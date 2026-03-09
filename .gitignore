@@ -16,6 +16,9 @@ XUnityToolkit-WebUI/wwwroot/
 xunity-webui/src/auto-imports.d.ts
 xunity-webui/src/components.d.ts
 
+# Playwright MCP
+.playwright-mcp/
+
 # OS
 Thumbs.db
 .DS_Store
