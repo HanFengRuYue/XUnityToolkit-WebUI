@@ -67,6 +67,7 @@ xunity-webui/src/
 - **Section cards:** `.section-icon` (30px colored icon box) + `.section-title` with `display: flex; gap: 10px`; color variants via classes (`.download`, `.translate`, `.warning`)
 - **Info cards:** `.info-card` with `.info-card-icon` (36px, colored variants: `.folder`/`.file`/`.unity`/`.code`/`.arch`) for dashboard-style info display
 - **Page layouts:** Views use full-width (no max-width); two-column grids (`.detail-columns`, `.settings-grid`) collapse to single column at 960px/768px
+- **Settings page layout:** `.settings-page` uses `display: flex; flex-direction: column; gap: 16px` — adding new full-width section cards automatically gets correct spacing; do NOT add individual `margin-bottom` to cards
 
 ## Code Conventions
 
@@ -85,7 +86,7 @@ xunity-webui/src/
 - Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
 - Game actions: `POST /api/games/{id}/open-folder` (opens explorer), `POST /api/games/{id}/launch` (runs game exe)
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
-- Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version)
+- Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version), `POST /api/settings/reset` (delete all app data: settings, library, cache, backups)
 - Config: `PUT /api/games/{id}/config` uses `PatchAsync` — reads existing INI, modifies only specified keys, preserves all other content (comments, unknown sections)
 
 ## Development Notes
@@ -104,7 +105,7 @@ xunity-webui/src/
 - **INI 配置修改策略**：不要从零生成 XUnity 配置文件（会丢失插件自动生成的默认值），应使用 `PatchAsync` 读取-修改-写回
 - **Console logging:** Configured programmatically in `Program.cs` (`ClearProviders` + `AddSimpleConsole`) — appsettings.json logging config was unreliable; all log messages are in Chinese
 - **Windows console encoding:** `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()`, otherwise Chinese characters will be garbled (the logging system captures encoding at init time)
-- Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`), so `url.Contains("github.com")` checks will match mirror URLs too; check mirror host first
+- Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`); `GitHubReleaseService` reads mirror base URL from `AppSettingsService` at download time (empty = direct connection, no mirror fallback); `CreateClientForUrl` checks mirror host dynamically
 - Download resilience: `GitHubReleaseService.DownloadAssetAsync` has retry (3 attempts, exponential backoff) + auto mirror fallback; progress reported via `IProgress<DownloadProgress>` (percent + speed + retry message)
 - `InstallationStatus` has `DownloadSpeed` and `RetryMessage` fields — reset both to null on step transitions in `InstallOrchestrator.UpdateStatus`
 - `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj; pass `-p:SkipFrontendBuild=true` to skip
@@ -115,7 +116,7 @@ xunity-webui/src/
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
 - Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync; `GeneratingConfig` step launches game to auto-generate XUnity config, then patches user settings
 - `XUnityConfig` has typed API key fields (e.g., `DeepLTranslateApiKey`) stored in engine-specific INI sections (e.g., `[DeepLTranslate]`); `ConfigurationService.PatchAsync` reads existing INI and only modifies specified keys
-- `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
+- `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; shows `ShowBalloonTip` on startup to notify user app is running in tray; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
 - `AppSettingsService` persists settings to `%APPDATA%/XUnityToolkit/settings.json` using same semaphore + atomic write pattern as `GameLibraryService`
 - Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)
 - **Theme-aware CSS:** Use semantic CSS variables (`--bg-subtle`, `--bg-muted`, `--bg-subtle-hover`, `--bg-muted-hover`) for semi-transparent overlay backgrounds — never hardcode `rgba(255,255,255,...)` in scoped CSS as it breaks light mode

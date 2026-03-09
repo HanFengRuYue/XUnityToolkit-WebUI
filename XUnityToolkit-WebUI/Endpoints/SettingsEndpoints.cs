@@ -1,4 +1,5 @@
 using System.Reflection;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
 
@@ -22,6 +23,49 @@ public static class SettingsEndpoints
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
         });
 
+        group.MapPost("/reset", (AppDataPaths paths, ILogger<AppSettingsService> logger) =>
+        {
+            var errors = new List<string>();
+
+            // Delete settings.json
+            TryDelete(() =>
+            {
+                if (File.Exists(paths.SettingsFile)) File.Delete(paths.SettingsFile);
+            }, "settings.json", errors);
+
+            // Delete library.json
+            TryDelete(() =>
+            {
+                if (File.Exists(paths.LibraryFile)) File.Delete(paths.LibraryFile);
+            }, "library.json", errors);
+
+            // Delete entire cache directory (includes download cache + icon cache)
+            TryDelete(() =>
+            {
+                if (Directory.Exists(paths.CacheDirectory))
+                    Directory.Delete(paths.CacheDirectory, recursive: true);
+            }, "cache", errors);
+
+            // Delete backups directory
+            TryDelete(() =>
+            {
+                if (Directory.Exists(paths.BackupsDirectory))
+                    Directory.Delete(paths.BackupsDirectory, recursive: true);
+            }, "backups", errors);
+
+            // Recreate required directories
+            paths.EnsureDirectoriesExist();
+
+            if (errors.Count > 0)
+            {
+                logger.LogWarning("重置配置时部分操作失败: {Errors}", string.Join(", ", errors));
+                return Results.Ok(ApiResult<object>.Ok(new { partial = true, errors }));
+            }
+
+            logger.LogInformation("已重置所有配置和缓存");
+            return Results.Ok(ApiResult<object>.Ok(new { partial = false }));
+        });
+
         group.MapGet("/version", () =>
         {
             var asm = Assembly.GetExecutingAssembly();
@@ -31,6 +75,11 @@ public static class SettingsEndpoints
                 ?? "1.0.0";
             return Results.Ok(ApiResult<VersionInfo>.Ok(new VersionInfo(version)));
         });
+    }
+    private static void TryDelete(Action action, string name, List<string> errors)
+    {
+        try { action(); }
+        catch (Exception ex) { errors.Add($"{name}: {ex.Message}"); }
     }
 }
 

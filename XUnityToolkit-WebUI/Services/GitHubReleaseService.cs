@@ -9,12 +9,12 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class GitHubReleaseService(
     IHttpClientFactory httpClientFactory,
     AppDataPaths paths,
+    AppSettingsService settingsService,
     ILogger<GitHubReleaseService> logger)
 {
     private readonly ConcurrentDictionary<string, (DateTime CachedAt, List<GitHubRelease> Releases)> _cache = [];
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-    private const string DefaultMirrorBase = "https://ghfast.top/";
     private const int MaxRetries = 3;
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(8);
 
@@ -81,9 +81,12 @@ public sealed class GitHubReleaseService(
 
         logger.LogInformation("开始下载: {Url}", url);
 
+        var settings = await settingsService.GetAsync(ct);
+        var mirrorBase = string.IsNullOrWhiteSpace(settings.MirrorUrl) ? null : settings.MirrorUrl;
+
         var tmpPath = destPath + ".tmp";
-        var mirrorUrl = BuildMirrorUrl(url);
-        var useMirror = await ShouldUseMirrorAsync(url, ct);
+        string? mirrorUrl = mirrorBase != null ? BuildMirrorUrl(url, mirrorBase) : null;
+        var useMirror = mirrorBase != null && await ShouldUseMirrorAsync(url, ct);
 
         if (useMirror)
             logger.LogInformation("GitHub 直连较慢，使用镜像加速: {Mirror}", mirrorUrl);
@@ -101,11 +104,11 @@ public sealed class GitHubReleaseService(
                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
             }
 
-            var attemptUrl = (attempt == 1 && !useMirror) ? url : mirrorUrl;
+            var attemptUrl = (attempt == 1 && !useMirror) ? url : (mirrorUrl ?? url);
 
             try
             {
-                await DownloadStreamAsync(attemptUrl, tmpPath, progress, ct);
+                await DownloadStreamAsync(attemptUrl, tmpPath, mirrorBase, progress, ct);
                 File.Move(tmpPath, destPath, overwrite: true);
                 progress?.Report(new DownloadProgress(100));
                 return destPath;
@@ -122,7 +125,7 @@ public sealed class GitHubReleaseService(
                     attempt, MaxRetries, attemptUrl);
                 TryDeleteFile(tmpPath);
 
-                if (attempt == 1 && !useMirror)
+                if (attempt == 1 && !useMirror && mirrorUrl != null)
                 {
                     useMirror = true;
                     progress?.Report(new DownloadProgress(0,
@@ -136,11 +139,11 @@ public sealed class GitHubReleaseService(
     }
 
     private async Task DownloadStreamAsync(
-        string url, string tmpPath,
+        string url, string tmpPath, string? mirrorBase,
         IProgress<DownloadProgress>? progress,
         CancellationToken ct)
     {
-        var client = CreateClientForUrl(url);
+        var client = CreateClientForUrl(url, mirrorBase);
 
         using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
         response.EnsureSuccessStatusCode();
@@ -208,18 +211,24 @@ public sealed class GitHubReleaseService(
         }
     }
 
-    private HttpClient CreateClientForUrl(string url)
+    private HttpClient CreateClientForUrl(string url, string? mirrorBase)
     {
-        if (url.Contains("ghfast.top"))
-            return httpClientFactory.CreateClient("Mirror");
+        if (mirrorBase != null)
+        {
+            var mirrorHost = new Uri(mirrorBase.TrimEnd('/') + "/").Host;
+            if (url.Contains(mirrorHost, StringComparison.OrdinalIgnoreCase))
+                return httpClientFactory.CreateClient("Mirror");
+        }
         return httpClientFactory.CreateClient("GitHub");
     }
 
-    private static string BuildMirrorUrl(string originalUrl)
+    private static string BuildMirrorUrl(string originalUrl, string mirrorBase)
     {
-        if (originalUrl.Contains("ghfast.top"))
+        var normalizedBase = mirrorBase.TrimEnd('/') + "/";
+        var mirrorHost = new Uri(normalizedBase).Host;
+        if (originalUrl.Contains(mirrorHost, StringComparison.OrdinalIgnoreCase))
             return originalUrl; // Already a mirror URL
-        return DefaultMirrorBase + originalUrl;
+        return normalizedBase + originalUrl;
     }
 
     private static string FormatSpeed(double bytesPerSecond) =>

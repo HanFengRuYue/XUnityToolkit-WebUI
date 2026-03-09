@@ -76,6 +76,12 @@ public sealed class SystemTrayService(
         using var trayIcon = BuildTrayIcon();
         trayIcon.Visible = true;
 
+        trayIcon.ShowBalloonTip(
+            3000,
+            "XUnity Toolkit WebUI",
+            "程序已在后台运行，双击托盘图标打开浏览器",
+            ToolTipIcon.Info);
+
         Application.Run(); // Blocks until Application.Exit() is called
 
         trayIcon.Visible = false;

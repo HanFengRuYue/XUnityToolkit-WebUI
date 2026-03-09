@@ -60,4 +60,5 @@ export const settingsApi = {
   get: () => api.get<AppSettings>('/api/settings'),
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
+  reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
 }

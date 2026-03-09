@@ -7,6 +7,7 @@ import {
   NSelect,
   NIcon,
   useMessage,
+  useDialog,
 } from 'naive-ui'
 import {
   StorageOutlined,
@@ -19,6 +20,7 @@ import {
   DeleteOutlined,
   PersonOutlined,
   OpenInNewOutlined,
+  WarningAmberOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { cacheApi, settingsApi } from '@/api/games'
@@ -27,6 +29,7 @@ import { useThemeStore } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 
 const message = useMessage()
+const dialog = useDialog()
 const themeStore = useThemeStore()
 
 // Cache
@@ -120,6 +123,34 @@ async function loadVersion() {
   } catch {
     version.value = '1.0.0'
   }
+}
+
+// Reset
+const resetLoading = ref(false)
+
+function handleReset() {
+  dialog.warning({
+    title: '重置所有配置',
+    content: '此操作将删除所有设置、游戏库、下载缓存和备份数据，且无法恢复。确定要继续吗？',
+    positiveText: '确认重置',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      resetLoading.value = true
+      try {
+        const result = await settingsApi.reset()
+        if (result.partial) {
+          message.warning('部分数据清除失败，请关闭占用的程序后重试')
+        } else {
+          message.success('已重置所有配置')
+        }
+        setTimeout(() => window.location.reload(), 500)
+      } catch {
+        message.error('重置失败')
+      } finally {
+        resetLoading.value = false
+      }
+    },
+  })
 }
 
 onMounted(() => {
@@ -230,8 +261,32 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- Danger Zone (full width) -->
+    <div class="section-card danger-card" style="animation-delay: 0.15s">
+      <div class="danger-bar"></div>
+      <div class="danger-body">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon danger">
+              <NIcon :size="16"><WarningAmberOutlined /></NIcon>
+            </span>
+            危险区域
+          </h2>
+        </div>
+        <div class="danger-action">
+          <div class="danger-text">
+            <div class="danger-description">重置将删除所有应用数据，包括游戏库、设置、下载缓存和备份。此操作不可撤销。</div>
+            <span class="danger-hint">重置后页面将自动刷新</span>
+          </div>
+          <NButton type="error" :loading="resetLoading" ghost @click="handleReset">
+            重置所有配置
+          </NButton>
+        </div>
+      </div>
+    </div>
+
     <!-- About (full width) -->
-    <div class="section-card" style="animation-delay: 0.15s">
+    <div class="section-card" style="animation-delay: 0.2s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon about">
@@ -295,6 +350,9 @@ onMounted(() => {
 <style scoped>
 .settings-page {
   /* Full width - no max-width restriction */
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   animation: fadeIn 0.3s ease;
 }
 
@@ -303,7 +361,7 @@ onMounted(() => {
   font-size: 30px;
   font-weight: 600;
   color: var(--text-1);
-  margin-bottom: 28px;
+  margin-bottom: 12px;
   letter-spacing: -0.03em;
   animation: slideUp 0.4s var(--ease-out) backwards;
   display: flex;
@@ -329,7 +387,6 @@ onMounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   align-items: stretch;
-  margin-bottom: 16px;
 }
 
 /* ===== Section Card ===== */
@@ -388,6 +445,11 @@ onMounted(() => {
 .section-icon.download {
   background: rgba(96, 165, 250, 0.10);
   color: #60a5fa;
+}
+
+.section-icon.danger {
+  background: rgba(239, 68, 68, 0.10);
+  color: #ef4444;
 }
 
 .section-icon.about {
@@ -538,6 +600,59 @@ onMounted(() => {
   color: var(--text-3);
 }
 
+/* ===== Danger Zone ===== */
+.danger-card {
+  flex-direction: row;
+  padding: 0;
+  overflow: hidden;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.danger-card:hover {
+  border-color: rgba(239, 68, 68, 0.30);
+}
+
+.danger-bar {
+  width: 4px;
+  flex-shrink: 0;
+  background: var(--danger);
+}
+
+.danger-body {
+  flex: 1;
+  padding: 20px 24px;
+  min-width: 0;
+}
+
+.danger-body .section-header {
+  margin-bottom: 14px;
+}
+
+.danger-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.danger-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.danger-description {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.danger-hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 /* ===== About Link ===== */
 .about-link {
   color: var(--accent);
@@ -556,6 +671,10 @@ onMounted(() => {
   }
 
   .section-card {
+    padding: 16px;
+  }
+
+  .danger-body {
     padding: 16px;
   }
 
@@ -594,6 +713,16 @@ onMounted(() => {
 
   .about-grid {
     grid-template-columns: 1fr;
+  }
+
+  .danger-action {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .danger-body {
+    padding: 14px;
   }
 
   .section-footer {
