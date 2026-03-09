@@ -7,12 +7,73 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed partial class UnityDetectionService(ILogger<UnityDetectionService> logger)
 {
+    /// <summary>
+    /// Full Unity detection — throws if no exe or not a Unity game.
+    /// Used by InstallOrchestrator.
+    /// </summary>
     public Task<UnityGameInfo> DetectAsync(string gamePath, CancellationToken ct = default)
     {
         var exePath = FindGameExecutable(gamePath);
         if (exePath is null)
             throw new FileNotFoundException("No game executable found in the specified directory.");
 
+        if (!CheckIsUnityGame(gamePath, exePath))
+            throw new InvalidOperationException("指定目录中未找到 Unity 游戏标识。");
+
+        return Task.FromResult(BuildUnityGameInfo(gamePath, exePath));
+    }
+
+    /// <summary>
+    /// Try to find an exe in the directory. Returns null if none found.
+    /// </summary>
+    public string? TryFindExecutable(string gamePath) => FindGameExecutable(gamePath);
+
+    /// <summary>
+    /// Check if a game directory + exe is a Unity game using multiple heuristics.
+    /// </summary>
+    public bool CheckIsUnityGame(string gamePath, string exePath)
+    {
+        var gameName = Path.GetFileNameWithoutExtension(exePath);
+        var exeDir = Path.GetDirectoryName(exePath) ?? gamePath;
+
+        // Heuristic 1: {Name}_Data/ folder (canonical Unity layout)
+        if (Directory.Exists(Path.Combine(gamePath, $"{gameName}_Data")))
+            return true;
+        if (exeDir != gamePath && Directory.Exists(Path.Combine(exeDir, $"{gameName}_Data")))
+            return true;
+
+        // Heuristic 2: UnityPlayer.dll
+        if (File.Exists(Path.Combine(gamePath, "UnityPlayer.dll")))
+            return true;
+
+        // Heuristic 3: GameAssembly.dll (IL2CPP)
+        if (File.Exists(Path.Combine(gamePath, "GameAssembly.dll")))
+            return true;
+
+        // Heuristic 4: globalgamemanagers or data.unity3d in any *_Data subfolder
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(gamePath, "*_Data", SearchOption.TopDirectoryOnly))
+            {
+                if (File.Exists(Path.Combine(dir, "globalgamemanagers")) ||
+                    File.Exists(Path.Combine(dir, "data.unity3d")))
+                    return true;
+            }
+        }
+        catch { /* access denied etc. */ }
+
+        // Heuristic 5: MonoBleedingEdge folder (Mono runtime)
+        if (Directory.Exists(Path.Combine(gamePath, "MonoBleedingEdge")))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Build full UnityGameInfo for a confirmed Unity game.
+    /// </summary>
+    public UnityGameInfo BuildUnityGameInfo(string gamePath, string exePath)
+    {
         var architecture = DetectArchitecture(exePath);
         var backend = DetectBackend(gamePath, exePath);
         var unityVersion = DetectUnityVersion(gamePath, exePath);
@@ -29,7 +90,7 @@ public sealed partial class UnityDetectionService(ILogger<UnityDetectionService>
             "检测结果: {Exe} | Unity {Version} | {Backend} | {Arch}",
             info.DetectedExecutable, info.UnityVersion, info.Backend, info.Architecture);
 
-        return Task.FromResult(info);
+        return info;
     }
 
     private static string? FindGameExecutable(string gamePath)

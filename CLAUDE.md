@@ -43,6 +43,7 @@ xunity-webui/src/
 │   ├── layout/     # AppShell (sidebar + content layout)
 │   ├── config/     # ConfigPanel (translation settings form)
 │   └── progress/   # InstallProgressDrawer (SignalR progress)
+├── composables/    # Reusable composition functions (useAddGameFlow)
 ├── stores/         # Pinia stores (games, install)
 ├── views/          # LibraryView, GameDetailView, SettingsView
 └── router/         # Vue Router config (/, /games/:id, /settings)
@@ -72,6 +73,8 @@ xunity-webui/src/
 
 ## API Endpoints
 
+- Add game with detection: `POST /api/games/add-with-detection` — auto-detects exe, Unity status, installed plugins/frameworks; returns `AddGameResponse { needsExeSelection, game }`
+- Framework uninstall: `DELETE /api/games/{id}/framework/{framework}` — uninstalls non-BepInEx mod frameworks (MelonLoader, IPA, ReiPatcher, Sybaris, UnityInjector, Standalone)
 - Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
 - Game actions: `POST /api/games/{id}/open-folder` (opens explorer), `POST /api/games/{id}/launch` (runs game exe)
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
@@ -80,6 +83,14 @@ xunity-webui/src/
 
 ## Development Notes
 
+- `Game.IsUnityGame` defaults to `true` for backward compatibility — existing `library.json` entries without this field deserialize correctly
+- `Game.DetectedFrameworks` stores detected mod frameworks (BepInEx, MelonLoader, IPA, etc.) — null when none detected
+- `PluginDetectionService` detects 7 mod frameworks + XUnity.AutoTranslator variants across all frameworks; uninstalls non-BepInEx frameworks
+- `UnityDetectionService.CheckIsUnityGame()` uses 5 heuristics: `{Name}_Data/`, `UnityPlayer.dll`, `GameAssembly.dll`, `globalgamemanagers`/`data.unity3d`, `MonoBleedingEdge/`
+- Add-game flow: folder picker → auto-detect → if no exe found, prompt user to select exe within the directory → if not Unity, mark as non-Unity (limited features)
+- Non-Unity games: only show run game + open folder in GameDetailView; hide install management and config cards; show "非 Unity" tag in LibraryView
+- Use composables (`src/composables/`) for complex multi-step UI flows that involve dialogs and API calls — keeps stores and views clean
+- Path security: when validating a file is inside a directory, normalize with `TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar` to handle root drive paths
 - **XUnity.AutoTranslator 配置文件**：实际文件名是 `AutoTranslatorConfig.ini`（不是 BepInEx GUID 风格的 `gravydevsupreme.xunity.autotranslator.cfg`），路径 `BepInEx/config/AutoTranslatorConfig.ini`
 - **P/Invoke on .NET 10**：使用 `[DllImport]` 而非 `[LibraryImport]`，后者需要 `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`，当前 csproj 未启用
 - **重命名公共方法时**：全局搜索所有调用点（Endpoints、Services、Orchestrator），避免遗漏编译错误

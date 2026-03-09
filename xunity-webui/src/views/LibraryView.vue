@@ -5,20 +5,19 @@ import { Add } from '@vicons/ionicons5'
 import { GamepadFilled } from '@vicons/material'
 import { useRouter } from 'vue-router'
 import { useGamesStore } from '@/stores/games'
+import { useAddGameFlow } from '@/composables/useAddGameFlow'
 
 const gamesStore = useGamesStore()
 const router = useRouter()
 const message = useMessage()
+const { addGame } = useAddGameFlow(message)
 
 onMounted(() => {
   gamesStore.fetchGames()
 })
 
 async function handleAddGame() {
-  const game = await gamesStore.addGameViaDialog()
-  if (game) {
-    message.success(`已添加: ${game.name}`)
-  }
+  await addGame()
 }
 
 function navigateToGame(id: string) {
@@ -112,7 +111,10 @@ function getStatusInfo(state: string) {
 
         <!-- Tags -->
         <div class="row-tags">
-          <template v-if="game.detectedInfo">
+          <template v-if="!game.isUnityGame">
+            <span class="info-pill non-unity">非 Unity</span>
+          </template>
+          <template v-else-if="game.detectedInfo">
             <span class="info-pill">Unity {{ game.detectedInfo.unityVersion }}</span>
             <span class="info-pill">{{ game.detectedInfo.backend }}</span>
             <span class="info-pill">{{ game.detectedInfo.architecture }}</span>
@@ -120,8 +122,8 @@ function getStatusInfo(state: string) {
           <span v-else class="info-pill muted">未检测</span>
         </div>
 
-        <!-- Status -->
-        <div class="row-status">
+        <!-- Status (hide for non-Unity games) -->
+        <div v-if="game.isUnityGame" class="row-status">
           <span class="status-dot" :class="getStatusInfo(game.installState).dotClass"></span>
           <span class="status-label" :style="{ color: getStatusInfo(game.installState).color }">
             {{ getStatusInfo(game.installState).label }}
@@ -376,6 +378,12 @@ function getStatusInfo(state: string) {
 
 .info-pill.muted {
   color: var(--text-3);
+}
+
+.info-pill.non-unity {
+  color: var(--text-3);
+  border-color: rgba(167, 139, 250, 0.15);
+  background: rgba(167, 139, 250, 0.06);
 }
 
 .game-row:hover .info-pill {

@@ -17,6 +17,22 @@ export interface UnityGameInfo {
   detectedAt: string
 }
 
+export type ModFrameworkType =
+  | 'BepInEx'
+  | 'MelonLoader'
+  | 'IPA'
+  | 'ReiPatcher'
+  | 'Sybaris'
+  | 'UnityInjector'
+  | 'Standalone'
+
+export interface DetectedModFramework {
+  framework: ModFrameworkType
+  version?: string
+  hasXUnityPlugin: boolean
+  xUnityVersion?: string
+}
+
 export interface Game {
   id: string
   name: string
@@ -24,10 +40,17 @@ export interface Game {
   executableName?: string
   addedAt: string
   updatedAt: string
+  isUnityGame: boolean
   detectedInfo?: UnityGameInfo
   installState: InstallState
+  detectedFrameworks?: DetectedModFramework[]
   installedBepInExVersion?: string
   installedXUnityVersion?: string
+}
+
+export interface AddGameResponse {
+  needsExeSelection: boolean
+  game?: Game
 }
 
 export type InstallStep =

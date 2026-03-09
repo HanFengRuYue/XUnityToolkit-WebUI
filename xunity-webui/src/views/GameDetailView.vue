@@ -2,12 +2,8 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NCard,
   NButton,
-  NSpace,
   NAlert,
-  NDescriptions,
-  NDescriptionsItem,
   NIcon,
   useMessage,
   useDialog,
@@ -15,7 +11,7 @@ import {
 import { GamepadFilled, FolderOpenOutlined, PlayArrowFilled } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
-import type { Game, XUnityConfig } from '@/api/types'
+import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
 import { gamesApi } from '@/api/games'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
 
@@ -30,7 +26,6 @@ const gameId = route.params['id'] as string
 const game = ref<Game | null>(null)
 const config = ref<XUnityConfig | null>(null)
 const loading = ref(true)
-const detecting = ref(false)
 
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
@@ -40,6 +35,20 @@ const hasBepInEx = computed(
     game.value?.installState === 'BepInExOnly' ||
     game.value?.installState === 'FullyInstalled',
 )
+
+const otherFrameworks = computed(() =>
+  game.value?.detectedFrameworks?.filter((f) => f.framework !== 'BepInEx') ?? [],
+)
+
+const frameworkDisplayNames: Record<ModFrameworkType, string> = {
+  BepInEx: 'BepInEx',
+  MelonLoader: 'MelonLoader',
+  IPA: 'IPA / BSIPA',
+  ReiPatcher: 'ReiPatcher',
+  Sybaris: 'Sybaris',
+  UnityInjector: 'UnityInjector',
+  Standalone: 'Standalone',
+}
 
 onMounted(async () => {
   await loadGame()
@@ -56,19 +65,6 @@ async function loadGame() {
     message.error('加载游戏信息失败')
   } finally {
     loading.value = false
-  }
-}
-
-async function handleDetect() {
-  detecting.value = true
-  try {
-    await gamesStore.detectGame(gameId)
-    await loadGame()
-    message.success('检测完成')
-  } catch {
-    message.error('检测失败')
-  } finally {
-    detecting.value = false
   }
 }
 
@@ -139,6 +135,25 @@ function handleRemoveGame() {
   })
 }
 
+function handleUninstallFramework(framework: ModFrameworkType) {
+  dialog.warning({
+    title: `卸载 ${frameworkDisplayNames[framework]}`,
+    content: `将移除 ${frameworkDisplayNames[framework]} 框架及其关联的 XUnity 插件文件。确定要继续吗？`,
+    positiveText: '确认卸载',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const updated = await gamesApi.uninstallFramework(gameId, framework)
+        game.value = updated
+        await gamesStore.refreshGame(gameId)
+        message.success(`${frameworkDisplayNames[framework]} 已卸载`)
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '卸载失败')
+      }
+    },
+  })
+}
+
 const stopWatch = watch(
   () => installStore.status?.step,
   async (step) => {
@@ -190,14 +205,19 @@ onUnmounted(() => stopWatch())
       </div>
       <h1 class="game-title">{{ game.name }}</h1>
       <div class="title-status">
-        <span class="status-indicator" :class="{
-          'status-installed': isInstalled,
-          'status-partial': hasBepInEx && !isInstalled,
-          'status-none': !hasBepInEx,
-        }"></span>
-        <span class="status-text">
-          {{ isInstalled ? '已安装' : hasBepInEx ? '仅 BepInEx' : '未安装' }}
-        </span>
+        <template v-if="game.isUnityGame">
+          <span class="status-indicator" :class="{
+            'status-installed': isInstalled,
+            'status-partial': hasBepInEx && !isInstalled,
+            'status-none': !hasBepInEx,
+          }"></span>
+          <span class="status-text">
+            {{ isInstalled ? '已安装' : hasBepInEx ? '仅 BepInEx' : '未安装' }}
+          </span>
+        </template>
+        <template v-else>
+          <span class="status-text" style="color: var(--text-3)">非 Unity</span>
+        </template>
       </div>
     </div>
 
@@ -214,14 +234,6 @@ onUnmounted(() => stopWatch())
             <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
             运行游戏
           </NButton>
-          <NButton
-            v-if="!game.detectedInfo"
-            size="small"
-            :loading="detecting"
-            @click="handleDetect"
-          >
-            检测游戏
-          </NButton>
         </div>
       </div>
 
@@ -233,32 +245,62 @@ onUnmounted(() => stopWatch())
         <div class="info-item">
           <span class="info-label">可执行文件</span>
           <span class="info-value" :class="{ muted: !game.executableName }">
-            {{ game.executableName || '未检测' }}
+            {{ game.executableName || '未知' }}
           </span>
         </div>
-        <div class="info-item">
-          <span class="info-label">Unity 版本</span>
-          <span class="info-value" :class="{ muted: !game.detectedInfo }">
-            {{ game.detectedInfo?.unityVersion || '未检测' }}
-          </span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">脚本后端</span>
-          <span class="info-value" :class="{ muted: !game.detectedInfo }">
-            {{ game.detectedInfo?.backend || '未检测' }}
-          </span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">架构</span>
-          <span class="info-value" :class="{ muted: !game.detectedInfo }">
-            {{ game.detectedInfo?.architecture || '未检测' }}
-          </span>
+        <template v-if="game.isUnityGame">
+          <div class="info-item">
+            <span class="info-label">Unity 版本</span>
+            <span class="info-value" :class="{ muted: !game.detectedInfo }">
+              {{ game.detectedInfo?.unityVersion || '未知' }}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">脚本后端</span>
+            <span class="info-value" :class="{ muted: !game.detectedInfo }">
+              {{ game.detectedInfo?.backend || '未知' }}
+            </span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">架构</span>
+            <span class="info-value" :class="{ muted: !game.detectedInfo }">
+              {{ game.detectedInfo?.architecture || '未知' }}
+            </span>
+          </div>
+        </template>
+        <div v-if="!game.isUnityGame" class="info-item">
+          <span class="info-label">类型</span>
+          <span class="info-value muted">非 Unity 游戏</span>
         </div>
       </div>
     </div>
 
-    <!-- Install Management Card -->
-    <div class="section-card" style="animation-delay: 0.15s">
+    <!-- Detected Frameworks Card (non-BepInEx) -->
+    <div v-if="otherFrameworks.length > 0" class="section-card" style="animation-delay: 0.15s">
+      <div class="section-header">
+        <h2 class="section-title">检测到的模组框架</h2>
+      </div>
+      <NAlert type="warning" style="margin-bottom: 16px">
+        检测到其他模组框架，建议卸载后再安装 BepInEx 版本，避免插件冲突。
+      </NAlert>
+      <div class="framework-list">
+        <div v-for="fw in otherFrameworks" :key="fw.framework" class="framework-item">
+          <div class="framework-info">
+            <span class="framework-name">{{ frameworkDisplayNames[fw.framework] }}</span>
+            <span v-if="fw.version" class="framework-version">v{{ fw.version }}</span>
+            <span v-if="fw.hasXUnityPlugin" class="framework-xunity">
+              含 XUnity{{ fw.xUnityVersion ? ` v${fw.xUnityVersion}` : '' }}
+            </span>
+          </div>
+          <NButton size="small" type="error" ghost @click="handleUninstallFramework(fw.framework)">
+            卸载
+          </NButton>
+        </div>
+      </div>
+    </div>
+
+    <!-- Install Management Card (Unity only) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.2s' : '0.15s' }">
       <div class="section-header">
         <h2 class="section-title">安装管理</h2>
       </div>
@@ -299,9 +341,6 @@ onUnmounted(() => stopWatch())
             </template>
             一键安装
           </NButton>
-          <NButton v-if="!game.detectedInfo" @click="handleDetect" :loading="detecting" size="large">
-            先检测游戏
-          </NButton>
         </div>
       </div>
 
@@ -340,8 +379,8 @@ onUnmounted(() => stopWatch())
       </div>
     </div>
 
-    <!-- Config Card -->
-    <div class="section-card" style="animation-delay: 0.2s">
+    <!-- Config Card (Unity only) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
       <div class="section-header">
         <h2 class="section-title">翻译配置</h2>
       </div>
@@ -582,6 +621,52 @@ onUnmounted(() => stopWatch())
 
 .info-value.muted {
   color: var(--text-3);
+}
+
+/* ===== Framework List ===== */
+.framework-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.framework-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  gap: 12px;
+}
+
+.framework-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.framework-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.framework-version {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.framework-xunity {
+  font-size: 11px;
+  color: var(--warning);
+  background: rgba(251, 191, 36, 0.08);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 191, 36, 0.15);
 }
 
 /* ===== Install CTA (Uninstalled State) ===== */

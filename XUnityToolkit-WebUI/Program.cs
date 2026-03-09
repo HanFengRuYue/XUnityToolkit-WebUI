@@ -51,6 +51,7 @@ builder.Services.AddHttpClient("Mirror", client =>
 // Services
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
+builder.Services.AddSingleton<PluginDetectionService>();
 builder.Services.AddSingleton<GitHubReleaseService>();
 builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();

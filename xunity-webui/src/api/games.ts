@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -9,12 +9,18 @@ export const gamesApi = {
   add: (gamePath: string, name?: string) =>
     api.post<Game>('/api/games', { gamePath, name }),
 
-  update: (id: string, data: { name?: string }) =>
+  addWithDetection: (folderPath: string, exePath?: string) =>
+    api.post<AddGameResponse>('/api/games/add-with-detection', { folderPath, exePath }),
+
+  update: (id: string, data: { name?: string; executableName?: string }) =>
     api.put<Game>(`/api/games/${id}`, data),
 
   remove: (id: string) => api.del<void>(`/api/games/${id}`),
 
   detect: (id: string) => api.post<UnityGameInfo>(`/api/games/${id}/detect`),
+
+  uninstallFramework: (id: string, framework: ModFrameworkType) =>
+    api.del<Game>(`/api/games/${id}/framework/${framework}`),
 
   getConfig: (id: string) => api.get<XUnityConfig>(`/api/games/${id}/config`),
 

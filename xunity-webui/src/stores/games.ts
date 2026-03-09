@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { gamesApi, dialogApi } from '@/api/games'
+import { gamesApi } from '@/api/games'
 import type { Game } from '@/api/types'
 
 export const useGamesStore = defineStore('games', () => {
@@ -22,19 +22,6 @@ export const useGamesStore = defineStore('games', () => {
       error.value = e instanceof Error ? e.message : 'Failed to load games'
     } finally {
       loading.value = false
-    }
-  }
-
-  async function addGameViaDialog() {
-    try {
-      const path = await dialogApi.selectFolder()
-      if (!path) return null
-      const game = await gamesApi.add(path)
-      games.value.push(game)
-      return game
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to add game'
-      return null
     }
   }
 
@@ -93,7 +80,6 @@ export const useGamesStore = defineStore('games', () => {
     gameCount,
     installedCount,
     fetchGames,
-    addGameViaDialog,
     addGame,
     removeGame,
     refreshGame,
