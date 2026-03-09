@@ -12,7 +12,6 @@ public sealed class InstallOrchestrator(
     BepInExInstallerService bepInExInstaller,
     XUnityInstallerService xUnityInstaller,
     ConfigurationService configService,
-    BackupService backup,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
 {
@@ -164,11 +163,8 @@ public sealed class InstallOrchestrator(
         var bepInExZip = await gitHub.DownloadAssetAsync(
             bepInExAsset.BrowserDownloadUrl, bepInExAsset.Name, progress, ct);
 
-        // Step 3: Backup and install BepInEx
-        await UpdateStatus(status, InstallStep.InstallingBepInEx, 40, "Backing up and installing BepInEx...");
-
-        string[] filesToBackup = ["winhttp.dll", "doorstop_config.ini", ".doorstop_version"];
-        await backup.CreateBackupAsync(game.Id, game.GamePath, filesToBackup, ct);
+        // Step 3: Install BepInEx
+        await UpdateStatus(status, InstallStep.InstallingBepInEx, 40, "Installing BepInEx...");
 
         await bepInExInstaller.InstallAsync(game.GamePath, bepInExZip, ct);
 
@@ -225,10 +221,6 @@ public sealed class InstallOrchestrator(
 
         await UpdateStatus(status, InstallStep.RemovingBepInEx, 50, "Removing BepInEx...");
         await bepInExInstaller.UninstallAsync(game.GamePath);
-
-        await UpdateStatus(status, InstallStep.RestoringBackup, 70, "Restoring original files...");
-        await backup.RestoreAsync(game.Id, game.GamePath);
-        await backup.DeleteBackupAsync(game.Id);
 
         game.InstallState = InstallState.NotInstalled;
         game.InstalledBepInExVersion = null;

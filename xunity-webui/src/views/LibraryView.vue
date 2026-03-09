@@ -80,44 +80,56 @@ function getStatusInfo(state: string) {
       </NButton>
     </div>
 
-    <!-- Game Grid -->
-    <div v-else class="games-grid">
+    <!-- Game List -->
+    <div v-else class="games-list">
       <div
         v-for="(game, index) in gamesStore.games"
         :key="game.id"
-        class="game-card"
-        :style="{ animationDelay: `${index * 0.06}s` }"
+        class="game-row"
+        :style="{ animationDelay: `${index * 0.04}s` }"
         @click="navigateToGame(game.id)"
       >
-        <!-- Card ambient glow -->
-        <div class="card-glow"></div>
-
-        <!-- Header row -->
-        <div class="card-header">
-          <h3 class="card-name">{{ game.name }}</h3>
-          <div class="card-status">
-            <span class="status-dot" :class="getStatusInfo(game.installState).dotClass"></span>
-            <span class="status-label" :style="{ color: getStatusInfo(game.installState).color }">
-              {{ getStatusInfo(game.installState).label }}
-            </span>
+        <!-- Left: Icon -->
+        <div class="row-icon">
+          <img
+            :src="`/api/games/${game.id}/icon`"
+            :alt="game.name"
+            class="icon-img"
+            @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.add('visible')"
+          />
+          <div class="icon-fallback">
+            <NIcon :size="22" color="var(--text-3)">
+              <GamepadFilled />
+            </NIcon>
           </div>
         </div>
 
-        <!-- Path -->
-        <p class="card-path">{{ game.gamePath }}</p>
+        <!-- Center: Name + Path -->
+        <div class="row-info">
+          <h3 class="row-name">{{ game.name }}</h3>
+          <p class="row-path">{{ game.gamePath }}</p>
+        </div>
 
         <!-- Tags -->
-        <div v-if="game.detectedInfo" class="card-tags">
-          <span class="info-pill">Unity {{ game.detectedInfo.unityVersion }}</span>
-          <span class="info-pill">{{ game.detectedInfo.backend }}</span>
-          <span class="info-pill">{{ game.detectedInfo.architecture }}</span>
-        </div>
-        <div v-else class="card-tags">
-          <span class="info-pill muted">未检测</span>
+        <div class="row-tags">
+          <template v-if="game.detectedInfo">
+            <span class="info-pill">Unity {{ game.detectedInfo.unityVersion }}</span>
+            <span class="info-pill">{{ game.detectedInfo.backend }}</span>
+            <span class="info-pill">{{ game.detectedInfo.architecture }}</span>
+          </template>
+          <span v-else class="info-pill muted">未检测</span>
         </div>
 
-        <!-- Hover arrow indicator -->
-        <div class="card-arrow">
+        <!-- Status -->
+        <div class="row-status">
+          <span class="status-dot" :class="getStatusInfo(game.installState).dotClass"></span>
+          <span class="status-label" :style="{ color: getStatusInfo(game.installState).color }">
+            {{ getStatusInfo(game.installState).label }}
+          </span>
+        </div>
+
+        <!-- Arrow -->
+        <div class="row-arrow">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
@@ -236,85 +248,143 @@ function getStatusInfo(state: string) {
   line-height: 1.5;
 }
 
-/* ===== Game Grid ===== */
-.games-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
+/* ===== Game List ===== */
+.games-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-/* ===== Game Card ===== */
-.game-card {
-  position: relative;
+/* ===== Game Row ===== */
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px 14px 20px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 22px 24px 18px;
   cursor: pointer;
-  transition: all 0.35s var(--ease-out);
-  animation: floatIn 0.5s var(--ease-out) backwards;
-  overflow: hidden;
+  transition: all 0.25s var(--ease-out);
+  animation: floatIn 0.4s var(--ease-out) backwards;
 }
 
-.card-glow {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 140px;
-  height: 100px;
-  background: radial-gradient(circle at top right, rgba(34, 211, 167, 0.04), transparent 70%);
-  border-radius: 0 var(--radius-lg) 0 0;
-  pointer-events: none;
-  transition: opacity 0.35s ease;
-  opacity: 0.6;
-}
-
-.game-card:hover {
-  transform: translateY(-4px);
+.game-row:hover {
+  background: var(--bg-card-hover);
   border-color: var(--accent-border);
   box-shadow: var(--shadow-card-hover);
-  background: var(--bg-card-hover);
+  transform: translateX(4px);
 }
 
-.game-card:hover .card-glow {
-  opacity: 1;
-}
-
-.game-card:hover .card-arrow {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.game-card:active {
-  transform: translateY(-2px);
+.game-row:active {
+  transform: translateX(2px);
   transition-duration: 0.1s;
 }
 
-/* Card Header */
-.card-header {
+/* ===== Row Icon ===== */
+.row-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 10px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  transition: all 0.25s var(--ease-out);
 }
 
-.card-name {
+.game-row:hover .row-icon {
+  border-color: rgba(34, 211, 167, 0.2);
+  box-shadow: 0 0 12px rgba(34, 211, 167, 0.08);
+}
+
+.icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: -webkit-optimize-contrast;
+  border-radius: 9px;
+}
+
+.icon-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+
+.icon-fallback.visible,
+.icon-img[style*="display: none"] + .icon-fallback {
+  opacity: 1;
+}
+
+/* ===== Row Info ===== */
+.row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.row-name {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-1);
+  margin: 0 0 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+.row-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
-/* Status */
-.card-status {
+/* ===== Row Tags ===== */
+.row-tags {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.info-pill {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 3px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.01em;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.info-pill.muted {
+  color: var(--text-3);
+}
+
+.game-row:hover .info-pill {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ===== Row Status ===== */
+.row-status {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -347,57 +417,22 @@ function getStatusInfo(state: string) {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.01em;
-}
-
-/* Path */
-.card-path {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text-3);
-  margin: 0 0 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-  line-height: 1.4;
 }
 
-/* Tags */
-.card-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.info-pill {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-2);
-  background: rgba(255, 255, 255, 0.05);
-  padding: 3px 10px;
-  border-radius: 20px;
-  letter-spacing: 0.01em;
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  transition: all 0.2s ease;
-}
-
-.info-pill.muted {
-  color: var(--text-3);
-}
-
-.game-card:hover .info-pill {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-/* Arrow */
-.card-arrow {
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateX(-8px);
-  margin-top: -8px;
+/* ===== Row Arrow ===== */
+.row-arrow {
+  flex-shrink: 0;
   color: var(--accent);
   opacity: 0;
-  transition: all 0.3s var(--ease-out);
+  width: 0;
+  overflow: visible;
+  transform: translateX(-10px);
+  transition: all 0.25s var(--ease-out);
+}
+
+.game-row:hover .row-arrow {
+  opacity: 1;
+  transform: translateX(-4px);
 }
 </style>

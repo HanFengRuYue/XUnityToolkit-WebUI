@@ -11,7 +11,6 @@ public enum InstallStep
     WritingConfig,
     RemovingXUnity,
     RemovingBepInEx,
-    RestoringBackup,
     Complete,
     Failed
 }

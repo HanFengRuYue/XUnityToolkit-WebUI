@@ -26,13 +26,9 @@ const installSteps: { key: InstallStep; label: string }[] = [
 const uninstallSteps: { key: InstallStep; label: string }[] = [
   { key: 'RemovingXUnity', label: '移除 XUnity.AutoTranslator' },
   { key: 'RemovingBepInEx', label: '移除 BepInEx' },
-  { key: 'RestoringBackup', label: '还原备份文件' },
 ]
 
-const isUninstalling = computed(() => {
-  const step = installStore.status?.step
-  return step === 'RemovingXUnity' || step === 'RemovingBepInEx' || step === 'RestoringBackup'
-})
+const isUninstalling = computed(() => installStore.operationType === 'uninstall')
 
 const steps = computed(() => isUninstalling.value ? uninstallSteps : installSteps)
 const stepOrder = computed(() => steps.value.map((s) => s.key))
@@ -105,7 +101,7 @@ const title = computed(() => {
 
         <!-- Success Alert -->
         <NAlert v-if="isComplete" type="success" style="margin-top: 16px">
-          {{ isUninstalling ? '已成功卸载插件并还原文件。' : '插件已成功安装！启动游戏即可使用。' }}
+          {{ isUninstalling ? '已成功卸载插件。' : '插件已成功安装！启动游戏即可使用。' }}
         </NAlert>
       </div>
 

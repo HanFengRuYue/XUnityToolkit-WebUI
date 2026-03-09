@@ -4,10 +4,13 @@ import * as signalR from '@microsoft/signalr'
 import { gamesApi } from '@/api/games'
 import type { InstallationStatus, XUnityConfig } from '@/api/types'
 
+export type OperationType = 'install' | 'uninstall'
+
 export const useInstallStore = defineStore('install', () => {
   const status = ref<InstallationStatus | null>(null)
   const isDrawerOpen = ref(false)
   const activeGameId = ref<string | null>(null)
+  const operationType = ref<OperationType>('install')
 
   let connection: signalR.HubConnection | null = null
 
@@ -48,6 +51,7 @@ export const useInstallStore = defineStore('install', () => {
 
   async function startInstall(gameId: string, config?: XUnityConfig) {
     activeGameId.value = gameId
+    operationType.value = 'install'
     isDrawerOpen.value = true
 
     await connectHub(gameId)
@@ -63,6 +67,7 @@ export const useInstallStore = defineStore('install', () => {
 
   async function startUninstall(gameId: string) {
     activeGameId.value = gameId
+    operationType.value = 'uninstall'
     isDrawerOpen.value = true
 
     await connectHub(gameId)
@@ -93,6 +98,7 @@ export const useInstallStore = defineStore('install', () => {
     status,
     isDrawerOpen,
     activeGameId,
+    operationType,
     startInstall,
     startUninstall,
     cancel,

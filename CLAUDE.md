@@ -9,10 +9,10 @@ XUnityToolkit-WebUI is a web-based tool for one-click installation of XUnity.Aut
 ## Build Commands
 
 ```bash
-# Build backend
+# Build backend (also builds frontend automatically via MSBuild Target)
 dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
-# Run backend (serves the web UI on http://localhost:5000)
+# Run backend (serves the web UI on https://localhost:51821)
 dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
@@ -55,7 +55,7 @@ xunity-webui/src/
 - **Theme:** Naive UI dark theme with comprehensive `GlobalThemeOverrides` in `App.vue`
 - **Animations:** Keyframes in `main.css` (`slideUp`, `fadeIn`, `floatIn`, `shimmer`, `breathe`, `pulse`); page transitions via Vue `<Transition name="page">`
 - **Layout:** Custom sidebar (230px) + scrollable content area; no NLayout/NLayoutSider
-- **Game cards:** Custom HTML/CSS (not NCard) with staggered entrance animations and hover effects
+- **Game list:** Full-width row layout with exe icon, name/path, tags, and status; staggered entrance animations
 
 ## Code Conventions
 
@@ -66,3 +66,15 @@ xunity-webui/src/
 - **Frontend:** Vue 3 Composition API with `<script setup lang="ts">`
 - **Frontend styling:** Scoped `<style scoped>` per component; use CSS variables from `main.css` for theming
 - **Frontend icons:** `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`
+
+## API Endpoints
+
+- Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
+
+## Development Notes
+
+- `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj
+- Stop the running backend before `dotnet build` — the exe is locked while running
+- Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
+- Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync
+- Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)

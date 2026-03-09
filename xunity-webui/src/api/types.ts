@@ -40,7 +40,6 @@ export type InstallStep =
   | 'WritingConfig'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
-  | 'RestoringBackup'
   | 'Complete'
   | 'Failed'
 

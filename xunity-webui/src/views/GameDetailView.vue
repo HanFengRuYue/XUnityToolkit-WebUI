@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   NCard,
   NButton,
-  NTag,
   NSpace,
   NAlert,
   NDescriptions,
@@ -13,6 +12,7 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
+import { GamepadFilled } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
 import type { Game, XUnityConfig } from '@/api/types'
@@ -83,7 +83,7 @@ async function handleInstall() {
 function handleUninstall() {
   dialog.warning({
     title: '确认卸载',
-    content: '将移除 BepInEx 和 XUnity.AutoTranslator，并还原备份的原始文件。确定要继续吗？',
+    content: '将移除 BepInEx 和 XUnity.AutoTranslator 的所有文件。确定要继续吗？',
     positiveText: '确认卸载',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -158,6 +158,19 @@ onUnmounted(() => stopWatch())
 
     <!-- Game Title -->
     <div class="game-title-section" style="animation-delay: 0.05s">
+      <div class="title-icon">
+        <img
+          :src="`/api/games/${gameId}/icon`"
+          :alt="game.name"
+          class="title-icon-img"
+          @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.add('visible')"
+        />
+        <div class="title-icon-fallback">
+          <NIcon :size="28" color="var(--text-3)">
+            <GamepadFilled />
+          </NIcon>
+        </div>
+      </div>
       <h1 class="game-title">{{ game.name }}</h1>
       <div class="title-status">
         <span class="status-indicator" :class="{
@@ -204,16 +217,9 @@ onUnmounted(() => stopWatch())
         </div>
         <div class="info-item">
           <span class="info-label">脚本后端</span>
-          <span v-if="game.detectedInfo" class="info-value">
-            <NTag
-              :type="game.detectedInfo.backend === 'IL2CPP' ? 'warning' : 'success'"
-              size="small"
-              round
-            >
-              {{ game.detectedInfo.backend }}
-            </NTag>
+          <span class="info-value" :class="{ muted: !game.detectedInfo }">
+            {{ game.detectedInfo?.backend || '未检测' }}
           </span>
-          <span v-else class="info-value muted">未检测</span>
         </div>
         <div class="info-item">
           <span class="info-label">架构</span>
@@ -270,7 +276,7 @@ onUnmounted(() => stopWatch())
           </span>
         </div>
         <NButton type="error" @click="handleUninstall" ghost>
-          卸载并还原
+          卸载
         </NButton>
       </div>
     </div>
@@ -358,6 +364,42 @@ onUnmounted(() => stopWatch())
   gap: 16px;
   margin-bottom: 28px;
   animation: slideUp 0.4s var(--ease-out) backwards;
+}
+
+.title-icon {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.title-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  image-rendering: -webkit-optimize-contrast;
+  border-radius: 13px;
+}
+
+.title-icon-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+}
+
+.title-icon-fallback.visible {
+  opacity: 1;
 }
 
 .game-title {

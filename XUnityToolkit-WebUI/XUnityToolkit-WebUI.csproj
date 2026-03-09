@@ -6,6 +6,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
+    <SpaRoot>..\xunity-webui\</SpaRoot>
   </PropertyGroup>
+
+  <!-- Build frontend before backend build -->
+  <Target Name="BuildFrontend" BeforeTargets="Build">
+    <Message Importance="high" Text="Installing frontend dependencies..." />
+    <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" />
+    <Message Importance="high" Text="Building frontend..." />
+    <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+  </Target>
 
 </Project>

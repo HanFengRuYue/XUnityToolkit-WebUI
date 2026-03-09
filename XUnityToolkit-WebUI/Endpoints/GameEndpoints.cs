@@ -1,3 +1,6 @@
+using System.Drawing;
+using System.Drawing.Imaging;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
 
@@ -21,6 +24,53 @@ public static class GameEndpoints
             return game is not null
                 ? Results.Ok(ApiResult<Game>.Ok(game))
                 : Results.NotFound(ApiResult<Game>.Fail("Game not found."));
+        });
+
+        group.MapGet("/{id}/icon", async (string id, GameLibraryService library, AppDataPaths paths) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound();
+
+            var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable;
+            if (string.IsNullOrEmpty(exeName))
+                return Results.NotFound();
+
+            var exePath = Path.Combine(game.GamePath, exeName);
+            if (!File.Exists(exePath))
+                return Results.NotFound();
+
+            // Check cache
+            var iconsDir = Path.Combine(paths.CacheDirectory, "icons");
+            Directory.CreateDirectory(iconsDir);
+            var cachePath = Path.Combine(iconsDir, $"{game.Id}.png");
+
+            if (File.Exists(cachePath))
+            {
+                // Invalidate cache if exe is newer
+                var exeTime = File.GetLastWriteTimeUtc(exePath);
+                var cacheTime = File.GetLastWriteTimeUtc(cachePath);
+                if (cacheTime > exeTime)
+                {
+                    var bytes = await File.ReadAllBytesAsync(cachePath);
+                    return Results.File(bytes, "image/png");
+                }
+            }
+
+            // Extract icon from exe
+            using var icon = Icon.ExtractAssociatedIcon(exePath);
+            if (icon is null)
+                return Results.NotFound();
+
+            using var bitmap = icon.ToBitmap();
+            using var ms = new MemoryStream();
+            bitmap.Save(ms, ImageFormat.Png);
+            var pngBytes = ms.ToArray();
+
+            // Write cache
+            await File.WriteAllBytesAsync(cachePath, pngBytes);
+
+            return Results.File(pngBytes, "image/png");
         });
 
         group.MapPost("/", async (AddGameRequest request, GameLibraryService library) =>

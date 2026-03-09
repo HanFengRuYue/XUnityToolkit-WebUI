@@ -31,7 +31,6 @@ builder.Services.AddSingleton<GitHubReleaseService>();
 builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<ConfigurationService>();
-builder.Services.AddSingleton<BackupService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 
 // SignalR with string enum serialization
