@@ -187,3 +187,25 @@ body::before {
   background: rgba(34, 211, 167, 0.25);
   color: #fff;
 }
+
+/* ===== Reduced Motion ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== Mobile Base ===== */
+@media (max-width: 768px) {
+  body {
+    overflow: auto;
+  }
+  #app {
+    height: auto;
+    min-height: 100vh;
+  }
+}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import {
   NForm,
   NFormItem,
@@ -71,11 +71,26 @@ const engineOptions = [
 function handleSave() {
   emit('save', { ...form.value })
 }
+
+const isMobile = ref(false)
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 768
+}
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
+
+const labelPlacement = computed(() => isMobile.value ? 'top' as const : 'left' as const)
+const labelWidth = computed(() => isMobile.value ? undefined : '160')
 </script>
 
 <template>
   <div class="config-panel">
-    <NForm :disabled="disabled" label-placement="left" label-width="160">
+    <NForm :disabled="disabled" :label-placement="labelPlacement" :label-width="labelWidth">
       <div class="config-section">
         <div class="config-section-label">语言设置</div>
         <NFormItem label="源语言">
@@ -163,5 +178,28 @@ function handleSave() {
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .advanced-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .advanced-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0 12px;
+  }
+
+  .config-footer .n-button {
+    width: 100%;
+  }
+
+  .config-footer {
+    justify-content: stretch;
+  }
 }
 </style>

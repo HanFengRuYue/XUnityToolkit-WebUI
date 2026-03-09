@@ -244,40 +244,72 @@ onUnmounted(() => stopWatch())
         检测到 IL2CPP 游戏，将使用 BepInEx 6 (预发布版)。首次启动游戏可能需要 30-90 秒生成互操作程序集。
       </NAlert>
 
-      <div v-if="!isInstalled" class="install-actions">
-        <NButton
-          type="primary"
-          size="large"
-          :disabled="!game.detectedInfo"
-          @click="handleInstall"
-          class="install-button"
-        >
-          <template #icon>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </template>
-          一键安装 BepInEx + XUnity.AutoTranslator
-        </NButton>
-        <NButton v-if="!game.detectedInfo" @click="handleDetect" :loading="detecting">
-          先检测游戏
-        </NButton>
+      <!-- Uninstalled State -->
+      <div v-if="!isInstalled" class="install-cta">
+        <div class="cta-visual">
+          <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
+            <rect x="4" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
+            <path d="M20 12V24M20 24L14 18M20 24L26 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 28H28" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="cta-text">
+          <span class="cta-title">准备安装翻译插件</span>
+          <span class="cta-desc">将自动下载并安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
+        </div>
+        <div class="cta-actions">
+          <NButton
+            type="primary"
+            size="large"
+            :disabled="!game.detectedInfo"
+            @click="handleInstall"
+            class="install-button"
+          >
+            <template #icon>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </template>
+            一键安装
+          </NButton>
+          <NButton v-if="!game.detectedInfo" @click="handleDetect" :loading="detecting" size="large">
+            先检测游戏
+          </NButton>
+        </div>
       </div>
 
+      <!-- Installed State -->
       <div v-else class="installed-info">
-        <div class="version-badges">
-          <span class="version-badge">
-            <span class="badge-label">BepInEx</span>
-            <span class="badge-value">{{ game.installedBepInExVersion }}</span>
-          </span>
-          <span class="version-badge">
-            <span class="badge-label">XUnity</span>
-            <span class="badge-value">{{ game.installedXUnityVersion }}</span>
-          </span>
+        <div class="version-grid">
+          <div class="version-card">
+            <div class="version-card-header">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+                <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span class="version-card-label">BepInEx</span>
+            </div>
+            <span class="version-card-value">{{ game.installedBepInExVersion }}</span>
+            <span class="version-card-desc">模组框架</span>
+          </div>
+          <div class="version-card">
+            <div class="version-card-header">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+                <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span class="version-card-label">XUnity.AutoTranslator</span>
+            </div>
+            <span class="version-card-value">{{ game.installedXUnityVersion }}</span>
+            <span class="version-card-desc">翻译插件</span>
+          </div>
         </div>
-        <NButton type="error" @click="handleUninstall" ghost>
-          卸载
-        </NButton>
+        <div class="installed-footer">
+          <span class="installed-hint">如需重新安装，请先卸载当前版本</span>
+          <NButton type="error" @click="handleUninstall" ghost size="small">
+            卸载插件
+          </NButton>
+        </div>
       </div>
     </div>
 
@@ -518,52 +550,212 @@ onUnmounted(() => stopWatch())
   color: var(--text-3);
 }
 
-/* ===== Install Actions ===== */
-.install-actions {
+/* ===== Install CTA (Uninstalled State) ===== */
+.install-cta {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
   align-items: center;
-  flex-wrap: wrap;
+  text-align: center;
+  padding: 12px 0 4px;
+  gap: 16px;
+}
+
+.cta-visual {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  animation: breathe 3s ease-in-out infinite;
+}
+
+.cta-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cta-title {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+
+.cta-desc {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.5;
+  max-width: 360px;
+}
+
+.cta-actions {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
 }
 
 .install-button {
   position: relative;
 }
 
-/* ===== Installed Info ===== */
+/* ===== Installed State ===== */
 .installed-info {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 16px;
-  flex-wrap: wrap;
 }
 
-.version-badges {
+.version-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.version-card {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease;
 }
 
-.version-badge {
+.version-card:hover {
+  border-color: var(--accent-border);
+}
+
+.version-card-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  color: var(--accent);
 }
 
-.badge-label {
+.version-card-label {
   font-size: 12px;
   font-weight: 500;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+}
+
+.version-card-value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+}
+
+.version-card-desc {
+  font-size: 11px;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+
+.installed-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  gap: 12px;
+}
+
+.installed-hint {
+  font-size: 12px;
   color: var(--text-3);
 }
 
-.badge-value {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--accent);
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .game-title-section {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .game-title {
+    font-size: 22px;
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  .title-status {
+    flex-shrink: 0;
+  }
+
+  .section-card {
+    padding: 16px;
+  }
+
+  .info-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 12px;
+  }
+
+  .version-card-value {
+    font-size: 15px;
+  }
+
+  .installed-footer {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .game-title-section {
+    gap: 10px;
+  }
+
+  .title-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .game-title {
+    font-size: 20px;
+  }
+
+  .section-card {
+    padding: 14px;
+    border-radius: var(--radius-md);
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .version-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cta-actions {
+    flex-direction: column;
+  }
+
+  .cta-actions .n-button {
+    width: 100%;
+  }
+
+  .installed-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .installed-hint {
+    text-align: center;
+  }
 }
 </style>

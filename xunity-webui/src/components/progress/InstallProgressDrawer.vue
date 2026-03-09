@@ -8,7 +8,7 @@ import {
   NButton,
   NAlert,
 } from 'naive-ui'
-import { computed } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useInstallStore } from '@/stores/install'
 import type { InstallStep } from '@/api/types'
 
@@ -59,10 +59,22 @@ const title = computed(() => {
   if (isUninstalling.value) return '卸载中...'
   return '安装中...'
 })
+
+const drawerWidth = ref(420)
+function updateDrawerWidth() {
+  drawerWidth.value = window.innerWidth <= 480 ? window.innerWidth : 420
+}
+onMounted(() => {
+  updateDrawerWidth()
+  window.addEventListener('resize', updateDrawerWidth)
+})
+onUnmounted(() => {
+  window.removeEventListener('resize', updateDrawerWidth)
+})
 </script>
 
 <template>
-  <NDrawer v-model:show="installStore.isDrawerOpen" :width="420" placement="right">
+  <NDrawer v-model:show="installStore.isDrawerOpen" :width="drawerWidth" placement="right">
     <NDrawerContent :title="title" closable @close="installStore.closeDrawer()">
       <div class="progress-content">
         <!-- Step Timeline -->

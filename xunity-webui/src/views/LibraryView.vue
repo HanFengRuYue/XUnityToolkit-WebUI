@@ -435,4 +435,73 @@ function getStatusInfo(state: string) {
   opacity: 1;
   transform: translateX(-4px);
 }
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .library-header {
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .library-title {
+    font-size: 22px;
+  }
+
+  .game-row {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .row-tags {
+    display: none;
+  }
+
+  .row-arrow {
+    display: none;
+  }
+
+  .row-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .row-status {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .library-title {
+    font-size: 20px;
+  }
+
+  .header-left {
+    gap: 10px;
+  }
+
+  .game-row {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .row-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+  }
+
+  .row-name {
+    font-size: 14px;
+  }
+
+  .row-path {
+    font-size: 10px;
+  }
+
+  .status-label {
+    font-size: 11px;
+  }
+}
 </style>

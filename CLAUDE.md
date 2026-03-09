@@ -55,6 +55,8 @@ xunity-webui/src/
 - **Theme:** Naive UI dark theme with comprehensive `GlobalThemeOverrides` in `App.vue`
 - **Animations:** Keyframes in `main.css` (`slideUp`, `fadeIn`, `floatIn`, `shimmer`, `breathe`, `pulse`); page transitions via Vue `<Transition name="page">`
 - **Layout:** Custom sidebar (230px) + scrollable content area; no NLayout/NLayoutSider
+- **Responsive Breakpoints:** 768px (tablet — sidebar collapses to slide-over drawer), 480px (phone — single-column layouts)
+- **Mobile Navigation:** AppShell uses hamburger menu + overlay sidebar on ≤768px; sidebar state managed via `sidebarOpen` ref
 - **Game list:** Full-width row layout with exe icon, name/path, tags, and status; staggered entrance animations
 
 ## Code Conventions
@@ -78,3 +80,6 @@ xunity-webui/src/
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
 - Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync
 - Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)
+- Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
+- Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
+- After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
