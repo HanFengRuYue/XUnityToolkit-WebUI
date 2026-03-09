@@ -32,6 +32,31 @@ cd xunity-webui && npx vue-tsc --noEmit
 - **Real-time:** SignalR for install progress updates
 - **Persistence:** JSON file at `%APPDATA%/XUnityToolkit/library.json`
 
+### Frontend Structure
+
+```
+xunity-webui/src/
+├── api/            # API client and TypeScript types
+├── assets/         # Global CSS (design system variables, animations)
+├── components/
+│   ├── layout/     # AppShell (sidebar + content layout)
+│   ├── config/     # ConfigPanel (translation settings form)
+│   └── progress/   # InstallProgressDrawer (SignalR progress)
+├── stores/         # Pinia stores (games, install)
+├── views/          # LibraryView, GameDetailView
+└── router/         # Vue Router config (/ and /games/:id)
+```
+
+### Frontend Design System
+
+- **Fonts:** Lexend (headings), DM Sans (body), JetBrains Mono (mono) — loaded via Google Fonts in `index.html`
+- **Colors:** Deep dark base (`#0b0b11`), teal accent (`#22d3a7`), violet secondary (`#a78bfa`)
+- **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, `--radius-lg`, `--ease-out`, etc.)
+- **Theme:** Naive UI dark theme with comprehensive `GlobalThemeOverrides` in `App.vue`
+- **Animations:** Keyframes in `main.css` (`slideUp`, `fadeIn`, `floatIn`, `shimmer`, `breathe`, `pulse`); page transitions via Vue `<Transition name="page">`
+- **Layout:** Custom sidebar (230px) + scrollable content area; no NLayout/NLayoutSider
+- **Game cards:** Custom HTML/CSS (not NCard) with staggered entrance animations and hover effects
+
 ## Code Conventions
 
 - **Target Framework:** net10.0-windows
@@ -39,3 +64,5 @@ cd xunity-webui && npx vue-tsc --noEmit
 - **Nullable reference types:** Enabled
 - **Implicit usings:** Enabled
 - **Frontend:** Vue 3 Composition API with `<script setup lang="ts">`
+- **Frontend styling:** Scoped `<style scoped>` per component; use CSS variables from `main.css` for theming
+- **Frontend icons:** `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`

@@ -58,7 +58,7 @@ const isRunning = computed(
 )
 
 const title = computed(() => {
-  if (isComplete.value) return isUninstalling.value ? '卸载完成' : '操作完成'
+  if (isComplete.value) return isUninstalling.value ? '卸载完成' : '安装完成'
   if (isFailed.value) return '操作失败'
   if (isUninstalling.value) return '卸载中...'
   return '安装中...'
@@ -66,50 +66,96 @@ const title = computed(() => {
 </script>
 
 <template>
-  <NDrawer v-model:show="installStore.isDrawerOpen" :width="400" placement="right">
+  <NDrawer v-model:show="installStore.isDrawerOpen" :width="420" placement="right">
     <NDrawerContent :title="title" closable @close="installStore.closeDrawer()">
-      <NTimeline>
-        <NTimelineItem
-          v-for="step in steps"
-          :key="step.key"
-          :type="getStepType(step.key)"
-          :title="step.label"
-        />
-      </NTimeline>
+      <div class="progress-content">
+        <!-- Step Timeline -->
+        <div class="timeline-section">
+          <NTimeline>
+            <NTimelineItem
+              v-for="(step, index) in steps"
+              :key="step.key"
+              :type="getStepType(step.key)"
+              :title="step.label"
+            />
+          </NTimeline>
+        </div>
 
-      <NProgress
-        v-if="installStore.status"
-        type="line"
-        :percentage="installStore.status.progressPercent"
-        :status="isFailed ? 'error' : isComplete ? 'success' : 'default'"
-        :indicator-placement="'inside'"
-        style="margin-top: 16px"
-      />
+        <!-- Progress Bar -->
+        <div v-if="installStore.status" class="progress-section">
+          <NProgress
+            type="line"
+            :percentage="installStore.status.progressPercent"
+            :status="isFailed ? 'error' : isComplete ? 'success' : 'default'"
+            :indicator-placement="'inside'"
+            :height="20"
+            :border-radius="10"
+          />
+        </div>
 
-      <div v-if="installStore.status?.message" style="margin-top: 12px; color: #aaa; font-size: 13px">
-        {{ installStore.status.message }}
+        <!-- Status Message -->
+        <div v-if="installStore.status?.message" class="status-message">
+          {{ installStore.status.message }}
+        </div>
+
+        <!-- Error Alert -->
+        <NAlert v-if="isFailed && installStore.status?.error" type="error" style="margin-top: 16px">
+          {{ installStore.status.error }}
+        </NAlert>
+
+        <!-- Success Alert -->
+        <NAlert v-if="isComplete" type="success" style="margin-top: 16px">
+          {{ isUninstalling ? '已成功卸载插件并还原文件。' : '插件已成功安装！启动游戏即可使用。' }}
+        </NAlert>
       </div>
 
-      <NAlert v-if="isFailed && installStore.status?.error" type="error" style="margin-top: 16px">
-        {{ installStore.status.error }}
-      </NAlert>
-
-      <NAlert v-if="isComplete" type="success" style="margin-top: 16px">
-        插件已成功安装！启动游戏即可使用。
-      </NAlert>
-
       <template #footer>
-        <NButton v-if="isRunning" @click="installStore.cancel()" tertiary type="warning">
-          取消
-        </NButton>
-        <NButton
-          v-if="isComplete || isFailed"
-          type="primary"
-          @click="installStore.closeDrawer()"
-        >
-          关闭
-        </NButton>
+        <div class="drawer-footer">
+          <NButton v-if="isRunning" @click="installStore.cancel()" tertiary type="warning">
+            取消
+          </NButton>
+          <NButton
+            v-if="isComplete || isFailed"
+            type="primary"
+            @click="installStore.closeDrawer()"
+          >
+            关闭
+          </NButton>
+        </div>
       </template>
     </NDrawerContent>
   </NDrawer>
 </template>
+
+<style scoped>
+.progress-content {
+  animation: fadeIn 0.3s ease;
+}
+
+.timeline-section {
+  margin-bottom: 24px;
+}
+
+.progress-section {
+  margin-bottom: 8px;
+}
+
+.status-message {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.5;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+</style>
