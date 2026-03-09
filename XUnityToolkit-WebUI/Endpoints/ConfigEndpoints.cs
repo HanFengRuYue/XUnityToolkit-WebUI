@@ -24,7 +24,7 @@ public static class ConfigEndpoints
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult<XUnityConfig>.Fail("Game not found."));
 
-            await configService.SaveAsync(game.GamePath, config);
+            await configService.PatchAsync(game.GamePath, config);
             return Results.Ok(ApiResult<XUnityConfig>.Ok(config));
         });
     }

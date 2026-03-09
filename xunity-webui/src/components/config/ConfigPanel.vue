@@ -6,10 +6,10 @@ import {
   NSelect,
   NSwitch,
   NInputNumber,
+  NInput,
   NCollapse,
   NCollapseItem,
   NButton,
-  NSpace,
 } from 'naive-ui'
 import type { XUnityConfig } from '@/api/types'
 
@@ -36,6 +36,38 @@ const form = ref<XUnityConfig>({
   handleRichText: true,
   enableUIResizing: true,
   extra: {},
+})
+
+interface EngineKeyField {
+  key: keyof XUnityConfig
+  label: string
+  placeholder: string
+  type: 'text' | 'password'
+}
+
+const engineKeyFields = computed<EngineKeyField[]>(() => {
+  switch (form.value.translationEngine) {
+    case 'GoogleTranslateV2':
+      return [{ key: 'googleTranslateV2ApiKey', label: 'API Key', placeholder: 'Google Cloud API Key', type: 'password' }]
+    case 'BingTranslate':
+      return [{ key: 'bingTranslateOcpApimSubscriptionKey', label: 'Subscription Key', placeholder: 'Azure 订阅密钥', type: 'password' }]
+    case 'BaiduTranslate':
+      return [
+        { key: 'baiduTranslateAppId', label: 'App ID', placeholder: '百度翻译 AppId', type: 'text' },
+        { key: 'baiduTranslateAppSecret', label: 'App Secret', placeholder: '百度翻译密钥', type: 'password' },
+      ]
+    case 'YandexTranslate':
+      return [{ key: 'yandexTranslateApiKey', label: 'API Key', placeholder: 'Yandex API Key', type: 'password' }]
+    case 'DeepLTranslate':
+      return [{ key: 'deepLTranslateApiKey', label: 'API Key', placeholder: 'DeepL Auth Key', type: 'password' }]
+    case 'PapagoTranslate':
+      return [
+        { key: 'papagoTranslateClientId', label: 'Client ID', placeholder: 'Papago Client ID', type: 'text' },
+        { key: 'papagoTranslateClientSecret', label: 'Client Secret', placeholder: 'Papago 密钥', type: 'password' },
+      ]
+    default:
+      return []
+  }
 })
 
 watch(
@@ -105,6 +137,24 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
         <div class="config-section-label">翻译引擎</div>
         <NFormItem label="翻译引擎">
           <NSelect v-model:value="form.translationEngine" :options="engineOptions" />
+        </NFormItem>
+      </div>
+
+      <div v-if="engineKeyFields.length > 0" class="config-section">
+        <div class="config-section-label">API 密钥</div>
+        <NFormItem
+          v-for="field in engineKeyFields"
+          :key="field.key"
+          :label="field.label"
+        >
+          <NInput
+            :value="(form[field.key] as string) ?? ''"
+            @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
+            :placeholder="field.placeholder"
+            :type="field.type"
+            :show-password-on="field.type === 'password' ? 'click' : undefined"
+            clearable
+          />
         </NFormItem>
       </div>
 

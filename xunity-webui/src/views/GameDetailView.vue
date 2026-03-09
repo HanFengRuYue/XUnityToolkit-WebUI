@@ -12,7 +12,7 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
-import { GamepadFilled } from '@vicons/material'
+import { GamepadFilled, FolderOpenOutlined, PlayArrowFilled } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
 import type { Game, XUnityConfig } from '@/api/types'
@@ -106,6 +106,23 @@ async function handleSaveConfig(cfg: XUnityConfig) {
   }
 }
 
+async function handleOpenFolder() {
+  try {
+    await gamesApi.openFolder(gameId)
+  } catch {
+    message.error('打开目录失败')
+  }
+}
+
+async function handleLaunch() {
+  try {
+    await gamesApi.launch(gameId)
+    message.success('游戏已启动')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '启动游戏失败')
+  }
+}
+
 function handleRemoveGame() {
   dialog.error({
     title: '移除游戏',
@@ -188,14 +205,24 @@ onUnmounted(() => stopWatch())
     <div class="section-card" style="animation-delay: 0.1s">
       <div class="section-header">
         <h2 class="section-title">游戏信息</h2>
-        <NButton
-          v-if="!game.detectedInfo"
-          size="small"
-          :loading="detecting"
-          @click="handleDetect"
-        >
-          检测游戏
-        </NButton>
+        <div class="header-btn-group">
+          <NButton size="small" @click="handleOpenFolder">
+            <template #icon><NIcon :size="16"><FolderOpenOutlined /></NIcon></template>
+            打开目录
+          </NButton>
+          <NButton size="small" @click="handleLaunch">
+            <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
+            运行游戏
+          </NButton>
+          <NButton
+            v-if="!game.detectedInfo"
+            size="small"
+            :loading="detecting"
+            @click="handleDetect"
+          >
+            检测游戏
+          </NButton>
+        </div>
       </div>
 
       <div class="info-grid">
@@ -512,6 +539,13 @@ onUnmounted(() => stopWatch())
   letter-spacing: -0.01em;
 }
 
+.header-btn-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 /* ===== Info Grid ===== */
 .info-grid {
   display: grid;
@@ -713,6 +747,16 @@ onUnmounted(() => stopWatch())
 }
 
 @media (max-width: 480px) {
+  .section-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .header-btn-group {
+    gap: 6px;
+    width: 100%;
+  }
+
   .game-title-section {
     gap: 10px;
   }

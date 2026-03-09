@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -29,6 +29,10 @@ export const gamesApi = {
   getStatus: (id: string) => api.get<InstallationStatus>(`/api/games/${id}/status`),
 
   cancel: (id: string) => api.post<void>(`/api/games/${id}/cancel`),
+
+  openFolder: (id: string) => api.post<void>(`/api/games/${id}/open-folder`),
+
+  launch: (id: string) => api.post<void>(`/api/games/${id}/launch`),
 }
 
 export const dialogApi = {
@@ -44,4 +48,10 @@ export const releasesApi = {
 export const cacheApi = {
   getInfo: () => api.get<CacheInfo>('/api/cache/downloads'),
   clear: () => api.del<CacheInfo>('/api/cache/downloads'),
+}
+
+export const settingsApi = {
+  get: () => api.get<AppSettings>('/api/settings'),
+  save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
+  getVersion: () => api.get<VersionInfo>('/api/settings/version'),
 }

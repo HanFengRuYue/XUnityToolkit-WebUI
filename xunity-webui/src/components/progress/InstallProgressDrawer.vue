@@ -20,7 +20,7 @@ const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'InstallingBepInEx', label: '安装 BepInEx' },
   { key: 'DownloadingXUnity', label: '下载 XUnity.AutoTranslator' },
   { key: 'InstallingXUnity', label: '安装 XUnity.AutoTranslator' },
-  { key: 'WritingConfig', label: '写入配置' },
+  { key: 'GeneratingConfig', label: '生成配置' },
 ]
 
 const uninstallSteps: { key: InstallStep; label: string }[] = [

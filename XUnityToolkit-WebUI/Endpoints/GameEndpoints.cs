@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using XUnityToolkit_WebUI.Infrastructure;
@@ -110,6 +111,46 @@ public static class GameEndpoints
             return removed
                 ? Results.Ok(ApiResult.Ok())
                 : Results.NotFound(ApiResult.Fail("Game not found."));
+        });
+
+        group.MapPost("/{id}/open-folder", async (string id, GameLibraryService library) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+            if (!Directory.Exists(game.GamePath))
+                return Results.BadRequest(ApiResult.Fail("游戏目录不存在。"));
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{game.GamePath}\"",
+                UseShellExecute = true
+            });
+            return Results.Ok(ApiResult.Ok());
+        });
+
+        group.MapPost("/{id}/launch", async (string id, GameLibraryService library) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable;
+            if (string.IsNullOrEmpty(exeName))
+                return Results.BadRequest(ApiResult.Fail("未检测到可执行文件。"));
+
+            var exePath = Path.Combine(game.GamePath, exeName);
+            if (!File.Exists(exePath))
+                return Results.BadRequest(ApiResult.Fail($"可执行文件不存在: {exeName}"));
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                WorkingDirectory = game.GamePath,
+                UseShellExecute = true
+            });
+            return Results.Ok(ApiResult.Ok());
         });
     }
 }

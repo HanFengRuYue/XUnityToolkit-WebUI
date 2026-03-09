@@ -1,46 +1,17 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { NIcon, NPopconfirm, useMessage } from 'naive-ui'
-import { GamepadFilled } from '@vicons/material'
+import { NIcon } from 'naive-ui'
+import { GamepadFilled, SettingsOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
-import { cacheApi } from '@/api/games'
 
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
-const message = useMessage()
-const cacheSize = ref<string | null>(null)
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${bytes} B`
-}
-
-async function loadCacheInfo() {
-  try {
-    const info = await cacheApi.getInfo()
-    cacheSize.value = info.totalBytes > 0 ? formatBytes(info.totalBytes) : null
-  } catch {
-    cacheSize.value = null
-  }
-}
-
-async function handleClearCache() {
-  try {
-    const result = await cacheApi.clear()
-    message.success(`已清除 ${result.fileCount} 个文件（${formatBytes(result.totalBytes)}）`)
-    cacheSize.value = null
-  } catch {
-    message.error('清除缓存失败')
-  }
-}
-
-onMounted(loadCacheInfo)
 
 const navItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
+  { label: '设置', key: '/settings', icon: SettingsOutlined },
 ]
 
 function navigateTo(key: string) {
@@ -49,7 +20,7 @@ function navigateTo(key: string) {
 }
 
 function isActive(key: string): boolean {
-  if (key === '/') return true
+  if (key === '/') return route.path === '/' || route.path.startsWith('/games/')
   return route.path.startsWith(key)
 }
 
@@ -131,19 +102,6 @@ watch(() => route.path, () => {
       <div class="sidebar-spacer"></div>
 
       <div class="sidebar-footer">
-        <NPopconfirm
-          v-if="cacheSize"
-          @positive-click="handleClearCache"
-          negative-text="取消"
-          positive-text="清除"
-        >
-          <template #trigger>
-            <button class="cache-clear-btn">
-              清除下载缓存（{{ cacheSize }}）
-            </button>
-          </template>
-          清除已缓存的安装包文件？
-        </NPopconfirm>
         <span class="footer-version">v1.0.0</span>
       </div>
     </aside>
@@ -293,26 +251,6 @@ watch(() => route.path, () => {
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
-}
-
-.cache-clear-btn {
-  display: block;
-  width: 100%;
-  margin-bottom: 8px;
-  padding: 6px 0;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-3);
-  font-size: 11px;
-  font-family: var(--font-body);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.cache-clear-btn:hover {
-  border-color: var(--accent-border);
-  color: var(--text-2);
 }
 
 .footer-version {

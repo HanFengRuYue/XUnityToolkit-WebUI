@@ -11,6 +11,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string LibraryFile => Path.Combine(_root, "library.json");
     public string BackupsDirectory => Path.Combine(_root, "backups");
     public string CacheDirectory => Path.Combine(_root, "cache");
+    public string SettingsFile => Path.Combine(_root, "settings.json");
 
     public string BackupDirectory(string gameId) =>
         Path.Combine(BackupsDirectory, gameId);

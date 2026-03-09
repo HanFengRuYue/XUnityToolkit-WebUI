@@ -15,4 +15,14 @@ public sealed class XUnityConfig
     public bool HandleRichText { get; set; } = true;
     public bool EnableUIResizing { get; set; } = true;
     public Dictionary<string, string> Extra { get; set; } = [];
+
+    // Engine API credentials — stored in engine-specific INI sections
+    public string? GoogleTranslateV2ApiKey { get; set; }
+    public string? BingTranslateOcpApimSubscriptionKey { get; set; }
+    public string? BaiduTranslateAppId { get; set; }
+    public string? BaiduTranslateAppSecret { get; set; }
+    public string? YandexTranslateApiKey { get; set; }
+    public string? DeepLTranslateApiKey { get; set; }
+    public string? PapagoTranslateClientId { get; set; }
+    public string? PapagoTranslateClientSecret { get; set; }
 }

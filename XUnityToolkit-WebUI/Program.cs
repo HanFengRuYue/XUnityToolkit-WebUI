@@ -56,6 +56,8 @@ builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
+builder.Services.AddSingleton<AppSettingsService>();
+builder.Services.AddHostedService<SystemTrayService>();
 
 // SignalR with string enum serialization
 builder.Services.AddSignalR()
@@ -81,6 +83,7 @@ app.MapConfigEndpoints();
 app.MapReleaseEndpoints();
 app.MapDialogEndpoints();
 app.MapCacheEndpoints();
+app.MapSettingsEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

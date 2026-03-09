@@ -14,6 +14,11 @@ const router = createRouter({
       name: 'game-detail',
       component: () => import('@/views/GameDetailView.vue'),
     },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
+    },
   ],
 })
 

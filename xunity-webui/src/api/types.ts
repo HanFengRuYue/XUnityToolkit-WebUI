@@ -37,7 +37,7 @@ export type InstallStep =
   | 'InstallingBepInEx'
   | 'DownloadingXUnity'
   | 'InstallingXUnity'
-  | 'WritingConfig'
+  | 'GeneratingConfig'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
   | 'Complete'
@@ -67,6 +67,15 @@ export interface XUnityConfig {
   handleRichText: boolean
   enableUIResizing: boolean
   extra: Record<string, string>
+  // Engine API credentials
+  googleTranslateV2ApiKey?: string
+  bingTranslateOcpApimSubscriptionKey?: string
+  baiduTranslateAppId?: string
+  baiduTranslateAppSecret?: string
+  yandexTranslateApiKey?: string
+  deepLTranslateApiKey?: string
+  papagoTranslateClientId?: string
+  papagoTranslateClientSecret?: string
 }
 
 export interface GitHubRelease {
@@ -86,4 +95,13 @@ export interface GitHubAsset {
 export interface CacheInfo {
   fileCount: number
   totalBytes: number
+}
+
+export interface AppSettings {
+  mirrorUrl: string
+  theme: string
+}
+
+export interface VersionInfo {
+  version: string
 }

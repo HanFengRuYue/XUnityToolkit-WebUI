@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Models;
@@ -66,7 +67,7 @@ public sealed class InstallOrchestrator(
                 {
                     _cancellations.TryRemove(gameId, out _);
                 }
-            }, cts.Token);
+            });
 
             return status;
         }
@@ -196,11 +197,69 @@ public sealed class InstallOrchestrator(
 
         await xUnityInstaller.InstallAsync(game.GamePath, xUnityZip, ct);
 
-        // Step 6: Write config
-        await UpdateStatus(status, InstallStep.WritingConfig, 90, "Writing configuration...");
+        // Step 6: Launch game to generate config file
+        await UpdateStatus(status, InstallStep.GeneratingConfig, 85, "正在启动游戏以生成配置文件...");
 
-        var xUnityConfig = config ?? new XUnityConfig();
-        await configService.SaveAsync(game.GamePath, xUnityConfig, ct);
+        var configPath = configService.GetConfigPath(game.GamePath);
+        var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable
+            ?? throw new InvalidOperationException("无法确定游戏可执行文件路径。");
+        var exePath = Path.Combine(game.GamePath, exeName);
+
+        Process? gameProcess = null;
+        try
+        {
+            gameProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName = exePath,
+                WorkingDirectory = game.GamePath,
+                UseShellExecute = true
+            });
+
+            // Wait for config file to appear (poll every second, timeout 60s)
+            var timeout = TimeSpan.FromSeconds(60);
+            var elapsed = TimeSpan.Zero;
+            var interval = TimeSpan.FromSeconds(1);
+
+            while (!File.Exists(configPath) && elapsed < timeout)
+            {
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(interval, ct);
+                elapsed += interval;
+                await UpdateStatus(status, InstallStep.GeneratingConfig,
+                    85 + (int)(elapsed.TotalSeconds / timeout.TotalSeconds * 5),
+                    $"等待配置文件生成... ({(int)elapsed.TotalSeconds}s)");
+            }
+
+            if (File.Exists(configPath))
+                logger.LogInformation("配置文件已生成: {Path}", configPath);
+            else
+                logger.LogWarning("配置文件生成超时，将在下次启动游戏时自动生成");
+        }
+        finally
+        {
+            // Kill the game process
+            if (gameProcess != null && !gameProcess.HasExited)
+            {
+                try
+                {
+                    gameProcess.Kill();
+                    gameProcess.WaitForExit(5000);
+                    logger.LogInformation("已关闭游戏进程");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "关闭游戏进程失败");
+                }
+            }
+            gameProcess?.Dispose();
+        }
+
+        // Apply user config if provided
+        if (config != null)
+        {
+            await UpdateStatus(status, InstallStep.GeneratingConfig, 92, "正在应用用户配置...");
+            await configService.PatchAsync(game.GamePath, config, ct);
+        }
 
         // Step 7: Complete
         game.InstalledXUnityVersion = xUnityRelease.TagName;

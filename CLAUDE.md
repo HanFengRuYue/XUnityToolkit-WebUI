@@ -30,7 +30,8 @@ cd xunity-webui && npx vue-tsc --noEmit
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `xunity-webui/`)
 - **Real-time:** SignalR for install progress updates
-- **Persistence:** JSON file at `%APPDATA%/XUnityToolkit/library.json`
+- **Persistence:** JSON files at `%APPDATA%/XUnityToolkit/` (`library.json`, `settings.json`)
+- **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
 
 ### Frontend Structure
 
@@ -43,8 +44,8 @@ xunity-webui/src/
 │   ├── config/     # ConfigPanel (translation settings form)
 │   └── progress/   # InstallProgressDrawer (SignalR progress)
 ├── stores/         # Pinia stores (games, install)
-├── views/          # LibraryView, GameDetailView
-└── router/         # Vue Router config (/ and /games/:id)
+├── views/          # LibraryView, GameDetailView, SettingsView
+└── router/         # Vue Router config (/, /games/:id, /settings)
 ```
 
 ### Frontend Design System
@@ -72,10 +73,17 @@ xunity-webui/src/
 ## API Endpoints
 
 - Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
+- Game actions: `POST /api/games/{id}/open-folder` (opens explorer), `POST /api/games/{id}/launch` (runs game exe)
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
+- Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version)
+- Config: `PUT /api/games/{id}/config` uses `PatchAsync` — reads existing INI, modifies only specified keys, preserves all other content (comments, unknown sections)
 
 ## Development Notes
 
+- **XUnity.AutoTranslator 配置文件**：实际文件名是 `AutoTranslatorConfig.ini`（不是 BepInEx GUID 风格的 `gravydevsupreme.xunity.autotranslator.cfg`），路径 `BepInEx/config/AutoTranslatorConfig.ini`
+- **P/Invoke on .NET 10**：使用 `[DllImport]` 而非 `[LibraryImport]`，后者需要 `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`，当前 csproj 未启用
+- **重命名公共方法时**：全局搜索所有调用点（Endpoints、Services、Orchestrator），避免遗漏编译错误
+- **INI 配置修改策略**：不要从零生成 XUnity 配置文件（会丢失插件自动生成的默认值），应使用 `PatchAsync` 读取-修改-写回
 - **Console logging:** Configured programmatically in `Program.cs` (`ClearProviders` + `AddSimpleConsole`) — appsettings.json logging config was unreliable; all log messages are in Chinese
 - **Windows console encoding:** `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()`, otherwise Chinese characters will be garbled (the logging system captures encoding at init time)
 - Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`), so `url.Contains("github.com")` checks will match mirror URLs too; check mirror host first
@@ -84,7 +92,10 @@ xunity-webui/src/
 - `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj
 - Stop the running backend before `dotnet build` — the exe is locked while running
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
-- Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync
+- Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync; `GeneratingConfig` step launches game to auto-generate XUnity config, then patches user settings
+- `XUnityConfig` has typed API key fields (e.g., `DeepLTranslateApiKey`) stored in engine-specific INI sections (e.g., `[DeepLTranslate]`); `ConfigurationService.PatchAsync` reads existing INI and only modifies specified keys
+- `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
+- `AppSettingsService` persists settings to `%APPDATA%/XUnityToolkit/settings.json` using same semaphore + atomic write pattern as `GameLibraryService`
 - Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
