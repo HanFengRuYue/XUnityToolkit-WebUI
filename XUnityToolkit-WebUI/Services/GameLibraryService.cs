@@ -54,7 +54,7 @@ public sealed class GameLibraryService(AppDataPaths paths, ILogger<GameLibrarySe
 
             games.Add(game);
             await WriteLibraryAsync(games, ct);
-            logger.LogInformation("Added game {Name} at {Path}", name, gamePath);
+            logger.LogInformation("已添加游戏 {Name}，路径: {Path}", name, gamePath);
             return game;
         }
         finally
@@ -93,7 +93,7 @@ public sealed class GameLibraryService(AppDataPaths paths, ILogger<GameLibrarySe
             if (removed > 0)
             {
                 await WriteLibraryAsync(games, ct);
-                logger.LogInformation("Removed game {Id}", id);
+                logger.LogInformation("已移除游戏 {Id}", id);
             }
             return removed > 0;
         }

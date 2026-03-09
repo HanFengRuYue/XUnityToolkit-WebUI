@@ -59,7 +59,7 @@ public sealed class InstallOrchestrator(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Installation failed for game {GameId}", gameId);
+                    logger.LogError(ex, "安装失败: 游戏 {GameId}", gameId);
                     await UpdateStatus(status, InstallStep.Failed, 0, error: ex.Message);
                 }
                 finally
@@ -104,7 +104,7 @@ public sealed class InstallOrchestrator(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Uninstall failed for game {GameId}", gameId);
+                    logger.LogError(ex, "卸载失败: 游戏 {GameId}", gameId);
                     await UpdateStatus(status, InstallStep.Failed, 0, error: ex.Message);
                 }
             });
@@ -260,7 +260,7 @@ public sealed class InstallOrchestrator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to broadcast status for game {GameId}", status.GameId);
+            logger.LogWarning(ex, "状态推送失败: 游戏 {GameId}", status.GameId);
         }
     }
 }

@@ -34,7 +34,7 @@ public sealed class GitHubReleaseService(
         if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
             response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
         {
-            logger.LogWarning("GitHub API rate limit hit for {Key}", cacheKey);
+            logger.LogWarning("GitHub API 请求频率超限: {Key}", cacheKey);
             if (_cache.TryGetValue(cacheKey, out var stale))
                 return stale.Releases;
             throw new HttpRequestException("GitHub API rate limit exceeded. Please try again later.");
@@ -74,19 +74,19 @@ public sealed class GitHubReleaseService(
         // Return cached file if exists
         if (File.Exists(destPath))
         {
-            logger.LogInformation("Using cached download: {Path}", destPath);
+            logger.LogInformation("使用缓存文件: {Path}", destPath);
             progress?.Report(new DownloadProgress(100));
             return destPath;
         }
 
-        logger.LogInformation("Downloading {Url} to {Path}", url, destPath);
+        logger.LogInformation("开始下载: {Url}", url);
 
         var tmpPath = destPath + ".tmp";
         var mirrorUrl = BuildMirrorUrl(url);
         var useMirror = await ShouldUseMirrorAsync(url, ct);
 
         if (useMirror)
-            logger.LogInformation("GitHub direct connection slow, using mirror: {Mirror}", mirrorUrl);
+            logger.LogInformation("GitHub 直连较慢，使用镜像加速: {Mirror}", mirrorUrl);
 
         Exception? lastException = null;
 
@@ -118,7 +118,7 @@ public sealed class GitHubReleaseService(
             catch (Exception ex)
             {
                 lastException = ex;
-                logger.LogWarning(ex, "Download attempt {Attempt}/{Max} failed for {Url}",
+                logger.LogWarning(ex, "下载失败 ({Attempt}/{Max}): {Url}",
                     attempt, MaxRetries, attemptUrl);
                 TryDeleteFile(tmpPath);
 
@@ -197,13 +197,13 @@ public sealed class GitHubReleaseService(
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // Probe timed out — GitHub is slow
-            logger.LogInformation("GitHub probe timed out after {Seconds}s, will use mirror",
+            logger.LogInformation("GitHub 连接测试超时 ({Seconds}s)，将使用镜像",
                 ProbeTimeout.TotalSeconds);
             return true;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogInformation(ex, "GitHub probe failed, will use mirror");
+            logger.LogInformation(ex, "GitHub 连接测试失败，将使用镜像");
             return true;
         }
     }

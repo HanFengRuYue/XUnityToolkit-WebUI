@@ -44,7 +44,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
         var manifestPath = Path.Combine(backupDir, "manifest.json");
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
 
-        logger.LogInformation("Created backup for game {GameId}: {Count} files",
+        logger.LogInformation("已创建备份: 游戏 {GameId}，共 {Count} 个文件",
             gameId, manifest.BackedUpFiles.Count);
 
         return Task.FromResult(manifest);
@@ -68,7 +68,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
 
         if (!File.Exists(manifestPath))
         {
-            logger.LogWarning("No backup manifest found for game {GameId}", gameId);
+            logger.LogWarning("未找到备份记录: 游戏 {GameId}", gameId);
             return Task.CompletedTask;
         }
 
@@ -89,7 +89,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
             File.Copy(backupPath, restorePath, overwrite: true);
         }
 
-        logger.LogInformation("Restored backup for game {GameId}", gameId);
+        logger.LogInformation("已恢复备份: 游戏 {GameId}", gameId);
         return Task.CompletedTask;
     }
 
@@ -99,7 +99,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
         if (Directory.Exists(backupDir))
         {
             Directory.Delete(backupDir, recursive: true);
-            logger.LogInformation("Deleted backup for game {GameId}", gameId);
+            logger.LogInformation("已删除备份: 游戏 {GameId}", gameId);
         }
         return Task.CompletedTask;
     }

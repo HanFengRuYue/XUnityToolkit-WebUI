@@ -76,6 +76,8 @@ xunity-webui/src/
 
 ## Development Notes
 
+- **Console logging:** Configured programmatically in `Program.cs` (`ClearProviders` + `AddSimpleConsole`) — appsettings.json logging config was unreliable; all log messages are in Chinese
+- **Windows console encoding:** `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()`, otherwise Chinese characters will be garbled (the logging system captures encoding at init time)
 - Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`), so `url.Contains("github.com")` checks will match mirror URLs too; check mirror host first
 - Download resilience: `GitHubReleaseService.DownloadAssetAsync` has retry (3 attempts, exponential backoff) + auto mirror fallback; progress reported via `IProgress<DownloadProgress>` (percent + speed + retry message)
 - `InstallationStatus` has `DownloadSpeed` and `RetryMessage` fields — reset both to null on step transitions in `InstallOrchestrator.UpdateStatus`

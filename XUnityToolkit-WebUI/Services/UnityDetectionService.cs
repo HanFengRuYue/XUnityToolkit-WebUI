@@ -26,7 +26,7 @@ public sealed partial class UnityDetectionService(ILogger<UnityDetectionService>
         };
 
         logger.LogInformation(
-            "Detected: {Exe} Unity={Version} Backend={Backend} Arch={Arch}",
+            "检测结果: {Exe} | Unity {Version} | {Backend} | {Arch}",
             info.DetectedExecutable, info.UnityVersion, info.Backend, info.Architecture);
 
         return Task.FromResult(info);
@@ -136,7 +136,7 @@ public sealed partial class UnityDetectionService(ILogger<UnityDetectionService>
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to read version from {Path}", path);
+            logger.LogWarning(ex, "读取版本信息失败: {Path}", path);
             return null;
         }
     }
@@ -155,7 +155,7 @@ public sealed partial class UnityDetectionService(ILogger<UnityDetectionService>
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to read version from {Path}", path);
+            logger.LogWarning(ex, "读取版本信息失败: {Path}", path);
             return null;
         }
     }

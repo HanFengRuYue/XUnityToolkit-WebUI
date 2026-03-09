@@ -30,7 +30,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
             EnableUIResizing = GetBool(ini, "Behaviour", "EnableUIResizing", true)
         };
 
-        logger.LogInformation("Read XUnity config from {Path}", configPath);
+        logger.LogInformation("已读取配置文件: {Path}", configPath);
         return Task.FromResult(config);
     }
 
@@ -70,7 +70,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
         }
 
         File.WriteAllText(configPath, sb.ToString());
-        logger.LogInformation("Wrote XUnity config to {Path}", configPath);
+        logger.LogInformation("已写入配置文件: {Path}", configPath);
         return Task.CompletedTask;
     }
 

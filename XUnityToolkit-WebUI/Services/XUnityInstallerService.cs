@@ -26,7 +26,7 @@ public sealed class XUnityInstallerService(ILogger<XUnityInstallerService> logge
 
     public Task<List<string>> InstallAsync(string gamePath, string zipPath, CancellationToken ct = default)
     {
-        logger.LogInformation("Installing XUnity.AutoTranslator from {Zip} to {Game}", zipPath, gamePath);
+        logger.LogInformation("正在安装 XUnity.AutoTranslator: {Zip}", zipPath);
 
         var installedFiles = new List<string>();
 
@@ -46,13 +46,13 @@ public sealed class XUnityInstallerService(ILogger<XUnityInstallerService> logge
             installedFiles.Add(entry.FullName);
         }
 
-        logger.LogInformation("XUnity.AutoTranslator installed: {Count} files", installedFiles.Count);
+        logger.LogInformation("XUnity.AutoTranslator 安装完成，共 {Count} 个文件", installedFiles.Count);
         return Task.FromResult(installedFiles);
     }
 
     public Task UninstallAsync(string gamePath, CancellationToken ct = default)
     {
-        logger.LogInformation("Uninstalling XUnity.AutoTranslator from {Game}", gamePath);
+        logger.LogInformation("正在卸载 XUnity.AutoTranslator: {Game}", gamePath);
 
         // Remove XUnity plugin directories
         var pluginsDir = Path.Combine(gamePath, "BepInEx", "plugins");

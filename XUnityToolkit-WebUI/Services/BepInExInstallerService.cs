@@ -30,7 +30,7 @@ public sealed class BepInExInstallerService(ILogger<BepInExInstallerService> log
             a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
 
         if (asset is null)
-            logger.LogWarning("No matching BepInEx asset found for pattern: {Pattern}", pattern);
+            logger.LogWarning("未找到匹配的 BepInEx 资源，匹配规则: {Pattern}", pattern);
 
         return asset?.Name;
     }
@@ -61,7 +61,7 @@ public sealed class BepInExInstallerService(ILogger<BepInExInstallerService> log
 
     public Task<List<string>> InstallAsync(string gamePath, string zipPath, CancellationToken ct = default)
     {
-        logger.LogInformation("Installing BepInEx from {Zip} to {Game}", zipPath, gamePath);
+        logger.LogInformation("正在安装 BepInEx: {Zip}", zipPath);
 
         var installedFiles = new List<string>();
 
@@ -81,13 +81,13 @@ public sealed class BepInExInstallerService(ILogger<BepInExInstallerService> log
             installedFiles.Add(entry.FullName);
         }
 
-        logger.LogInformation("BepInEx installed: {Count} files", installedFiles.Count);
+        logger.LogInformation("BepInEx 安装完成，共 {Count} 个文件", installedFiles.Count);
         return Task.FromResult(installedFiles);
     }
 
     public Task UninstallAsync(string gamePath, CancellationToken ct = default)
     {
-        logger.LogInformation("Uninstalling BepInEx from {Game}", gamePath);
+        logger.LogInformation("正在卸载 BepInEx: {Game}", gamePath);
 
         // Remove BepInEx directory
         var bepinexDir = Path.Combine(gamePath, "BepInEx");
