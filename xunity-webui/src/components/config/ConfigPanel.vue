@@ -123,71 +123,80 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
 <template>
   <div class="config-panel">
     <NForm :disabled="disabled" :label-placement="labelPlacement" :label-width="labelWidth">
-      <div class="config-section">
-        <div class="config-section-label">语言设置</div>
-        <NFormItem label="源语言">
-          <NSelect v-model:value="form.sourceLanguage" :options="languageOptions" />
-        </NFormItem>
-        <NFormItem label="目标语言">
-          <NSelect v-model:value="form.targetLanguage" :options="languageOptions" />
-        </NFormItem>
-      </div>
-
-      <div class="config-section">
-        <div class="config-section-label">翻译引擎</div>
-        <NFormItem label="翻译引擎">
-          <NSelect v-model:value="form.translationEngine" :options="engineOptions" />
-        </NFormItem>
-      </div>
-
-      <div v-if="engineKeyFields.length > 0" class="config-section">
-        <div class="config-section-label">API 密钥</div>
-        <NFormItem
-          v-for="field in engineKeyFields"
-          :key="field.key"
-          :label="field.label"
-        >
-          <NInput
-            :value="(form[field.key] as string) ?? ''"
-            @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
-            :placeholder="field.placeholder"
-            :type="field.type"
-            :show-password-on="field.type === 'password' ? 'click' : undefined"
-            clearable
-          />
-        </NFormItem>
-      </div>
-
-      <NCollapse style="margin-top: 4px">
-        <NCollapseItem title="高级选项" name="advanced">
-          <div class="advanced-grid">
-            <NFormItem label="UGUI">
-              <NSwitch v-model:value="form.enableUGUI" />
+      <div class="config-main-grid">
+        <div class="config-column">
+          <div class="config-section">
+            <div class="config-section-label">语言设置</div>
+            <NFormItem label="源语言">
+              <NSelect v-model:value="form.sourceLanguage" :options="languageOptions" />
             </NFormItem>
-            <NFormItem label="NGUI">
-              <NSwitch v-model:value="form.enableNGUI" />
-            </NFormItem>
-            <NFormItem label="TextMeshPro">
-              <NSwitch v-model:value="form.enableTextMeshPro" />
-            </NFormItem>
-            <NFormItem label="TextMesh">
-              <NSwitch v-model:value="form.enableTextMesh" />
-            </NFormItem>
-            <NFormItem label="IMGUI">
-              <NSwitch v-model:value="form.enableIMGUI" />
+            <NFormItem label="目标语言">
+              <NSelect v-model:value="form.targetLanguage" :options="languageOptions" />
             </NFormItem>
           </div>
-          <NFormItem label="每次最大翻译字符数">
-            <NInputNumber v-model:value="form.maxCharactersPerTranslation" :min="10" :max="5000" />
-          </NFormItem>
-          <NFormItem label="处理富文本">
-            <NSwitch v-model:value="form.handleRichText" />
-          </NFormItem>
-          <NFormItem label="启用 UI 缩放">
-            <NSwitch v-model:value="form.enableUIResizing" />
-          </NFormItem>
-        </NCollapseItem>
-      </NCollapse>
+
+          <div class="config-section">
+            <div class="config-section-label">翻译引擎</div>
+            <NFormItem label="翻译引擎">
+              <NSelect v-model:value="form.translationEngine" :options="engineOptions" />
+            </NFormItem>
+          </div>
+
+          <div v-if="engineKeyFields.length > 0" class="config-section">
+            <div class="config-section-label">API 密钥</div>
+            <NFormItem
+              v-for="field in engineKeyFields"
+              :key="field.key"
+              :label="field.label"
+            >
+              <NInput
+                :value="(form[field.key] as string) ?? ''"
+                @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
+                :placeholder="field.placeholder"
+                :type="field.type"
+                :show-password-on="field.type === 'password' ? 'click' : undefined"
+                clearable
+              />
+            </NFormItem>
+          </div>
+        </div>
+
+        <div class="config-column">
+          <div class="config-section">
+            <div class="config-section-label">文本框架</div>
+            <div class="advanced-grid">
+              <NFormItem label="UGUI">
+                <NSwitch v-model:value="form.enableUGUI" />
+              </NFormItem>
+              <NFormItem label="NGUI">
+                <NSwitch v-model:value="form.enableNGUI" />
+              </NFormItem>
+              <NFormItem label="TextMeshPro">
+                <NSwitch v-model:value="form.enableTextMeshPro" />
+              </NFormItem>
+              <NFormItem label="TextMesh">
+                <NSwitch v-model:value="form.enableTextMesh" />
+              </NFormItem>
+              <NFormItem label="IMGUI">
+                <NSwitch v-model:value="form.enableIMGUI" />
+              </NFormItem>
+            </div>
+          </div>
+
+          <div class="config-section">
+            <div class="config-section-label">高级选项</div>
+            <NFormItem label="每次最大翻译字符数">
+              <NInputNumber v-model:value="form.maxCharactersPerTranslation" :min="10" :max="5000" />
+            </NFormItem>
+            <NFormItem label="处理富文本">
+              <NSwitch v-model:value="form.handleRichText" />
+            </NFormItem>
+            <NFormItem label="启用 UI 缩放">
+              <NSwitch v-model:value="form.enableUIResizing" />
+            </NFormItem>
+          </div>
+        </div>
+      </div>
 
       <div class="config-footer">
         <NButton type="primary" :disabled="disabled" @click="handleSave">
@@ -201,6 +210,17 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
 <style scoped>
 .config-panel {
   animation: fadeIn 0.3s ease;
+}
+
+.config-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 40px;
+}
+
+.config-column {
+  display: flex;
+  flex-direction: column;
 }
 
 .config-section {
@@ -218,7 +238,7 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
 
 .advanced-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 0 24px;
 }
 
@@ -231,10 +251,10 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
 }
 
 /* ===== Responsive ===== */
-@media (max-width: 768px) {
-  .advanced-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 0 16px;
+@media (max-width: 960px) {
+  .config-main-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 }
 

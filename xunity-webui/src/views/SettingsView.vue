@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   NButton,
   NInput,
@@ -16,9 +16,11 @@ import {
   PaletteOutlined,
   TuneOutlined,
   CodeOutlined,
-  LanguageOutlined,
   DeleteOutlined,
+  PersonOutlined,
+  OpenInNewOutlined,
 } from '@vicons/material'
+import { LogoGithub } from '@vicons/ionicons5'
 import { cacheApi, settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
 import { useThemeStore } from '@/stores/theme'
@@ -104,6 +106,12 @@ async function handleSaveSettings() {
 
 // Version
 const version = ref('...')
+
+const shortVersion = computed(() => {
+  // Keep only first 3 segments: "1.0.0+abc..." → "1.0.0"
+  const match = version.value.match(/^(\d+\.\d+\.\d+)/)
+  return match ? match[1] : version.value
+})
 
 async function loadVersion() {
   try {
@@ -235,16 +243,16 @@ onMounted(() => {
       <div class="about-grid">
         <div class="info-card">
           <div class="info-card-icon version">
-            <NIcon :size="18"><LanguageOutlined /></NIcon>
+            <NIcon :size="18"><CodeOutlined /></NIcon>
           </div>
           <div class="info-card-content">
             <span class="info-label">版本</span>
-            <span class="info-value mono">{{ version }}</span>
+            <span class="info-value mono">v{{ shortVersion }}</span>
           </div>
         </div>
         <div class="info-card">
           <div class="info-card-icon tech">
-            <NIcon :size="18"><CodeOutlined /></NIcon>
+            <NIcon :size="18"><InfoOutlined /></NIcon>
           </div>
           <div class="info-card-content">
             <span class="info-label">技术栈</span>
@@ -252,19 +260,29 @@ onMounted(() => {
           </div>
         </div>
         <div class="info-card">
-          <div class="info-card-icon project">
-            <NIcon :size="18"><InfoOutlined /></NIcon>
+          <div class="info-card-icon author">
+            <NIcon :size="18"><PersonOutlined /></NIcon>
           </div>
           <div class="info-card-content">
-            <span class="info-label">项目</span>
+            <span class="info-label">作者</span>
+            <span class="info-value">寒枫如玥</span>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon github">
+            <NIcon :size="18"><LogoGithub /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">源代码</span>
             <span class="info-value">
               <a
-                href="https://github.com"
+                href="https://github.com/XUnityToolkit/XUnityToolkit-WebUI"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="about-link"
               >
-                XUnityToolkit-WebUI
+                GitHub 仓库
+                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
               </a>
             </span>
           </div>
@@ -305,17 +323,19 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* ===== Settings Grid (two-column) ===== */
+/* ===== Settings Grid (two-column, equal height) ===== */
 .settings-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   margin-bottom: 16px;
 }
 
 /* ===== Section Card ===== */
 .section-card {
+  display: flex;
+  flex-direction: column;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -384,7 +404,7 @@ onMounted(() => {
 
 .about-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 
@@ -427,8 +447,8 @@ onMounted(() => {
 }
 
 .info-card-icon.version {
-  background: rgba(34, 211, 167, 0.10);
-  color: #22d3a7;
+  background: rgba(59, 130, 246, 0.10);
+  color: #3b82f6;
 }
 
 .info-card-icon.tech {
@@ -436,7 +456,12 @@ onMounted(() => {
   color: #60a5fa;
 }
 
-.info-card-icon.project {
+.info-card-icon.author {
+  background: rgba(251, 146, 60, 0.10);
+  color: #fb923c;
+}
+
+.info-card-icon.github {
   background: rgba(167, 139, 250, 0.10);
   color: #a78bfa;
 }
@@ -475,10 +500,11 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding-top: 16px;
-  margin-top: 16px;
+  margin-top: auto;
   border-top: 1px solid var(--border);
   gap: 12px;
 }
+
 
 .footer-hint {
   font-size: 12px;
@@ -539,7 +565,7 @@ onMounted(() => {
   }
 
   .about-grid {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
 }

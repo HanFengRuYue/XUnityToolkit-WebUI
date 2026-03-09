@@ -13,10 +13,10 @@ const naiveTheme = computed(() => isDark.value ? darkTheme : null)
 
 const darkOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#22d3a7',
-    primaryColorHover: '#34e0b6',
-    primaryColorPressed: '#1aba94',
-    primaryColorSuppl: '#22d3a7',
+    primaryColor: '#3b82f6',
+    primaryColorHover: '#60a5fa',
+    primaryColorPressed: '#2563eb',
+    primaryColorSuppl: '#3b82f6',
 
     infoColor: '#60a5fa',
     infoColorHover: '#93bbfd',
@@ -99,7 +99,7 @@ const darkOverrides: GlobalThemeOverrides = {
     railColor: 'rgba(255, 255, 255, 0.06)',
   },
   Timeline: {
-    circleBorder: '2px solid #22d3a7',
+    circleBorder: '2px solid #3b82f6',
   },
   Collapse: {
     titleFontWeight: '500',
@@ -111,10 +111,10 @@ const darkOverrides: GlobalThemeOverrides = {
 
 const lightOverrides: GlobalThemeOverrides = {
   common: {
-    primaryColor: '#19b892',
-    primaryColorHover: '#15a583',
-    primaryColorPressed: '#0f8c6e',
-    primaryColorSuppl: '#19b892',
+    primaryColor: '#2563eb',
+    primaryColorHover: '#1d4ed8',
+    primaryColorPressed: '#1e40af',
+    primaryColorSuppl: '#2563eb',
 
     infoColor: '#3b82f6',
     infoColorHover: '#2563eb',
@@ -197,7 +197,7 @@ const lightOverrides: GlobalThemeOverrides = {
     railColor: 'rgba(0, 0, 0, 0.06)',
   },
   Timeline: {
-    circleBorder: '2px solid #19b892',
+    circleBorder: '2px solid #2563eb',
   },
   Collapse: {
     titleFontWeight: '500',

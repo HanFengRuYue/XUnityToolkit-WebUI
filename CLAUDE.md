@@ -119,3 +119,4 @@ xunity-webui/src/
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
 - Verify `@vicons/material` icon availability before importing: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - Stop backend on Windows: `taskkill //f //im XUnityToolkit-WebUI.exe`
+- **截图清理:** 每次使用 Playwright 或浏览器工具测试/调试后，必须删除产生的截图文件（项目根目录的 `*.png` 和 `.playwright-mcp/` 下的截图），不要将截图留在项目文件夹内

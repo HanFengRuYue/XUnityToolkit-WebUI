@@ -6,10 +6,10 @@
   --bg-card-hover: #1c1c28;
   --bg-elevated: #1a1a26;
 
-  --accent: #22d3a7;
-  --accent-soft: rgba(34, 211, 167, 0.10);
-  --accent-glow: rgba(34, 211, 167, 0.25);
-  --accent-border: rgba(34, 211, 167, 0.20);
+  --accent: #3b82f6;
+  --accent-soft: rgba(59, 130, 246, 0.10);
+  --accent-glow: rgba(59, 130, 246, 0.25);
+  --accent-border: rgba(59, 130, 246, 0.20);
   --secondary: #a78bfa;
   --secondary-soft: rgba(167, 139, 250, 0.10);
 
@@ -43,8 +43,8 @@
   --radius-xl: 20px;
 
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.25);
-  --shadow-card-hover: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 211, 167, 0.08);
-  --shadow-glow: 0 0 20px rgba(34, 211, 167, 0.12);
+  --shadow-card-hover: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(59, 130, 246, 0.08);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.12);
   --shadow-card-rest: none;
 
   --font-display: 'Lexend', sans-serif;
@@ -55,14 +55,14 @@
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
   /* Ambient gradient */
-  --ambient-1: rgba(34, 211, 167, 0.025);
+  --ambient-1: rgba(59, 130, 246, 0.025);
   --ambient-2: rgba(167, 139, 250, 0.02);
 
   /* Logo glow */
-  --logo-glow: drop-shadow(0 0 8px rgba(34, 211, 167, 0.3));
+  --logo-glow: drop-shadow(0 0 8px rgba(59, 130, 246, 0.3));
 
   /* Selection */
-  --selection-bg: rgba(34, 211, 167, 0.25);
+  --selection-bg: rgba(59, 130, 246, 0.25);
   --selection-text: #fff;
 }
 
@@ -74,10 +74,10 @@
   --bg-card-hover: #f8f8fb;
   --bg-elevated: #ffffff;
 
-  --accent: #19b892;
-  --accent-soft: rgba(25, 184, 146, 0.08);
-  --accent-glow: rgba(25, 184, 146, 0.15);
-  --accent-border: rgba(25, 184, 146, 0.18);
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+  --accent-glow: rgba(37, 99, 235, 0.15);
+  --accent-border: rgba(37, 99, 235, 0.18);
   --secondary: #7c3aed;
   --secondary-soft: rgba(124, 58, 237, 0.07);
 
@@ -103,18 +103,18 @@
   --overlay-backdrop: rgba(0, 0, 0, 0.25);
 
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(25, 184, 146, 0.12);
-  --shadow-glow: 0 0 16px rgba(25, 184, 146, 0.06);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(37, 99, 235, 0.12);
+  --shadow-glow: 0 0 16px rgba(37, 99, 235, 0.06);
 
   /* Light mode: cards get default shadow for depth */
   --shadow-card-rest: 0 1px 3px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
 
-  --ambient-1: rgba(25, 184, 146, 0.015);
+  --ambient-1: rgba(37, 99, 235, 0.015);
   --ambient-2: rgba(124, 58, 237, 0.01);
 
-  --logo-glow: drop-shadow(0 0 6px rgba(25, 184, 146, 0.2));
+  --logo-glow: drop-shadow(0 0 6px rgba(37, 99, 235, 0.2));
 
-  --selection-bg: rgba(25, 184, 146, 0.2);
+  --selection-bg: rgba(37, 99, 235, 0.2);
   --selection-text: #1a1a2e;
 }
 
@@ -225,13 +225,13 @@ body::before {
 }
 
 @keyframes glowPulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(34, 211, 167, 0.2); }
-  50% { box-shadow: 0 0 16px rgba(34, 211, 167, 0.4); }
+  0%, 100% { box-shadow: 0 0 8px rgba(59, 130, 246, 0.2); }
+  50% { box-shadow: 0 0 16px rgba(59, 130, 246, 0.4); }
 }
 
 @keyframes borderGlow {
-  0%, 100% { border-color: rgba(34, 211, 167, 0.15); }
-  50% { border-color: rgba(34, 211, 167, 0.35); }
+  0%, 100% { border-color: rgba(59, 130, 246, 0.15); }
+  50% { border-color: rgba(59, 130, 246, 0.35); }
 }
 
 @keyframes floatIn {

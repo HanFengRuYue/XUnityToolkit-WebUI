@@ -354,29 +354,31 @@ onUnmounted(() => stopWatch())
       </div>
     </div>
 
-    <!-- Install + Config two-column layout (Unity only) -->
-    <div v-if="game.isUnityGame" class="detail-columns">
-      <!-- Install Management Card -->
-      <div class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.2s' : '0.15s' }">
-        <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon download">
-              <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
-            </span>
-            安装管理
-          </h2>
-        </div>
+    <!-- Install Management Card (Unity only) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.2s' : '0.15s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon download">
+            <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
+          </span>
+          安装管理
+        </h2>
+        <NButton v-if="isInstalled" type="error" @click="handleUninstall" ghost size="small">
+          卸载插件
+        </NButton>
+      </div>
 
-        <NAlert
-          v-if="game.detectedInfo?.backend === 'IL2CPP'"
-          type="warning"
-          style="margin-bottom: 20px"
-        >
-          检测到 IL2CPP 游戏，将使用 BepInEx 6 (预发布版)。首次启动游戏可能需要 30-90 秒生成互操作程序集。
-        </NAlert>
+      <NAlert
+        v-if="game.detectedInfo?.backend === 'IL2CPP'"
+        type="warning"
+        style="margin-bottom: 20px"
+      >
+        检测到 IL2CPP 游戏，将使用 BepInEx 6 (预发布版)。首次启动游戏可能需要 30-90 秒生成互操作程序集。
+      </NAlert>
 
-        <!-- Uninstalled State -->
-        <div v-if="!isInstalled" class="install-cta">
+      <!-- Uninstalled State -->
+      <div v-if="!isInstalled" class="install-cta-horizontal">
+        <div class="cta-left">
           <div class="cta-visual">
             <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
               <rect x="4" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
@@ -388,75 +390,68 @@ onUnmounted(() => stopWatch())
             <span class="cta-title">准备安装翻译插件</span>
             <span class="cta-desc">将自动下载并安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
           </div>
-          <div class="cta-actions">
-            <NButton
-              type="primary"
-              size="large"
-              :disabled="!game.detectedInfo"
-              @click="handleInstall"
-              class="install-button"
-            >
-              <template #icon>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </template>
-              一键安装
-            </NButton>
-          </div>
         </div>
-
-        <!-- Installed State -->
-        <div v-else class="installed-info">
-          <div class="version-grid">
-            <div class="version-card">
-              <div class="version-card-header">
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
-                  <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span class="version-card-label">BepInEx</span>
-              </div>
-              <span class="version-card-value">{{ game.installedBepInExVersion }}</span>
-              <span class="version-card-desc">模组框架</span>
-            </div>
-            <div class="version-card">
-              <div class="version-card-header">
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
-                  <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-                <span class="version-card-label">XUnity.AutoTranslator</span>
-              </div>
-              <span class="version-card-value">{{ game.installedXUnityVersion }}</span>
-              <span class="version-card-desc">翻译插件</span>
-            </div>
-          </div>
-          <div class="installed-footer">
-            <span class="installed-hint">如需重新安装，请先卸载当前版本</span>
-            <NButton type="error" @click="handleUninstall" ghost size="small">
-              卸载插件
-            </NButton>
-          </div>
-        </div>
+        <NButton
+          type="primary"
+          size="large"
+          :disabled="!game.detectedInfo"
+          @click="handleInstall"
+          class="install-button"
+        >
+          <template #icon>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </template>
+          一键安装
+        </NButton>
       </div>
 
-      <!-- Config Card -->
-      <div class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
-        <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon translate">
-              <NIcon :size="16"><TranslateOutlined /></NIcon>
-            </span>
-            翻译配置
-          </h2>
+      <!-- Installed State -->
+      <div v-else class="installed-info-horizontal">
+        <div class="version-card">
+          <div class="version-card-header">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+              <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="version-card-label">BepInEx</span>
+          </div>
+          <span class="version-card-value">{{ game.installedBepInExVersion }}</span>
+          <span class="version-card-desc">模组框架</span>
         </div>
-        <ConfigPanel
-          :config="config"
-          :disabled="!isInstalled"
-          @save="handleSaveConfig"
-        />
+        <div class="version-card">
+          <div class="version-card-header">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.2" opacity="0.5"/>
+              <path d="M6 9L8 11L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="version-card-label">XUnity.AutoTranslator</span>
+          </div>
+          <span class="version-card-value">{{ game.installedXUnityVersion }}</span>
+          <span class="version-card-desc">翻译插件</span>
+        </div>
+        <div class="installed-hint-inline">
+          如需重新安装，请先卸载当前版本
+        </div>
       </div>
+    </div>
+
+    <!-- Translation Config Card (Unity only, separate full-width card) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon translate">
+            <NIcon :size="16"><TranslateOutlined /></NIcon>
+          </span>
+          翻译配置
+        </h2>
+      </div>
+      <ConfigPanel
+        :config="config"
+        :disabled="!isInstalled"
+        @save="handleSaveConfig"
+      />
     </div>
   </div>
 </template>
@@ -730,8 +725,8 @@ onUnmounted(() => stopWatch())
 }
 
 .info-card-icon.unity {
-  background: rgba(34, 211, 167, 0.10);
-  color: #22d3a7;
+  background: rgba(59, 130, 246, 0.10);
+  color: #3b82f6;
 }
 
 .info-card-icon.code {
@@ -776,12 +771,61 @@ onUnmounted(() => stopWatch())
   color: var(--text-3);
 }
 
-/* ===== Two-column layout ===== */
-.detail-columns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* ===== Install CTA Horizontal (Uninstalled State) ===== */
+.install-cta-horizontal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.install-cta-horizontal .cta-left {
+  display: flex;
+  align-items: center;
   gap: 16px;
-  align-items: start;
+}
+
+.install-cta-horizontal .cta-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.install-cta-horizontal .cta-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.01em;
+}
+
+.install-cta-horizontal .cta-desc {
+  font-size: 13px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* ===== Installed State Horizontal ===== */
+.installed-info-horizontal {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.installed-info-horizontal .version-card {
+  flex: 1;
+  min-width: 0;
+}
+
+.installed-hint-inline {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ===== Framework List ===== */
@@ -830,73 +874,24 @@ onUnmounted(() => stopWatch())
   border: 1px solid rgba(251, 191, 36, 0.15);
 }
 
-/* ===== Install CTA (Uninstalled State) ===== */
-.install-cta {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 12px 0 4px;
-  gap: 16px;
-}
-
+/* ===== CTA Visual ===== */
 .cta-visual {
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   color: var(--accent);
   animation: breathe 3s ease-in-out infinite;
-}
-
-.cta-text {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.cta-title {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  letter-spacing: -0.01em;
-}
-
-.cta-desc {
-  font-size: 13px;
-  color: var(--text-3);
-  line-height: 1.5;
-  max-width: 360px;
-}
-
-.cta-actions {
-  display: flex;
-  gap: 10px;
-  width: 100%;
-  justify-content: center;
-  margin-top: 4px;
+  flex-shrink: 0;
 }
 
 .install-button {
   position: relative;
-}
-
-/* ===== Installed State ===== */
-.installed-info {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.version-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  flex-shrink: 0;
 }
 
 .version-card {
@@ -942,27 +937,8 @@ onUnmounted(() => stopWatch())
   letter-spacing: 0.02em;
 }
 
-.installed-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-  gap: 12px;
-}
-
-.installed-hint {
-  font-size: 12px;
-  color: var(--text-3);
-}
 
 /* ===== Responsive ===== */
-@media (max-width: 960px) {
-  .detail-columns {
-    grid-template-columns: 1fr;
-  }
-}
-
 @media (max-width: 768px) {
   .game-title-section {
     flex-wrap: wrap;
@@ -993,8 +969,26 @@ onUnmounted(() => stopWatch())
     font-size: 15px;
   }
 
-  .installed-footer {
-    flex-wrap: wrap;
+  .install-cta-horizontal {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .install-cta-horizontal .cta-left {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .installed-info-horizontal {
+    flex-direction: column;
+  }
+
+  .installed-hint-inline {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding: 12px 0 0;
+    justify-content: center;
   }
 }
 
@@ -1032,26 +1026,8 @@ onUnmounted(() => stopWatch())
     grid-template-columns: 1fr;
   }
 
-  .version-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .cta-actions {
-    flex-direction: column;
-  }
-
-  .cta-actions .n-button {
+  .install-cta-horizontal .install-button {
     width: 100%;
-  }
-
-  .installed-footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-  }
-
-  .installed-hint {
-    text-align: center;
   }
 }
 </style>
