@@ -1,0 +1,14 @@
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\bin\Debug\net10.0\XUnityToolkit-WebUI.exe
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\bin\Debug\net10.0\XUnityToolkit-WebUI.deps.json
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\bin\Debug\net10.0\XUnityToolkit-WebUI.runtimeconfig.json
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\bin\Debug\net10.0\XUnityToolkit-WebUI.dll
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\bin\Debug\net10.0\XUnityToolkit-WebUI.pdb
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.GeneratedMSBuildEditorConfig.editorconfig
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.AssemblyInfoInputs.cache
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.AssemblyInfo.cs
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.csproj.CoreCompileInputs.cache
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.dll
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\refint\XUnityToolkit-WebUI.dll
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.pdb
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\XUnityToolkit-WebUI.genruntimeconfig.cache
+D:\Document\Git\XUnityToolkit-WebUI\XUnityToolkit-WebUI\obj\Debug\net10.0\ref\XUnityToolkit-WebUI.dll
