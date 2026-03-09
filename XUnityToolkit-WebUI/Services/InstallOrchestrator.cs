@@ -41,6 +41,8 @@ public sealed class InstallOrchestrator(
             status.ProgressPercent = 0;
             status.Error = null;
             status.Message = null;
+            status.DownloadSpeed = null;
+            status.RetryMessage = null;
 
             var cts = new CancellationTokenSource();
             _cancellations[gameId] = cts;
@@ -91,6 +93,8 @@ public sealed class InstallOrchestrator(
             status.ProgressPercent = 0;
             status.Error = null;
             status.Message = null;
+            status.DownloadSpeed = null;
+            status.RetryMessage = null;
 
             _ = Task.Run(async () =>
             {
@@ -154,14 +158,10 @@ public sealed class InstallOrchestrator(
         await UpdateStatus(status, InstallStep.DownloadingBepInEx, 15,
             $"Downloading {bepInExAsset.Name}...");
 
-        var progress = new Progress<int>(p =>
-        {
-            status.ProgressPercent = 15 + p * 25 / 100;
-            _ = BroadcastStatus(status);
-        });
+        var bepProgress = MakeDownloadProgress(status, basePercent: 15, rangePercent: 25);
 
         var bepInExZip = await gitHub.DownloadAssetAsync(
-            bepInExAsset.BrowserDownloadUrl, bepInExAsset.Name, progress, ct);
+            bepInExAsset.BrowserDownloadUrl, bepInExAsset.Name, bepProgress, ct);
 
         // Step 3: Install BepInEx
         await UpdateStatus(status, InstallStep.InstallingBepInEx, 40, "Installing BepInEx...");
@@ -186,14 +186,10 @@ public sealed class InstallOrchestrator(
         await UpdateStatus(status, InstallStep.DownloadingXUnity, 55,
             $"Downloading {xUnityAsset.Name}...");
 
-        var xUnityProgress = new Progress<int>(p =>
-        {
-            status.ProgressPercent = 55 + p * 25 / 100;
-            _ = BroadcastStatus(status);
-        });
+        var xProgress = MakeDownloadProgress(status, basePercent: 55, rangePercent: 25);
 
         var xUnityZip = await gitHub.DownloadAssetAsync(
-            xUnityAsset.BrowserDownloadUrl, xUnityAsset.Name, xUnityProgress, ct);
+            xUnityAsset.BrowserDownloadUrl, xUnityAsset.Name, xProgress, ct);
 
         // Step 5: Install XUnity.AutoTranslator
         await UpdateStatus(status, InstallStep.InstallingXUnity, 80, "Installing XUnity.AutoTranslator...");
@@ -230,6 +226,19 @@ public sealed class InstallOrchestrator(
         await UpdateStatus(status, InstallStep.Complete, 100, "Uninstall complete!");
     }
 
+    private IProgress<DownloadProgress> MakeDownloadProgress(
+        InstallationStatus status, int basePercent, int rangePercent)
+    {
+        return new Progress<DownloadProgress>(p =>
+        {
+            status.ProgressPercent = basePercent + p.Percent * rangePercent / 100;
+            status.DownloadSpeed = p.SpeedFormatted;
+            if (p.RetryMessage is not null)
+                status.RetryMessage = p.RetryMessage;
+            _ = BroadcastStatus(status);
+        });
+    }
+
     private async Task UpdateStatus(InstallationStatus status, InstallStep step, int percent,
         string? message = null, string? error = null)
     {
@@ -237,6 +246,8 @@ public sealed class InstallOrchestrator(
         status.ProgressPercent = percent;
         status.Message = message;
         status.Error = error;
+        status.DownloadSpeed = null;
+        status.RetryMessage = null;
         await BroadcastStatus(status);
     }
 

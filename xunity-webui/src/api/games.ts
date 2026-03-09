@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -39,4 +39,9 @@ export const dialogApi = {
 export const releasesApi = {
   getBepInEx: () => api.get<unknown[]>('/api/releases/bepinex'),
   getXUnity: () => api.get<unknown[]>('/api/releases/xunity'),
+}
+
+export const cacheApi = {
+  getInfo: () => api.get<CacheInfo>('/api/cache/downloads'),
+  clear: () => api.del<CacheInfo>('/api/cache/downloads'),
 }

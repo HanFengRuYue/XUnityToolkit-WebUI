@@ -72,9 +72,13 @@ xunity-webui/src/
 ## API Endpoints
 
 - Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
+- Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
 
 ## Development Notes
 
+- Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`), so `url.Contains("github.com")` checks will match mirror URLs too; check mirror host first
+- Download resilience: `GitHubReleaseService.DownloadAssetAsync` has retry (3 attempts, exponential backoff) + auto mirror fallback; progress reported via `IProgress<DownloadProgress>` (percent + speed + retry message)
+- `InstallationStatus` has `DownloadSpeed` and `RetryMessage` fields — reset both to null on step transitions in `InstallOrchestrator.UpdateStatus`
 - `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj
 - Stop the running backend before `dotnet build` — the exe is locked while running
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)

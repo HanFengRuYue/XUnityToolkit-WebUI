@@ -49,6 +49,8 @@ export interface InstallationStatus {
   progressPercent: number
   message?: string
   error?: string
+  downloadSpeed?: string
+  retryMessage?: string
 }
 
 export interface XUnityConfig {
@@ -79,4 +81,9 @@ export interface GitHubAsset {
   name: string
   browserDownloadUrl: string
   size: number
+}
+
+export interface CacheInfo {
+  fileCount: number
+  totalBytes: number
 }

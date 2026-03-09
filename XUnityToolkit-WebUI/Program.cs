@@ -24,6 +24,13 @@ builder.Services.AddHttpClient("GitHub", client =>
     client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
 });
 
+// HTTP client for mirror downloads (no GitHub API headers)
+builder.Services.AddHttpClient("Mirror", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
+    client.Timeout = TimeSpan.FromMinutes(10);
+});
+
 // Services
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
@@ -56,6 +63,7 @@ app.MapInstallEndpoints();
 app.MapConfigEndpoints();
 app.MapReleaseEndpoints();
 app.MapDialogEndpoints();
+app.MapCacheEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

@@ -53,6 +53,11 @@ const isRunning = computed(
   () => installStore.status && !isComplete.value && !isFailed.value && installStore.status.step !== 'Idle',
 )
 
+const isDownloadStep = computed(() =>
+  installStore.status?.step === 'DownloadingBepInEx' ||
+  installStore.status?.step === 'DownloadingXUnity'
+)
+
 const title = computed(() => {
   if (isComplete.value) return isUninstalling.value ? '卸载完成' : '安装完成'
   if (isFailed.value) return '操作失败'
@@ -99,6 +104,16 @@ onUnmounted(() => {
             :height="20"
             :border-radius="10"
           />
+        </div>
+
+        <!-- Download Stats (speed + retry) -->
+        <div v-if="isDownloadStep" class="download-stats">
+          <span v-if="installStore.status?.downloadSpeed" class="speed-badge">
+            {{ installStore.status.downloadSpeed }}
+          </span>
+          <span v-if="installStore.status?.retryMessage" class="retry-notice">
+            {{ installStore.status.retryMessage }}
+          </span>
         </div>
 
         <!-- Status Message -->
@@ -148,8 +163,37 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 
+.download-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  min-height: 24px;
+}
+
+.speed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  background: rgba(34, 211, 167, 0.1);
+  border: 1px solid rgba(34, 211, 167, 0.2);
+  border-radius: 100px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.retry-notice {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--warning);
+  opacity: 0.9;
+}
+
 .status-message {
-  font-size: 13px;
   color: var(--text-3);
   line-height: 1.5;
   margin-top: 8px;
