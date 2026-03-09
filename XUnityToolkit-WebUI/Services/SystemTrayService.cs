@@ -86,7 +86,7 @@ public sealed class SystemTrayService(
         var icon = new NotifyIcon
         {
             Text = "XUnity Toolkit WebUI",
-            Icon = SystemIcons.Application,
+            Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application,
             ContextMenuStrip = BuildContextMenu()
         };
 

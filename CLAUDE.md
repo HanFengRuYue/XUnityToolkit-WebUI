@@ -60,6 +60,9 @@ xunity-webui/src/
 - **Responsive Breakpoints:** 768px (tablet — sidebar collapses to slide-over drawer), 480px (phone — single-column layouts)
 - **Mobile Navigation:** AppShell uses hamburger menu + overlay sidebar on ≤768px; sidebar state managed via `sidebarOpen` ref
 - **Game list:** Full-width row layout with exe icon, name/path, tags, and status; staggered entrance animations
+- **Section cards:** `.section-icon` (30px colored icon box) + `.section-title` with `display: flex; gap: 10px`; color variants via classes (`.download`, `.translate`, `.warning`)
+- **Info cards:** `.info-card` with `.info-card-icon` (36px, colored variants: `.folder`/`.file`/`.unity`/`.code`/`.arch`) for dashboard-style info display
+- **Page layouts:** Views use full-width (no max-width); two-column grids (`.detail-columns`, `.settings-grid`) collapse to single column at 960px/768px
 
 ## Code Conventions
 
@@ -111,3 +114,5 @@ xunity-webui/src/
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
+- Verify `@vicons/material` icon availability before importing: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
+- Stop backend on Windows: `taskkill //f //im XUnityToolkit-WebUI.exe`

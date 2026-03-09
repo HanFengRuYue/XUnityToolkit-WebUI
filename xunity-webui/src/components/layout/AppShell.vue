@@ -39,11 +39,7 @@ watch(() => route.path, () => {
         <span></span>
       </button>
       <div class="topbar-logo">
-        <svg class="logo-hex" viewBox="0 0 28 28" width="24" height="24">
-          <path d="M14 2L25 8.5V19.5L14 26L3 19.5V8.5L14 2Z" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.6"/>
-          <path d="M14 7L20.5 10.5V17.5L14 21L7.5 17.5V10.5L14 7Z" fill="currentColor" opacity="0.15"/>
-          <path d="M14 10L17.5 12V16L14 18L10.5 16V12L14 10Z" fill="currentColor" opacity="0.4"/>
-        </svg>
+        <img class="logo-icon" src="/logo.png" width="24" height="24" alt="XUnity Toolkit" />
         <span class="topbar-title">XUnity Toolkit</span>
       </div>
     </header>
@@ -56,25 +52,7 @@ watch(() => route.path, () => {
     <aside class="sidebar" :class="{ open: sidebarOpen }">
       <div class="sidebar-header">
         <div class="sidebar-logo">
-          <svg class="logo-hex" viewBox="0 0 28 28" width="32" height="32">
-            <path
-              d="M14 2L25 8.5V19.5L14 26L3 19.5V8.5L14 2Z"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.2"
-              opacity="0.6"
-            />
-            <path
-              d="M14 7L20.5 10.5V17.5L14 21L7.5 17.5V10.5L14 7Z"
-              fill="currentColor"
-              opacity="0.15"
-            />
-            <path
-              d="M14 10L17.5 12V16L14 18L10.5 16V12L14 10Z"
-              fill="currentColor"
-              opacity="0.4"
-            />
-          </svg>
+          <img class="logo-icon" src="/logo.png" width="32" height="32" alt="XUnity Toolkit" />
           <div class="logo-text">
             <span class="logo-name">XUnity</span>
             <span class="logo-sub">Toolkit</span>
@@ -165,9 +143,9 @@ watch(() => route.path, () => {
   animation: breathe 4s ease-in-out infinite;
 }
 
-.logo-hex {
-  color: var(--accent);
+.logo-icon {
   filter: drop-shadow(0 0 8px rgba(34, 211, 167, 0.3));
+  border-radius: 4px;
 }
 
 .logo-text {
@@ -345,8 +323,7 @@ watch(() => route.path, () => {
     gap: 8px;
   }
 
-  .topbar-logo .logo-hex {
-    color: var(--accent);
+  .topbar-logo .logo-icon {
     filter: drop-shadow(0 0 6px rgba(34, 211, 167, 0.3));
   }
 

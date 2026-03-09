@@ -5,8 +5,20 @@ import {
   NInput,
   NPopconfirm,
   NSelect,
+  NIcon,
   useMessage,
 } from 'naive-ui'
+import {
+  StorageOutlined,
+  CloudDownloadOutlined,
+  InfoOutlined,
+  SpeedOutlined,
+  PaletteOutlined,
+  TuneOutlined,
+  CodeOutlined,
+  LanguageOutlined,
+  DeleteOutlined,
+} from '@vicons/material'
 import { cacheApi, settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
 
@@ -100,98 +112,151 @@ onMounted(() => {
 
 <template>
   <div class="settings-page">
-    <h1 class="page-title" style="animation-delay: 0s">设置</h1>
+    <h1 class="page-title" style="animation-delay: 0s">
+      <span class="page-title-icon">
+        <NIcon :size="24"><TuneOutlined /></NIcon>
+      </span>
+      设置
+    </h1>
 
-    <!-- Cache Management -->
-    <div class="section-card" style="animation-delay: 0.05s">
-      <div class="section-header">
-        <h2 class="section-title">下载缓存</h2>
-      </div>
-      <div class="info-grid">
-        <div class="info-item">
-          <span class="info-label">缓存文件</span>
-          <span class="info-value">{{ cacheFileCount }} 个文件</span>
+    <!-- Top row: Cache + Download Settings side by side -->
+    <div class="settings-grid">
+      <!-- Cache Management -->
+      <div class="section-card" style="animation-delay: 0.05s">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon storage">
+              <NIcon :size="16"><StorageOutlined /></NIcon>
+            </span>
+            下载缓存
+          </h2>
         </div>
-        <div class="info-item">
-          <span class="info-label">占用空间</span>
-          <span class="info-value mono">{{ cacheSize }}</span>
+        <div class="info-grid">
+          <div class="info-card">
+            <div class="info-card-icon file-count">
+              <NIcon :size="18"><DeleteOutlined /></NIcon>
+            </div>
+            <div class="info-card-content">
+              <span class="info-label">缓存文件</span>
+              <span class="info-value">{{ cacheFileCount }} 个文件</span>
+            </div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-icon size">
+              <NIcon :size="18"><StorageOutlined /></NIcon>
+            </div>
+            <div class="info-card-content">
+              <span class="info-label">占用空间</span>
+              <span class="info-value mono">{{ cacheSize }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="section-footer">
+          <span class="footer-hint">清除已缓存的 BepInEx 和 XUnity 安装包</span>
+          <NPopconfirm
+            @positive-click="handleClearCache"
+            negative-text="取消"
+            positive-text="确认清除"
+          >
+            <template #trigger>
+              <NButton size="small" :loading="cacheLoading" ghost type="warning">
+                清除缓存
+              </NButton>
+            </template>
+            确定要清除所有下载缓存？
+          </NPopconfirm>
         </div>
       </div>
-      <div class="section-footer">
-        <span class="footer-hint">清除已缓存的 BepInEx 和 XUnity 安装包</span>
-        <NPopconfirm
-          @positive-click="handleClearCache"
-          negative-text="取消"
-          positive-text="确认清除"
-        >
-          <template #trigger>
-            <NButton size="small" :loading="cacheLoading" ghost type="warning">
-              清除缓存
-            </NButton>
-          </template>
-          确定要清除所有下载缓存？
-        </NPopconfirm>
+
+      <!-- Mirror & Theme Settings -->
+      <div class="section-card" style="animation-delay: 0.1s">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon download">
+              <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
+            </span>
+            下载设置
+          </h2>
+        </div>
+        <div class="settings-form">
+          <div class="form-row">
+            <label class="form-label">
+              <NIcon :size="14" color="var(--text-3)"><SpeedOutlined /></NIcon>
+              GitHub 镜像地址
+            </label>
+            <NInput
+              v-model:value="settings.mirrorUrl"
+              placeholder="https://ghfast.top/"
+              clearable
+            />
+            <span class="form-hint">加速 GitHub 资源下载，留空使用直连</span>
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <NIcon :size="14" color="var(--text-3)"><PaletteOutlined /></NIcon>
+              界面主题
+            </label>
+            <NSelect
+              v-model:value="settings.theme"
+              :options="themeOptions"
+            />
+          </div>
+        </div>
+        <div class="section-footer">
+          <span></span>
+          <NButton type="primary" :loading="settingsLoading" @click="handleSaveSettings">
+            保存设置
+          </NButton>
+        </div>
       </div>
     </div>
 
-    <!-- Mirror & Theme Settings -->
-    <div class="section-card" style="animation-delay: 0.1s">
-      <div class="section-header">
-        <h2 class="section-title">下载设置</h2>
-      </div>
-      <div class="settings-form">
-        <div class="form-row">
-          <label class="form-label">GitHub 镜像地址</label>
-          <NInput
-            v-model:value="settings.mirrorUrl"
-            placeholder="https://ghfast.top/"
-            clearable
-          />
-          <span class="form-hint">加速 GitHub 资源下载，留空使用直连</span>
-        </div>
-        <div class="form-row">
-          <label class="form-label">界面主题</label>
-          <NSelect
-            v-model:value="settings.theme"
-            :options="themeOptions"
-            style="max-width: 240px"
-          />
-        </div>
-      </div>
-      <div class="section-footer">
-        <span></span>
-        <NButton type="primary" :loading="settingsLoading" @click="handleSaveSettings">
-          保存设置
-        </NButton>
-      </div>
-    </div>
-
-    <!-- About -->
+    <!-- About (full width) -->
     <div class="section-card" style="animation-delay: 0.15s">
       <div class="section-header">
-        <h2 class="section-title">关于</h2>
-      </div>
-      <div class="info-grid">
-        <div class="info-item">
-          <span class="info-label">版本</span>
-          <span class="info-value mono">{{ version }}</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">技术栈</span>
-          <span class="info-value">.NET 10 + Vue 3</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">项目</span>
-          <span class="info-value">
-            <a
-              href="https://github.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="about-link"
-            >
-              XUnityToolkit-WebUI
-            </a>
+        <h2 class="section-title">
+          <span class="section-icon about">
+            <NIcon :size="16"><InfoOutlined /></NIcon>
           </span>
+          关于
+        </h2>
+      </div>
+      <div class="about-grid">
+        <div class="info-card">
+          <div class="info-card-icon version">
+            <NIcon :size="18"><LanguageOutlined /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">版本</span>
+            <span class="info-value mono">{{ version }}</span>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon tech">
+            <NIcon :size="18"><CodeOutlined /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">技术栈</span>
+            <span class="info-value">.NET 10 + Vue 3</span>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon project">
+            <NIcon :size="18"><InfoOutlined /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">项目</span>
+            <span class="info-value">
+              <a
+                href="https://github.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="about-link"
+              >
+                XUnityToolkit-WebUI
+              </a>
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -200,7 +265,7 @@ onMounted(() => {
 
 <style scoped>
 .settings-page {
-  max-width: 800px;
+  /* Full width - no max-width restriction */
   animation: fadeIn 0.3s ease;
 }
 
@@ -212,6 +277,30 @@ onMounted(() => {
   margin-bottom: 28px;
   letter-spacing: -0.03em;
   animation: slideUp 0.4s var(--ease-out) backwards;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.page-title-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+/* ===== Settings Grid (two-column) ===== */
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 16px;
 }
 
 /* ===== Section Card ===== */
@@ -220,7 +309,6 @@ onMounted(() => {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
-  margin-bottom: 16px;
   animation: slideUp 0.5s var(--ease-out) backwards;
   transition: border-color 0.3s ease;
 }
@@ -243,19 +331,109 @@ onMounted(() => {
   color: var(--text-1);
   margin: 0;
   letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-/* ===== Info Grid ===== */
+.section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.section-icon.storage {
+  background: rgba(251, 191, 36, 0.10);
+  color: #fbbf24;
+}
+
+.section-icon.download {
+  background: rgba(96, 165, 250, 0.10);
+  color: #60a5fa;
+}
+
+.section-icon.about {
+  background: rgba(167, 139, 250, 0.10);
+  color: #a78bfa;
+}
+
+/* ===== Info Grid & Cards ===== */
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
-.info-item {
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.info-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.info-card:hover {
+  border-color: var(--border-hover);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.info-card-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.info-card-icon.file-count {
+  background: rgba(251, 146, 60, 0.10);
+  color: #fb923c;
+}
+
+.info-card-icon.size {
+  background: rgba(251, 191, 36, 0.10);
+  color: #fbbf24;
+}
+
+.info-card-icon.version {
+  background: rgba(34, 211, 167, 0.10);
+  color: #22d3a7;
+}
+
+.info-card-icon.tech {
+  background: rgba(96, 165, 250, 0.10);
+  color: #60a5fa;
+}
+
+.info-card-icon.project {
+  background: rgba(167, 139, 250, 0.10);
+  color: #a78bfa;
+}
+
+.info-card-content {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .info-label {
@@ -275,6 +453,8 @@ onMounted(() => {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-2);
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 /* ===== Section Footer ===== */
@@ -310,6 +490,9 @@ onMounted(() => {
   font-size: 13px;
   font-weight: 500;
   color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .form-hint {
@@ -330,13 +513,22 @@ onMounted(() => {
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
   .section-card {
     padding: 16px;
   }
 
   .info-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .about-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 10px;
   }
 }
 
@@ -344,6 +536,13 @@ onMounted(() => {
   .page-title {
     font-size: 22px;
     margin-bottom: 20px;
+    gap: 10px;
+  }
+
+  .page-title-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
   }
 
   .section-card {
@@ -352,6 +551,10 @@ onMounted(() => {
   }
 
   .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-grid {
     grid-template-columns: 1fr;
   }
 
