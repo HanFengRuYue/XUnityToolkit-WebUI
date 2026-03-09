@@ -11,6 +11,9 @@ Console.InputEncoding = System.Text.Encoding.UTF8;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 固定监听地址，确保 publish 后与开发环境一致
+builder.WebHost.UseUrls("http://localhost:51821");
+
 // 控制台日志：仅显示自身服务日志 + 启动信息，过滤框架噪音
 builder.Logging.ClearProviders();
 builder.Logging.AddSimpleConsole(options =>

@@ -12,8 +12,12 @@ XUnityToolkit-WebUI is a web-based tool for one-click installation of XUnity.Aut
 # Build backend (also builds frontend automatically via MSBuild Target)
 dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
-# Run backend (serves the web UI on https://localhost:51821)
+# Run backend (serves the web UI on http://localhost:51821)
 dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
+
+# One-click release build (self-contained single-file, win-x64 + win-arm64)
+.\build.ps1                    # both architectures
+.\build.ps1 -Runtime win-x64  # x64 only
 
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
 cd xunity-webui && npm run build
@@ -103,7 +107,10 @@ xunity-webui/src/
 - Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`), so `url.Contains("github.com")` checks will match mirror URLs too; check mirror host first
 - Download resilience: `GitHubReleaseService.DownloadAssetAsync` has retry (3 attempts, exponential backoff) + auto mirror fallback; progress reported via `IProgress<DownloadProgress>` (percent + speed + retry message)
 - `InstallationStatus` has `DownloadSpeed` and `RetryMessage` fields — reset both to null on step transitions in `InstallOrchestrator.UpdateStatus`
-- `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj
+- `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj; pass `-p:SkipFrontendBuild=true` to skip
+- `build.ps1` builds frontend once then publishes self-contained single-file exe for each target runtime; output to `Release/{rid}/`
+- **App URL:** Fixed to `http://localhost:51821` via `UseUrls()` in `Program.cs` — `launchSettings.json` only applies during `dotnet run`, publish builds ignore it; `SystemTrayService.AppUrl` must match
+- **Publish cleanup:** Remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json` from publish output — not needed for this desktop app
 - Stop the running backend before `dotnet build` — the exe is locked while running
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
 - Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync; `GeneratingConfig` step launches game to auto-generate XUnity config, then patches user settings

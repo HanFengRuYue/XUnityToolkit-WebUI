@@ -18,7 +18,7 @@ public sealed class SystemTrayService(
 
     private Thread? _staThread;
 
-    private const string AppUrl = "https://localhost:51821";
+    private const string AppUrl = "http://localhost:51821";
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
