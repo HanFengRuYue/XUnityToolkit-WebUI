@@ -1,0 +1,18 @@
+namespace XUnityToolkit_WebUI.Models;
+
+public sealed class XUnityConfig
+{
+    public string SourceLanguage { get; set; } = "ja";
+    public string TargetLanguage { get; set; } = "en";
+    public string TranslationEngine { get; set; } = "GoogleTranslateV2";
+    public string? FallbackEndpoint { get; set; }
+    public bool EnableUGUI { get; set; } = true;
+    public bool EnableNGUI { get; set; } = true;
+    public bool EnableTextMeshPro { get; set; } = true;
+    public bool EnableTextMesh { get; set; }
+    public bool EnableIMGUI { get; set; }
+    public int MaxCharactersPerTranslation { get; set; } = 200;
+    public bool HandleRichText { get; set; } = true;
+    public bool EnableUIResizing { get; set; } = true;
+    public Dictionary<string, string> Extra { get; set; } = [];
+}
