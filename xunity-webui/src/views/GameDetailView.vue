@@ -511,7 +511,7 @@ onUnmounted(() => stopWatch())
 }
 
 .back-button:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-muted);
   color: var(--text-1);
 }
 
@@ -537,14 +537,14 @@ onUnmounted(() => stopWatch())
   height: 56px;
   flex-shrink: 0;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
   position: relative;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-card);
 }
 
 .title-icon-img {
@@ -583,7 +583,7 @@ onUnmounted(() => stopWatch())
   gap: 8px;
   padding: 5px 14px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-subtle-hover);
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -623,7 +623,8 @@ onUnmounted(() => stopWatch())
   padding: 24px;
   margin-bottom: 16px;
   animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: var(--shadow-card-rest);
 }
 
 .section-card:hover {
@@ -695,7 +696,7 @@ onUnmounted(() => stopWatch())
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: border-color 0.2s ease, background 0.2s ease;
@@ -703,7 +704,7 @@ onUnmounted(() => stopWatch())
 
 .info-card:hover {
   border-color: var(--border-hover);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--bg-subtle-hover);
 }
 
 .info-card-icon {
@@ -795,7 +796,7 @@ onUnmounted(() => stopWatch())
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   gap: 12px;
@@ -903,7 +904,7 @@ onUnmounted(() => stopWatch())
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: border-color 0.2s ease;

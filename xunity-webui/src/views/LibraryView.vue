@@ -228,7 +228,7 @@ function getStatusInfo(state: string) {
   align-items: center;
   justify-content: center;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   margin-bottom: 20px;
   animation: breathe 3s ease-in-out infinite;
@@ -289,8 +289,8 @@ function getStatusInfo(state: string) {
   height: 42px;
   flex-shrink: 0;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -300,8 +300,8 @@ function getStatusInfo(state: string) {
 }
 
 .game-row:hover .row-icon {
-  border-color: rgba(34, 211, 167, 0.2);
-  box-shadow: 0 0 12px rgba(34, 211, 167, 0.08);
+  border-color: var(--accent-border);
+  box-shadow: 0 0 12px var(--accent-soft);
 }
 
 .icon-img {
@@ -367,11 +367,11 @@ function getStatusInfo(state: string) {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-2);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-muted);
   padding: 3px 10px;
   border-radius: 20px;
   letter-spacing: 0.01em;
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
   transition: all 0.2s ease;
   white-space: nowrap;
 }
@@ -387,8 +387,8 @@ function getStatusInfo(state: string) {
 }
 
 .game-row:hover .info-pill {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--bg-muted-hover);
+  border-color: var(--border-hover);
 }
 
 /* ===== Row Status ===== */

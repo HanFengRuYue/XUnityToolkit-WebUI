@@ -176,8 +176,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   padding: 2px 10px;
-  background: rgba(34, 211, 167, 0.1);
-  border: 1px solid rgba(34, 211, 167, 0.2);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
   border-radius: 100px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -200,7 +200,7 @@ onUnmounted(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--bg-subtle);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
 }

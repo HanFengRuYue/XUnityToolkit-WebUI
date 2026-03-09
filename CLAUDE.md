@@ -54,7 +54,7 @@ xunity-webui/src/
 - **Fonts:** Lexend (headings), DM Sans (body), JetBrains Mono (mono) — loaded via Google Fonts in `index.html`
 - **Colors:** Deep dark base (`#0b0b11`), teal accent (`#22d3a7`), violet secondary (`#a78bfa`)
 - **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, `--radius-lg`, `--ease-out`, etc.)
-- **Theme:** Naive UI dark theme with comprehensive `GlobalThemeOverrides` in `App.vue`
+- **Theme:** Dark/light mode via `data-theme` attribute on `<html>`; Pinia `useThemeStore` manages mode + localStorage persistence; Naive UI uses `darkTheme`/`null` with separate `GlobalThemeOverrides` per mode in `App.vue`
 - **Animations:** Keyframes in `main.css` (`slideUp`, `fadeIn`, `floatIn`, `shimmer`, `breathe`, `pulse`); page transitions via Vue `<Transition name="page">`
 - **Layout:** Custom sidebar (230px) + scrollable content area; no NLayout/NLayoutSider
 - **Responsive Breakpoints:** 768px (tablet — sidebar collapses to slide-over drawer), 480px (phone — single-column layouts)
@@ -111,6 +111,9 @@ xunity-webui/src/
 - `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
 - `AppSettingsService` persists settings to `%APPDATA%/XUnityToolkit/settings.json` using same semaphore + atomic write pattern as `GameLibraryService`
 - Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)
+- **Theme-aware CSS:** Use semantic CSS variables (`--bg-subtle`, `--bg-muted`, `--bg-subtle-hover`, `--bg-muted-hover`) for semi-transparent overlay backgrounds — never hardcode `rgba(255,255,255,...)` in scoped CSS as it breaks light mode
+- **Naive UI light theme:** Pass `null` (not `lightTheme`) as the `:theme` prop; accent colors need slightly darker values in light mode for contrast (e.g., `#22d3a7` → `#19b892`)
+- Pinia stores: `games` (game management), `install` (installation progress + SignalR), `theme` (dark/light mode + localStorage)
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done

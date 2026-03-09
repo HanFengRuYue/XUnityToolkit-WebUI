@@ -1,9 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import AppShell from '@/components/layout/AppShell.vue'
+import { useThemeStore } from '@/stores/theme'
 
-const themeOverrides: GlobalThemeOverrides = {
+const themeStore = useThemeStore()
+
+const isDark = computed(() => themeStore.mode === 'dark')
+
+const naiveTheme = computed(() => isDark.value ? darkTheme : null)
+
+const darkOverrides: GlobalThemeOverrides = {
   common: {
     primaryColor: '#22d3a7',
     primaryColorHover: '#34e0b6',
@@ -100,10 +108,110 @@ const themeOverrides: GlobalThemeOverrides = {
     borderRadius: '12px',
   },
 }
+
+const lightOverrides: GlobalThemeOverrides = {
+  common: {
+    primaryColor: '#19b892',
+    primaryColorHover: '#15a583',
+    primaryColorPressed: '#0f8c6e',
+    primaryColorSuppl: '#19b892',
+
+    infoColor: '#3b82f6',
+    infoColorHover: '#2563eb',
+    infoColorPressed: '#1d4ed8',
+    infoColorSuppl: '#3b82f6',
+
+    successColor: '#059669',
+    successColorHover: '#047857',
+    successColorPressed: '#065f46',
+    successColorSuppl: '#059669',
+
+    warningColor: '#d97706',
+    warningColorHover: '#b45309',
+    warningColorPressed: '#92400e',
+    warningColorSuppl: '#d97706',
+
+    errorColor: '#dc2626',
+    errorColorHover: '#b91c1c',
+    errorColorPressed: '#991b1b',
+    errorColorSuppl: '#dc2626',
+
+    textColor1: '#1a1a2e',
+    textColor2: '#5a5a72',
+    textColor3: '#8b8ba0',
+
+    bodyColor: '#f4f4f7',
+    cardColor: '#ffffff',
+    modalColor: '#ffffff',
+    popoverColor: '#ffffff',
+    tableColor: '#ffffff',
+    inputColor: '#f8f8fb',
+    actionColor: '#f4f4f7',
+
+    borderColor: 'rgba(0, 0, 0, 0.09)',
+    dividerColor: 'rgba(0, 0, 0, 0.06)',
+
+    hoverColor: 'rgba(0, 0, 0, 0.04)',
+    pressedColor: 'rgba(0, 0, 0, 0.06)',
+
+    borderRadius: '10px',
+    borderRadiusSmall: '8px',
+
+    fontFamily: "'DM Sans', sans-serif",
+    fontFamilyMono: "'JetBrains Mono', monospace",
+  },
+  Card: {
+    borderRadius: '16px',
+    borderColor: 'rgba(0, 0, 0, 0.07)',
+    color: '#ffffff',
+    colorEmbedded: '#f8f8fb',
+    titleFontWeight: '600',
+    titleFontSizeMedium: '16px',
+  },
+  Button: {
+    borderRadiusMedium: '10px',
+    borderRadiusSmall: '8px',
+    borderRadiusLarge: '12px',
+    fontWeight: '500',
+  },
+  Tag: {
+    borderRadius: '6px',
+  },
+  Drawer: {
+    color: '#ffffff',
+    borderColor: 'rgba(0, 0, 0, 0.07)',
+  },
+  Alert: {
+    borderRadius: '12px',
+  },
+  Descriptions: {
+    borderColor: 'rgba(0, 0, 0, 0.07)',
+    thColor: '#f8f8fb',
+    tdColor: '#ffffff',
+    borderRadius: '12px',
+  },
+  Form: {
+    labelFontWeight: '500',
+  },
+  Progress: {
+    railColor: 'rgba(0, 0, 0, 0.06)',
+  },
+  Timeline: {
+    circleBorder: '2px solid #19b892',
+  },
+  Collapse: {
+    titleFontWeight: '500',
+  },
+  Popconfirm: {
+    borderRadius: '12px',
+  },
+}
+
+const themeOverrides = computed(() => isDark.value ? darkOverrides : lightOverrides)
 </script>
 
 <template>
-  <NConfigProvider :theme="darkTheme" :theme-overrides="themeOverrides" :locale="zhCN">
+  <NConfigProvider :theme="naiveTheme" :theme-overrides="themeOverrides" :locale="zhCN">
     <NMessageProvider>
       <NDialogProvider>
         <AppShell />
@@ -116,6 +224,7 @@ const themeOverrides: GlobalThemeOverrides = {
 body {
   margin: 0;
   padding: 0;
-  background-color: #0b0b11;
+  background-color: var(--bg-root);
+  transition: background-color 0.3s ease;
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import {
   NButton,
   NInput,
@@ -21,8 +21,11 @@ import {
 } from '@vicons/material'
 import { cacheApi, settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
+import { useThemeStore } from '@/stores/theme'
+import type { ThemeMode } from '@/stores/theme'
 
 const message = useMessage()
+const themeStore = useThemeStore()
 
 // Cache
 const cacheFileCount = ref(0)
@@ -62,18 +65,26 @@ async function handleClearCache() {
 // Settings
 const settings = ref<AppSettings>({
   mirrorUrl: 'https://ghfast.top/',
-  theme: 'dark',
+  theme: themeStore.mode,
 })
 const settingsLoading = ref(false)
 
 const themeOptions = [
   { label: '深色主题', value: 'dark' },
-  { label: '浅色主题（即将推出）', value: 'light', disabled: true },
+  { label: '浅色主题', value: 'light' },
 ]
+
+// Sync theme changes immediately when user selects
+watch(() => settings.value.theme, (newTheme) => {
+  themeStore.setTheme(newTheme as ThemeMode)
+})
 
 async function loadSettings() {
   try {
-    settings.value = await settingsApi.get()
+    const loaded = await settingsApi.get()
+    settings.value = loaded
+    // Sync loaded theme with theme store
+    themeStore.setTheme(loaded.theme as ThemeMode)
   } catch {
     // Use defaults
   }
@@ -310,7 +321,8 @@ onMounted(() => {
   border-radius: var(--radius-lg);
   padding: 24px;
   animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: var(--shadow-card-rest);
 }
 
 .section-card:hover {
@@ -381,7 +393,7 @@ onMounted(() => {
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: border-color 0.2s ease, background 0.2s ease;
@@ -389,7 +401,7 @@ onMounted(() => {
 
 .info-card:hover {
   border-color: var(--border-hover);
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--bg-subtle-hover);
 }
 
 .info-card-icon {

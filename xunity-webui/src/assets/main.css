@@ -24,6 +24,19 @@
   --border: rgba(255, 255, 255, 0.06);
   --border-hover: rgba(255, 255, 255, 0.12);
 
+  /* Semantic overlay backgrounds */
+  --bg-subtle: rgba(255, 255, 255, 0.025);
+  --bg-subtle-hover: rgba(255, 255, 255, 0.04);
+  --bg-muted: rgba(255, 255, 255, 0.05);
+  --bg-muted-hover: rgba(255, 255, 255, 0.07);
+
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.08);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.15);
+
+  /* Overlay */
+  --overlay-backdrop: rgba(0, 0, 0, 0.6);
+
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -32,6 +45,7 @@
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.25);
   --shadow-card-hover: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 211, 167, 0.08);
   --shadow-glow: 0 0 20px rgba(34, 211, 167, 0.12);
+  --shadow-card-rest: none;
 
   --font-display: 'Lexend', sans-serif;
   --font-body: 'DM Sans', sans-serif;
@@ -39,6 +53,69 @@
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Ambient gradient */
+  --ambient-1: rgba(34, 211, 167, 0.025);
+  --ambient-2: rgba(167, 139, 250, 0.02);
+
+  /* Logo glow */
+  --logo-glow: drop-shadow(0 0 8px rgba(34, 211, 167, 0.3));
+
+  /* Selection */
+  --selection-bg: rgba(34, 211, 167, 0.25);
+  --selection-text: #fff;
+}
+
+/* ===== Light Theme ===== */
+[data-theme="light"] {
+  --bg-root: #f4f4f7;
+  --bg-surface: #ffffff;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8f8fb;
+  --bg-elevated: #ffffff;
+
+  --accent: #19b892;
+  --accent-soft: rgba(25, 184, 146, 0.08);
+  --accent-glow: rgba(25, 184, 146, 0.15);
+  --accent-border: rgba(25, 184, 146, 0.18);
+  --secondary: #7c3aed;
+  --secondary-soft: rgba(124, 58, 237, 0.07);
+
+  --danger: #dc2626;
+  --warning: #d97706;
+  --success: #059669;
+
+  --text-1: #1a1a2e;
+  --text-2: #5a5a72;
+  --text-3: #8b8ba0;
+
+  --border: rgba(0, 0, 0, 0.07);
+  --border-hover: rgba(0, 0, 0, 0.14);
+
+  --bg-subtle: rgba(0, 0, 0, 0.02);
+  --bg-subtle-hover: rgba(0, 0, 0, 0.035);
+  --bg-muted: rgba(0, 0, 0, 0.04);
+  --bg-muted-hover: rgba(0, 0, 0, 0.06);
+
+  --scrollbar-thumb: rgba(0, 0, 0, 0.12);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.22);
+
+  --overlay-backdrop: rgba(0, 0, 0, 0.25);
+
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(25, 184, 146, 0.12);
+  --shadow-glow: 0 0 16px rgba(25, 184, 146, 0.06);
+
+  /* Light mode: cards get default shadow for depth */
+  --shadow-card-rest: 0 1px 3px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.03);
+
+  --ambient-1: rgba(25, 184, 146, 0.015);
+  --ambient-2: rgba(124, 58, 237, 0.01);
+
+  --logo-glow: drop-shadow(0 0 6px rgba(25, 184, 146, 0.2));
+
+  --selection-bg: rgba(25, 184, 146, 0.2);
+  --selection-text: #1a1a2e;
 }
 
 /* ===== Reset & Base ===== */
@@ -57,6 +134,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #app {
@@ -69,10 +147,11 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(ellipse 80% 50% at 15% 30%, rgba(34, 211, 167, 0.025), transparent),
-    radial-gradient(ellipse 60% 40% at 85% 70%, rgba(167, 139, 250, 0.02), transparent);
+    radial-gradient(ellipse 80% 50% at 15% 30%, var(--ambient-1), transparent),
+    radial-gradient(ellipse 60% 40% at 85% 70%, var(--ambient-2), transparent);
   pointer-events: none;
   z-index: 0;
+  transition: background 0.3s ease;
 }
 
 /* ===== Custom Scrollbar ===== */
@@ -84,11 +163,11 @@ body::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ===== Keyframe Animations ===== */
@@ -184,8 +263,8 @@ body::before {
 
 /* ===== Selection ===== */
 ::selection {
-  background: rgba(34, 211, 167, 0.25);
-  color: #fff;
+  background: var(--selection-bg);
+  color: var(--selection-text);
 }
 
 /* ===== Reduced Motion ===== */

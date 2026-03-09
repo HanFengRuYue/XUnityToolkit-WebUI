@@ -113,6 +113,7 @@ watch(() => route.path, () => {
   flex-shrink: 0;
   position: relative;
   animation: slideInLeft 0.4s var(--ease-out) backwards;
+  transition: background 0.3s ease, border-color 0.3s ease;
 }
 
 .sidebar::after {
@@ -125,8 +126,8 @@ watch(() => route.path, () => {
   background: linear-gradient(
     180deg,
     transparent,
-    rgba(34, 211, 167, 0.08) 30%,
-    rgba(34, 211, 167, 0.08) 70%,
+    var(--accent-border) 30%,
+    var(--accent-border) 70%,
     transparent
   );
   pointer-events: none;
@@ -144,7 +145,7 @@ watch(() => route.path, () => {
 }
 
 .logo-icon {
-  filter: drop-shadow(0 0 8px rgba(34, 211, 167, 0.3));
+  filter: var(--logo-glow);
   border-radius: 4px;
 }
 
@@ -206,19 +207,19 @@ watch(() => route.path, () => {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-subtle-hover);
   color: var(--text-1);
 }
 
 .nav-item.active {
   border-left-color: var(--accent);
-  background: linear-gradient(90deg, rgba(34, 211, 167, 0.08), transparent 80%);
+  background: var(--accent-soft);
   color: var(--text-1);
 }
 
 .nav-item.active .n-icon {
   color: var(--accent);
-  filter: drop-shadow(0 0 6px rgba(34, 211, 167, 0.4));
+  filter: drop-shadow(0 0 6px var(--accent-glow));
 }
 
 /* ===== Sidebar Footer ===== */
@@ -314,7 +315,7 @@ watch(() => route.path, () => {
 
   .hamburger:hover {
     border-color: var(--accent-border);
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--bg-subtle);
   }
 
   .topbar-logo {
@@ -324,7 +325,7 @@ watch(() => route.path, () => {
   }
 
   .topbar-logo .logo-icon {
-    filter: drop-shadow(0 0 6px rgba(34, 211, 167, 0.3));
+    filter: var(--logo-glow);
   }
 
   .topbar-title {
@@ -340,7 +341,7 @@ watch(() => route.path, () => {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--overlay-backdrop);
     backdrop-filter: blur(4px);
     z-index: 199;
   }
