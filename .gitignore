@@ -6,15 +6,15 @@ obj/
 .vs/
 
 # Vue / Node
-xunity-webui/node_modules/
-xunity-webui/dist/
+XUnityToolkit-Vue/node_modules/
+XUnityToolkit-Vue/dist/
 
 # Generated frontend output served by ASP.NET Core
 XUnityToolkit-WebUI/wwwroot/
 
 # Auto-generated type declarations
-xunity-webui/src/auto-imports.d.ts
-xunity-webui/src/components.d.ts
+XUnityToolkit-Vue/src/auto-imports.d.ts
+XUnityToolkit-Vue/src/components.d.ts
 
 # Build output
 Release/

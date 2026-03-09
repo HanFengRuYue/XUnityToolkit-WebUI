@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 
 $ProjectRoot = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
-$FrontendDir = Join-Path $ProjectRoot 'xunity-webui'
+$FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
 $ReleaseRoot = Join-Path $ProjectRoot 'Release'
 
 $Runtimes = if ($Runtime -eq 'all') { @('win-x64', 'win-arm64') } else { @($Runtime) }

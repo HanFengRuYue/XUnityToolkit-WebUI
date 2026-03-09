@@ -20,19 +20,19 @@ dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 .\build.ps1 -Runtime win-x64  # x64 only
 
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
-cd xunity-webui && npm run build
+cd XUnityToolkit-Vue && npm run build
 
 # Frontend dev server (proxies API to backend)
-cd xunity-webui && npm run dev
+cd XUnityToolkit-Vue && npm run dev
 
 # Type-check frontend
-cd xunity-webui && npx vue-tsc --noEmit
+cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ```
 
 ## Architecture
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
-- **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `xunity-webui/`)
+- **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
 - **Real-time:** SignalR for install progress updates
 - **Persistence:** JSON files at `%APPDATA%/XUnityToolkit/` (`library.json`, `settings.json`)
 - **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
@@ -40,7 +40,7 @@ cd xunity-webui && npx vue-tsc --noEmit
 ### Frontend Structure
 
 ```
-xunity-webui/src/
+XUnityToolkit-Vue/src/
 ├── api/            # API client and TypeScript types
 ├── assets/         # Global CSS (design system variables, animations)
 ├── components/

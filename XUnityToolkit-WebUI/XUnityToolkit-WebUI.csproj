@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <SpaRoot>..\xunity-webui\</SpaRoot>
+    <SpaRoot>..\XUnityToolkit-Vue\</SpaRoot>
   </PropertyGroup>
 
   <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->
