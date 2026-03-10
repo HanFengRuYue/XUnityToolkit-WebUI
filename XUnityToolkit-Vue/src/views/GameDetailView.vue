@@ -74,6 +74,8 @@ async function loadGame() {
     game.value = await gamesApi.get(gameId)
     if (isInstalled.value) {
       config.value = await gamesApi.getConfig(gameId)
+    } else {
+      config.value = null
     }
   } catch {
     message.error('加载游戏信息失败')

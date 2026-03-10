@@ -77,28 +77,65 @@ export interface InstallationStatus {
 }
 
 export interface XUnityConfig {
-  sourceLanguage: string
-  targetLanguage: string
+  // [Service]
   translationEngine: string
   fallbackEndpoint?: string
+  // [General]
+  sourceLanguage: string
+  targetLanguage: string
+  // [Files]
+  outputFile?: string
+  // [TextFrameworks]
+  enableIMGUI: boolean
   enableUGUI: boolean
   enableNGUI: boolean
   enableTextMeshPro: boolean
   enableTextMesh: boolean
-  enableIMGUI: boolean
+  enableFairyGUI: boolean
+  // [Behaviour]
   maxCharactersPerTranslation: number
+  forceSplitTextAfterCharacters: number
   handleRichText: boolean
   enableUIResizing: boolean
+  overrideFont?: string
+  overrideFontSize?: string
+  overrideFontTextMeshPro?: string
+  fallbackFontTextMeshPro?: string
+  resizeUILineSpacingScale?: string
+  forceUIResizing: boolean
+  textGetterCompatibilityMode: boolean
+  maxTextParserRecursion: number
+  enableTranslationHelper: boolean
+  templateAllNumberAway: boolean
+  disableTextMeshProScrollInEffects: boolean
+  cacheParsedTranslations: boolean
+  // [Texture]
+  textureDirectory?: string
+  enableTextureTranslation: boolean
+  enableTextureDumping: boolean
+  enableTextureToggling: boolean
+  enableTextureScanOnSceneLoad: boolean
+  loadUnmodifiedTextures: boolean
+  textureHashGenerationStrategy: string
+  enableSpriteHooking: boolean
+
   extra: Record<string, string>
   // Engine API credentials
-  googleTranslateV2ApiKey?: string
-  bingTranslateOcpApimSubscriptionKey?: string
-  baiduTranslateAppId?: string
-  baiduTranslateAppSecret?: string
-  yandexTranslateApiKey?: string
-  deepLTranslateApiKey?: string
-  papagoTranslateClientId?: string
-  papagoTranslateClientSecret?: string
+  googleLegitimateApiKey?: string
+  bingLegitimateSubscriptionKey?: string
+  baiduAppId?: string
+  baiduAppSecret?: string
+  yandexApiKey?: string
+  deepLLegitimateApiKey?: string
+  deepLLegitimateFree: boolean
+  papagoClientId?: string
+  papagoClientSecret?: string
+  lingoCloudToken?: string
+  watsonUrl?: string
+  watsonKey?: string
+  customTranslateUrl?: string
+  lecInstallPath?: string
+  ezTransInstallPath?: string
 }
 
 export interface GitHubRelease {

@@ -103,6 +103,8 @@ XUnityToolkit-Vue/src/
 - **P/Invoke on .NET 10**：使用 `[DllImport]` 而非 `[LibraryImport]`，后者需要 `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`，当前 csproj 未启用
 - **重命名公共方法时**：全局搜索所有调用点（Endpoints、Services、Orchestrator），避免遗漏编译错误
 - **INI 配置修改策略**：不要从零生成 XUnity 配置文件（会丢失插件自动生成的默认值），应使用 `PatchAsync` 读取-修改-写回
+- **INI Section 兼容**：`[TextFrameworks]`（复数）为主、`[TextFramework]`（单数）为旧兼容；`PatchAsync` 检测文件中实际存在的 section 名来决定写入目标
+- **INI PatchAsync 空值语义**：`BuildSectionMods` 中 `null` = 不修改（跳过），`""` = 清空值（写入 `Key=`）；`AddEngineKeyModification` 仍对 null 和 "" 都跳过（不删除已有 API key）
 - **Console logging:** Configured programmatically in `Program.cs` (`ClearProviders` + `AddSimpleConsole`) — appsettings.json logging config was unreliable; all log messages are in Chinese
 - **Windows console encoding:** `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()`, otherwise Chinese characters will be garbled (the logging system captures encoding at init time)
 - Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`); `GitHubReleaseService` reads mirror base URL from `AppSettingsService` at download time (empty = direct connection, no mirror fallback); `CreateClientForUrl` checks mirror host dynamically
@@ -115,15 +117,17 @@ XUnityToolkit-Vue/src/
 - Stop the running backend before `dotnet build` — the exe is locked while running
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
 - Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync; `GeneratingConfig` step launches game to auto-generate XUnity config, then patches user settings
-- `XUnityConfig` has typed API key fields (e.g., `DeepLTranslateApiKey`) stored in engine-specific INI sections (e.g., `[DeepLTranslate]`); `ConfigurationService.PatchAsync` reads existing INI and only modifies specified keys
+- `XUnityConfig` has typed API key fields (e.g., `DeepLLegitimateApiKey`) stored in engine-specific INI sections (e.g., `[DeepLLegitimate]`); `ConfigurationService.PatchAsync` reads existing INI and only modifies specified keys; engine sections use XUnity's actual section names (`[Baidu]`, `[Yandex]`, `[GoogleLegitimate]`, etc.) with backward-compat reading from old names
 - `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; shows `ShowBalloonTip` on startup to notify user app is running in tray; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
 - `AppSettingsService` persists settings to `%APPDATA%/XUnityToolkit/settings.json` using same semaphore + atomic write pattern as `GameLibraryService`
 - Install store's `operationType` field tracks whether current operation is install or uninstall (do not infer from transient step values)
+- **前端状态生命周期**：`GameDetailView.loadGame()` 在 `isInstalled=false` 时必须重置 `config.value = null`；任何新增的"仅已安装时加载"的状态也需同样处理
 - **Theme-aware CSS:** Use semantic CSS variables (`--bg-subtle`, `--bg-muted`, `--bg-subtle-hover`, `--bg-muted-hover`) for semi-transparent overlay backgrounds — never hardcode `rgba(255,255,255,...)` in scoped CSS as it breaks light mode
 - **Naive UI light theme:** Pass `null` (not `lightTheme`) as the `:theme` prop; accent colors need slightly darker values in light mode for contrast (e.g., `#22d3a7` → `#19b892`)
 - Pinia stores: `games` (game management), `install` (installation progress + SignalR), `theme` (dark/light mode + localStorage)
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
+- **Naive UI NInput 绑定 `string?` 字段**：不要用 `v-model:value`（会收到 `undefined` 导致运行时警告），应使用 `:value="form.field ?? ''"` + `@update:value` 模式；API key 字段用 `v || undefined` 防止发送空字符串
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
 - Verify `@vicons/material` icon availability before importing: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - Stop backend on Windows: `taskkill //f //im XUnityToolkit-WebUI.exe`

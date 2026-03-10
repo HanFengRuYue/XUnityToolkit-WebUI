@@ -72,11 +72,14 @@ public sealed class XUnityInstallerService(ILogger<XUnityInstallerService> logge
         if (File.Exists(commonDll))
             File.Delete(commonDll);
 
-        // Remove XUnity config
-        var configFile = Path.Combine(gamePath, "BepInEx", "config",
-            "gravydevsupreme.xunity.autotranslator.cfg");
-        if (File.Exists(configFile))
-            File.Delete(configFile);
+        // Remove XUnity config (actual file name is AutoTranslatorConfig.ini, not the BepInEx GUID style)
+        var configDir = Path.Combine(gamePath, "BepInEx", "config");
+        foreach (var cfgName in new[] { "AutoTranslatorConfig.ini", "gravydevsupreme.xunity.autotranslator.cfg" })
+        {
+            var cfgPath = Path.Combine(configDir, cfgName);
+            if (File.Exists(cfgPath))
+                File.Delete(cfgPath);
+        }
 
         // Remove translation output
         var translationDir = Path.Combine(gamePath, "BepInEx", "Translation");

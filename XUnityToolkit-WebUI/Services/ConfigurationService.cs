@@ -17,29 +17,75 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
             return Task.FromResult(new XUnityConfig());
 
         var ini = ParseIni(File.ReadAllText(configPath));
+
+        // TextFrameworks section: prefer [TextFrameworks] (plural), fall back to [TextFramework] (singular)
+        var tfSection = ini.ContainsKey("TextFrameworks") ? "TextFrameworks" : "TextFramework";
+
         var config = new XUnityConfig
         {
-            SourceLanguage = GetValue(ini, "General", "FromLanguage", "ja"),
-            TargetLanguage = GetValue(ini, "General", "Language", "en"),
+            // [Service]
             TranslationEngine = GetValue(ini, "Service", "Endpoint", "GoogleTranslateV2"),
             FallbackEndpoint = GetValue(ini, "Service", "FallbackEndpoint", null),
-            EnableUGUI = GetBool(ini, "TextFramework", "EnableUGUI", true),
-            EnableNGUI = GetBool(ini, "TextFramework", "EnableNGUI", true),
-            EnableTextMeshPro = GetBool(ini, "TextFramework", "EnableTextMeshPro", true),
-            EnableTextMesh = GetBool(ini, "TextFramework", "EnableTextMesh", false),
-            EnableIMGUI = GetBool(ini, "TextFramework", "EnableIMGUI", false),
+            // [General]
+            SourceLanguage = GetValue(ini, "General", "FromLanguage", "ja"),
+            TargetLanguage = GetValue(ini, "General", "Language", "en"),
+            // [Files]
+            OutputFile = GetNullableValue(ini, "Files", "OutputFile"),
+            // [TextFrameworks]
+            EnableIMGUI = GetBool(ini, tfSection, "EnableIMGUI", false),
+            EnableUGUI = GetBool(ini, tfSection, "EnableUGUI", true),
+            EnableNGUI = GetBool(ini, tfSection, "EnableNGUI", true),
+            EnableTextMeshPro = GetBool(ini, tfSection, "EnableTextMeshPro", true),
+            EnableTextMesh = GetBool(ini, tfSection, "EnableTextMesh", false),
+            EnableFairyGUI = GetBool(ini, tfSection, "EnableFairyGUI", true),
+            // [Behaviour]
             MaxCharactersPerTranslation = GetInt(ini, "Behaviour", "MaxCharactersPerTranslation", 200),
+            ForceSplitTextAfterCharacters = GetInt(ini, "Behaviour", "ForceSplitTextAfterCharacters", 0),
             HandleRichText = GetBool(ini, "Behaviour", "HandleRichText", true),
             EnableUIResizing = GetBool(ini, "Behaviour", "EnableUIResizing", true),
-            // Engine API credentials
-            GoogleTranslateV2ApiKey = GetNullableValue(ini, "GoogleTranslateV2", "GoogleAPIKey"),
-            BingTranslateOcpApimSubscriptionKey = GetNullableValue(ini, "BingTranslate", "OcpApimSubscriptionKey"),
-            BaiduTranslateAppId = GetNullableValue(ini, "BaiduTranslate", "BaiduAppId"),
-            BaiduTranslateAppSecret = GetNullableValue(ini, "BaiduTranslate", "BaiduAppSecret"),
-            YandexTranslateApiKey = GetNullableValue(ini, "YandexTranslate", "YandexAPIKey"),
-            DeepLTranslateApiKey = GetNullableValue(ini, "DeepLTranslate", "DeepLAPIKey"),
-            PapagoTranslateClientId = GetNullableValue(ini, "PapagoTranslate", "PapagoClientId"),
-            PapagoTranslateClientSecret = GetNullableValue(ini, "PapagoTranslate", "PapagoClientSecret"),
+            OverrideFont = GetNullableValue(ini, "Behaviour", "OverrideFont"),
+            OverrideFontSize = GetNullableValue(ini, "Behaviour", "OverrideFontSize"),
+            OverrideFontTextMeshPro = GetNullableValue(ini, "Behaviour", "OverrideFontTextMeshPro"),
+            FallbackFontTextMeshPro = GetNullableValue(ini, "Behaviour", "FallbackFontTextMeshPro"),
+            ResizeUILineSpacingScale = GetNullableValue(ini, "Behaviour", "ResizeUILineSpacingScale"),
+            ForceUIResizing = GetBool(ini, "Behaviour", "ForceUIResizing", true),
+            TextGetterCompatibilityMode = GetBool(ini, "Behaviour", "TextGetterCompatibilityMode", false),
+            MaxTextParserRecursion = GetInt(ini, "Behaviour", "MaxTextParserRecursion", 1),
+            EnableTranslationHelper = GetBool(ini, "Behaviour", "EnableTranslationHelper", false),
+            TemplateAllNumberAway = GetBool(ini, "Behaviour", "TemplateAllNumberAway", false),
+            DisableTextMeshProScrollInEffects = GetBool(ini, "Behaviour", "DisableTextMeshProScrollInEffects", false),
+            CacheParsedTranslations = GetBool(ini, "Behaviour", "CacheParsedTranslations", false),
+            // [Texture]
+            TextureDirectory = GetNullableValue(ini, "Texture", "TextureDirectory"),
+            EnableTextureTranslation = GetBool(ini, "Texture", "EnableTextureTranslation", false),
+            EnableTextureDumping = GetBool(ini, "Texture", "EnableTextureDumping", false),
+            EnableTextureToggling = GetBool(ini, "Texture", "EnableTextureToggling", false),
+            EnableTextureScanOnSceneLoad = GetBool(ini, "Texture", "EnableTextureScanOnSceneLoad", false),
+            LoadUnmodifiedTextures = GetBool(ini, "Texture", "LoadUnmodifiedTextures", false),
+            TextureHashGenerationStrategy = GetValue(ini, "Texture", "TextureHashGenerationStrategy", "FromImageName"),
+            EnableSpriteHooking = GetBool(ini, "Texture", "EnableSpriteHooking", false),
+            // Engine API credentials (with backward-compat fallback for old section names)
+            GoogleLegitimateApiKey = GetNullableValue(ini, "GoogleLegitimate", "GoogleAPIKey")
+                                    ?? GetNullableValue(ini, "GoogleTranslateV2", "GoogleAPIKey"),
+            BingLegitimateSubscriptionKey = GetNullableValue(ini, "BingLegitimate", "OcpApimSubscriptionKey")
+                                           ?? GetNullableValue(ini, "BingTranslate", "OcpApimSubscriptionKey"),
+            BaiduAppId = GetNullableValue(ini, "Baidu", "BaiduAppId")
+                         ?? GetNullableValue(ini, "BaiduTranslate", "BaiduAppId"),
+            BaiduAppSecret = GetNullableValue(ini, "Baidu", "BaiduAppSecret")
+                             ?? GetNullableValue(ini, "BaiduTranslate", "BaiduAppSecret"),
+            YandexApiKey = GetNullableValue(ini, "Yandex", "YandexAPIKey")
+                           ?? GetNullableValue(ini, "YandexTranslate", "YandexAPIKey"),
+            DeepLLegitimateApiKey = GetNullableValue(ini, "DeepLLegitimate", "ApiKey")
+                                   ?? GetNullableValue(ini, "DeepLTranslate", "DeepLAPIKey"),
+            DeepLLegitimateFree = GetBool(ini, "DeepLLegitimate", "Free", false),
+            PapagoClientId = GetNullableValue(ini, "PapagoTranslate", "PapagoClientId"),
+            PapagoClientSecret = GetNullableValue(ini, "PapagoTranslate", "PapagoClientSecret"),
+            LingoCloudToken = GetNullableValue(ini, "LingoCloud", "LingoCloudToken"),
+            WatsonUrl = GetNullableValue(ini, "Watson", "Url"),
+            WatsonKey = GetNullableValue(ini, "Watson", "Key"),
+            CustomTranslateUrl = GetNullableValue(ini, "Custom", "Url"),
+            LecInstallPath = GetNullableValue(ini, "LecPowerTranslator15", "InstallationPath"),
+            EzTransInstallPath = GetNullableValue(ini, "ezTrans", "InstallationPath"),
         };
 
         logger.LogInformation("已读取配置文件: {Path}", configPath);
@@ -64,6 +110,11 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
 
         var lines = File.ReadAllLines(configPath).ToList();
 
+        // Detect actual TextFrameworks section name used in the file
+        var tfSection = lines.Any(l => l.Trim().Equals("[TextFrameworks]", StringComparison.OrdinalIgnoreCase))
+            ? "TextFrameworks"
+            : "TextFramework";
+
         // Build the modifications we want to apply
         var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
         {
@@ -73,29 +124,63 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
             ["General"] = BuildSectionMods(
                 ("Language", config.TargetLanguage),
                 ("FromLanguage", config.SourceLanguage)),
-            ["TextFramework"] = BuildSectionMods(
+            ["Files"] = BuildSectionMods(
+                ("OutputFile", config.OutputFile)),
+            [tfSection] = BuildSectionMods(
+                ("EnableIMGUI", config.EnableIMGUI.ToString()),
                 ("EnableUGUI", config.EnableUGUI.ToString()),
                 ("EnableNGUI", config.EnableNGUI.ToString()),
                 ("EnableTextMeshPro", config.EnableTextMeshPro.ToString()),
                 ("EnableTextMesh", config.EnableTextMesh.ToString()),
-                ("EnableIMGUI", config.EnableIMGUI.ToString())),
+                ("EnableFairyGUI", config.EnableFairyGUI.ToString())),
             ["Behaviour"] = BuildSectionMods(
                 ("MaxCharactersPerTranslation", config.MaxCharactersPerTranslation.ToString()),
+                ("ForceSplitTextAfterCharacters", config.ForceSplitTextAfterCharacters.ToString()),
                 ("HandleRichText", config.HandleRichText.ToString()),
-                ("EnableUIResizing", config.EnableUIResizing.ToString())),
+                ("EnableUIResizing", config.EnableUIResizing.ToString()),
+                ("OverrideFont", config.OverrideFont),
+                ("OverrideFontSize", config.OverrideFontSize),
+                ("OverrideFontTextMeshPro", config.OverrideFontTextMeshPro),
+                ("FallbackFontTextMeshPro", config.FallbackFontTextMeshPro),
+                ("ResizeUILineSpacingScale", config.ResizeUILineSpacingScale),
+                ("ForceUIResizing", config.ForceUIResizing.ToString()),
+                ("TextGetterCompatibilityMode", config.TextGetterCompatibilityMode.ToString()),
+                ("MaxTextParserRecursion", config.MaxTextParserRecursion.ToString()),
+                ("EnableTranslationHelper", config.EnableTranslationHelper.ToString()),
+                ("TemplateAllNumberAway", config.TemplateAllNumberAway.ToString()),
+                ("DisableTextMeshProScrollInEffects", config.DisableTextMeshProScrollInEffects.ToString()),
+                ("CacheParsedTranslations", config.CacheParsedTranslations.ToString())),
+            ["Texture"] = BuildSectionMods(
+                ("TextureDirectory", config.TextureDirectory),
+                ("EnableTextureTranslation", config.EnableTextureTranslation.ToString()),
+                ("EnableTextureDumping", config.EnableTextureDumping.ToString()),
+                ("EnableTextureToggling", config.EnableTextureToggling.ToString()),
+                ("EnableTextureScanOnSceneLoad", config.EnableTextureScanOnSceneLoad.ToString()),
+                ("LoadUnmodifiedTextures", config.LoadUnmodifiedTextures.ToString()),
+                ("TextureHashGenerationStrategy", config.TextureHashGenerationStrategy),
+                ("EnableSpriteHooking", config.EnableSpriteHooking.ToString())),
         };
 
         // Add engine-specific API key sections
-        AddEngineKeyModification(modifications, "GoogleTranslateV2", "GoogleAPIKey", config.GoogleTranslateV2ApiKey);
-        AddEngineKeyModification(modifications, "BingTranslate", "OcpApimSubscriptionKey", config.BingTranslateOcpApimSubscriptionKey);
-        AddEngineKeyModifications(modifications, "BaiduTranslate",
-            ("BaiduAppId", config.BaiduTranslateAppId),
-            ("BaiduAppSecret", config.BaiduTranslateAppSecret));
-        AddEngineKeyModification(modifications, "YandexTranslate", "YandexAPIKey", config.YandexTranslateApiKey);
-        AddEngineKeyModification(modifications, "DeepLTranslate", "DeepLAPIKey", config.DeepLTranslateApiKey);
+        AddEngineKeyModification(modifications, "GoogleLegitimate", "GoogleAPIKey", config.GoogleLegitimateApiKey);
+        AddEngineKeyModification(modifications, "BingLegitimate", "OcpApimSubscriptionKey", config.BingLegitimateSubscriptionKey);
+        AddEngineKeyModifications(modifications, "Baidu",
+            ("BaiduAppId", config.BaiduAppId),
+            ("BaiduAppSecret", config.BaiduAppSecret));
+        AddEngineKeyModification(modifications, "Yandex", "YandexAPIKey", config.YandexApiKey);
+        AddEngineKeyModifications(modifications, "DeepLLegitimate",
+            ("ApiKey", config.DeepLLegitimateApiKey),
+            ("Free", config.DeepLLegitimateFree.ToString()));
         AddEngineKeyModifications(modifications, "PapagoTranslate",
-            ("PapagoClientId", config.PapagoTranslateClientId),
-            ("PapagoClientSecret", config.PapagoTranslateClientSecret));
+            ("PapagoClientId", config.PapagoClientId),
+            ("PapagoClientSecret", config.PapagoClientSecret));
+        AddEngineKeyModification(modifications, "LingoCloud", "LingoCloudToken", config.LingoCloudToken);
+        AddEngineKeyModifications(modifications, "Watson",
+            ("Url", config.WatsonUrl),
+            ("Key", config.WatsonKey));
+        AddEngineKeyModification(modifications, "Custom", "Url", config.CustomTranslateUrl);
+        AddEngineKeyModification(modifications, "LecPowerTranslator15", "InstallationPath", config.LecInstallPath);
+        AddEngineKeyModification(modifications, "ezTrans", "InstallationPath", config.EzTransInstallPath);
 
         // Apply modifications to the existing lines
         var result = ApplyModifications(lines, modifications);
@@ -121,24 +206,56 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
         sb.AppendLine($"Language={config.TargetLanguage}");
         sb.AppendLine($"FromLanguage={config.SourceLanguage}");
         sb.AppendLine();
-        sb.AppendLine("[TextFramework]");
+        sb.AppendLine("[Files]");
+        sb.AppendLine($"OutputFile={config.OutputFile ?? "Translation\\{Lang}\\Text\\_AutoGeneratedTranslations.txt"}");
+        sb.AppendLine();
+        sb.AppendLine("[TextFrameworks]");
+        sb.AppendLine($"EnableIMGUI={config.EnableIMGUI}");
         sb.AppendLine($"EnableUGUI={config.EnableUGUI}");
         sb.AppendLine($"EnableNGUI={config.EnableNGUI}");
         sb.AppendLine($"EnableTextMeshPro={config.EnableTextMeshPro}");
         sb.AppendLine($"EnableTextMesh={config.EnableTextMesh}");
-        sb.AppendLine($"EnableIMGUI={config.EnableIMGUI}");
+        sb.AppendLine($"EnableFairyGUI={config.EnableFairyGUI}");
         sb.AppendLine();
         sb.AppendLine("[Behaviour]");
         sb.AppendLine($"MaxCharactersPerTranslation={config.MaxCharactersPerTranslation}");
+        sb.AppendLine($"ForceSplitTextAfterCharacters={config.ForceSplitTextAfterCharacters}");
         sb.AppendLine($"HandleRichText={config.HandleRichText}");
         sb.AppendLine($"EnableUIResizing={config.EnableUIResizing}");
+        sb.AppendLine($"OverrideFont={config.OverrideFont ?? ""}");
+        sb.AppendLine($"OverrideFontSize={config.OverrideFontSize ?? ""}");
+        sb.AppendLine($"OverrideFontTextMeshPro={config.OverrideFontTextMeshPro ?? ""}");
+        sb.AppendLine($"FallbackFontTextMeshPro={config.FallbackFontTextMeshPro ?? ""}");
+        sb.AppendLine($"ResizeUILineSpacingScale={config.ResizeUILineSpacingScale ?? ""}");
+        sb.AppendLine($"ForceUIResizing={config.ForceUIResizing}");
+        sb.AppendLine($"TextGetterCompatibilityMode={config.TextGetterCompatibilityMode}");
+        sb.AppendLine($"MaxTextParserRecursion={config.MaxTextParserRecursion}");
+        sb.AppendLine($"EnableTranslationHelper={config.EnableTranslationHelper}");
+        sb.AppendLine($"TemplateAllNumberAway={config.TemplateAllNumberAway}");
+        sb.AppendLine($"DisableTextMeshProScrollInEffects={config.DisableTextMeshProScrollInEffects}");
+        sb.AppendLine($"CacheParsedTranslations={config.CacheParsedTranslations}");
+        sb.AppendLine();
+        sb.AppendLine("[Texture]");
+        sb.AppendLine($"TextureDirectory={config.TextureDirectory ?? "Translation\\{Lang}\\Texture"}");
+        sb.AppendLine($"EnableTextureTranslation={config.EnableTextureTranslation}");
+        sb.AppendLine($"EnableTextureDumping={config.EnableTextureDumping}");
+        sb.AppendLine($"EnableTextureToggling={config.EnableTextureToggling}");
+        sb.AppendLine($"EnableTextureScanOnSceneLoad={config.EnableTextureScanOnSceneLoad}");
+        sb.AppendLine($"LoadUnmodifiedTextures={config.LoadUnmodifiedTextures}");
+        sb.AppendLine($"TextureHashGenerationStrategy={config.TextureHashGenerationStrategy}");
+        sb.AppendLine($"EnableSpriteHooking={config.EnableSpriteHooking}");
 
-        AppendEngineSection(sb, "GoogleTranslateV2", ("GoogleAPIKey", config.GoogleTranslateV2ApiKey));
-        AppendEngineSection(sb, "BingTranslate", ("OcpApimSubscriptionKey", config.BingTranslateOcpApimSubscriptionKey));
-        AppendEngineSection(sb, "BaiduTranslate", ("BaiduAppId", config.BaiduTranslateAppId), ("BaiduAppSecret", config.BaiduTranslateAppSecret));
-        AppendEngineSection(sb, "YandexTranslate", ("YandexAPIKey", config.YandexTranslateApiKey));
-        AppendEngineSection(sb, "DeepLTranslate", ("DeepLAPIKey", config.DeepLTranslateApiKey));
-        AppendEngineSection(sb, "PapagoTranslate", ("PapagoClientId", config.PapagoTranslateClientId), ("PapagoClientSecret", config.PapagoTranslateClientSecret));
+        AppendEngineSection(sb, "GoogleLegitimate", ("GoogleAPIKey", config.GoogleLegitimateApiKey));
+        AppendEngineSection(sb, "BingLegitimate", ("OcpApimSubscriptionKey", config.BingLegitimateSubscriptionKey));
+        AppendEngineSection(sb, "Baidu", ("BaiduAppId", config.BaiduAppId), ("BaiduAppSecret", config.BaiduAppSecret));
+        AppendEngineSection(sb, "Yandex", ("YandexAPIKey", config.YandexApiKey));
+        AppendEngineSection(sb, "DeepLLegitimate", ("ApiKey", config.DeepLLegitimateApiKey), ("Free", config.DeepLLegitimateFree.ToString()));
+        AppendEngineSection(sb, "PapagoTranslate", ("PapagoClientId", config.PapagoClientId), ("PapagoClientSecret", config.PapagoClientSecret));
+        AppendEngineSection(sb, "LingoCloud", ("LingoCloudToken", config.LingoCloudToken));
+        AppendEngineSection(sb, "Watson", ("Url", config.WatsonUrl), ("Key", config.WatsonKey));
+        AppendEngineSection(sb, "Custom", ("Url", config.CustomTranslateUrl));
+        AppendEngineSection(sb, "LecPowerTranslator15", ("InstallationPath", config.LecInstallPath));
+        AppendEngineSection(sb, "ezTrans", ("InstallationPath", config.EzTransInstallPath));
 
         File.WriteAllText(configPath, sb.ToString());
         logger.LogInformation("已写入配置文件: {Path}", configPath);
@@ -222,7 +339,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
         var applied = appliedKeys.TryGetValue(section, out var ak) ? ak : new HashSet<string>();
         foreach (var (key, value) in sectionMods)
         {
-            if (!applied.Contains(key) && !string.IsNullOrEmpty(value))
+            if (!applied.Contains(key) && value.Length > 0)
             {
                 result.Add($"{key}={value}");
                 if (!appliedKeys.ContainsKey(section))
@@ -236,7 +353,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, value) in fields)
-            if (!string.IsNullOrEmpty(value))
+            if (value is not null)
                 dict[key] = value;
         return dict;
     }
