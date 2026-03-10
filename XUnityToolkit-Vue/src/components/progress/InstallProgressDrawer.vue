@@ -21,6 +21,7 @@ const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'DownloadingXUnity', label: '下载 XUnity.AutoTranslator' },
   { key: 'InstallingXUnity', label: '安装 XUnity.AutoTranslator' },
   { key: 'GeneratingConfig', label: '生成配置' },
+  { key: 'ApplyingConfig', label: '应用最佳配置' },
 ]
 
 const uninstallSteps: { key: InstallStep; label: string }[] = [

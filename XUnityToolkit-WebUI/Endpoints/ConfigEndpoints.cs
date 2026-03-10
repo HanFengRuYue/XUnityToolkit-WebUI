@@ -27,5 +27,29 @@ public static class ConfigEndpoints
             await configService.PatchAsync(game.GamePath, config);
             return Results.Ok(ApiResult<XUnityConfig>.Ok(config));
         });
+
+        app.MapGet("/api/games/{id}/config/raw", async (string id,
+            GameLibraryService library, ConfigurationService configService) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null) return Results.NotFound(ApiResult<string>.Fail("Game not found."));
+
+            var content = await configService.GetRawAsync(game.GamePath);
+            if (content is null) return Results.NotFound(ApiResult<string>.Fail("配置文件不存在。"));
+            return Results.Ok(ApiResult<string>.Ok(content));
+        });
+
+        app.MapPut("/api/games/{id}/config/raw", async (string id,
+            RawConfigRequest request,
+            GameLibraryService library, ConfigurationService configService) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            await configService.SaveRawAsync(game.GamePath, request.Content);
+            return Results.Ok(ApiResult.Ok());
+        });
     }
 }
+
+public record RawConfigRequest(string Content);

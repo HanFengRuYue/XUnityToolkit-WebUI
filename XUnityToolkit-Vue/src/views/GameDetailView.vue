@@ -452,6 +452,7 @@ onUnmounted(() => stopWatch())
       <ConfigPanel
         :config="config"
         :disabled="!isInstalled"
+        :game-id="gameId"
         @save="handleSaveConfig"
       />
     </div>

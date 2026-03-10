@@ -9,6 +9,7 @@ public enum InstallStep
     DownloadingXUnity,
     InstallingXUnity,
     GeneratingConfig,
+    ApplyingConfig,
     RemovingXUnity,
     RemovingBepInEx,
     Complete,

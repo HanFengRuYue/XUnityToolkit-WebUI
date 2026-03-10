@@ -15,6 +15,11 @@ const router = createRouter({
       component: () => import('@/views/GameDetailView.vue'),
     },
     {
+      path: '/games/:id/config-editor',
+      name: 'config-editor',
+      component: () => import('@/views/ConfigEditorView.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),

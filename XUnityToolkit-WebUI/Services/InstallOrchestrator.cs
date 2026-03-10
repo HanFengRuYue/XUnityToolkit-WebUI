@@ -254,14 +254,19 @@ public sealed class InstallOrchestrator(
             gameProcess?.Dispose();
         }
 
-        // Apply user config if provided
+        // Step 7: Apply optimal defaults and user config
+        await UpdateStatus(status, InstallStep.ApplyingConfig, 91, "正在应用最佳默认配置...");
+        await configService.ApplyOptimalDefaultsAsync(game.GamePath, ct);
+
         if (config != null)
         {
-            await UpdateStatus(status, InstallStep.GeneratingConfig, 92, "正在应用用户配置...");
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 94, "正在应用用户配置...");
             await configService.PatchAsync(game.GamePath, config, ct);
         }
 
-        // Step 7: Complete
+        await UpdateStatus(status, InstallStep.ApplyingConfig, 97, "配置应用完成");
+
+        // Step 8: Complete
         game.InstalledXUnityVersion = xUnityRelease.TagName;
         game.InstallState = InstallState.FullyInstalled;
         await gameLibrary.UpdateAsync(game, ct);

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   NForm,
   NFormItem,
@@ -10,13 +11,18 @@ import {
   NCollapse,
   NCollapseItem,
   NButton,
+  NIcon,
 } from 'naive-ui'
+import { EditNoteOutlined } from '@vicons/material'
 import type { XUnityConfig } from '@/api/types'
 
 const props = defineProps<{
   config: XUnityConfig | null
   disabled: boolean
+  gameId: string
 }>()
+
+const router = useRouter()
 
 const emit = defineEmits<{
   save: [config: XUnityConfig]
@@ -28,28 +34,28 @@ const form = ref<XUnityConfig>({
   sourceLanguage: 'ja',
   targetLanguage: 'zh',
   outputFile: '',
-  enableIMGUI: false,
+  enableIMGUI: true,
   enableUGUI: true,
   enableNGUI: true,
   enableTextMeshPro: true,
-  enableTextMesh: false,
+  enableTextMesh: true,
   enableFairyGUI: true,
-  maxCharactersPerTranslation: 200,
+  maxCharactersPerTranslation: 2500,
   forceSplitTextAfterCharacters: 0,
   handleRichText: true,
   enableUIResizing: true,
-  overrideFont: '',
+  overrideFont: 'Microsoft YaHei',
   overrideFontSize: '',
   overrideFontTextMeshPro: '',
   fallbackFontTextMeshPro: '',
   resizeUILineSpacingScale: '',
   forceUIResizing: true,
   textGetterCompatibilityMode: false,
-  maxTextParserRecursion: 1,
+  maxTextParserRecursion: 4,
   enableTranslationHelper: false,
   templateAllNumberAway: false,
   disableTextMeshProScrollInEffects: false,
-  cacheParsedTranslations: false,
+  cacheParsedTranslations: true,
   textureDirectory: '',
   enableTextureTranslation: false,
   enableTextureDumping: false,
@@ -69,8 +75,8 @@ interface EngineKeyField {
   type: 'text' | 'password'
 }
 
-const engineKeyFields = computed<EngineKeyField[]>(() => {
-  switch (form.value.translationEngine) {
+function getKeyFieldsForEngine(engine: string): EngineKeyField[] {
+  switch (engine) {
     case 'GoogleTranslateLegitimate':
       return [{ key: 'googleLegitimateApiKey', label: 'API Key', placeholder: 'Google Cloud API Key', type: 'password' }]
     case 'BingTranslateLegitimate':
@@ -105,10 +111,30 @@ const engineKeyFields = computed<EngineKeyField[]>(() => {
     default:
       return []
   }
+}
+
+function getEngineName(engine: string): string {
+  return engineOptions.find(o => o.value === engine)?.label ?? engine
+}
+
+const primaryKeyFields = computed(() => getKeyFieldsForEngine(form.value.translationEngine))
+const fallbackKeyFields = computed(() => {
+  const fallback = form.value.fallbackEndpoint
+  if (!fallback || fallback === form.value.translationEngine) return []
+  return getKeyFieldsForEngine(fallback)
 })
 
-// DeepL Legitimate has an extra "Free" toggle
-const showDeepLFreeToggle = computed(() => form.value.translationEngine === 'DeepLTranslateLegitimate')
+const showPrimaryDeepLFreeToggle = computed(() => form.value.translationEngine === 'DeepLTranslateLegitimate')
+const showFallbackDeepLFreeToggle = computed(() => {
+  const fallback = form.value.fallbackEndpoint
+  return fallback === 'DeepLTranslateLegitimate' && fallback !== form.value.translationEngine
+})
+
+const hasBothKeyGroups = computed(() => primaryKeyFields.value.length > 0 && fallbackKeyFields.value.length > 0)
+const hasAnyKeyFields = computed(() =>
+  primaryKeyFields.value.length > 0 || fallbackKeyFields.value.length > 0 ||
+  showPrimaryDeepLFreeToggle.value || showFallbackDeepLFreeToggle.value
+)
 
 watch(
   () => props.config,
@@ -160,6 +186,10 @@ function handleSave() {
   emit('save', { ...form.value })
 }
 
+function openConfigEditor() {
+  router.push(`/games/${props.gameId}/config-editor`)
+}
+
 const isMobile = ref(false)
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -205,25 +235,54 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
             </NFormItem>
           </div>
 
-          <div v-if="engineKeyFields.length > 0 || showDeepLFreeToggle" class="config-section">
-            <div class="config-section-label">API 密钥</div>
-            <NFormItem
-              v-for="field in engineKeyFields"
-              :key="field.key"
-              :label="field.label"
-            >
-              <NInput
-                :value="(form[field.key] as string) ?? ''"
-                @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
-                :placeholder="field.placeholder"
-                :type="field.type"
-                :show-password-on="field.type === 'password' ? 'click' : undefined"
-                clearable
-              />
-            </NFormItem>
-            <NFormItem v-if="showDeepLFreeToggle" label="使用免费版 API">
-              <NSwitch v-model:value="form.deepLLegitimateFree" />
-            </NFormItem>
+          <!-- Primary engine API keys -->
+          <div v-if="hasAnyKeyFields" class="config-section">
+            <div v-if="primaryKeyFields.length > 0 || showPrimaryDeepLFreeToggle" class="api-key-group">
+              <div class="config-section-label">
+                {{ fallbackKeyFields.length > 0 || showFallbackDeepLFreeToggle ? `API 密钥 — ${getEngineName(form.translationEngine)}` : 'API 密钥' }}
+              </div>
+              <NFormItem
+                v-for="field in primaryKeyFields"
+                :key="field.key"
+                :label="field.label"
+              >
+                <NInput
+                  :value="(form[field.key] as string) ?? ''"
+                  @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
+                  :placeholder="field.placeholder"
+                  :type="field.type"
+                  :show-password-on="field.type === 'password' ? 'click' : undefined"
+                  clearable
+                />
+              </NFormItem>
+              <NFormItem v-if="showPrimaryDeepLFreeToggle" label="使用免费版 API">
+                <NSwitch v-model:value="form.deepLLegitimateFree" />
+              </NFormItem>
+            </div>
+
+            <!-- Fallback engine API keys (only when different engine) -->
+            <div v-if="fallbackKeyFields.length > 0 || showFallbackDeepLFreeToggle" class="api-key-group">
+              <div class="config-section-label">
+                {{ primaryKeyFields.length > 0 || showPrimaryDeepLFreeToggle ? `API 密钥 — ${getEngineName(form.fallbackEndpoint ?? '')}` : 'API 密钥' }}
+              </div>
+              <NFormItem
+                v-for="field in fallbackKeyFields"
+                :key="'fallback-' + field.key"
+                :label="field.label"
+              >
+                <NInput
+                  :value="(form[field.key] as string) ?? ''"
+                  @update:value="(v: string) => { (form as Record<string, unknown>)[field.key] = v || undefined }"
+                  :placeholder="field.placeholder"
+                  :type="field.type"
+                  :show-password-on="field.type === 'password' ? 'click' : undefined"
+                  clearable
+                />
+              </NFormItem>
+              <NFormItem v-if="showFallbackDeepLFreeToggle" label="使用免费版 API">
+                <NSwitch v-model:value="form.deepLLegitimateFree" />
+              </NFormItem>
+            </div>
           </div>
         </div>
 
@@ -380,6 +439,12 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
       </NCollapse>
 
       <div class="config-footer">
+        <NButton :disabled="disabled" @click="openConfigEditor">
+          <template #icon>
+            <NIcon><EditNoteOutlined /></NIcon>
+          </template>
+          编辑配置文件
+        </NButton>
         <NButton type="primary" :disabled="disabled" @click="handleSave">
           保存配置
         </NButton>
@@ -417,6 +482,10 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
   margin-bottom: 12px;
 }
 
+.api-key-group {
+  margin-bottom: 8px;
+}
+
 .framework-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -436,6 +505,7 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
 .config-footer {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
   margin-top: 20px;
   padding-top: 16px;
   border-top: 1px solid var(--border);

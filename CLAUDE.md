@@ -50,7 +50,7 @@ XUnityToolkit-Vue/src/
 ├── composables/    # Reusable composition functions (useAddGameFlow)
 ├── stores/         # Pinia stores (games, install)
 ├── views/          # LibraryView, GameDetailView, SettingsView
-└── router/         # Vue Router config (/, /games/:id, /settings)
+└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /settings)
 ```
 
 ### Frontend Design System
@@ -68,6 +68,7 @@ XUnityToolkit-Vue/src/
 - **Info cards:** `.info-card` with `.info-card-icon` (36px, colored variants: `.folder`/`.file`/`.unity`/`.code`/`.arch`) for dashboard-style info display
 - **Page layouts:** Views use full-width (no max-width); two-column grids (`.detail-columns`, `.settings-grid`) collapse to single column at 960px/768px
 - **Settings page layout:** `.settings-page` uses `display: flex; flex-direction: column; gap: 16px` — adding new full-width section cards automatically gets correct spacing; do NOT add individual `margin-bottom` to cards
+- **AppShell 内容区**：`.main-content` padding 为 `36px 40px`（桌面）、`20px 16px`（平板）、`16px 12px`（手机）；需要全高布局的页面用 `calc(100vh - 72px)` 等扣除 padding
 
 ## Code Conventions
 
@@ -87,7 +88,8 @@ XUnityToolkit-Vue/src/
 - Game actions: `POST /api/games/{id}/open-folder` (opens explorer), `POST /api/games/{id}/launch` (runs game exe)
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
 - Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version), `POST /api/settings/reset` (delete all app data: settings, library, cache, backups)
-- Config: `PUT /api/games/{id}/config` uses `PatchAsync` — reads existing INI, modifies only specified keys, preserves all other content (comments, unknown sections)
+- Config: `PUT /api/games/{id}/config` uses `PatchAsync` — reads existing INI, modifies only specified keys, preserves all other content (comments, unknown sections); `GET/PUT /api/games/{id}/config/raw` — 读写原始 INI 文件内容（用于配置编辑器）
+- **ApiResult 模式**：`ApiResult<T>.Ok(data)` 需要 data 参数；无数据成功响应用 `ApiResult.Ok()`（非泛型静态类）；request record 定义在对应 Endpoints 文件底部
 
 ## Development Notes
 
@@ -116,7 +118,7 @@ XUnityToolkit-Vue/src/
 - **Publish cleanup:** Remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json` from publish output — not needed for this desktop app
 - Stop the running backend before `dotnet build` — the exe is locked while running
 - Frontend changes require `npm run build` then restart backend to take effect (unless using `npm run dev`)
-- Backend and frontend share `InstallStep` enum — keep `Models/InstallationStatus.cs` and `src/api/types.ts` in sync; `GeneratingConfig` step launches game to auto-generate XUnity config, then patches user settings
+- Backend and frontend share `InstallStep` enum — adding/modifying步骤需同步 4 处: `Models/InstallationStatus.cs` (C# enum)、`src/api/types.ts` (TS type)、`InstallProgressDrawer.vue` (`installSteps` 数组)、`InstallOrchestrator.cs` (调用处)；`GeneratingConfig` 步骤启动游戏生成配置，`ApplyingConfig` 步骤应用最佳默认+用户配置
 - `XUnityConfig` has typed API key fields (e.g., `DeepLLegitimateApiKey`) stored in engine-specific INI sections (e.g., `[DeepLLegitimate]`); `ConfigurationService.PatchAsync` reads existing INI and only modifies specified keys; engine sections use XUnity's actual section names (`[Baidu]`, `[Yandex]`, `[GoogleLegitimate]`, etc.) with backward-compat reading from old names
 - `SystemTrayService` runs `NotifyIcon` on a dedicated STA thread; shows `ShowBalloonTip` on startup to notify user app is running in tray; `StopAsync` only calls `Application.Exit()` — the STA thread owns the NotifyIcon lifecycle via `using` statement
 - `AppSettingsService` persists settings to `%APPDATA%/XUnityToolkit/settings.json` using same semaphore + atomic write pattern as `GameLibraryService`

@@ -93,6 +93,72 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
     }
 
     /// <summary>
+    /// Get the raw INI file content as a string.
+    /// </summary>
+    public Task<string?> GetRawAsync(string gamePath, CancellationToken ct = default)
+    {
+        var configPath = GetConfigPath(gamePath);
+        if (!File.Exists(configPath))
+            return Task.FromResult<string?>(null);
+        return Task.FromResult<string?>(File.ReadAllText(configPath));
+    }
+
+    /// <summary>
+    /// Save raw INI file content directly.
+    /// </summary>
+    public Task SaveRawAsync(string gamePath, string content, CancellationToken ct = default)
+    {
+        var configPath = GetConfigPath(gamePath);
+        var configDir = Path.GetDirectoryName(configPath)!;
+        Directory.CreateDirectory(configDir);
+        File.WriteAllText(configPath, content);
+        logger.LogInformation("已保存原始配置文件: {Path}", configPath);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Apply optimal default settings to the config file (called during installation).
+    /// Only modifies specific keys, preserves all other content.
+    /// </summary>
+    public Task ApplyOptimalDefaultsAsync(string gamePath, CancellationToken ct = default)
+    {
+        var configPath = GetConfigPath(gamePath);
+        if (!File.Exists(configPath))
+            return Task.CompletedTask;
+
+        var lines = File.ReadAllLines(configPath).ToList();
+
+        var tfSection = lines.Any(l => l.Trim().Equals("[TextFrameworks]", StringComparison.OrdinalIgnoreCase))
+            ? "TextFrameworks"
+            : "TextFramework";
+
+        var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [tfSection] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["EnableIMGUI"] = "True",
+                ["EnableUGUI"] = "True",
+                ["EnableNGUI"] = "True",
+                ["EnableTextMeshPro"] = "True",
+                ["EnableTextMesh"] = "True",
+                ["EnableFairyGUI"] = "True",
+            },
+            ["Behaviour"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["MaxCharactersPerTranslation"] = "2500",
+                ["OverrideFont"] = "Microsoft YaHei",
+                ["MaxTextParserRecursion"] = "4",
+                ["CacheParsedTranslations"] = "True",
+            },
+        };
+
+        var result = ApplyModifications(lines, modifications);
+        File.WriteAllText(configPath, string.Join(Environment.NewLine, result) + Environment.NewLine);
+        logger.LogInformation("已应用最佳默认配置: {Path}", configPath);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Patch an existing config file, modifying only the specified keys while preserving all other content.
     /// Falls back to full write if the config file doesn't exist.
     /// </summary>

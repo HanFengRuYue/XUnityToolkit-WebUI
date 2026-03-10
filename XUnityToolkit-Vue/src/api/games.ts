@@ -27,6 +27,12 @@ export const gamesApi = {
   saveConfig: (id: string, config: XUnityConfig) =>
     api.put<XUnityConfig>(`/api/games/${id}/config`, config),
 
+  getRawConfig: (id: string) =>
+    api.get<string>(`/api/games/${id}/config/raw`),
+
+  saveRawConfig: (id: string, content: string) =>
+    api.put<string>(`/api/games/${id}/config/raw`, { content }),
+
   install: (id: string, config?: XUnityConfig) =>
     api.post<InstallationStatus>(`/api/games/${id}/install`, { config }),
 
