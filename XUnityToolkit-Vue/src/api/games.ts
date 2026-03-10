@@ -54,6 +54,24 @@ export const gamesApi = {
   saveGlossary: (id: string, entries: GlossaryEntry[]) =>
     api.put<GlossaryEntry[]>(`/api/games/${id}/glossary`, entries),
 
+  // Icon
+  getIconUrl: (id: string) => `/api/games/${id}/icon`,
+  uploadIcon: async (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('icon', file)
+    const resp = await fetch(`/api/games/${id}/icon/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+  },
+  deleteCustomIcon: (id: string) => api.del<void>(`/api/games/${id}/icon/custom`),
+
   // Cover image
   getCoverUrl: (id: string) => `/api/games/${id}/cover`,
   deleteCover: (id: string) => api.del<void>(`/api/games/${id}/cover`),

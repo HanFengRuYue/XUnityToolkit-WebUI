@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { NButton, NIcon, NSelect, NButtonGroup, useMessage } from 'naive-ui'
+import { onMounted, ref, h } from 'vue'
+import { NButton, NIcon, NSelect, NButtonGroup, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
 import { Add } from '@vicons/ionicons5'
-import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound } from '@vicons/material'
+import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound, DriveFileRenameOutlineOutlined, PhotoCameraOutlined } from '@vicons/material'
 import { useRouter } from 'vue-router'
 import { useGamesStore } from '@/stores/games'
 import { useAddGameFlow } from '@/composables/useAddGameFlow'
@@ -17,6 +17,22 @@ const { addGame } = useAddGameFlow(message)
 
 const showCoverPicker = ref(false)
 const coverPickerGame = ref<Game | null>(null)
+
+// Context menu state
+const showContextMenu = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+const contextMenuGame = ref<Game | null>(null)
+const contextMenuOptions = [
+  { label: '重命名', key: 'rename', icon: () => h(NIcon, { size: 16 }, { default: () => h(DriveFileRenameOutlineOutlined) }) },
+  { label: '更换封面', key: 'cover', icon: () => h(NIcon, { size: 16 }, { default: () => h(PhotoCameraOutlined) }) },
+]
+
+// Rename modal state
+const showRenameModal = ref(false)
+const renameValue = ref('')
+const renameGameId = ref('')
+const renameSaving = ref(false)
 
 onMounted(async () => {
   await gamesStore.loadPreferences()
@@ -44,6 +60,43 @@ function handleSortChange(value: string) {
 function openCoverPicker(game: Game) {
   coverPickerGame.value = game
   showCoverPicker.value = true
+}
+
+function handleCardContextMenu(e: MouseEvent, game: Game) {
+  contextMenuGame.value = game
+  contextMenuX.value = e.clientX
+  contextMenuY.value = e.clientY
+  showContextMenu.value = true
+}
+
+function handleContextMenuSelect(key: string) {
+  showContextMenu.value = false
+  if (!contextMenuGame.value) return
+  if (key === 'rename') {
+    renameGameId.value = contextMenuGame.value.id
+    renameValue.value = contextMenuGame.value.name
+    showRenameModal.value = true
+  } else if (key === 'cover') {
+    openCoverPicker(contextMenuGame.value)
+  }
+}
+
+async function handleRenameConfirm() {
+  const name = renameValue.value.trim()
+  if (!name || !renameGameId.value) {
+    showRenameModal.value = false
+    return
+  }
+  renameSaving.value = true
+  try {
+    await gamesStore.renameGame(renameGameId.value, name)
+    message.success('游戏名称已更新')
+  } catch {
+    message.error('重命名失败')
+  } finally {
+    renameSaving.value = false
+    showRenameModal.value = false
+  }
 }
 
 function getStatusInfo(state: string) {
@@ -155,6 +208,7 @@ const sortOptions = [
         :index="index"
         @navigate="navigateToGame"
         @edit-cover="openCoverPicker"
+        @context-menu="handleCardContextMenu"
       />
     </div>
 
@@ -166,11 +220,12 @@ const sortOptions = [
         class="game-row"
         :style="{ animationDelay: `${index * 0.04}s` }"
         @click="navigateToGame(game.id)"
+        @contextmenu.prevent="handleCardContextMenu($event, game)"
       >
         <!-- Icon -->
         <div class="row-icon">
           <img
-            :src="`/api/games/${game.id}/icon`"
+            :src="`/api/games/${game.id}/icon?t=${game.updatedAt}`"
             :alt="game.name"
             class="icon-img"
             @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.add('visible')"
@@ -229,6 +284,38 @@ const sortOptions = [
         </div>
       </div>
     </div>
+
+    <!-- Context Menu -->
+    <NDropdown
+      trigger="manual"
+      :show="showContextMenu"
+      :options="contextMenuOptions"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      placement="bottom-start"
+      @clickoutside="showContextMenu = false"
+      @select="handleContextMenuSelect"
+    />
+
+    <!-- Rename Modal -->
+    <NModal
+      :show="showRenameModal"
+      preset="dialog"
+      title="重命名游戏"
+      positive-text="确定"
+      negative-text="取消"
+      :positive-button-props="{ loading: renameSaving }"
+      @positive-click="handleRenameConfirm"
+      @negative-click="showRenameModal = false"
+      @mask-click="showRenameModal = false"
+    >
+      <NInput
+        v-model:value="renameValue"
+        placeholder="输入新名称"
+        @keyup.enter="handleRenameConfirm"
+        autofocus
+      />
+    </NModal>
 
     <!-- Cover Picker Modal (lazy loaded) -->
     <CoverPickerModal

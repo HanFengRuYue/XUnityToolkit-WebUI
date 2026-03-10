@@ -15,6 +15,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string GlossariesDirectory => Path.Combine(_root, "glossaries");
 
     public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
+    public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
     public string LogsDirectory => Path.Combine(_root, "logs");
     public string LogFile => Path.Combine(LogsDirectory, "app.log");
 
@@ -30,12 +31,16 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CoverMetaFile(string gameId) =>
         Path.Combine(CoversDirectory, $"{gameId}.meta");
 
+    public string CustomIconFile(string gameId) =>
+        Path.Combine(IconsDirectory, $"{gameId}.custom.png");
+
     public void EnsureDirectoriesExist()
     {
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(BackupsDirectory);
         Directory.CreateDirectory(CacheDirectory);
         Directory.CreateDirectory(CoversDirectory);
+        Directory.CreateDirectory(IconsDirectory);
         Directory.CreateDirectory(GlossariesDirectory);
         Directory.CreateDirectory(LogsDirectory);
     }

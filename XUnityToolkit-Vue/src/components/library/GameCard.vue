@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { NIcon } from 'naive-ui'
 import { PlayArrowRound, PhotoCameraOutlined, GamepadFilled } from '@vicons/material'
 import type { Game } from '@/api/types'
@@ -13,12 +13,19 @@ const props = defineProps<{
 const emit = defineEmits<{
   navigate: [id: string]
   editCover: [game: Game]
+  contextMenu: [e: MouseEvent, game: Game]
 }>()
 
 const coverLoaded = ref(false)
 const coverError = ref(false)
 const coverUrl = computed(() => `${gamesApi.getCoverUrl(props.game.id)}?t=${props.game.updatedAt}`)
-const iconUrl = computed(() => `/api/games/${props.game.id}/icon`)
+const iconUrl = computed(() => `${gamesApi.getIconUrl(props.game.id)}?t=${props.game.updatedAt}`)
+
+// Reset loading state when cover URL changes (e.g. after cover update, rename)
+watch(coverUrl, () => {
+  coverLoaded.value = false
+  coverError.value = false
+})
 
 function onCoverLoad() {
   coverLoaded.value = true
@@ -66,6 +73,12 @@ function handleEditCover(e: MouseEvent) {
   emit('editCover', props.game)
 }
 
+function handleContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  emit('contextMenu', e, props.game)
+}
+
 const statusInfo = computed(() => getStatusInfo(props.game.installState))
 const hasExe = computed(() => !!(props.game.executableName || props.game.detectedInfo?.detectedExecutable))
 </script>
@@ -75,6 +88,7 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
     class="game-card"
     :style="{ animationDelay: `${index * 0.03}s` }"
     @click="emit('navigate', game.id)"
+    @contextmenu="handleContextMenu"
   >
     <!-- Cover Area -->
     <div class="card-cover">
@@ -83,10 +97,10 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 
       <!-- Cover image from SteamGridDB or uploaded -->
       <img
-        v-show="coverLoaded && !coverError"
         :src="coverUrl"
         :alt="game.name"
         class="cover-img"
+        :class="{ 'cover-img-visible': coverLoaded && !coverError }"
         loading="lazy"
         @load="onCoverLoad"
         @error="onCoverError"
@@ -190,10 +204,17 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 }
 
 .cover-img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.4s var(--ease-out);
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.4s var(--ease-out);
+}
+
+.cover-img-visible {
+  opacity: 1;
 }
 
 .game-card:hover .cover-img {

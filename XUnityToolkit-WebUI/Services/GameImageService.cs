@@ -1,3 +1,5 @@
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -118,6 +120,10 @@ public sealed class GameImageService(
         {
             _lock.Release();
         }
+
+        // Auto-fetch icon from SteamGridDB (best effort)
+        if (steamGridDbGameId.HasValue)
+            await SaveCustomIconFromSteamGridDbAsync(gameId, steamGridDbGameId.Value, ct);
     }
 
     public async Task SaveCoverFromUploadAsync(string gameId, Stream imageStream, string contentType, CancellationToken ct = default)
@@ -183,6 +189,130 @@ public sealed class GameImageService(
         }
     }
 
+    // ===== Custom Icon Management =====
+
+    public bool HasCustomIcon(string gameId) => File.Exists(paths.CustomIconFile(gameId));
+
+    public async Task<byte[]?> GetCustomIconAsync(string gameId, CancellationToken ct = default)
+    {
+        var path = paths.CustomIconFile(gameId);
+        if (!File.Exists(path)) return null;
+        return await File.ReadAllBytesAsync(path, ct);
+    }
+
+    public async Task SaveCustomIconFromUploadAsync(string gameId, Stream imageStream, CancellationToken ct = default)
+    {
+        using var ms = new MemoryStream();
+        await imageStream.CopyToAsync(ms, ct);
+        var pngBytes = ConvertToPng(ms.ToArray());
+        await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
+    }
+
+    public async Task DeleteCustomIconAsync(string gameId, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var path = paths.CustomIconFile(gameId);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+                logger.LogInformation("已删除游戏 {GameId} 的自定义图标", gameId);
+            }
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task SaveCustomIconFromSteamGridDbAsync(string gameId, int steamGridDbGameId, CancellationToken ct = default)
+    {
+        try
+        {
+            var apiKey = await GetApiKeyAsync(ct);
+            var client = httpClientFactory.CreateClient("SteamGridDB");
+
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"icons/game/{steamGridDbGameId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var response = await client.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            var icons = await ParseSteamGridDbResponse<List<SteamGridDbImage>>(response, ct);
+            if (icons.Count == 0) return;
+
+            // Download first icon
+            var iconResponse = await client.GetAsync(icons[0].Url, ct);
+            iconResponse.EnsureSuccessStatusCode();
+            var bytes = await iconResponse.Content.ReadAsByteArrayAsync(ct);
+
+            var pngBytes = ConvertToPng(bytes);
+            await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "从 SteamGridDB 获取图标失败 (游戏 {GameId})", gameId);
+        }
+    }
+
+    private async Task TrySaveIconFromSteamGridDbBySteamAppIdAsync(string gameId, int steamAppId, CancellationToken ct)
+    {
+        try
+        {
+            var settings = await settingsService.GetAsync(ct);
+            if (string.IsNullOrEmpty(settings.SteamGridDbApiKey))
+                return; // No API key, keep exe icon
+
+            var client = httpClientFactory.CreateClient("SteamGridDB");
+
+            // Look up SteamGridDB game by Steam AppID
+            using var lookupRequest = new HttpRequestMessage(HttpMethod.Get, $"games/steam/{steamAppId}");
+            lookupRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.SteamGridDbApiKey);
+
+            var lookupResponse = await client.SendAsync(lookupRequest, ct);
+            lookupResponse.EnsureSuccessStatusCode();
+
+            var sgdbGame = await ParseSteamGridDbResponse<SteamGridDbSearchResult>(lookupResponse, ct);
+            if (sgdbGame is null) return;
+
+            // Fetch icon using the SteamGridDB game ID
+            await SaveCustomIconFromSteamGridDbAsync(gameId, sgdbGame.Id, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "无法通过 Steam AppID {SteamAppId} 从 SteamGridDB 获取图标，将使用程序图标", steamAppId);
+        }
+    }
+
+    private async Task SaveCustomIconBytesAsync(string gameId, byte[] pngBytes, CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(paths.IconsDirectory);
+            var path = paths.CustomIconFile(gameId);
+            var tmpPath = path + ".tmp";
+            await File.WriteAllBytesAsync(tmpPath, pngBytes, ct);
+            File.Move(tmpPath, path, overwrite: true);
+            logger.LogInformation("已保存游戏 {GameId} 的自定义图标", gameId);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    private static byte[] ConvertToPng(byte[] imageBytes)
+    {
+        using var inputStream = new MemoryStream(imageBytes);
+        using var bitmap = new Bitmap(inputStream);
+        using var ms = new MemoryStream();
+        bitmap.Save(ms, ImageFormat.Png);
+        return ms.ToArray();
+    }
+
     public async Task<List<SteamStoreSearchResult>> SearchSteamGamesAsync(string query, CancellationToken ct = default)
     {
         var client = httpClientFactory.CreateClient();
@@ -240,10 +370,11 @@ public sealed class GameImageService(
             imageUrl = headerUrl;
         }
 
+        byte[] coverBytes;
         using (response)
         {
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            coverBytes = await response.Content.ReadAsByteArrayAsync(ct);
 
             await _lock.WaitAsync(ct);
             try
@@ -252,7 +383,7 @@ public sealed class GameImageService(
 
                 var coverPath = paths.CoverFile(gameId);
                 var tmpPath = coverPath + ".tmp";
-                await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+                await File.WriteAllBytesAsync(tmpPath, coverBytes, ct);
                 File.Move(tmpPath, coverPath, overwrite: true);
 
                 var meta = new CoverMeta
@@ -274,6 +405,9 @@ public sealed class GameImageService(
                 _lock.Release();
             }
         }
+
+        // Try to get icon from SteamGridDB via Steam AppID (requires API key, best effort)
+        await TrySaveIconFromSteamGridDbBySteamAppIdAsync(gameId, steamAppId, ct);
 
         return true;
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, h, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -7,6 +7,7 @@ import {
   NIcon,
   NInput,
   NSwitch,
+  NDropdown,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -29,6 +30,9 @@ import {
   AddOutlined,
   DeleteOutlined,
   PhotoCameraOutlined,
+  DriveFileRenameOutlineOutlined,
+  CloudUploadOutlined,
+  DeleteOutlineOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -57,6 +61,22 @@ const aiEndpointLoading = ref(false)
 const glossaryEntries = ref<GlossaryEntry[]>([])
 const glossarySaving = ref(false)
 const showCoverPicker = ref(false)
+
+// Name editing state
+const editingName = ref(false)
+const editNameValue = ref('')
+
+// Icon context menu state
+const showIconContextMenu = ref(false)
+const iconContextMenuX = ref(0)
+const iconContextMenuY = ref(0)
+const iconContextMenuOptions = [
+  { label: '更换封面', key: 'cover', icon: () => h(NIcon, { size: 16 }, { default: () => h(PhotoCameraOutlined) }) },
+  { label: '上传自定义图标', key: 'upload-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(CloudUploadOutlined) }) },
+  { label: '删除自定义图标', key: 'delete-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(DeleteOutlineOutlined) }) },
+]
+
+const iconUrl = computed(() => game.value ? `/api/games/${gameId}/icon?t=${game.value.updatedAt}` : '')
 
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
@@ -181,6 +201,79 @@ function handleRemoveGame() {
   })
 }
 
+function startEditName() {
+  editNameValue.value = game.value?.name ?? ''
+  editingName.value = true
+}
+
+async function saveEditName() {
+  if (!editingName.value) return
+  editingName.value = false
+  const name = editNameValue.value.trim()
+  if (!name || !game.value || name === game.value.name) return
+  try {
+    await gamesStore.renameGame(gameId, name)
+    game.value!.name = name
+    message.success('游戏名称已更新')
+  } catch {
+    message.error('重命名失败')
+  }
+}
+
+function cancelEditName() {
+  editingName.value = false
+}
+
+function handleIconContextMenu(e: MouseEvent) {
+  e.preventDefault()
+  iconContextMenuX.value = e.clientX
+  iconContextMenuY.value = e.clientY
+  showIconContextMenu.value = true
+}
+
+async function handleIconContextMenuSelect(key: string) {
+  showIconContextMenu.value = false
+  if (key === 'cover') {
+    showCoverPicker.value = true
+  } else if (key === 'upload-icon') {
+    iconFileInput.value?.click()
+  } else if (key === 'delete-icon') {
+    try {
+      await gamesApi.deleteCustomIcon(gameId)
+      await gamesStore.refreshGame(gameId)
+      if (game.value) game.value = await gamesApi.get(gameId)
+      message.success('自定义图标已删除')
+    } catch {
+      message.error('删除图标失败')
+    }
+  }
+}
+
+const iconFileInput = ref<HTMLInputElement | null>(null)
+
+async function handleIconFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    message.error('仅支持 JPEG、PNG 或 WebP 格式')
+    return
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    message.error('图片文件不能超过 5 MB')
+    return
+  }
+  try {
+    await gamesApi.uploadIcon(gameId, file)
+    await gamesStore.refreshGame(gameId)
+    if (game.value) game.value = await gamesApi.get(gameId)
+    message.success('自定义图标已上传')
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '上传图标失败')
+  }
+}
+
 async function handleInstallAiEndpoint() {
   aiEndpointLoading.value = true
   try {
@@ -299,9 +392,9 @@ onUnmounted(() => stopWatch())
 
     <!-- Game Title -->
     <div class="game-title-section" style="animation-delay: 0.05s">
-      <div class="title-icon" @click="showCoverPicker = true" title="更换封面">
+      <div class="title-icon" @click="showCoverPicker = true" @contextmenu="handleIconContextMenu" title="左键更换封面 / 右键更多操作">
         <img
-          :src="`/api/games/${gameId}/icon`"
+          :src="iconUrl"
           :alt="game.name"
           class="title-icon-img"
           @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.add('visible')"
@@ -317,7 +410,22 @@ onUnmounted(() => stopWatch())
           </NIcon>
         </div>
       </div>
-      <h1 class="game-title">{{ game.name }}</h1>
+      <h1 v-if="!editingName" class="game-title" @dblclick="startEditName">{{ game.name }}</h1>
+      <NInput
+        v-else
+        v-model:value="editNameValue"
+        class="game-title-input"
+        size="large"
+        autofocus
+        @keyup.enter="saveEditName"
+        @keyup.escape="cancelEditName"
+        @blur="saveEditName"
+      />
+      <button v-if="!editingName" class="edit-name-btn" title="重命名" @click="startEditName">
+        <NIcon :size="16" color="var(--text-3)">
+          <DriveFileRenameOutlineOutlined />
+        </NIcon>
+      </button>
       <div class="title-status">
         <template v-if="game.isUnityGame">
           <span class="status-indicator" :class="{
@@ -667,6 +775,27 @@ onUnmounted(() => stopWatch())
       </div>
     </div>
 
+    <!-- Icon Context Menu -->
+    <NDropdown
+      trigger="manual"
+      :show="showIconContextMenu"
+      :options="iconContextMenuOptions"
+      :x="iconContextMenuX"
+      :y="iconContextMenuY"
+      placement="bottom-start"
+      @clickoutside="showIconContextMenu = false"
+      @select="handleIconContextMenuSelect"
+    />
+
+    <!-- Hidden file input for icon upload -->
+    <input
+      ref="iconFileInput"
+      type="file"
+      accept="image/jpeg,image/png,image/webp"
+      style="display: none"
+      @change="handleIconFileSelect"
+    />
+
     <!-- Cover Picker Modal -->
     <CoverPickerModal
       v-if="showCoverPicker"
@@ -814,6 +943,34 @@ onUnmounted(() => stopWatch())
   color: var(--text-1);
   margin: 0;
   letter-spacing: -0.03em;
+  cursor: default;
+}
+
+.game-title-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.edit-name-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.game-title-section:hover .edit-name-btn {
+  opacity: 1;
+}
+
+.edit-name-btn:hover {
+  background: var(--bg-muted);
 }
 
 .title-status {

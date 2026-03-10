@@ -90,7 +90,8 @@ XUnityToolkit-Vue/src/
 
 - Add game with detection: `POST /api/games/add-with-detection` — auto-detects exe, Unity status, installed plugins/frameworks; returns `AddGameResponse { needsExeSelection, game }`
 - Framework uninstall: `DELETE /api/games/{id}/framework/{framework}` — uninstalls non-BepInEx mod frameworks (MelonLoader, IPA, ReiPatcher, Sybaris, UnityInjector, Standalone)
-- Game icon extraction: `GET /api/games/{id}/icon` — extracts icon from game exe via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`
+- Game icon extraction: `GET /api/games/{id}/icon` — priority: custom icon (`{gameId}.custom.png`) > exe icon (`{gameId}.png`); exe icon extracted via `System.Drawing.Icon.ExtractAssociatedIcon()`, cached at `%APPDATA%/XUnityToolkit/cache/icons/`; custom icons auto-saved from SteamGridDB `icons/game/{id}` endpoint during cover save, or manually uploaded via `POST /api/games/{id}/icon/upload`; `DELETE /api/games/{id}/icon/custom` removes custom icon
+- Game rename: `PUT /api/games/{id}` with `{ name }` — frontend supports inline editing (GameDetailView) and right-click context menu (LibraryView)
 - Game actions: `POST /api/games/{id}/open-folder` (opens explorer), `POST /api/games/{id}/launch` (runs game exe)
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
 - Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version), `POST /api/settings/reset` (delete all app data: settings, library, cache, backups)
@@ -155,6 +156,9 @@ XUnityToolkit-Vue/src/
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
 - **Naive UI NInput 绑定 `string?` 字段**：不要用 `v-model:value`（会收到 `undefined` 导致运行时警告），应使用 `:value="form.field ?? ''"` + `@update:value` 模式；API key 字段用 `v || undefined` 防止发送空字符串
+- **`v-show` + `loading="lazy"` 死锁**：`v-show` 设置 `display: none` → 元素无布局尺寸 → `IntersectionObserver`（lazy loading）永远不触发加载；改用 `opacity: 0` + `position: absolute` 保持布局，让 lazy loading 正常工作
+- **Vue `v-for` 组件 prop 变化时 ref 不重置**：key 不变但 prop 数据更新时，组件内 ref 保持旧值；对依赖 prop 计算的 URL 加 `watch` 来重置加载状态（如 `coverLoaded`/`coverError`）
+- **NInput `@blur` + `@keyup.enter` 双重触发**：Enter 键触发 handler → handler 移除 NInput → 触发 blur → 再次调用 handler；需在 handler 开头加 flag 守卫（`if (!editing.value) return`）
 - **TypeScript 对象更新**：更新 `ApiEndpointConfig` 等类型化对象时，用 `Object.assign({}, obj, patch)` 而非 `{ ...obj, ...patch }`（spread 会产生 `Partial<T>` 类型不兼容错误）
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
 - Verify `@vicons/material` icon availability before importing: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`

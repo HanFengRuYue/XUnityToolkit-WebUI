@@ -56,6 +56,18 @@ export const useGamesStore = defineStore('games', () => {
     }
   }
 
+  async function renameGame(id: string, name: string) {
+    try {
+      const game = await gamesApi.update(id, { name })
+      const index = games.value.findIndex((g) => g.id === id)
+      if (index >= 0) games.value[index] = game
+      return game
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Failed to rename game'
+      return null
+    }
+  }
+
   async function removeGame(id: string) {
     try {
       await gamesApi.remove(id)
@@ -134,6 +146,7 @@ export const useGamesStore = defineStore('games', () => {
     installedCount,
     fetchGames,
     addGame,
+    renameGame,
     removeGame,
     refreshGame,
     detectGame,

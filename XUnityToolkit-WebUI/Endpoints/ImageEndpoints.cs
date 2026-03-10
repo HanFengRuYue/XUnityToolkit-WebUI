@@ -10,7 +10,7 @@ public static class ImageEndpoints
         var group = app.MapGroup("/api/games/{id}");
 
         // Serve cover image (raw bytes, no ApiResult wrapper)
-        group.MapGet("/cover", async (string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
+        group.MapGet("/cover", async (HttpContext context, string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -20,6 +20,7 @@ public static class ImageEndpoints
             if (result is null)
                 return Results.NotFound();
 
+            context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
             var (bytes, contentType) = result.Value;
             return Results.File(bytes, contentType);
         });

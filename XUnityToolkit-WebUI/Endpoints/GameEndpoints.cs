@@ -27,12 +27,20 @@ public static class GameEndpoints
                 : Results.NotFound(ApiResult<Game>.Fail("Game not found."));
         });
 
-        group.MapGet("/{id}/icon", async (string id, GameLibraryService library, AppDataPaths paths) =>
+        group.MapGet("/{id}/icon", async (HttpContext context, string id, GameLibraryService library, GameImageService imageService, AppDataPaths paths, CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound();
 
+            context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+
+            // Check for custom icon first (from Steam/SteamGridDB/upload)
+            var customIcon = await imageService.GetCustomIconAsync(id, ct);
+            if (customIcon is not null)
+                return Results.File(customIcon, "image/png");
+
+            // Fall back to exe icon extraction
             var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable;
             if (string.IsNullOrEmpty(exeName))
                 return Results.NotFound();
@@ -41,19 +49,18 @@ public static class GameEndpoints
             if (!File.Exists(exePath))
                 return Results.NotFound();
 
-            // Check cache
-            var iconsDir = Path.Combine(paths.CacheDirectory, "icons");
+            // Check exe icon cache
+            var iconsDir = paths.IconsDirectory;
             Directory.CreateDirectory(iconsDir);
             var cachePath = Path.Combine(iconsDir, $"{game.Id}.png");
 
             if (File.Exists(cachePath))
             {
-                // Invalidate cache if exe is newer
                 var exeTime = File.GetLastWriteTimeUtc(exePath);
                 var cacheTime = File.GetLastWriteTimeUtc(cachePath);
                 if (cacheTime > exeTime)
                 {
-                    var bytes = await File.ReadAllBytesAsync(cachePath);
+                    var bytes = await File.ReadAllBytesAsync(cachePath, ct);
                     return Results.File(bytes, "image/png");
                 }
             }
@@ -68,8 +75,7 @@ public static class GameEndpoints
             bitmap.Save(ms, ImageFormat.Png);
             var pngBytes = ms.ToArray();
 
-            // Write cache
-            await File.WriteAllBytesAsync(cachePath, pngBytes);
+            await File.WriteAllBytesAsync(cachePath, pngBytes, ct);
 
             return Results.File(pngBytes, "image/png");
         });
@@ -241,14 +247,62 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<Game>.Ok(updated));
         });
 
+        // Upload custom icon
+        group.MapPost("/{id}/icon/upload", async (
+            HttpRequest httpRequest,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var form = await httpRequest.ReadFormAsync(ct);
+            var file = form.Files.GetFile("icon");
+            if (file is null || file.Length == 0)
+                return Results.BadRequest(ApiResult.Fail("请选择一个图片文件。"));
+
+            if (file.Length > 5 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("图片文件不能超过 5 MB。"));
+
+            if (!GameImageService.IsAllowedContentType(file.ContentType))
+                return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
+
+            using var stream = file.OpenReadStream();
+            await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+
+            // Update game timestamp for cache busting
+            await library.UpdateAsync(game);
+            return Results.Ok(ApiResult.Ok());
+        }).DisableAntiforgery();
+
+        // Delete custom icon
+        group.MapDelete("/{id}/icon/custom", async (
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            await imageService.DeleteCustomIconAsync(id, ct);
+            await library.UpdateAsync(game);
+            return Results.Ok(ApiResult.Ok());
+        });
+
         group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            // Clean up cover image
+            // Clean up cover image and custom icon
             await imageService.DeleteCoverAsync(id, ct);
+            await imageService.DeleteCustomIconAsync(id, ct);
             return Results.Ok(ApiResult.Ok());
         });
 
