@@ -20,31 +20,125 @@ public static class TranslateEndpoints
             try
             {
                 var translations = await translationService.TranslateAsync(
-                    request.Texts, request.From ?? "ja", request.To ?? "zh", ct);
+                    request.Texts, request.From ?? "ja", request.To ?? "zh",
+                    request.GameId, ct);
                 logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
                 return Results.Ok(new TranslateResponse(translations));
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("已停用"))
+            {
+                logger.LogWarning("AI 翻译已停用");
+                translationService.RecordError("AI 翻译功能已停用");
+                return Results.Json(ApiResult.Fail(ex.Message), statusCode: 503);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("队列已满"))
+            {
+                logger.LogWarning("翻译队列已满，请求被拒绝");
+                return Results.Json(ApiResult.Fail(ex.Message), statusCode: 503);
             }
             catch (InvalidOperationException ex)
             {
                 logger.LogWarning("AI 翻译配置错误: {Message}", ex.Message);
+                translationService.RecordError($"配置错误: {ex.Message}");
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)
             {
                 logger.LogError(ex, "AI 翻译 API 调用失败");
+                translationService.RecordError($"LLM API 调用失败: {ex.Message}");
                 return Results.Json(ApiResult.Fail($"LLM API 调用失败: {ex.Message}"), statusCode: 502);
+            }
+            catch (OperationCanceledException)
+            {
+                // 客户端断开或 API 超时 — 不算翻译错误，仅记录日志
+                logger.LogWarning("翻译请求被取消（客户端断开或 API 超时）");
+                return Results.Json(ApiResult.Fail("请求已取消"), statusCode: 499);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "翻译时发生未知错误");
+                translationService.RecordError($"未知错误: {ex.Message}");
+                return Results.Json(ApiResult.Fail($"内部错误: {ex.Message}"), statusCode: 500);
             }
         });
 
         app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
             Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
+
+        // Toggle AI translation on/off
+        app.MapPost("/api/ai/toggle", async (
+            AiToggleRequest request,
+            LlmTranslationService translationService,
+            AppSettingsService settingsService,
+            ILogger<LlmTranslationService> logger,
+            CancellationToken ct) =>
+        {
+            translationService.Enabled = request.Enabled;
+
+            // Persist to settings — use UpdateAsync to avoid mutating the cached object
+            await settingsService.UpdateAsync(s => s.AiTranslation.Enabled = request.Enabled, ct);
+
+            logger.LogInformation("AI 翻译已{State}", request.Enabled ? "启用" : "停用");
+            return Results.Ok(ApiResult<bool>.Ok(request.Enabled));
+        });
+
+        // Test translation with specific endpoint(s)
+        app.MapPost("/api/translate/test", async (
+            TestTranslateRequest request,
+            LlmTranslationService translationService,
+            ILogger<LlmTranslationService> logger,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var results = await translationService.TestTranslateAsync(
+                    request.Endpoints, request.SystemPrompt, request.Temperature, ct);
+                return Results.Ok(ApiResult<IList<EndpointTestResult>>.Ok(results));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "测试翻译失败");
+                return Results.Json(ApiResult.Fail($"测试翻译失败: {ex.Message}"), statusCode: 500);
+            }
+        });
+
+        // Fetch available models from provider
+        app.MapGet("/api/ai/models", async (
+            LlmProvider provider,
+            string? apiBaseUrl,
+            string apiKey,
+            LlmTranslationService translationService,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var models = await translationService.FetchModelsAsync(provider, apiBaseUrl ?? "", apiKey, ct);
+                return Results.Ok(ApiResult<IList<string>>.Ok(models));
+            }
+            catch
+            {
+                return Results.Ok(ApiResult<IList<string>>.Ok(Array.Empty<string>()));
+            }
+        });
     }
 }
 
 public record TranslateRequest(
     [property: JsonPropertyName("texts")] IList<string> Texts,
     [property: JsonPropertyName("from")] string? From,
-    [property: JsonPropertyName("to")] string? To);
+    [property: JsonPropertyName("to")] string? To,
+    [property: JsonPropertyName("gameId")] string? GameId);
 
 public record TranslateResponse(
     [property: JsonPropertyName("translations")] IList<string> Translations);
+
+public record AiToggleRequest(bool Enabled);
+
+public record TestTranslateRequest(
+    [property: JsonPropertyName("endpoints")] IList<ApiEndpointConfig> Endpoints,
+    [property: JsonPropertyName("systemPrompt")] string SystemPrompt,
+    [property: JsonPropertyName("temperature")] double Temperature);

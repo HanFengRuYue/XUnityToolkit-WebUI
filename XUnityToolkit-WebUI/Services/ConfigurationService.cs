@@ -3,7 +3,7 @@ using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
 
-public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
+public sealed class ConfigurationService(ILogger<ConfigurationService> logger, AppSettingsService settingsService)
 {
     private const string ConfigFileName = "AutoTranslatorConfig.ini";
 
@@ -120,17 +120,21 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
     /// Apply optimal default settings to the config file (called during installation).
     /// Only modifies specific keys, preserves all other content.
     /// </summary>
-    public Task ApplyOptimalDefaultsAsync(string gamePath, CancellationToken ct = default)
+    public async Task ApplyOptimalDefaultsAsync(string gamePath, CancellationToken ct = default)
     {
         var configPath = GetConfigPath(gamePath);
         if (!File.Exists(configPath))
-            return Task.CompletedTask;
+            return;
 
         var lines = File.ReadAllLines(configPath).ToList();
 
         var tfSection = lines.Any(l => l.Trim().Equals("[TextFrameworks]", StringComparison.OrdinalIgnoreCase))
             ? "TextFrameworks"
             : "TextFramework";
+
+        // Read current port from settings for LLMTranslate URL
+        var settings = await settingsService.GetAsync(ct);
+        var port = settings.AiTranslation.Port;
 
         var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
         {
@@ -150,12 +154,20 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
                 ["MaxTextParserRecursion"] = "4",
                 ["CacheParsedTranslations"] = "True",
             },
+            ["Service"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Endpoint"] = "LLMTranslate",
+                ["FallbackEndpoint"] = "GoogleTranslateV2",
+            },
+            ["LLMTranslate"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+            },
         };
 
         var result = ApplyModifications(lines, modifications);
         File.WriteAllText(configPath, string.Join(Environment.NewLine, result) + Environment.NewLine);
         logger.LogInformation("已应用最佳默认配置: {Path}", configPath);
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -325,6 +337,27 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger)
 
         File.WriteAllText(configPath, sb.ToString());
         logger.LogInformation("已写入配置文件: {Path}", configPath);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Patch a single section in the config file, modifying only the specified keys.
+    /// </summary>
+    public Task PatchSectionAsync(string gamePath, string section, Dictionary<string, string> keys, CancellationToken ct = default)
+    {
+        var configPath = GetConfigPath(gamePath);
+        if (!File.Exists(configPath))
+            return Task.CompletedTask;
+
+        var lines = File.ReadAllLines(configPath).ToList();
+        var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [section] = new Dictionary<string, string>(keys, StringComparer.OrdinalIgnoreCase),
+        };
+
+        var result = ApplyModifications(lines, modifications);
+        File.WriteAllText(configPath, string.Join(Environment.NewLine, result) + Environment.NewLine);
+        logger.LogInformation("已更新配置 [{Section}]: {Path}", section, configPath);
         return Task.CompletedTask;
     }
 

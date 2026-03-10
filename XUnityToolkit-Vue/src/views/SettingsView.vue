@@ -21,6 +21,7 @@ import {
   PersonOutlined,
   OpenInNewOutlined,
   WarningAmberOutlined,
+  ImageOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { cacheApi, settingsApi } from '@/api/games'
@@ -72,13 +73,16 @@ const settings = ref<AppSettings>({
   mirrorUrl: 'https://ghfast.top/',
   theme: themeStore.mode,
   aiTranslation: {
-    provider: 'OpenAI',
-    apiBaseUrl: '',
-    apiKey: '',
-    modelName: '',
+    enabled: true,
+    maxConcurrency: 5,
+    port: 51821,
     systemPrompt: '',
     temperature: 0.3,
+    endpoints: [],
   },
+  steamGridDbApiKey: undefined,
+  libraryViewMode: 'grid',
+  librarySortBy: 'name',
 })
 const settingsLoading = ref(false)
 
@@ -266,6 +270,40 @@ onMounted(() => {
             保存设置
           </NButton>
         </div>
+      </div>
+    </div>
+
+    <!-- Game Covers -->
+    <div class="section-card" style="animation-delay: 0.15s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon covers">
+            <NIcon :size="16"><ImageOutlined /></NIcon>
+          </span>
+          游戏封面
+        </h2>
+      </div>
+      <div class="settings-form">
+        <div class="form-row">
+          <label class="form-label">SteamGridDB API Key</label>
+          <NInput
+            :value="settings.steamGridDbApiKey ?? ''"
+            @update:value="settings.steamGridDbApiKey = $event || undefined"
+            type="password"
+            show-password-on="click"
+            placeholder="输入 SteamGridDB API Key"
+          />
+          <span class="form-hint">
+            免费注册获取：<a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener noreferrer" class="about-link">steamgriddb.com</a>
+            — 用于在游戏库中搜索高清封面图
+          </span>
+        </div>
+      </div>
+      <div class="section-footer">
+        <span></span>
+        <NButton type="primary" :loading="settingsLoading" @click="handleSaveSettings">
+          保存设置
+        </NButton>
       </div>
     </div>
 
@@ -463,6 +501,11 @@ onMounted(() => {
 .section-icon.about {
   background: rgba(167, 139, 250, 0.10);
   color: #a78bfa;
+}
+
+.section-icon.covers {
+  background: rgba(52, 211, 153, 0.10);
+  color: #34d399;
 }
 
 /* ===== Info Grid & Cards ===== */

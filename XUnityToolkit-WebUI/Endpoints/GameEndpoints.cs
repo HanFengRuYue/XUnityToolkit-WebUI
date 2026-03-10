@@ -100,7 +100,9 @@ public static class GameEndpoints
             AddWithDetectionRequest request,
             GameLibraryService library,
             UnityDetectionService detection,
-            PluginDetectionService pluginDetection) =>
+            PluginDetectionService pluginDetection,
+            GameImageService imageService,
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.FolderPath))
                 return Results.BadRequest(ApiResult<AddGameResponse>.Fail("文件夹路径不能为空。"));
@@ -181,6 +183,20 @@ public static class GameEndpoints
                 }
             }
 
+            // Detect Steam AppID from steam_appid.txt
+            int? steamAppId = null;
+            var steamAppIdFile = Path.Combine(folderPath, "steam_appid.txt");
+            if (File.Exists(steamAppIdFile))
+            {
+                try
+                {
+                    var content = (await File.ReadAllTextAsync(steamAppIdFile, ct)).Trim();
+                    if (int.TryParse(content, out var parsedId) && parsedId > 0)
+                        steamAppId = parsedId;
+                }
+                catch { /* ignore read errors */ }
+            }
+
             // Build and save game
             try
             {
@@ -191,7 +207,15 @@ public static class GameEndpoints
                 game.InstalledBepInExVersion = bepInExVersion;
                 game.InstalledXUnityVersion = xUnityVersion;
                 game.DetectedFrameworks = frameworks.Count > 0 ? frameworks : null;
+                game.SteamAppId = steamAppId;
                 await library.UpdateAsync(game);
+
+                // Auto-fetch cover from Steam CDN (best effort)
+                if (steamAppId.HasValue && !imageService.HasCover(game.Id))
+                {
+                    try { await imageService.SaveCoverFromSteamAsync(game.Id, steamAppId.Value, ct); }
+                    catch { /* cover can be set manually later */ }
+                }
 
                 return Results.Created($"/api/games/{game.Id}",
                     ApiResult<AddGameResponse>.Ok(new AddGameResponse
@@ -217,12 +241,15 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<Game>.Ok(updated));
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
-            return removed
-                ? Results.Ok(ApiResult.Ok())
-                : Results.NotFound(ApiResult.Fail("Game not found."));
+            if (!removed)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            // Clean up cover image
+            await imageService.DeleteCoverAsync(id, ct);
+            return Results.Ok(ApiResult.Ok());
         });
 
         group.MapPost("/{id}/open-folder", async (string id, GameLibraryService library) =>
@@ -262,6 +289,11 @@ public static class GameEndpoints
                 WorkingDirectory = game.GamePath,
                 UseShellExecute = true
             });
+
+            // Track last played time
+            game.LastPlayedAt = DateTime.UtcNow;
+            await library.UpdateAsync(game);
+
             return Results.Ok(ApiResult.Ok());
         });
 
@@ -282,7 +314,10 @@ public static class GameEndpoints
         group.MapPost("/{id}/ai-endpoint", async (
             string id,
             GameLibraryService library,
-            XUnityInstallerService xUnityInstaller) =>
+            XUnityInstallerService xUnityInstaller,
+            ConfigurationService configService,
+            AppSettingsService appSettingsService,
+            CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -294,6 +329,21 @@ public static class GameEndpoints
             var deployed = xUnityInstaller.ForceDeployTranslatorEndpoint(game.GamePath);
             if (!deployed)
                 return Results.BadRequest(ApiResult.Fail("AI 翻译端点 DLL 不可用（未嵌入构建）。"));
+
+            // Patch config to ensure LLMTranslate uses 127.0.0.1 (avoids localhost IPv6 issues)
+            var configPath = configService.GetConfigPath(game.GamePath);
+            if (File.Exists(configPath))
+            {
+                var settings = await appSettingsService.GetAsync(ct);
+                var port = settings.AiTranslation.Port;
+                await configService.PatchSectionAsync(game.GamePath, "LLMTranslate",
+                    new Dictionary<string, string>
+                    {
+                        ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+                        ["MaxConcurrency"] = "10",
+                        ["MaxTranslationsPerRequest"] = "10"
+                    }, ct);
+            }
 
             return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(true)));
         });
@@ -309,6 +359,36 @@ public static class GameEndpoints
 
             xUnityInstaller.RemoveTranslatorEndpoint(game.GamePath);
             return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(false)));
+        });
+
+        // Glossary management
+        group.MapGet("/{id}/glossary", async (
+            string id,
+            GameLibraryService library,
+            GlossaryService glossaryService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var entries = await glossaryService.GetAsync(id, ct);
+            return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
+        });
+
+        group.MapPut("/{id}/glossary", async (
+            string id,
+            List<GlossaryEntry> entries,
+            GameLibraryService library,
+            GlossaryService glossaryService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            await glossaryService.SaveAsync(id, entries, ct);
+            return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
         });
 
         // Uninstall a non-BepInEx mod framework

@@ -46,6 +46,9 @@ export interface Game {
   detectedFrameworks?: DetectedModFramework[]
   installedBepInExVersion?: string
   installedXUnityVersion?: string
+  steamAppId?: number
+  steamGridDbGameId?: number
+  lastPlayedAt?: string
 }
 
 export interface AddGameResponse {
@@ -159,33 +162,114 @@ export interface CacheInfo {
   totalBytes: number
 }
 
-export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'Custom'
+export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'DeepSeek' | 'Qwen' | 'GLM' | 'Kimi' | 'Custom'
 
-export interface AiTranslationSettings {
+export interface ApiEndpointConfig {
+  id: string
+  name: string
   provider: LlmProvider
   apiBaseUrl: string
   apiKey: string
   modelName: string
+  priority: number
+  enabled: boolean
+}
+
+export interface AiTranslationSettings {
+  enabled: boolean
+  maxConcurrency: number
+  port: number
   systemPrompt: string
   temperature: number
+  endpoints: ApiEndpointConfig[]
 }
 
 export interface AppSettings {
   mirrorUrl: string
   theme: string
   aiTranslation: AiTranslationSettings
+  steamGridDbApiKey?: string
+  libraryViewMode: string
+  librarySortBy: string
 }
 
 export interface VersionInfo {
   version: string
 }
 
+export interface RecentTranslation {
+  original: string
+  translated: string
+  timestamp: string
+  tokensUsed: number
+  responseTimeMs: number
+  endpointName: string
+}
+
+export interface TranslationError {
+  message: string
+  timestamp: string
+  endpointName?: string
+}
+
 export interface TranslationStats {
   totalTranslated: number
-  inProgress: number
+  translating: number
+  queued: number
   lastRequestAt?: string
+  totalTokensUsed: number
+  averageResponseTimeMs: number
+  requestsPerMinute: number
+  enabled: boolean
+  recentTranslations: RecentTranslation[]
+  totalReceived: number
+  totalErrors: number
+  recentErrors: TranslationError[]
 }
 
 export interface AiEndpointStatus {
   installed: boolean
+}
+
+export interface EndpointTestResult {
+  endpointId: string
+  endpointName: string
+  success: boolean
+  translations?: string[]
+  error?: string
+  responseTimeMs: number
+}
+
+export interface GlossaryEntry {
+  original: string
+  translation: string
+  isRegex: boolean
+}
+
+export interface SteamGridDbSearchResult {
+  id: number
+  name: string
+  verified: boolean
+}
+
+export interface SteamGridDbImage {
+  id: number
+  url: string
+  thumb: string
+  width: number
+  height: number
+  style: string
+  mime: string
+}
+
+export interface CoverInfo {
+  hasCover: boolean
+  source?: string
+  steamGridDbGameId?: number
+}
+
+export interface SteamStoreSearchResult {
+  id: number
+  name: string
+  tinyImage: string
 }

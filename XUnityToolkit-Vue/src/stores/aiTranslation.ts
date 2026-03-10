@@ -41,5 +41,12 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
     stats.value = await translateApi.getStats()
   }
 
-  return { stats, connect, disconnect, fetchStats }
+  async function toggleEnabled(enabled: boolean) {
+    await translateApi.toggle(enabled)
+    if (stats.value) {
+      stats.value = { ...stats.value, enabled }
+    }
+  }
+
+  return { stats, connect, disconnect, fetchStats, toggleEnabled }
 })

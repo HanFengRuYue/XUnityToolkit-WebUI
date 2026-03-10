@@ -12,14 +12,31 @@ public sealed class AppDataPaths(IConfiguration config)
     public string BackupsDirectory => Path.Combine(_root, "backups");
     public string CacheDirectory => Path.Combine(_root, "cache");
     public string SettingsFile => Path.Combine(_root, "settings.json");
+    public string GlossariesDirectory => Path.Combine(_root, "glossaries");
+
+    public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
+    public string LogsDirectory => Path.Combine(_root, "logs");
+    public string LogFile => Path.Combine(LogsDirectory, "app.log");
+
+    public string GlossaryFile(string gameId) =>
+        Path.Combine(GlossariesDirectory, $"{gameId}.json");
 
     public string BackupDirectory(string gameId) =>
         Path.Combine(BackupsDirectory, gameId);
+
+    public string CoverFile(string gameId) =>
+        Path.Combine(CoversDirectory, $"{gameId}.img");
+
+    public string CoverMetaFile(string gameId) =>
+        Path.Combine(CoversDirectory, $"{gameId}.meta");
 
     public void EnsureDirectoriesExist()
     {
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(BackupsDirectory);
         Directory.CreateDirectory(CacheDirectory);
+        Directory.CreateDirectory(CoversDirectory);
+        Directory.CreateDirectory(GlossariesDirectory);
+        Directory.CreateDirectory(LogsDirectory);
     }
 }

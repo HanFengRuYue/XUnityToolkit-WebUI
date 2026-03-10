@@ -5,6 +5,8 @@ import {
   NButton,
   NAlert,
   NIcon,
+  NInput,
+  NSwitch,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -23,12 +25,21 @@ import {
   ExtensionOutlined,
   ViewInArOutlined,
   SmartToyOutlined,
+  MenuBookOutlined,
+  AddOutlined,
+  DeleteOutlined,
+  PhotoCameraOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
-import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
+import type { Game, XUnityConfig, ModFrameworkType, GlossaryEntry } from '@/api/types'
 import { gamesApi } from '@/api/games'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
+import { defineAsyncComponent } from 'vue'
+
+const CoverPickerModal = defineAsyncComponent(
+  () => import('@/components/library/CoverPickerModal.vue')
+)
 
 const route = useRoute()
 const router = useRouter()
@@ -43,6 +54,9 @@ const config = ref<XUnityConfig | null>(null)
 const loading = ref(true)
 const aiEndpointInstalled = ref<boolean | null>(null)
 const aiEndpointLoading = ref(false)
+const glossaryEntries = ref<GlossaryEntry[]>([])
+const glossarySaving = ref(false)
+const showCoverPicker = ref(false)
 
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
@@ -83,9 +97,15 @@ async function loadGame() {
       } catch {
         aiEndpointInstalled.value = null
       }
+      try {
+        glossaryEntries.value = await gamesApi.getGlossary(gameId)
+      } catch {
+        glossaryEntries.value = []
+      }
     } else {
       config.value = null
       aiEndpointInstalled.value = null
+      glossaryEntries.value = []
     }
   } catch {
     message.error('加载游戏信息失败')
@@ -166,7 +186,7 @@ async function handleInstallAiEndpoint() {
   try {
     const result = await gamesApi.installAiEndpoint(gameId)
     aiEndpointInstalled.value = result.installed
-    message.success('AI 翻译端点已安装')
+    message.success('AI 翻译引擎已安装')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
   } finally {
@@ -176,8 +196,8 @@ async function handleInstallAiEndpoint() {
 
 function handleUninstallAiEndpoint() {
   dialog.warning({
-    title: '卸载 AI 翻译端点',
-    content: '将移除游戏内的 AI 翻译端点 DLL 文件。确定要继续吗？',
+    title: '卸载 AI 翻译引擎',
+    content: '将移除游戏内的 AI 翻译引擎 DLL 文件。确定要继续吗？',
     positiveText: '确认卸载',
     negativeText: '取消',
     onPositiveClick: async () => {
@@ -185,7 +205,7 @@ function handleUninstallAiEndpoint() {
       try {
         const result = await gamesApi.uninstallAiEndpoint(gameId)
         aiEndpointInstalled.value = result.installed
-        message.success('AI 翻译端点已卸载')
+        message.success('AI 翻译引擎已卸载')
       } catch (e) {
         message.error(e instanceof Error ? e.message : '卸载失败')
       } finally {
@@ -193,6 +213,35 @@ function handleUninstallAiEndpoint() {
       }
     },
   })
+}
+
+function addGlossaryEntry() {
+  glossaryEntries.value = [...glossaryEntries.value, { original: '', translation: '', isRegex: false }]
+}
+
+function removeGlossaryEntry(index: number) {
+  glossaryEntries.value = glossaryEntries.value.filter((_, i) => i !== index)
+}
+
+function updateGlossaryEntry(index: number, field: keyof GlossaryEntry, value: string | boolean) {
+  const entries: GlossaryEntry[] = [...glossaryEntries.value]
+  entries[index] = Object.assign({}, entries[index], { [field]: value })
+  glossaryEntries.value = entries
+}
+
+async function handleSaveGlossary() {
+  // Filter out empty entries
+  const valid = glossaryEntries.value.filter(e => e.original.trim())
+  glossarySaving.value = true
+  try {
+    await gamesApi.saveGlossary(gameId, valid)
+    glossaryEntries.value = valid
+    message.success('术语库已保存')
+  } catch {
+    message.error('保存术语库失败')
+  } finally {
+    glossarySaving.value = false
+  }
 }
 
 function handleUninstallFramework(framework: ModFrameworkType) {
@@ -250,7 +299,7 @@ onUnmounted(() => stopWatch())
 
     <!-- Game Title -->
     <div class="game-title-section" style="animation-delay: 0.05s">
-      <div class="title-icon">
+      <div class="title-icon" @click="showCoverPicker = true" title="更换封面">
         <img
           :src="`/api/games/${gameId}/icon`"
           :alt="game.name"
@@ -260,6 +309,11 @@ onUnmounted(() => stopWatch())
         <div class="title-icon-fallback">
           <NIcon :size="28" color="var(--text-3)">
             <GamepadFilled />
+          </NIcon>
+        </div>
+        <div class="title-icon-edit">
+          <NIcon :size="14" color="#fff">
+            <PhotoCameraOutlined />
           </NIcon>
         </div>
       </div>
@@ -501,14 +555,14 @@ onUnmounted(() => stopWatch())
       />
     </div>
 
-    <!-- AI Translation Endpoint Card (only when fully installed) -->
+    <!-- AI Translation Engine Card (only when fully installed) -->
     <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon ai">
             <NIcon :size="16"><SmartToyOutlined /></NIcon>
           </span>
-          AI 翻译端点
+          AI 翻译引擎
         </h2>
         <div v-if="aiEndpointInstalled !== null" class="ai-status-badge" :class="{ installed: aiEndpointInstalled }">
           <span class="ai-status-dot"></span>
@@ -519,10 +573,10 @@ onUnmounted(() => stopWatch())
       <div class="ai-endpoint-content">
         <div class="ai-endpoint-desc">
           <p v-if="aiEndpointInstalled">
-            AI 翻译端点已部署到游戏内，启动游戏后可通过工具箱的 AI 翻译功能实时翻译游戏文本。
+            AI 翻译引擎已部署到游戏内，启动游戏后可通过工具箱的 AI 翻译功能实时翻译游戏文本。
           </p>
           <p v-else>
-            安装 AI 翻译端点后，游戏将通过工具箱连接 LLM 进行实时翻译。需要在 AI 翻译页面配置 API Key。
+            安装 AI 翻译引擎后，游戏将通过工具箱连接 LLM 进行实时翻译。需要在 AI 翻译页面配置 API Key。
           </p>
         </div>
         <div class="ai-endpoint-actions">
@@ -533,7 +587,7 @@ onUnmounted(() => stopWatch())
             @click="handleInstallAiEndpoint"
           >
             <template #icon><NIcon :size="16"><SmartToyOutlined /></NIcon></template>
-            安装 AI 翻译端点
+            安装 AI 翻译引擎
           </NButton>
           <NButton
             v-else
@@ -542,11 +596,85 @@ onUnmounted(() => stopWatch())
             :loading="aiEndpointLoading"
             @click="handleUninstallAiEndpoint"
           >
-            卸载端点
+            卸载引擎
           </NButton>
         </div>
       </div>
     </div>
+
+    <!-- Glossary Card (only when fully installed) -->
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon glossary">
+            <NIcon :size="16"><MenuBookOutlined /></NIcon>
+          </span>
+          AI 翻译术语库
+        </h2>
+        <div class="glossary-actions-header">
+          <NButton size="small" @click="addGlossaryEntry">
+            <template #icon><NIcon><AddOutlined /></NIcon></template>
+            添加
+          </NButton>
+          <NButton size="small" :loading="glossarySaving" @click="handleSaveGlossary">
+            保存
+          </NButton>
+        </div>
+      </div>
+
+      <div v-if="glossaryEntries.length === 0" class="glossary-empty">
+        <p>暂无术语，点击"添加"为该游戏配置专用术语表。术语会自动注入翻译提示词并对结果进行后处理替换。</p>
+      </div>
+
+      <div v-else class="glossary-list">
+        <div class="glossary-table-header">
+          <span class="glossary-col-original">原文</span>
+          <span class="glossary-col-translation">译文</span>
+          <span class="glossary-col-regex">正则</span>
+          <span class="glossary-col-action"></span>
+        </div>
+        <div v-for="(entry, index) in glossaryEntries" :key="index" class="glossary-row">
+          <NInput
+            :value="entry.original"
+            @update:value="(v: string) => updateGlossaryEntry(index, 'original', v)"
+            placeholder="原文 / 正则表达式"
+            size="small"
+            class="glossary-col-original"
+          />
+          <NInput
+            :value="entry.translation"
+            @update:value="(v: string) => updateGlossaryEntry(index, 'translation', v)"
+            placeholder="译文"
+            size="small"
+            class="glossary-col-translation"
+          />
+          <NSwitch
+            :value="entry.isRegex"
+            @update:value="(v: boolean) => updateGlossaryEntry(index, 'isRegex', v)"
+            size="small"
+            class="glossary-col-regex"
+          />
+          <NButton
+            size="tiny"
+            quaternary
+            type="error"
+            class="glossary-col-action"
+            @click="removeGlossaryEntry(index)"
+          >
+            <template #icon><NIcon><DeleteOutlined /></NIcon></template>
+          </NButton>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cover Picker Modal -->
+    <CoverPickerModal
+      v-if="showCoverPicker"
+      :show="showCoverPicker"
+      :game="game"
+      @update:show="showCoverPicker = $event"
+      @saved="loadGame()"
+    />
   </div>
 </template>
 
@@ -634,6 +762,28 @@ onUnmounted(() => stopWatch())
   overflow: hidden;
   position: relative;
   box-shadow: var(--shadow-card);
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.title-icon:hover {
+  border-color: var(--accent-border);
+}
+
+.title-icon-edit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 13px;
+}
+
+.title-icon:hover .title-icon-edit {
+  opacity: 1;
 }
 
 .title-icon-img {
@@ -1089,6 +1239,74 @@ onUnmounted(() => stopWatch())
 }
 
 .ai-endpoint-actions {
+  flex-shrink: 0;
+}
+
+/* ===== Glossary ===== */
+.section-icon.glossary {
+  background: rgba(96, 165, 250, 0.10);
+  color: #60a5fa;
+}
+
+.glossary-actions-header {
+  display: flex;
+  gap: 8px;
+}
+
+.glossary-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-3);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border);
+}
+
+.glossary-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.glossary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.glossary-table-header {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.glossary-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.glossary-col-original {
+  flex: 2;
+  min-width: 0;
+}
+
+.glossary-col-translation {
+  flex: 2;
+  min-width: 0;
+}
+
+.glossary-col-regex {
+  flex-shrink: 0;
+  width: 40px;
+}
+
+.glossary-col-action {
   flex-shrink: 0;
 }
 

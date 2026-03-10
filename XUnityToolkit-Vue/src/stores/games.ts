@@ -1,17 +1,37 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { gamesApi } from '@/api/games'
+import { gamesApi, settingsApi } from '@/api/games'
 import type { Game } from '@/api/types'
 
 export const useGamesStore = defineStore('games', () => {
   const games = ref<Game[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const viewMode = ref<'grid' | 'list'>('grid')
+  const sortBy = ref<'name' | 'recent' | 'added'>('name')
 
   const gameCount = computed(() => games.value.length)
   const installedCount = computed(
     () => games.value.filter((g) => g.installState === 'FullyInstalled').length,
   )
+
+  const sortedGames = computed(() => {
+    const sorted = [...games.value]
+    switch (sortBy.value) {
+      case 'recent':
+        return sorted.sort((a, b) => {
+          const aTime = a.lastPlayedAt ? new Date(a.lastPlayedAt).getTime() : 0
+          const bTime = b.lastPlayedAt ? new Date(b.lastPlayedAt).getTime() : 0
+          return bTime - aTime
+        })
+      case 'added':
+        return sorted.sort((a, b) =>
+          new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
+        )
+      default:
+        return sorted.sort((a, b) => a.name.localeCompare(b.name))
+    }
+  })
 
   async function fetchGames() {
     loading.value = true
@@ -69,6 +89,36 @@ export const useGamesStore = defineStore('games', () => {
     }
   }
 
+  async function launchGame(id: string) {
+    try {
+      await gamesApi.launch(id)
+      // Update lastPlayedAt locally
+      const game = games.value.find((g) => g.id === id)
+      if (game) game.lastPlayedAt = new Date().toISOString()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Failed to launch game'
+    }
+  }
+
+  async function loadPreferences() {
+    try {
+      const settings = await settingsApi.get()
+      if (settings.libraryViewMode === 'grid' || settings.libraryViewMode === 'list')
+        viewMode.value = settings.libraryViewMode
+      if (settings.librarySortBy === 'name' || settings.librarySortBy === 'recent' || settings.librarySortBy === 'added')
+        sortBy.value = settings.librarySortBy
+    } catch { /* ignore */ }
+  }
+
+  async function savePreferences() {
+    try {
+      const settings = await settingsApi.get()
+      settings.libraryViewMode = viewMode.value
+      settings.librarySortBy = sortBy.value
+      await settingsApi.save(settings)
+    } catch { /* ignore */ }
+  }
+
   function getGame(id: string) {
     return computed(() => games.value.find((g) => g.id === id))
   }
@@ -77,6 +127,9 @@ export const useGamesStore = defineStore('games', () => {
     games,
     loading,
     error,
+    viewMode,
+    sortBy,
+    sortedGames,
     gameCount,
     installedCount,
     fetchGames,
@@ -84,6 +137,9 @@ export const useGamesStore = defineStore('games', () => {
     removeGame,
     refreshGame,
     detectGame,
+    launchGame,
+    loadPreferences,
+    savePreferences,
     getGame,
   }
 })

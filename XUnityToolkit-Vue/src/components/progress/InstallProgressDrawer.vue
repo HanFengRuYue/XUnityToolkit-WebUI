@@ -20,7 +20,7 @@ const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'InstallingBepInEx', label: '安装 BepInEx' },
   { key: 'DownloadingXUnity', label: '下载 XUnity.AutoTranslator' },
   { key: 'InstallingXUnity', label: '安装 XUnity.AutoTranslator' },
-  { key: 'InstallingAiTranslation', label: '部署 AI 翻译端点' },
+  { key: 'InstallingAiTranslation', label: '部署 AI 翻译引擎' },
   { key: 'GeneratingConfig', label: '生成配置' },
   { key: 'ApplyingConfig', label: '应用最佳配置' },
 ]

@@ -8,6 +8,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Wait-Exit {
+    param([int]$ExitCode = 0)
+    Write-Host ""
+    Write-Host "Press any key to exit..." -ForegroundColor DarkGray
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    exit $ExitCode
+}
+
+try {
+
 $ProjectRoot = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
@@ -50,10 +60,7 @@ if ($hasEndpoint) {
 
     if ($hasLibs) {
         & dotnet build $EndpointProject -c Release --nologo -v quiet
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "  TranslatorEndpoint build failed!" -ForegroundColor Red
-            exit 1
-        }
+        if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
         Write-Host "  LLMTranslate.dll build complete." -ForegroundColor Green
     } else {
         Write-Host "  Skipped: XUnity reference DLLs not found in TranslatorEndpoint/libs/" -ForegroundColor DarkYellow
@@ -88,10 +95,7 @@ foreach ($rid in $Runtimes) {
         -p:SkipFrontendBuild=true `
         -o $OutputDir
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Build failed for $rid!" -ForegroundColor Red
-        exit 1
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
 
     # Clean up unnecessary files
     @('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {
@@ -124,4 +128,13 @@ foreach ($rid in $Runtimes) {
 }
 
 Write-Host "Output: $ReleaseRoot" -ForegroundColor White
-Write-Host ""
+
+Wait-Exit 0
+
+} catch {
+    Write-Host ""
+    Write-Host "=== BUILD FAILED ===" -ForegroundColor Red
+    Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ""
+    Wait-Exit 1
+}

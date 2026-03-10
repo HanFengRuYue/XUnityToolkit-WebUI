@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { NButton, NIcon, NTag, useMessage } from 'naive-ui'
+import { onMounted, ref } from 'vue'
+import { NButton, NIcon, NSelect, NButtonGroup, useMessage } from 'naive-ui'
 import { Add } from '@vicons/ionicons5'
-import { GamepadFilled } from '@vicons/material'
+import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound } from '@vicons/material'
 import { useRouter } from 'vue-router'
 import { useGamesStore } from '@/stores/games'
 import { useAddGameFlow } from '@/composables/useAddGameFlow'
+import { gamesApi } from '@/api/games'
+import GameCard from '@/components/library/GameCard.vue'
+import type { Game } from '@/api/types'
 
 const gamesStore = useGamesStore()
 const router = useRouter()
 const message = useMessage()
 const { addGame } = useAddGameFlow(message)
 
-onMounted(() => {
+const showCoverPicker = ref(false)
+const coverPickerGame = ref<Game | null>(null)
+
+onMounted(async () => {
+  await gamesStore.loadPreferences()
   gamesStore.fetchGames()
 })
 
@@ -22,6 +29,21 @@ async function handleAddGame() {
 
 function navigateToGame(id: string) {
   router.push(`/games/${id}`)
+}
+
+function setViewMode(mode: 'grid' | 'list') {
+  gamesStore.viewMode = mode
+  gamesStore.savePreferences()
+}
+
+function handleSortChange(value: string) {
+  gamesStore.sortBy = value as 'name' | 'recent' | 'added'
+  gamesStore.savePreferences()
+}
+
+function openCoverPicker(game: Game) {
+  coverPickerGame.value = game
+  showCoverPicker.value = true
 }
 
 function getStatusInfo(state: string) {
@@ -36,6 +58,17 @@ function getStatusInfo(state: string) {
       return { label: '未安装', color: 'var(--text-3)', dotClass: 'dot-default' }
   }
 }
+
+async function handleLaunchFromList(e: MouseEvent, id: string) {
+  e.stopPropagation()
+  await gamesStore.launchGame(id)
+}
+
+const sortOptions = [
+  { label: '名称', value: 'name' },
+  { label: '最近游玩', value: 'recent' },
+  { label: '添加时间', value: 'added' },
+]
 </script>
 
 <template>
@@ -48,12 +81,46 @@ function getStatusInfo(state: string) {
           {{ gamesStore.games.length }} 款游戏
         </span>
       </div>
-      <NButton type="primary" @click="handleAddGame" size="medium">
-        <template #icon>
-          <NIcon><Add /></NIcon>
-        </template>
-        添加游戏
-      </NButton>
+      <div class="header-actions">
+        <!-- View mode toggle -->
+        <NButtonGroup size="small">
+          <NButton
+            :type="gamesStore.viewMode === 'grid' ? 'primary' : 'default'"
+            :tertiary="gamesStore.viewMode !== 'grid'"
+            @click="setViewMode('grid')"
+          >
+            <template #icon>
+              <NIcon><GridViewRound /></NIcon>
+            </template>
+          </NButton>
+          <NButton
+            :type="gamesStore.viewMode === 'list' ? 'primary' : 'default'"
+            :tertiary="gamesStore.viewMode !== 'list'"
+            @click="setViewMode('list')"
+          >
+            <template #icon>
+              <NIcon><ViewListRound /></NIcon>
+            </template>
+          </NButton>
+        </NButtonGroup>
+
+        <!-- Sort -->
+        <NSelect
+          :value="gamesStore.sortBy"
+          :options="sortOptions"
+          size="small"
+          style="width: 120px"
+          @update:value="handleSortChange"
+        />
+
+        <!-- Add game -->
+        <NButton type="primary" @click="handleAddGame" size="small">
+          <template #icon>
+            <NIcon><Add /></NIcon>
+          </template>
+          添加游戏
+        </NButton>
+      </div>
     </div>
 
     <!-- Loading State -->
@@ -79,16 +146,28 @@ function getStatusInfo(state: string) {
       </NButton>
     </div>
 
-    <!-- Game List -->
+    <!-- Grid View -->
+    <div v-else-if="gamesStore.viewMode === 'grid'" class="games-grid">
+      <GameCard
+        v-for="(game, index) in gamesStore.sortedGames"
+        :key="game.id"
+        :game="game"
+        :index="index"
+        @navigate="navigateToGame"
+        @edit-cover="openCoverPicker"
+      />
+    </div>
+
+    <!-- List View -->
     <div v-else class="games-list">
       <div
-        v-for="(game, index) in gamesStore.games"
+        v-for="(game, index) in gamesStore.sortedGames"
         :key="game.id"
         class="game-row"
         :style="{ animationDelay: `${index * 0.04}s` }"
         @click="navigateToGame(game.id)"
       >
-        <!-- Left: Icon -->
+        <!-- Icon -->
         <div class="row-icon">
           <img
             :src="`/api/games/${game.id}/icon`"
@@ -103,7 +182,7 @@ function getStatusInfo(state: string) {
           </div>
         </div>
 
-        <!-- Center: Name + Path -->
+        <!-- Name + Path -->
         <div class="row-info">
           <h3 class="row-name">{{ game.name }}</h3>
           <p class="row-path">{{ game.gamePath }}</p>
@@ -122,7 +201,19 @@ function getStatusInfo(state: string) {
           <span v-else class="info-pill muted">未检测</span>
         </div>
 
-        <!-- Status (hide for non-Unity games) -->
+        <!-- Play button -->
+        <button
+          v-if="game.executableName || game.detectedInfo?.detectedExecutable"
+          class="row-play-btn"
+          title="启动游戏"
+          @click="handleLaunchFromList($event, game.id)"
+        >
+          <NIcon :size="18">
+            <PlayArrowRound />
+          </NIcon>
+        </button>
+
+        <!-- Status -->
         <div v-if="game.isUnityGame" class="row-status">
           <span class="status-dot" :class="getStatusInfo(game.installState).dotClass"></span>
           <span class="status-label" :style="{ color: getStatusInfo(game.installState).color }">
@@ -138,12 +229,32 @@ function getStatusInfo(state: string) {
         </div>
       </div>
     </div>
+
+    <!-- Cover Picker Modal (lazy loaded) -->
+    <CoverPickerModal
+      v-if="showCoverPicker && coverPickerGame"
+      :show="showCoverPicker"
+      :game="coverPickerGame"
+      @update:show="showCoverPicker = $event"
+      @saved="gamesStore.refreshGame(coverPickerGame!.id)"
+    />
   </div>
 </template>
 
+<script lang="ts">
+import { defineAsyncComponent } from 'vue'
+
+const CoverPickerModal = defineAsyncComponent(
+  () => import('@/components/library/CoverPickerModal.vue')
+)
+
+export default {
+  components: { CoverPickerModal }
+}
+</script>
+
 <style scoped>
 .library-page {
-  max-width: 1200px;
   animation: fadeIn 0.3s ease;
 }
 
@@ -152,7 +263,7 @@ function getStatusInfo(state: string) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
   animation: slideUp 0.4s var(--ease-out) backwards;
 }
 
@@ -179,6 +290,12 @@ function getStatusInfo(state: string) {
   padding: 3px 10px;
   border-radius: 20px;
   letter-spacing: 0.01em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* ===== Loading State ===== */
@@ -250,14 +367,20 @@ function getStatusInfo(state: string) {
   line-height: 1.5;
 }
 
-/* ===== Game List ===== */
+/* ===== Grid View ===== */
+.games-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+/* ===== List View ===== */
 .games-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-/* ===== Game Row ===== */
 .game-row {
   display: flex;
   align-items: center;
@@ -283,7 +406,7 @@ function getStatusInfo(state: string) {
   transition-duration: 0.1s;
 }
 
-/* ===== Row Icon ===== */
+/* Row Icon */
 .row-icon {
   width: 42px;
   height: 42px;
@@ -326,7 +449,7 @@ function getStatusInfo(state: string) {
   opacity: 1;
 }
 
-/* ===== Row Info ===== */
+/* Row Info */
 .row-info {
   flex: 1;
   min-width: 0;
@@ -355,7 +478,7 @@ function getStatusInfo(state: string) {
   line-height: 1.4;
 }
 
-/* ===== Row Tags ===== */
+/* Row Tags */
 .row-tags {
   display: flex;
   gap: 6px;
@@ -391,7 +514,38 @@ function getStatusInfo(state: string) {
   border-color: var(--border-hover);
 }
 
-/* ===== Row Status ===== */
+/* Row Play Button */
+.row-play-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-muted);
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.2s var(--ease-out);
+  padding-left: 2px;
+}
+
+.game-row:hover .row-play-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.row-play-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.4);
+}
+
+/* Row Status */
 .row-status {
   display: flex;
   align-items: center;
@@ -428,7 +582,7 @@ function getStatusInfo(state: string) {
   white-space: nowrap;
 }
 
-/* ===== Row Arrow ===== */
+/* Row Arrow */
 .row-arrow {
   flex-shrink: 0;
   color: var(--accent);
@@ -452,8 +606,18 @@ function getStatusInfo(state: string) {
     margin-bottom: 20px;
   }
 
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
   .library-title {
     font-size: 22px;
+  }
+
+  .games-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px;
   }
 
   .game-row {
@@ -470,9 +634,9 @@ function getStatusInfo(state: string) {
     display: none;
   }
 
-  .row-info {
-    flex: 1;
-    min-width: 0;
+  .row-play-btn {
+    opacity: 1;
+    transform: scale(1);
   }
 
   .row-status {
@@ -485,7 +649,8 @@ function getStatusInfo(state: string) {
     font-size: 20px;
   }
 
-  .header-left {
+  .games-grid {
+    grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
 

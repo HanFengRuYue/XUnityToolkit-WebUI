@@ -19,12 +19,16 @@ public static class SettingsEndpoints
 
         group.MapPut("/", async (AppSettings settings, AppSettingsService settingsService) =>
         {
+            // Server-side validation: clamp MaxConcurrency to [1, 100]
+            settings.AiTranslation.MaxConcurrency = Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
+
             var saved = await settingsService.SaveAsync(settings);
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
         });
 
-        group.MapPost("/reset", (AppDataPaths paths, ILogger<AppSettingsService> logger) =>
+        group.MapPost("/reset", (AppDataPaths paths, AppSettingsService settingsService, ILogger<AppSettingsService> logger) =>
         {
+            settingsService.InvalidateCache();
             var errors = new List<string>();
 
             // Delete settings.json

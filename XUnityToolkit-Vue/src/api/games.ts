@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -49,6 +49,40 @@ export const gamesApi = {
   getAiEndpointStatus: (id: string) => api.get<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
   installAiEndpoint: (id: string) => api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, {}),
   uninstallAiEndpoint: (id: string) => api.del<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
+
+  getGlossary: (id: string) => api.get<GlossaryEntry[]>(`/api/games/${id}/glossary`),
+  saveGlossary: (id: string, entries: GlossaryEntry[]) =>
+    api.put<GlossaryEntry[]>(`/api/games/${id}/glossary`, entries),
+
+  // Cover image
+  getCoverUrl: (id: string) => `/api/games/${id}/cover`,
+  deleteCover: (id: string) => api.del<void>(`/api/games/${id}/cover`),
+  uploadCover: async (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('cover', file)
+    const resp = await fetch(`/api/games/${id}/cover/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+    const result = await resp.json()
+    return result.data as CoverInfo
+  },
+  searchCovers: (id: string, query: string) =>
+    api.post<SteamGridDbSearchResult[]>(`/api/games/${id}/cover/search`, { query }),
+  getCoverGrids: (id: string, steamGridDbGameId: number) =>
+    api.post<SteamGridDbImage[]>(`/api/games/${id}/cover/grids`, { steamGridDbGameId }),
+  selectCover: (id: string, imageUrl: string, steamGridDbGameId: number) =>
+    api.post<CoverInfo>(`/api/games/${id}/cover/select`, { imageUrl, steamGridDbGameId }),
+  searchSteamGames: (id: string, query: string) =>
+    api.post<SteamStoreSearchResult[]>(`/api/games/${id}/cover/steam-search`, { query }),
+  selectSteamCover: (id: string, steamAppId: number) =>
+    api.post<CoverInfo>(`/api/games/${id}/cover/steam-select`, { steamAppId }),
 }
 
 export const dialogApi = {
@@ -90,4 +124,9 @@ export const translateApi = {
     return (await resp.json()) as { translations: string[] }
   },
   getStats: () => api.get<TranslationStats>('/api/translate/stats'),
+  toggle: (enabled: boolean) => api.post<boolean>('/api/ai/toggle', { enabled }),
+  fetchModels: (provider: LlmProvider, apiBaseUrl: string, apiKey: string) =>
+    api.get<string[]>(`/api/ai/models?provider=${provider}&apiBaseUrl=${encodeURIComponent(apiBaseUrl)}&apiKey=${encodeURIComponent(apiKey)}`),
+  testTranslate: (endpoints: ApiEndpointConfig[], systemPrompt: string, temperature: number) =>
+    api.post<EndpointTestResult[]>('/api/translate/test', { endpoints, systemPrompt, temperature }),
 }

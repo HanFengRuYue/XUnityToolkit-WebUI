@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>net35</TargetFramework>
     <AssemblyName>LLMTranslate</AssemblyName>
     <RootNamespace>LLMTranslate</RootNamespace>
     <Nullable>disable</Nullable>
@@ -9,6 +9,11 @@
     <Optimize>true</Optimize>
     <OutputType>Library</OutputType>
   </PropertyGroup>
+
+  <!-- Reference assemblies for dotnet build to target net35 -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net35" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
 
   <!-- XUnity DLLs are reference-only; do not copy to output -->
   <ItemGroup>

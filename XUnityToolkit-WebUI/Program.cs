@@ -11,8 +11,30 @@ Console.InputEncoding = System.Text.Encoding.UTF8;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 固定监听地址，确保 publish 后与开发环境一致
-builder.WebHost.UseUrls("http://localhost:51821");
+// 从 settings.json 读取端口，如果文件不存在或端口无效则使用默认值
+var appDataRoot = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
+var settingsPath = Path.Combine(appDataRoot, "settings.json");
+var listenPort = 51821;
+if (File.Exists(settingsPath))
+{
+    try
+    {
+        var settingsJson = System.Text.Json.JsonDocument.Parse(File.ReadAllText(settingsPath));
+        if (settingsJson.RootElement.TryGetProperty("aiTranslation", out var aiSection) &&
+            aiSection.TryGetProperty("port", out var portProp) &&
+            portProp.TryGetInt32(out var configuredPort) &&
+            configuredPort is > 0 and < 65536)
+        {
+            listenPort = configuredPort;
+        }
+    }
+    catch
+    {
+        // Ignore parse errors, use default port
+    }
+}
+builder.WebHost.UseUrls($"http://127.0.0.1:{listenPort}");
 
 // 控制台日志：仅显示自身服务日志 + 启动信息，过滤框架噪音
 builder.Logging.ClearProviders();
@@ -25,6 +47,10 @@ builder.Logging.AddSimpleConsole(options =>
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 builder.Logging.AddFilter("XUnityToolkit_WebUI", LogLevel.Information);
+
+// 文件日志：写入 %APPDATA%/XUnityToolkit/logs/app.log
+var logFilePath = Path.Combine(appDataRoot, "logs", "app.log");
+builder.Logging.AddProvider(new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logFilePath));
 
 // Infrastructure
 builder.Services.AddSingleton<AppDataPaths>();
@@ -51,14 +77,27 @@ builder.Services.AddHttpClient("Mirror", client =>
     client.Timeout = TimeSpan.FromMinutes(10);
 });
 
-// HTTP client for LLM API calls
+// HTTP client for LLM API calls — allow high concurrent connections for parallel translation
 builder.Services.AddHttpClient("LLM", client =>
 {
     client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
     client.Timeout = TimeSpan.FromSeconds(120);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    MaxConnectionsPerServer = 200,
+    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+});
+
+// HTTP client for SteamGridDB API
+builder.Services.AddHttpClient("SteamGridDB", client =>
+{
+    client.BaseAddress = new Uri("https://www.steamgriddb.com/api/v2/");
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
+    client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 // Services
+builder.Services.AddSingleton<GameImageService>();
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
 builder.Services.AddSingleton<PluginDetectionService>();
@@ -68,6 +107,7 @@ builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
+builder.Services.AddSingleton<GlossaryService>();
 builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddHostedService<SystemTrayService>();
 
@@ -83,6 +123,19 @@ var app = builder.Build();
 // Ensure app data directories exist
 app.Services.GetRequiredService<AppDataPaths>().EnsureDirectoriesExist();
 
+// Log incoming API requests for diagnostics (especially /api/translate from game plugin)
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/translate") && context.Request.Method == "POST")
+    {
+        var apiLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("XUnityToolkit_WebUI.TranslateMiddleware");
+        apiLogger.LogInformation("收到翻译请求: {Remote} → {Path}",
+            context.Connection.RemoteIpAddress, context.Request.Path);
+    }
+    await next(context);
+});
+
 // Static files (Vue SPA)
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -97,11 +150,24 @@ app.MapDialogEndpoints();
 app.MapCacheEndpoints();
 app.MapSettingsEndpoints();
 app.MapTranslateEndpoints();
+app.MapImageEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");
 
 // SPA fallback
 app.MapFallbackToFile("index.html");
+
+// Initialize AI translation enabled state from settings
+try
+{
+    var settingsService = app.Services.GetRequiredService<AppSettingsService>();
+    var settings = settingsService.GetAsync().GetAwaiter().GetResult();
+    app.Services.GetRequiredService<LlmTranslationService>().Enabled = settings.AiTranslation.Enabled;
+}
+catch
+{
+    // Ignore — defaults to enabled
+}
 
 app.Run();

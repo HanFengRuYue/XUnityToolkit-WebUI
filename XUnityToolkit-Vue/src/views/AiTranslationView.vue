@@ -3,14 +3,21 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
   NIcon,
   NButton,
+  NSwitch,
   useMessage,
 } from 'naive-ui'
 import {
   SmartToyOutlined,
   TranslateOutlined,
   HourglassEmptyOutlined,
+  SyncOutlined,
   LinkOutlined,
   LinkOffOutlined,
+  TokenOutlined,
+  SpeedOutlined,
+  HistoryOutlined,
+  ErrorOutlineOutlined,
+  CallReceivedOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { settingsApi } from '@/api/games'
@@ -21,17 +28,22 @@ const aiStore = useAiTranslationStore()
 const message = useMessage()
 
 const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
-  provider: 'OpenAI',
-  apiBaseUrl: '',
-  apiKey: '',
-  modelName: '',
+  enabled: true,
+  maxConcurrency: 4,
+  port: 51821,
   systemPrompt:
-    'You are a professional game text translator. ' +
-    'Translate the following texts from {from} to {to}. ' +
-    'Return ONLY a JSON array of translated strings in the same order as the input. ' +
-    'Do not add any explanation or markdown formatting. ' +
-    'Example input: ["Hello","World"] Example output: ["你好","世界"]',
+    '你是一名专业的游戏文本翻译家。将以下 {from} 文本翻译为 {to}。\n\n' +
+    '要求：\n' +
+    '1. 仅返回翻译结果的 JSON 数组，保持与输入相同的顺序和数量。不要添加任何解释、说明或 markdown 格式。\n' +
+    '2. 不要增加或省略信息，不擅自添加原文中没有的主语、代词或句子。\n' +
+    '3. 保持与原文一致的格式：尽量保留行数、标点和特殊符号，仅在必要时做符合目标语言语法的微调。\n' +
+    '4. 严格保留所有占位符、控制符和变量名（如 {0}、%s、%d、<b>、</b>、\\n、【SPECIAL_*】等），不要翻译、删除或改动其位置。\n' +
+    '5. 若待翻译内容仅为单个字母、数字、符号或空字符串，请原样返回。\n' +
+    '6. 翻译准确自然，忠于原文。结合上下文正确使用人称代词和称呼，使对白自然符合游戏语境，不随意改变说话人。\n' +
+    '7. 在忠实原文含义的前提下，使译文符合目标语言的表达习惯，并考虑游戏类型和角色性格，力求达到"信、达、雅"。\n\n' +
+    '输入示例：["Hello","World"] → 输出：["你好","世界"]',
   temperature: 0.3,
+  endpoints: [],
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -69,6 +81,35 @@ const lastRequestFormatted = computed(() => {
   const date = new Date(aiStore.stats.lastRequestAt)
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 })
+
+const isEnabled = computed(() => aiStore.stats?.enabled ?? true)
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
+
+function formatTime(ms: number): string {
+  if (ms >= 1000) return (ms / 1000).toFixed(1) + 's'
+  return Math.round(ms) + 'ms'
+}
+
+function formatRelativeTime(timestamp: string): string {
+  const diff = Date.now() - new Date(timestamp).getTime()
+  if (diff < 60_000) return '刚刚'
+  if (diff < 3600_000) return Math.floor(diff / 60_000) + '分钟前'
+  return Math.floor(diff / 3600_000) + '小时前'
+}
+
+async function handleToggle(enabled: boolean) {
+  try {
+    await aiStore.toggleEnabled(enabled)
+    message.success(enabled ? 'AI 翻译已启用' : 'AI 翻译已停用')
+  } catch {
+    message.error('切换 AI 翻译状态失败')
+  }
+}
 
 async function loadSettings() {
   try {
@@ -108,12 +149,21 @@ onUnmounted(() => {
 
 <template>
   <div class="ai-page">
-    <h1 class="page-title" style="animation-delay: 0s">
-      <span class="page-title-icon">
-        <NIcon :size="24"><SmartToyOutlined /></NIcon>
-      </span>
-      AI 翻译
-    </h1>
+    <div class="page-title-row" style="animation-delay: 0s">
+      <h1 class="page-title">
+        <span class="page-title-icon">
+          <NIcon :size="24"><SmartToyOutlined /></NIcon>
+        </span>
+        AI 翻译
+      </h1>
+      <div class="enable-toggle">
+        <span class="toggle-label">{{ isEnabled ? '已启用' : '已停用' }}</span>
+        <NSwitch
+          :value="isEnabled"
+          @update:value="handleToggle"
+        />
+      </div>
+    </div>
 
     <!-- Status Dashboard -->
     <div class="section-card" style="animation-delay: 0.05s">
@@ -159,13 +209,135 @@ onUnmounted(() => {
         </div>
 
         <div class="stat-card">
-          <div class="stat-icon in-progress">
+          <div class="stat-icon translating">
+            <NIcon :size="20"><SyncOutlined /></NIcon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">正在翻译</span>
+            <span class="stat-value">{{ aiStore.stats?.translating ?? 0 }}</span>
+            <span class="stat-hint">条文本正在调用 API</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon queued">
             <NIcon :size="20"><HourglassEmptyOutlined /></NIcon>
           </div>
           <div class="stat-content">
-            <span class="stat-label">处理中</span>
-            <span class="stat-value">{{ aiStore.stats?.inProgress ?? 0 }}</span>
-            <span class="stat-hint">条文本正在翻译</span>
+            <span class="stat-label">排队等待</span>
+            <span class="stat-value">{{ aiStore.stats?.queued ?? 0 }}</span>
+            <span class="stat-hint">条文本等待发送</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon tokens">
+            <NIcon :size="20"><TokenOutlined /></NIcon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">Token 用量</span>
+            <span class="stat-value">{{ formatTokens(aiStore.stats?.totalTokensUsed ?? 0) }}</span>
+            <span class="stat-hint">累计已使用 Token</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon speed">
+            <NIcon :size="20"><SpeedOutlined /></NIcon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">API 速度</span>
+            <span class="stat-value">{{ formatTime(aiStore.stats?.averageResponseTimeMs ?? 0) }}</span>
+            <span class="stat-hint">{{ aiStore.stats?.requestsPerMinute ?? 0 }} 请求/分钟</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon received">
+            <NIcon :size="20"><CallReceivedOutlined /></NIcon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">已接收</span>
+            <span class="stat-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
+            <span class="stat-hint">累计收到的翻译请求</span>
+          </div>
+        </div>
+
+        <div class="stat-card" v-if="(aiStore.stats?.totalErrors ?? 0) > 0">
+          <div class="stat-icon errors">
+            <NIcon :size="20"><ErrorOutlineOutlined /></NIcon>
+          </div>
+          <div class="stat-content">
+            <span class="stat-label">错误</span>
+            <span class="stat-value error-value">{{ aiStore.stats?.totalErrors ?? 0 }}</span>
+            <span class="stat-hint">翻译失败次数</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Translations -->
+    <div
+      v-if="(aiStore.stats?.recentTranslations?.length ?? 0) > 0"
+      class="section-card"
+      style="animation-delay: 0.08s"
+    >
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon history">
+            <NIcon :size="16"><HistoryOutlined /></NIcon>
+          </span>
+          最近翻译
+        </h2>
+      </div>
+
+      <div class="recent-list">
+        <div
+          v-for="(item, index) in aiStore.stats!.recentTranslations"
+          :key="index"
+          class="recent-item"
+        >
+          <div class="recent-texts">
+            <span class="recent-original">{{ item.original }}</span>
+            <span class="recent-arrow">→</span>
+            <span class="recent-translated">{{ item.translated }}</span>
+          </div>
+          <div class="recent-meta">
+            <span>{{ item.endpointName }}</span>
+            <span>{{ item.tokensUsed }} tokens</span>
+            <span>{{ formatTime(item.responseTimeMs) }}</span>
+            <span>{{ formatRelativeTime(item.timestamp) }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Log -->
+    <div
+      v-if="(aiStore.stats?.recentErrors?.length ?? 0) > 0"
+      class="section-card"
+      style="animation-delay: 0.09s"
+    >
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon error-log">
+            <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
+          </span>
+          错误日志
+        </h2>
+        <span class="error-count-badge">{{ aiStore.stats!.recentErrors.length }} 条</span>
+      </div>
+
+      <div class="error-list">
+        <div
+          v-for="err in [...aiStore.stats!.recentErrors].reverse()"
+          :key="err.timestamp + err.message"
+          class="error-item"
+        >
+          <div class="error-message">{{ err.message }}</div>
+          <div class="error-meta">
+            <span v-if="err.endpointName">{{ err.endpointName }}</span>
+            <span>{{ formatRelativeTime(err.timestamp) }}</span>
           </div>
         </div>
       </div>
@@ -190,6 +362,13 @@ onUnmounted(() => {
   animation: fadeIn 0.3s ease;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  animation: slideUp 0.4s var(--ease-out) backwards;
+}
+
 .page-title {
   font-family: var(--font-display);
   font-size: 30px;
@@ -197,7 +376,6 @@ onUnmounted(() => {
   color: var(--text-1);
   margin-bottom: 12px;
   letter-spacing: -0.03em;
-  animation: slideUp 0.4s var(--ease-out) backwards;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -213,6 +391,18 @@ onUnmounted(() => {
   background: rgba(167, 139, 250, 0.10);
   color: #a78bfa;
   flex-shrink: 0;
+}
+
+.enable-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toggle-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* ===== Section Card ===== */
@@ -264,6 +454,11 @@ onUnmounted(() => {
 .section-icon.status {
   background: rgba(52, 211, 153, 0.10);
   color: #34d399;
+}
+
+.section-icon.history {
+  background: rgba(96, 165, 250, 0.10);
+  color: #60a5fa;
 }
 
 /* ===== Stats Grid ===== */
@@ -319,9 +514,38 @@ onUnmounted(() => {
   color: #60a5fa;
 }
 
-.stat-icon.in-progress {
+.stat-icon.translating {
+  background: rgba(52, 211, 153, 0.10);
+  color: #34d399;
+}
+
+.stat-icon.queued {
   background: rgba(167, 139, 250, 0.10);
   color: #a78bfa;
+}
+
+.stat-icon.tokens {
+  background: rgba(251, 146, 60, 0.10);
+  color: #fb923c;
+}
+
+.stat-icon.speed {
+  background: rgba(52, 211, 153, 0.10);
+  color: #34d399;
+}
+
+.stat-icon.received {
+  background: rgba(56, 189, 248, 0.10);
+  color: #38bdf8;
+}
+
+.stat-icon.errors {
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+}
+
+.error-value {
+  color: #f87171 !important;
 }
 
 .stat-content {
@@ -366,7 +590,115 @@ onUnmounted(() => {
   color: var(--text-3);
 }
 
+/* ===== Recent Translations ===== */
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-item {
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: border-color 0.2s ease;
+}
+
+.recent-item:hover {
+  border-color: var(--border-hover);
+}
+
+.recent-texts {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.recent-original {
+  font-size: 13px;
+  color: var(--text-2);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-arrow {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.recent-translated {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ===== Error Log ===== */
+.section-icon.error-log {
+  background: rgba(248, 113, 113, 0.10);
+  color: #f87171;
+}
+
+.error-count-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.08);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.error-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.error-item {
+  padding: 10px 14px;
+  background: rgba(248, 113, 113, 0.04);
+  border: 1px solid rgba(248, 113, 113, 0.12);
+  border-radius: var(--radius-md);
+}
+
+.error-message {
+  font-size: 13px;
+  color: var(--text-1);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.error-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 /* ===== Responsive ===== */
+@media (max-width: 960px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
 @media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: 1fr;
@@ -375,12 +707,18 @@ onUnmounted(() => {
   .section-card {
     padding: 16px;
   }
+
+  .page-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
 }
 
 @media (max-width: 480px) {
   .page-title {
     font-size: 22px;
-    margin-bottom: 20px;
+    margin-bottom: 0;
     gap: 10px;
   }
 
@@ -407,6 +745,20 @@ onUnmounted(() => {
 
   .stat-value {
     font-size: 18px;
+  }
+
+  .recent-texts {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .recent-arrow {
+    display: none;
+  }
+
+  .recent-meta {
+    flex-wrap: wrap;
+    gap: 8px;
   }
 }
 </style>

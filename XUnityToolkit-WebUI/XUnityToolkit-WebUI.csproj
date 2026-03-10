@@ -11,8 +11,8 @@
   </PropertyGroup>
 
   <!-- Embed LLMTranslate.dll if it has been built -->
-  <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\netstandard2.0\LLMTranslate.dll')">
-    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\netstandard2.0\LLMTranslate.dll"
+  <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll')">
+    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll"
                       LogicalName="LLMTranslate.dll" />
   </ItemGroup>
 

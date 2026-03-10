@@ -22,4 +22,7 @@ public sealed class Game
     public List<DetectedModFramework>? DetectedFrameworks { get; set; }
     public string? InstalledBepInExVersion { get; set; }
     public string? InstalledXUnityVersion { get; set; }
+    public int? SteamAppId { get; set; }
+    public int? SteamGridDbGameId { get; set; }
+    public DateTime? LastPlayedAt { get; set; }
 }

@@ -5,7 +5,8 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class SystemTrayService(
     ILogger<SystemTrayService> logger,
-    IHostApplicationLifetime lifetime) : IHostedService, IDisposable
+    IHostApplicationLifetime lifetime,
+    IConfiguration configuration) : IHostedService, IDisposable
 {
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetConsoleWindow();
@@ -18,7 +19,14 @@ public sealed class SystemTrayService(
 
     private Thread? _staThread;
 
-    private const string AppUrl = "http://localhost:51821";
+    private string AppUrl
+    {
+        get
+        {
+            var urls = configuration["urls"] ?? "http://127.0.0.1:51821";
+            return urls.Split(';')[0];
+        }
+    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -128,7 +136,7 @@ public sealed class SystemTrayService(
         return menu;
     }
 
-    private static void OpenBrowser()
+    private void OpenBrowser()
     {
         try
         {
