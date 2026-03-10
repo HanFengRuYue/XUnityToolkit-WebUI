@@ -174,6 +174,7 @@ const engineOptions = [
   { label: 'LEC Power Translator', value: 'LecPowerTranslator15' },
   { label: 'ezTrans XP', value: 'ezTrans' },
   { label: '自定义端点', value: 'CustomTranslate' },
+  { label: 'AI 翻译 (工具箱)', value: 'LLMTranslate' },
 ]
 
 const textureHashOptions = [

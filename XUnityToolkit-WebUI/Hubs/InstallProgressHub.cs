@@ -9,4 +9,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveGameGroup(string gameId) =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, $"game-{gameId}");
+
+    public Task JoinAiTranslationGroup() =>
+        Groups.AddToGroupAsync(Context.ConnectionId, "ai-translation");
+
+    public Task LeaveAiTranslationGroup() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, "ai-translation");
 }

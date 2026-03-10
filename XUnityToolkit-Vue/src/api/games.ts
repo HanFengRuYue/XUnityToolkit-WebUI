@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -45,6 +45,10 @@ export const gamesApi = {
   openFolder: (id: string) => api.post<void>(`/api/games/${id}/open-folder`),
 
   launch: (id: string) => api.post<void>(`/api/games/${id}/launch`),
+
+  getAiEndpointStatus: (id: string) => api.get<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
+  installAiEndpoint: (id: string) => api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, {}),
+  uninstallAiEndpoint: (id: string) => api.del<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
 }
 
 export const dialogApi = {
@@ -67,4 +71,23 @@ export const settingsApi = {
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
   reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
+}
+
+export const translateApi = {
+  /** POST /api/translate returns raw TranslateResponse (not ApiResult) since it's also called by the in-game DLL */
+  translate: async (texts: string[], from: string, to: string) => {
+    const resp = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts, from, to }),
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+    return (await resp.json()) as { translations: string[] }
+  },
+  getStats: () => api.get<TranslationStats>('/api/translate/stats'),
 }

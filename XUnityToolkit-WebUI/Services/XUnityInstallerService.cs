@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Reflection;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -6,6 +7,74 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class XUnityInstallerService(ILogger<XUnityInstallerService> logger)
 {
+    private const string EndpointDllResourceName = "LLMTranslate.dll";
+
+    private static string GetTranslatorEndpointPath(string gamePath) =>
+        Path.Combine(gamePath, "BepInEx", "plugins", "XUnity.AutoTranslator", "Translators", EndpointDllResourceName);
+
+    /// <summary>
+    /// Deploy the LLMTranslate.dll translator endpoint to the game's Translators directory.
+    /// Returns true if the DLL was deployed, false if not available.
+    /// Skips if already deployed (preserves user-customized files).
+    /// </summary>
+    public bool DeployTranslatorEndpoint(string gamePath)
+    {
+        var destPath = GetTranslatorEndpointPath(gamePath);
+
+        // Skip if already deployed (don't overwrite user-customized files)
+        if (File.Exists(destPath))
+        {
+            logger.LogInformation("翻译端点 DLL 已存在，跳过部署: {Path}", destPath);
+            return true;
+        }
+
+        return ExtractEndpointDll(destPath);
+    }
+
+    /// <summary>
+    /// Check if the LLMTranslate.dll is installed for a specific game.
+    /// </summary>
+    public bool IsTranslatorEndpointInstalled(string gamePath) =>
+        File.Exists(GetTranslatorEndpointPath(gamePath));
+
+    /// <summary>
+    /// Force-deploy the LLMTranslate.dll (overwrites existing).
+    /// Used when user explicitly requests install from game detail page.
+    /// </summary>
+    public bool ForceDeployTranslatorEndpoint(string gamePath) =>
+        ExtractEndpointDll(GetTranslatorEndpointPath(gamePath));
+
+    /// <summary>
+    /// Remove the LLMTranslate.dll from a game's Translators directory.
+    /// </summary>
+    public void RemoveTranslatorEndpoint(string gamePath)
+    {
+        var path = GetTranslatorEndpointPath(gamePath);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+            logger.LogInformation("已删除 AI 翻译端点 DLL: {Path}", path);
+        }
+    }
+
+    private bool ExtractEndpointDll(string destPath)
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        using var stream = assembly.GetManifestResourceStream(EndpointDllResourceName);
+        if (stream is null)
+        {
+            logger.LogInformation("LLMTranslate.dll 嵌入资源不可用，跳过翻译端点部署");
+            return false;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+        using var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write);
+        stream.CopyTo(fs);
+
+        logger.LogInformation("已部署翻译端点 DLL: {Path}", destPath);
+        return true;
+    }
+
     public GitHubAsset? ResolveAsset(UnityGameInfo info, IReadOnlyList<GitHubAsset> assets)
     {
         // IL2CPP games need the IL2CPP-specific build

@@ -20,6 +20,11 @@ const router = createRouter({
       component: () => import('@/views/ConfigEditorView.vue'),
     },
     {
+      path: '/ai-translation',
+      name: 'ai-translation',
+      component: () => import('@/views/AiTranslationView.vue'),
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),

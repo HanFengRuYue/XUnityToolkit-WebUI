@@ -19,6 +19,9 @@ XUnityToolkit-Vue/src/components.d.ts
 # Build output
 Release/
 
+# TranslatorEndpoint reference DLLs (downloaded from XUnity release)
+TranslatorEndpoint/libs/
+
 # Playwright MCP
 .playwright-mcp/
 

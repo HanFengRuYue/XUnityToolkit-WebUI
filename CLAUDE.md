@@ -22,6 +22,9 @@ dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
 cd XUnityToolkit-Vue && npm run build
 
+# Build TranslatorEndpoint (LLMTranslate.dll)
+dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
+
 # Frontend dev server (proxies API to backend)
 cd XUnityToolkit-Vue && npm run dev
 
@@ -36,6 +39,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Real-time:** SignalR for install progress updates
 - **Persistence:** JSON files at `%APPDATA%/XUnityToolkit/` (`library.json`, `settings.json`)
 - **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
+- **TranslatorEndpoint:** netstandard2.0 class library producing `LLMTranslate.dll` — XUnity.AutoTranslator custom translation endpoint that forwards game text to the toolkit backend's `POST /api/translate`; hand-rolled JSON (no System.Text.Json in Unity Mono); embedded as resource in main project and deployed to `BepInEx/plugins/XUnity.AutoTranslator/Translators/` during install
+- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/Custom); settings in `AppSettings.AiTranslation`; `POST /api/translate` endpoint receives requests from the in-game DLL; in-memory stats tracked via `Interlocked` counters (session-scoped, reset on restart); real-time stats pushed via SignalR `"ai-translation"` group on existing `InstallProgressHub`; dedicated `/ai-translation` page with status dashboard + settings; per-game AI endpoint install/uninstall via `GET/POST/DELETE /api/games/{id}/ai-endpoint`
 
 ### Frontend Structure
 
@@ -48,9 +53,9 @@ XUnityToolkit-Vue/src/
 │   ├── config/     # ConfigPanel (translation settings form)
 │   └── progress/   # InstallProgressDrawer (SignalR progress)
 ├── composables/    # Reusable composition functions (useAddGameFlow)
-├── stores/         # Pinia stores (games, install)
-├── views/          # LibraryView, GameDetailView, SettingsView
-└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /settings)
+├── stores/         # Pinia stores (games, install, theme, aiTranslation)
+├── views/          # LibraryView, GameDetailView, AiTranslationView, SettingsView
+└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /ai-translation, /settings)
 ```
 
 ### Frontend Design System
@@ -89,6 +94,9 @@ XUnityToolkit-Vue/src/
 - Cache management: `GET /api/cache/downloads` (info), `DELETE /api/cache/downloads` (clear) — manages download cache at `%APPDATA%/XUnityToolkit/cache/`
 - Settings: `GET /api/settings` (read), `PUT /api/settings` (save), `GET /api/settings/version` (app version), `POST /api/settings/reset` (delete all app data: settings, library, cache, backups)
 - Config: `PUT /api/games/{id}/config` uses `PatchAsync` — reads existing INI, modifies only specified keys, preserves all other content (comments, unknown sections); `GET/PUT /api/games/{id}/config/raw` — 读写原始 INI 文件内容（用于配置编辑器）
+- AI Translation: `POST /api/translate` — receives `{texts, from, to}` from in-game DLL, calls LLM provider, returns `{translations: [...]}`; **不使用 `ApiResult` 包装**（因为游戏内 DLL 直接调用），前端调用此端点必须用原始 `fetch` 而非 `api.post`（会自动解包 ApiResult）；errors: 400 (no API key), 502 (LLM API failure)
+- AI Translation Stats: `GET /api/translate/stats` — returns `ApiResult<TranslationStats>` with in-memory session counters
+- AI Endpoint Management: `GET/POST/DELETE /api/games/{id}/ai-endpoint` — check/install/uninstall `LLMTranslate.dll` for a specific game; POST requires `FullyInstalled` state
 - **ApiResult 模式**：`ApiResult<T>.Ok(data)` 需要 data 参数；无数据成功响应用 `ApiResult.Ok()`（非泛型静态类）；request record 定义在对应 Endpoints 文件底部
 
 ## Development Notes
@@ -109,11 +117,14 @@ XUnityToolkit-Vue/src/
 - **INI PatchAsync 空值语义**：`BuildSectionMods` 中 `null` = 不修改（跳过），`""` = 清空值（写入 `Key=`）；`AddEngineKeyModification` 仍对 null 和 "" 都跳过（不删除已有 API key）
 - **Console logging:** Configured programmatically in `Program.cs` (`ClearProviders` + `AddSimpleConsole`) — appsettings.json logging config was unreliable; all log messages are in Chinese
 - **Windows console encoding:** `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()`, otherwise Chinese characters will be garbled (the logging system captures encoding at init time)
-- Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`); `GitHubReleaseService` reads mirror base URL from `AppSettingsService` at download time (empty = direct connection, no mirror fallback); `CreateClientForUrl` checks mirror host dynamically
+- Named `HttpClient` instances: `"GitHub"` (API calls with GitHub headers), `"Mirror"` (mirror downloads, no API headers), `"LLM"` (AI translation, 120s timeout) — mirror URLs embed the original URL as path (e.g., `https://ghfast.top/https://github.com/...`); `GitHubReleaseService` reads mirror base URL from `AppSettingsService` at download time (empty = direct connection, no mirror fallback); `CreateClientForUrl` checks mirror host dynamically
 - Download resilience: `GitHubReleaseService.DownloadAssetAsync` has retry (3 attempts, exponential backoff) + auto mirror fallback; progress reported via `IProgress<DownloadProgress>` (percent + speed + retry message)
 - `InstallationStatus` has `DownloadSpeed` and `RetryMessage` fields — reset both to null on step transitions in `InstallOrchestrator.UpdateStatus`
 - `dotnet build` automatically runs `npm install` + `npm run build` via `BuildFrontend` MSBuild Target in csproj; pass `-p:SkipFrontendBuild=true` to skip
-- `build.ps1` builds frontend once then publishes self-contained single-file exe for each target runtime; output to `Release/{rid}/`
+- `build.ps1` builds frontend once, then TranslatorEndpoint (if XUnity reference DLLs present), then publishes self-contained single-file exe for each target runtime; output to `Release/{rid}/`
+- **TranslatorEndpoint 依赖**：`TranslatorEndpoint/libs/` 下需要 `XUnity.AutoTranslator.Plugin.Core.dll` 和 `XUnity.Common.dll`（从 GitHub `bbepis/XUnity.AutoTranslator` releases 下载 BepInEx zip 提取）；目录已 gitignore
+- **XUnity API 命名空间**：`XUnityWebRequest` 在 `XUnity.AutoTranslator.Plugin.Core.Web`，`HttpEndpoint`/`IHttpRequestCreationContext` 在 `XUnity.AutoTranslator.Plugin.Core.Endpoints.Http`，`IInitializationContext` 在 `XUnity.AutoTranslator.Plugin.Core.Endpoints`
+- **TranslatorEndpoint 约束**：目标 netstandard2.0（不能用 net35，`dotnet build` 不支持）；C# 7.3 语言版本；不能使用 System.Text.Json，需手写 JSON 序列化/解析
 - **App URL:** Fixed to `http://localhost:51821` via `UseUrls()` in `Program.cs` — `launchSettings.json` only applies during `dotnet run`, publish builds ignore it; `SystemTrayService.AppUrl` must match
 - **Publish cleanup:** Remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json` from publish output — not needed for this desktop app
 - Stop the running backend before `dotnet build` — the exe is locked while running
@@ -126,11 +137,13 @@ XUnityToolkit-Vue/src/
 - **前端状态生命周期**：`GameDetailView.loadGame()` 在 `isInstalled=false` 时必须重置 `config.value = null`；任何新增的"仅已安装时加载"的状态也需同样处理
 - **Theme-aware CSS:** Use semantic CSS variables (`--bg-subtle`, `--bg-muted`, `--bg-subtle-hover`, `--bg-muted-hover`) for semi-transparent overlay backgrounds — never hardcode `rgba(255,255,255,...)` in scoped CSS as it breaks light mode
 - **Naive UI light theme:** Pass `null` (not `lightTheme`) as the `:theme` prop; accent colors need slightly darker values in light mode for contrast (e.g., `#22d3a7` → `#19b892`)
-- Pinia stores: `games` (game management), `install` (installation progress + SignalR), `theme` (dark/light mode + localStorage)
+- Pinia stores: `games` (game management), `install` (installation progress + SignalR), `theme` (dark/light mode + localStorage), `aiTranslation` (AI translation stats + SignalR)
 - Naive UI `NDrawer` width prop only accepts numbers (not CSS strings) — use `window.resize` listener + ref for responsive drawer width
 - Naive UI `NForm` label-placement must be toggled dynamically (via computed) for mobile — cannot use CSS media queries alone
 - **Naive UI NInput 绑定 `string?` 字段**：不要用 `v-model:value`（会收到 `undefined` 导致运行时警告），应使用 `:value="form.field ?? ''"` + `@update:value` 模式；API key 字段用 `v || undefined` 防止发送空字符串
 - After frontend changes, always verify with both `npx vue-tsc --noEmit` (type-check) and `npm run build` before considering done
 - Verify `@vicons/material` icon availability before importing: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - Stop backend on Windows: `taskkill //f //im XUnityToolkit-WebUI.exe`
+- **`Volatile.Read<T>` 要求引用类型**：`DateTime?`（`Nullable<DateTime>`）是值类型，不能用 `Volatile.Read`；需线程安全读取时，改用 `long` 存储 ticks + `Interlocked.Read/Exchange`
+- **SignalR hub 复用**：`InstallProgressHub` 同时服务安装进度（`game-{id}` 组）和 AI 翻译统计（`ai-translation` 组），避免开多个 hub；`LlmTranslationService` 通过 `IHubContext<InstallProgressHub>` 广播统计
 - **截图清理:** 每次使用 Playwright 或浏览器工具测试/调试后，必须删除产生的截图文件（项目根目录的 `*.png` 和 `.playwright-mcp/` 下的截图），不要将截图留在项目文件夹内

@@ -51,6 +51,13 @@ builder.Services.AddHttpClient("Mirror", client =>
     client.Timeout = TimeSpan.FromMinutes(10);
 });
 
+// HTTP client for LLM API calls
+builder.Services.AddHttpClient("LLM", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+
 // Services
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
@@ -61,6 +68,7 @@ builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
+builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddHostedService<SystemTrayService>();
 
 // SignalR with string enum serialization
@@ -88,6 +96,7 @@ app.MapReleaseEndpoints();
 app.MapDialogEndpoints();
 app.MapCacheEndpoints();
 app.MapSettingsEndpoints();
+app.MapTranslateEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

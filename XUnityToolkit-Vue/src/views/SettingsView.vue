@@ -71,6 +71,14 @@ async function handleClearCache() {
 const settings = ref<AppSettings>({
   mirrorUrl: 'https://ghfast.top/',
   theme: themeStore.mode,
+  aiTranslation: {
+    provider: 'OpenAI',
+    apiBaseUrl: '',
+    apiKey: '',
+    modelName: '',
+    systemPrompt: '',
+    temperature: 0.3,
+  },
 })
 const settingsLoading = ref(false)
 
@@ -262,7 +270,7 @@ onMounted(() => {
     </div>
 
     <!-- Danger Zone (full width) -->
-    <div class="section-card danger-card" style="animation-delay: 0.15s">
+    <div class="section-card danger-card" style="animation-delay: 0.2s">
       <div class="danger-bar"></div>
       <div class="danger-body">
         <div class="section-header">
@@ -286,7 +294,7 @@ onMounted(() => {
     </div>
 
     <!-- About (full width) -->
-    <div class="section-card" style="animation-delay: 0.2s">
+    <div class="section-card" style="animation-delay: 0.25s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon about">

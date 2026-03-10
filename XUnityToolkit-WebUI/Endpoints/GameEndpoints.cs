@@ -265,6 +265,52 @@ public static class GameEndpoints
             return Results.Ok(ApiResult.Ok());
         });
 
+        // AI translation endpoint management
+        group.MapGet("/{id}/ai-endpoint", async (
+            string id,
+            GameLibraryService library,
+            XUnityInstallerService xUnityInstaller) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var installed = xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath);
+            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(installed)));
+        });
+
+        group.MapPost("/{id}/ai-endpoint", async (
+            string id,
+            GameLibraryService library,
+            XUnityInstallerService xUnityInstaller) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (game.InstallState != InstallState.FullyInstalled)
+                return Results.BadRequest(ApiResult.Fail("请先安装 BepInEx 和 XUnity.AutoTranslator。"));
+
+            var deployed = xUnityInstaller.ForceDeployTranslatorEndpoint(game.GamePath);
+            if (!deployed)
+                return Results.BadRequest(ApiResult.Fail("AI 翻译端点 DLL 不可用（未嵌入构建）。"));
+
+            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(true)));
+        });
+
+        group.MapDelete("/{id}/ai-endpoint", async (
+            string id,
+            GameLibraryService library,
+            XUnityInstallerService xUnityInstaller) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            xUnityInstaller.RemoveTranslatorEndpoint(game.GamePath);
+            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(false)));
+        });
+
         // Uninstall a non-BepInEx mod framework
         group.MapDelete("/{id}/framework/{framework}", async (
             string id,
@@ -298,3 +344,4 @@ public static class GameEndpoints
 public record AddGameRequest(string GamePath, string? Name = null, string? ExecutableName = null);
 public record AddWithDetectionRequest(string FolderPath, string? ExePath = null);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
+public record AiEndpointStatus(bool Installed);

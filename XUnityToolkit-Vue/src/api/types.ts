@@ -60,6 +60,7 @@ export type InstallStep =
   | 'InstallingBepInEx'
   | 'DownloadingXUnity'
   | 'InstallingXUnity'
+  | 'InstallingAiTranslation'
   | 'GeneratingConfig'
   | 'ApplyingConfig'
   | 'RemovingXUnity'
@@ -158,11 +159,33 @@ export interface CacheInfo {
   totalBytes: number
 }
 
+export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'Custom'
+
+export interface AiTranslationSettings {
+  provider: LlmProvider
+  apiBaseUrl: string
+  apiKey: string
+  modelName: string
+  systemPrompt: string
+  temperature: number
+}
+
 export interface AppSettings {
   mirrorUrl: string
   theme: string
+  aiTranslation: AiTranslationSettings
 }
 
 export interface VersionInfo {
   version: string
+}
+
+export interface TranslationStats {
+  totalTranslated: number
+  inProgress: number
+  lastRequestAt?: string
+}
+
+export interface AiEndpointStatus {
+  installed: boolean
 }

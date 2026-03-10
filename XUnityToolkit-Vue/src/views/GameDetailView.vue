@@ -22,6 +22,7 @@ import {
   WarningAmberOutlined,
   ExtensionOutlined,
   ViewInArOutlined,
+  SmartToyOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -40,6 +41,8 @@ const gameId = route.params['id'] as string
 const game = ref<Game | null>(null)
 const config = ref<XUnityConfig | null>(null)
 const loading = ref(true)
+const aiEndpointInstalled = ref<boolean | null>(null)
+const aiEndpointLoading = ref(false)
 
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
@@ -74,8 +77,15 @@ async function loadGame() {
     game.value = await gamesApi.get(gameId)
     if (isInstalled.value) {
       config.value = await gamesApi.getConfig(gameId)
+      try {
+        const status = await gamesApi.getAiEndpointStatus(gameId)
+        aiEndpointInstalled.value = status.installed
+      } catch {
+        aiEndpointInstalled.value = null
+      }
     } else {
       config.value = null
+      aiEndpointInstalled.value = null
     }
   } catch {
     message.error('加载游戏信息失败')
@@ -146,6 +156,40 @@ function handleRemoveGame() {
       if (ok) {
         message.success('已移除')
         router.push('/')
+      }
+    },
+  })
+}
+
+async function handleInstallAiEndpoint() {
+  aiEndpointLoading.value = true
+  try {
+    const result = await gamesApi.installAiEndpoint(gameId)
+    aiEndpointInstalled.value = result.installed
+    message.success('AI 翻译端点已安装')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '安装失败')
+  } finally {
+    aiEndpointLoading.value = false
+  }
+}
+
+function handleUninstallAiEndpoint() {
+  dialog.warning({
+    title: '卸载 AI 翻译端点',
+    content: '将移除游戏内的 AI 翻译端点 DLL 文件。确定要继续吗？',
+    positiveText: '确认卸载',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      aiEndpointLoading.value = true
+      try {
+        const result = await gamesApi.uninstallAiEndpoint(gameId)
+        aiEndpointInstalled.value = result.installed
+        message.success('AI 翻译端点已卸载')
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '卸载失败')
+      } finally {
+        aiEndpointLoading.value = false
       }
     },
   })
@@ -456,6 +500,53 @@ onUnmounted(() => stopWatch())
         @save="handleSaveConfig"
       />
     </div>
+
+    <!-- AI Translation Endpoint Card (only when fully installed) -->
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon ai">
+            <NIcon :size="16"><SmartToyOutlined /></NIcon>
+          </span>
+          AI 翻译端点
+        </h2>
+        <div v-if="aiEndpointInstalled !== null" class="ai-status-badge" :class="{ installed: aiEndpointInstalled }">
+          <span class="ai-status-dot"></span>
+          {{ aiEndpointInstalled ? '已安装' : '未安装' }}
+        </div>
+      </div>
+
+      <div class="ai-endpoint-content">
+        <div class="ai-endpoint-desc">
+          <p v-if="aiEndpointInstalled">
+            AI 翻译端点已部署到游戏内，启动游戏后可通过工具箱的 AI 翻译功能实时翻译游戏文本。
+          </p>
+          <p v-else>
+            安装 AI 翻译端点后，游戏将通过工具箱连接 LLM 进行实时翻译。需要在 AI 翻译页面配置 API Key。
+          </p>
+        </div>
+        <div class="ai-endpoint-actions">
+          <NButton
+            v-if="!aiEndpointInstalled"
+            type="primary"
+            :loading="aiEndpointLoading"
+            @click="handleInstallAiEndpoint"
+          >
+            <template #icon><NIcon :size="16"><SmartToyOutlined /></NIcon></template>
+            安装 AI 翻译端点
+          </NButton>
+          <NButton
+            v-else
+            type="error"
+            ghost
+            :loading="aiEndpointLoading"
+            @click="handleUninstallAiEndpoint"
+          >
+            卸载端点
+          </NButton>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -671,6 +762,11 @@ onUnmounted(() => stopWatch())
 }
 
 .section-icon.translate {
+  background: rgba(167, 139, 250, 0.10);
+  color: #a78bfa;
+}
+
+.section-icon.ai {
   background: rgba(167, 139, 250, 0.10);
   color: #a78bfa;
 }
@@ -941,6 +1037,61 @@ onUnmounted(() => stopWatch())
 }
 
 
+/* ===== AI Endpoint Section ===== */
+.ai-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.ai-status-badge.installed {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.2);
+  color: #34d399;
+}
+
+.ai-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.ai-status-badge.installed .ai-status-dot {
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
+}
+
+.ai-endpoint-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.ai-endpoint-desc {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-endpoint-desc p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.ai-endpoint-actions {
+  flex-shrink: 0;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .game-title-section {
@@ -992,6 +1143,12 @@ onUnmounted(() => stopWatch())
     border-top: 1px solid var(--border);
     padding: 12px 0 0;
     justify-content: center;
+  }
+
+  .ai-endpoint-content {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
   }
 }
 

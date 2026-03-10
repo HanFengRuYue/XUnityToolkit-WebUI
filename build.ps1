@@ -13,8 +13,10 @@ $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.c
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
 $ReleaseRoot = Join-Path $ProjectRoot 'Release'
 
+$EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
 $Runtimes = if ($Runtime -eq 'all') { @('win-x64', 'win-arm64') } else { @($Runtime) }
-$totalSteps = 2 + $Runtimes.Count
+$hasEndpoint = Test-Path $EndpointProject
+$totalSteps = 2 + $Runtimes.Count + $(if ($hasEndpoint) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -35,16 +37,41 @@ try {
 }
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
-# Step 2: Clean Release folder
+# Step 2: Build TranslatorEndpoint (LLMTranslate.dll)
+$nextStep = 2
+if ($hasEndpoint) {
+    Write-Host ""
+    Write-Host "[$nextStep/$totalSteps] Building TranslatorEndpoint (LLMTranslate.dll)..." -ForegroundColor Yellow
+
+    # Check if XUnity reference DLLs exist
+    $libsDir = Join-Path $ProjectRoot 'TranslatorEndpoint\libs'
+    $hasLibs = (Test-Path (Join-Path $libsDir 'XUnity.AutoTranslator.Plugin.Core.dll')) -and
+               (Test-Path (Join-Path $libsDir 'XUnity.Common.dll'))
+
+    if ($hasLibs) {
+        & dotnet build $EndpointProject -c Release --nologo -v quiet
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  TranslatorEndpoint build failed!" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  LLMTranslate.dll build complete." -ForegroundColor Green
+    } else {
+        Write-Host "  Skipped: XUnity reference DLLs not found in TranslatorEndpoint/libs/" -ForegroundColor DarkYellow
+        Write-Host "  (LLMTranslate.dll will not be embedded)" -ForegroundColor DarkGray
+    }
+    $nextStep++
+}
+
+# Clean Release folder
 Write-Host ""
-Write-Host "[2/$totalSteps] Preparing Release folder..." -ForegroundColor Yellow
+Write-Host "[$nextStep/$totalSteps] Preparing Release folder..." -ForegroundColor Yellow
 if (Test-Path $ReleaseRoot) {
     Remove-Item $ReleaseRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 
-# Step 3+: Publish for each runtime
-$step = 2
+# Publish for each runtime
+$step = $nextStep
 foreach ($rid in $Runtimes) {
     $step++
     $OutputDir = Join-Path $ReleaseRoot $rid

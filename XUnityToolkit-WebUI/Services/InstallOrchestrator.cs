@@ -197,6 +197,13 @@ public sealed class InstallOrchestrator(
 
         await xUnityInstaller.InstallAsync(game.GamePath, xUnityZip, ct);
 
+        // Deploy LLMTranslate translator endpoint DLL (if available)
+        await UpdateStatus(status, InstallStep.InstallingAiTranslation, 82, "正在部署 AI 翻译端点...");
+        if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 84, "AI 翻译端点已部署");
+        else
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 84, "AI 翻译端点不可用（跳过）");
+
         // Step 6: Launch game to generate config file
         await UpdateStatus(status, InstallStep.GeneratingConfig, 85, "正在启动游戏以生成配置文件...");
 

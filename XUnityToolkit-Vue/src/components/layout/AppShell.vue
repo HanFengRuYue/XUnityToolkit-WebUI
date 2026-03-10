@@ -2,7 +2,7 @@
 import { ref, watch } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
-import { GamepadFilled, SettingsOutlined } from '@vicons/material'
+import { GamepadFilled, SettingsOutlined, SmartToyOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
 
 const router = useRouter()
@@ -11,6 +11,7 @@ const sidebarOpen = ref(false)
 
 const navItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
+  { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
   { label: '设置', key: '/settings', icon: SettingsOutlined },
 ]
 

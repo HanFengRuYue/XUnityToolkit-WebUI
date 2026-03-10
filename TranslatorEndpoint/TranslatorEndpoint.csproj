@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>LLMTranslate</AssemblyName>
+    <RootNamespace>LLMTranslate</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>7.3</LangVersion>
+    <Optimize>true</Optimize>
+    <OutputType>Library</OutputType>
+  </PropertyGroup>
+
+  <!-- XUnity DLLs are reference-only; do not copy to output -->
+  <ItemGroup>
+    <Reference Include="XUnity.AutoTranslator.Plugin.Core">
+      <HintPath>libs\XUnity.AutoTranslator.Plugin.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="XUnity.Common">
+      <HintPath>libs\XUnity.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
