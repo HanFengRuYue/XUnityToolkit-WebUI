@@ -191,6 +191,10 @@ export interface AppSettings {
   steamGridDbApiKey?: string
   libraryViewMode: string
   librarySortBy: string
+  accentColor: string
+  libraryCardSize: string
+  libraryGap: string
+  libraryShowLabels: boolean
 }
 
 export interface VersionInfo {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, h } from 'vue'
+import { onMounted, ref, h, computed } from 'vue'
 import { NButton, NIcon, NSelect, NButtonGroup, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
 import { Add } from '@vicons/ionicons5'
 import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound, DriveFileRenameOutlineOutlined, PhotoCameraOutlined } from '@vicons/material'
@@ -8,6 +8,7 @@ import { useGamesStore } from '@/stores/games'
 import { useAddGameFlow } from '@/composables/useAddGameFlow'
 import { gamesApi } from '@/api/games'
 import GameCard from '@/components/library/GameCard.vue'
+import LibraryCustomizer from '@/components/library/LibraryCustomizer.vue'
 import type { Game } from '@/api/types'
 
 const gamesStore = useGamesStore()
@@ -122,6 +123,18 @@ const sortOptions = [
   { label: '最近游玩', value: 'recent' },
   { label: '添加时间', value: 'added' },
 ]
+
+const cardSizeMap = { small: 120, medium: 160, large: 200, xlarge: 240 }
+const gapMap = { compact: 8, normal: 16, spacious: 24 }
+
+const gridStyle = computed(() => {
+  const minWidth = cardSizeMap[gamesStore.cardSize] || 160
+  const gapPx = gapMap[gamesStore.gap] || 16
+  return {
+    gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`,
+    gap: `${gapPx}px`,
+  }
+})
 </script>
 
 <template>
@@ -166,6 +179,9 @@ const sortOptions = [
           @update:value="handleSortChange"
         />
 
+        <!-- Customizer -->
+        <LibraryCustomizer />
+
         <!-- Add game -->
         <NButton type="primary" @click="handleAddGame" size="small">
           <template #icon>
@@ -200,12 +216,13 @@ const sortOptions = [
     </div>
 
     <!-- Grid View -->
-    <div v-else-if="gamesStore.viewMode === 'grid'" class="games-grid">
+    <div v-else-if="gamesStore.viewMode === 'grid'" class="games-grid" :style="gridStyle">
       <GameCard
         v-for="(game, index) in gamesStore.sortedGames"
         :key="game.id"
         :game="game"
         :index="index"
+        :show-label="gamesStore.showLabels"
         @navigate="navigateToGame"
         @edit-cover="openCoverPicker"
         @context-menu="handleCardContextMenu"
@@ -457,8 +474,7 @@ export default {
 /* ===== Grid View ===== */
 .games-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 16px;
+  /* grid-template-columns and gap are set dynamically via :style */
 }
 
 /* ===== List View ===== */
@@ -703,8 +719,7 @@ export default {
   }
 
   .games-grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 12px;
+    gap: 12px !important;
   }
 
   .game-row {
@@ -737,8 +752,8 @@ export default {
   }
 
   .games-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
   }
 
   .game-row {

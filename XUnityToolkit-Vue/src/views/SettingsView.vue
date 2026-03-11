@@ -22,11 +22,12 @@ import {
   OpenInNewOutlined,
   WarningAmberOutlined,
   ImageOutlined,
+  ColorLensOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { cacheApi, settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
-import { useThemeStore } from '@/stores/theme'
+import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 
 const message = useMessage()
@@ -83,6 +84,10 @@ const settings = ref<AppSettings>({
   steamGridDbApiKey: undefined,
   libraryViewMode: 'grid',
   librarySortBy: 'name',
+  accentColor: themeStore.accentColor,
+  libraryCardSize: 'medium',
+  libraryGap: 'normal',
+  libraryShowLabels: true,
 })
 const settingsLoading = ref(false)
 
@@ -96,12 +101,21 @@ watch(() => settings.value.theme, (newTheme) => {
   themeStore.setTheme(newTheme as ThemeMode)
 })
 
+// Sync accent color changes immediately
+watch(() => settings.value.accentColor, (newColor) => {
+  if (newColor) themeStore.setAccentColor(newColor)
+})
+
 async function loadSettings() {
   try {
     const loaded = await settingsApi.get()
     settings.value = loaded
     // Sync loaded theme with theme store
     themeStore.setTheme(loaded.theme as ThemeMode)
+    // Sync accent color
+    if (loaded.accentColor) {
+      themeStore.setAccentColor(loaded.accentColor)
+    }
   } catch {
     // Use defaults
   }
@@ -262,6 +276,28 @@ onMounted(() => {
               v-model:value="settings.theme"
               :options="themeOptions"
             />
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <NIcon :size="14" color="var(--text-3)"><ColorLensOutlined /></NIcon>
+              主题色
+            </label>
+            <div class="accent-color-row">
+              <button
+                v-for="preset in accentPresets"
+                :key="preset.hex"
+                class="accent-swatch"
+                :class="{ active: settings.accentColor === preset.hex }"
+                :style="{ '--swatch-color': preset.hex }"
+                :title="preset.name"
+                @click="settings.accentColor = preset.hex"
+              >
+                <svg v-if="settings.accentColor === preset.hex" class="swatch-check" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
           </div>
         </div>
         <div class="section-footer">
@@ -649,6 +685,43 @@ onMounted(() => {
 .form-hint {
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* ===== Accent Color Swatches ===== */
+.accent-color-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.accent-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: var(--swatch-color);
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.accent-swatch:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--swatch-color) 50%, transparent);
+}
+
+.accent-swatch.active {
+  border-color: var(--text-1);
+  transform: scale(1.1);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--swatch-color) 40%, transparent);
+}
+
+.swatch-check {
+  width: 14px;
+  height: 14px;
 }
 
 /* ===== Danger Zone ===== */

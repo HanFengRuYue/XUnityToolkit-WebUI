@@ -5,10 +5,13 @@ import { PlayArrowRound, PhotoCameraOutlined, GamepadFilled } from '@vicons/mate
 import type { Game } from '@/api/types'
 import { gamesApi } from '@/api/games'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   game: Game
   index: number
-}>()
+  showLabel?: boolean
+}>(), {
+  showLabel: true,
+})
 
 const emit = defineEmits<{
   navigate: [id: string]
@@ -152,7 +155,7 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
     </div>
 
     <!-- Card Info -->
-    <div class="card-info">
+    <div v-if="showLabel" class="card-info">
       <h3 class="card-name" :title="game.name">{{ game.name }}</h3>
     </div>
   </div>

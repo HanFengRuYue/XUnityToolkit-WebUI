@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { gamesApi, settingsApi } from '@/api/games'
 import type { Game } from '@/api/types'
+import { useThemeStore } from '@/stores/theme'
 
 export const useGamesStore = defineStore('games', () => {
   const games = ref<Game[]>([])
@@ -9,6 +10,9 @@ export const useGamesStore = defineStore('games', () => {
   const error = ref<string | null>(null)
   const viewMode = ref<'grid' | 'list'>('grid')
   const sortBy = ref<'name' | 'recent' | 'added'>('name')
+  const cardSize = ref<'small' | 'medium' | 'large' | 'xlarge'>('medium')
+  const gap = ref<'compact' | 'normal' | 'spacious'>('normal')
+  const showLabels = ref(true)
 
   const gameCount = computed(() => games.value.length)
   const installedCount = computed(
@@ -119,6 +123,17 @@ export const useGamesStore = defineStore('games', () => {
         viewMode.value = settings.libraryViewMode
       if (settings.librarySortBy === 'name' || settings.librarySortBy === 'recent' || settings.librarySortBy === 'added')
         sortBy.value = settings.librarySortBy
+      if (settings.libraryCardSize === 'small' || settings.libraryCardSize === 'medium' || settings.libraryCardSize === 'large' || settings.libraryCardSize === 'xlarge')
+        cardSize.value = settings.libraryCardSize
+      if (settings.libraryGap === 'compact' || settings.libraryGap === 'normal' || settings.libraryGap === 'spacious')
+        gap.value = settings.libraryGap
+      if (typeof settings.libraryShowLabels === 'boolean')
+        showLabels.value = settings.libraryShowLabels
+      // Sync accent color from backend (overrides localStorage if different)
+      if (settings.accentColor) {
+        const themeStore = useThemeStore()
+        themeStore.setAccentColor(settings.accentColor)
+      }
     } catch { /* ignore */ }
   }
 
@@ -127,6 +142,9 @@ export const useGamesStore = defineStore('games', () => {
       const settings = await settingsApi.get()
       settings.libraryViewMode = viewMode.value
       settings.librarySortBy = sortBy.value
+      settings.libraryCardSize = cardSize.value
+      settings.libraryGap = gap.value
+      settings.libraryShowLabels = showLabels.value
       await settingsApi.save(settings)
     } catch { /* ignore */ }
   }
@@ -141,6 +159,9 @@ export const useGamesStore = defineStore('games', () => {
     error,
     viewMode,
     sortBy,
+    cardSize,
+    gap,
+    showLabels,
     sortedGames,
     gameCount,
     installedCount,
