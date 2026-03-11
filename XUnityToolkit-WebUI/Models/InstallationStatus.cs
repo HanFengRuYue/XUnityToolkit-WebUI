@@ -11,6 +11,7 @@ public enum InstallStep
     InstallingAiTranslation,
     GeneratingConfig,
     ApplyingConfig,
+    ExtractingAssets,
     RemovingXUnity,
     RemovingBepInEx,
     Complete,

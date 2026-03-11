@@ -710,8 +710,26 @@ onUnmounted(() => stopWatch())
       </div>
     </div>
 
-    <!-- Glossary Card (only when fully installed) -->
+    <!-- Asset Extraction & Pre-Translation Card -->
     <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><ViewInArOutlined /></NIcon>
+          </span>
+          资产提取与预翻译
+        </h2>
+        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/asset-extraction`)">
+          打开
+        </NButton>
+      </div>
+      <p class="asset-extraction-desc">
+        从游戏资产中提取文本，自动检测游戏语言，并使用 AI 进行预翻译。预翻译的结果会写入翻译缓存，游戏启动时即可使用。
+      </p>
+    </div>
+
+    <!-- Glossary Card (only when fully installed) -->
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon glossary">
@@ -1350,6 +1368,13 @@ onUnmounted(() => stopWatch())
 }
 
 .ai-endpoint-desc p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+.asset-extraction-desc {
   margin: 0;
   font-size: 13px;
   color: var(--text-2);

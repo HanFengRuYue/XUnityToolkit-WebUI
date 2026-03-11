@@ -1,39 +1,65 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { NButton, NIcon, NInput, NCheckbox, NCheckboxGroup, NSwitch } from 'naive-ui'
+import { NButton, NIcon, NInput, NSwitch, NTooltip } from 'naive-ui'
 import {
-  ArticleOutlined,
+  TerminalOutlined,
   FilterListOutlined,
   SearchOutlined,
   FileDownloadOutlined,
   DeleteOutlined,
   HistoryOutlined,
   VerticalAlignBottomOutlined,
+  InfoOutlined,
+  WarningAmberOutlined,
+  BugReportOutlined,
 } from '@vicons/material'
 import { useLogStore } from '@/stores/log'
 import { logsApi } from '@/api/games'
 
 const logStore = useLogStore()
 
-const selectedLevels = ref(['INF', 'WRN', 'ERR', 'CRI'])
+const selectedLevels = ref<Set<string>>(new Set(['INF', 'WRN', 'ERR', 'CRI']))
 const keyword = ref('')
 const autoScroll = ref(true)
 const loading = ref(false)
 const historyLoading = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
+const showFilters = ref(true)
 
-const levelOptions = [
-  { label: 'INFO', value: 'INF' },
-  { label: 'WARN', value: 'WRN' },
-  { label: 'ERROR', value: 'ERR' },
-  { label: 'CRITICAL', value: 'CRI' },
+interface LevelDef {
+  key: string
+  label: string
+  icon: typeof InfoOutlined
+  colorVar: string
+}
+
+const levelDefs: LevelDef[] = [
+  { key: 'INF', label: 'INFO', icon: InfoOutlined, colorVar: '--accent' },
+  { key: 'WRN', label: 'WARN', icon: WarningAmberOutlined, colorVar: '--warning' },
+  { key: 'ERR', label: 'ERROR', icon: BugReportOutlined, colorVar: '--danger' },
+  { key: 'CRI', label: 'CRIT', icon: BugReportOutlined, colorVar: '--danger' },
 ]
+
+function toggleLevel(key: string) {
+  const s = new Set(selectedLevels.value)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
+  selectedLevels.value = s
+}
+
+const levelCounts = computed(() => {
+  const counts: Record<string, number> = { INF: 0, WRN: 0, ERR: 0, CRI: 0 }
+  for (const e of logStore.entries) {
+    if (e.level in counts) counts[e.level] = (counts[e.level] ?? 0) + 1
+  }
+  return counts
+})
 
 const filteredEntries = computed(() => {
   const levels = selectedLevels.value
   const kw = keyword.value.toLowerCase()
   return logStore.entries.filter(e => {
-    if (!levels.includes(e.level)) return false
+    if (!levels.has(e.level)) return false
     if (kw && !e.message.toLowerCase().includes(kw) && !e.category.toLowerCase().includes(kw)) return false
     return true
   })
@@ -103,36 +129,50 @@ function levelClass(level: string) {
     default: return 'level-inf'
   }
 }
+
+function formatTimestamp(ts: string) {
+  return ts.substring(11, 23)
+}
 </script>
 
 <template>
   <div class="log-page">
+    <!-- Header -->
     <h1 class="page-title" style="animation-delay: 0s">
       <span class="page-title-icon">
-        <NIcon :size="24"><ArticleOutlined /></NIcon>
+        <NIcon :size="24"><TerminalOutlined /></NIcon>
       </span>
       运行日志
     </h1>
 
+    <!-- Stats Row -->
+    <div class="stats-row" style="animation-delay: 0.04s">
+      <button
+        v-for="def in levelDefs"
+        :key="def.key"
+        class="level-pill"
+        :class="[`pill-${def.key.toLowerCase()}`, { active: selectedLevels.has(def.key), 'has-count': (levelCounts[def.key] ?? 0) > 0 }]"
+        @click="toggleLevel(def.key)"
+      >
+        <NIcon :size="14"><component :is="def.icon" /></NIcon>
+        <span class="pill-label">{{ def.label }}</span>
+        <span class="pill-count">{{ levelCounts[def.key] }}</span>
+      </button>
+    </div>
+
     <!-- Toolbar -->
-    <div class="section-card toolbar-card" style="animation-delay: 0.05s">
+    <div class="toolbar-card" style="animation-delay: 0.06s">
       <div class="toolbar">
         <div class="toolbar-left">
-          <div class="toolbar-group">
-            <NIcon :size="16" color="var(--text-3)"><FilterListOutlined /></NIcon>
-            <NCheckboxGroup v-model:value="selectedLevels" class="level-filter">
-              <NCheckbox v-for="opt in levelOptions" :key="opt.value" :value="opt.value" :label="opt.label" />
-            </NCheckboxGroup>
-          </div>
-          <div class="toolbar-group search-group">
+          <div class="search-box">
             <NInput
               v-model:value="keyword"
-              placeholder="搜索日志..."
+              placeholder="搜索日志内容或分类..."
               clearable
               size="small"
             >
               <template #prefix>
-                <NIcon :size="14"><SearchOutlined /></NIcon>
+                <NIcon :size="14" color="var(--text-3)"><SearchOutlined /></NIcon>
               </template>
             </NInput>
           </div>
@@ -142,50 +182,96 @@ function levelClass(level: string) {
             <span class="toggle-label">自动滚动</span>
             <NSwitch v-model:value="autoScroll" size="small" />
           </div>
-          <NButton size="small" quaternary :loading="historyLoading" @click="handleLoadHistory">
-            <template #icon><NIcon><HistoryOutlined /></NIcon></template>
-            加载历史
-          </NButton>
-          <NButton size="small" quaternary @click="handleExport">
-            <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
-            导出
-          </NButton>
-          <NButton size="small" quaternary @click="handleClear">
-            <template #icon><NIcon><DeleteOutlined /></NIcon></template>
-            清空
-          </NButton>
+          <div class="toolbar-divider"></div>
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <NButton size="small" quaternary :loading="historyLoading" @click="handleLoadHistory">
+                <template #icon><NIcon><HistoryOutlined /></NIcon></template>
+              </NButton>
+            </template>
+            加载历史日志
+          </NTooltip>
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <NButton size="small" quaternary @click="handleExport">
+                <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
+              </NButton>
+            </template>
+            导出日志文件
+          </NTooltip>
+          <NTooltip trigger="hover">
+            <template #trigger>
+              <NButton size="small" quaternary @click="handleClear">
+                <template #icon><NIcon><DeleteOutlined /></NIcon></template>
+              </NButton>
+            </template>
+            清空当前日志
+          </NTooltip>
         </div>
       </div>
     </div>
 
     <!-- Log Container -->
-    <div class="section-card log-section" style="animation-delay: 0.1s">
+    <div class="log-panel" style="animation-delay: 0.08s">
       <div ref="containerRef" class="log-container" @scroll="handleScroll">
-        <div v-if="loading" class="log-empty">加载中...</div>
-        <div v-else-if="filteredEntries.length === 0" class="log-empty">暂无日志</div>
-        <div
-          v-for="(entry, i) in filteredEntries"
-          :key="`${entry.timestamp}-${i}`"
-          class="log-row"
-          :class="levelClass(entry.level)"
-        >
-          <span class="log-time">{{ entry.timestamp.substring(11) }}</span>
-          <span class="log-level" :class="levelClass(entry.level)">{{ entry.level }}</span>
-          <span class="log-category">{{ entry.category }}</span>
-          <span class="log-message">{{ entry.message }}</span>
+        <!-- Loading State -->
+        <div v-if="loading" class="log-empty-state">
+          <div class="empty-icon loading-icon">
+            <NIcon :size="32"><TerminalOutlined /></NIcon>
+          </div>
+          <span class="empty-text">连接日志流...</span>
         </div>
+
+        <!-- Empty State -->
+        <div v-else-if="filteredEntries.length === 0" class="log-empty-state">
+          <div class="empty-icon">
+            <NIcon :size="32"><TerminalOutlined /></NIcon>
+          </div>
+          <span class="empty-text">{{ keyword ? '没有匹配的日志' : '暂无日志记录' }}</span>
+          <span class="empty-hint">{{ keyword ? '尝试调整搜索关键词或筛选条件' : '日志将在应用运行时实时显示' }}</span>
+        </div>
+
+        <!-- Log Entries -->
+        <template v-else>
+          <div
+            v-for="(entry, i) in filteredEntries"
+            :key="`${entry.timestamp}-${i}`"
+            class="log-row"
+            :class="levelClass(entry.level)"
+          >
+            <span class="log-line-no">{{ i + 1 }}</span>
+            <span class="log-time">{{ formatTimestamp(entry.timestamp) }}</span>
+            <span class="log-level-badge" :class="levelClass(entry.level)">{{ entry.level }}</span>
+            <span class="log-category">{{ entry.category }}</span>
+            <span class="log-message">{{ entry.message }}</span>
+          </div>
+        </template>
       </div>
+
+      <!-- Footer -->
       <div class="log-footer">
-        <span class="log-count">{{ filteredEntries.length }} / {{ logStore.entries.length }} 条日志</span>
-        <NButton
-          v-if="!autoScroll"
-          size="tiny"
-          quaternary
-          @click="autoScroll = true; scrollToBottom()"
-        >
-          <template #icon><NIcon :size="14"><VerticalAlignBottomOutlined /></NIcon></template>
-          滚动到底部
-        </NButton>
+        <div class="footer-left">
+          <span class="log-count">
+            <span class="count-filtered">{{ filteredEntries.length }}</span>
+            <span class="count-sep">/</span>
+            <span class="count-total">{{ logStore.entries.length }}</span>
+            <span class="count-label">条日志</span>
+          </span>
+        </div>
+        <div class="footer-right">
+          <Transition name="fade-btn">
+            <NButton
+              v-if="!autoScroll"
+              size="tiny"
+              quaternary
+              class="scroll-btn"
+              @click="autoScroll = true; scrollToBottom()"
+            >
+              <template #icon><NIcon :size="14"><VerticalAlignBottomOutlined /></NIcon></template>
+              回到底部
+            </NButton>
+          </Transition>
+        </div>
       </div>
     </div>
   </div>
@@ -195,11 +281,12 @@ function levelClass(level: string) {
 .log-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   animation: fadeIn 0.3s ease;
   height: calc(100vh - 72px);
 }
 
+/* ===== Header ===== */
 .page-title {
   font-family: var(--font-display);
   font-size: 30px;
@@ -207,11 +294,9 @@ function levelClass(level: string) {
   color: var(--text-1);
   margin-bottom: 0;
   letter-spacing: -0.03em;
-  animation: slideUp 0.4s var(--ease-out) backwards;
   display: flex;
   align-items: center;
   gap: 14px;
-  flex-shrink: 0;
 }
 
 .page-title-icon {
@@ -226,67 +311,155 @@ function levelClass(level: string) {
   flex-shrink: 0;
 }
 
-/* ===== Section Card ===== */
-.section-card {
-  background: var(--bg-card);
+/* ===== Stats / Level Pills ===== */
+.stats-row {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  animation: slideUp 0.45s var(--ease-out) backwards;
+}
+
+.level-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  outline: none;
+  flex: 1;
+  justify-content: center;
   box-shadow: var(--shadow-card-rest);
 }
 
-.section-card:hover {
+.level-pill:hover {
   border-color: var(--border-hover);
+  background: var(--bg-card-hover);
+}
+
+.level-pill .pill-count {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* INF */
+.level-pill.pill-inf.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.level-pill.pill-inf.active .pill-count {
+  color: var(--accent);
+}
+
+/* WRN */
+.level-pill.pill-wrn.active {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 6%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--warning) 20%, transparent);
+}
+
+.level-pill.pill-wrn.active .pill-count {
+  color: var(--warning);
+}
+
+/* ERR */
+.level-pill.pill-err.active {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+}
+
+.level-pill.pill-err.active .pill-count {
+  color: var(--danger);
+}
+
+/* CRI */
+.level-pill.pill-cri.active {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-card));
+  border-color: color-mix(in srgb, var(--danger) 25%, transparent);
+}
+
+.level-pill.pill-cri.active .pill-count {
+  color: var(--danger);
+}
+
+.level-pill.pill-cri.active.has-count {
+  animation: crit-pulse 3s ease-in-out infinite;
+}
+
+@keyframes crit-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 15%, transparent); }
+  50% { box-shadow: 0 0 12px 2px color-mix(in srgb, var(--danger) 10%, transparent); }
 }
 
 /* ===== Toolbar ===== */
 .toolbar-card {
-  padding: 12px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
   flex-shrink: 0;
+  animation: slideUp 0.5s var(--ease-out) backwards;
+  transition: border-color 0.3s ease, background 0.3s ease;
+  box-shadow: var(--shadow-card-rest);
+}
+
+.toolbar-card:hover {
+  border-color: var(--border-hover);
 }
 
 .toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.search-box {
+  max-width: 280px;
+  width: 100%;
 }
 
 .toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.toolbar-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.level-filter {
-  display: flex;
-  gap: 12px;
-}
-
-.search-group {
-  min-width: 180px;
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
 }
 
 .auto-scroll-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-right: 4px;
 }
 
 .toggle-label {
@@ -295,41 +468,99 @@ function levelClass(level: string) {
   white-space: nowrap;
 }
 
-/* ===== Log Container ===== */
-.log-section {
+/* ===== Log Panel ===== */
+.log-panel {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   overflow: hidden;
+  animation: slideUp 0.55s var(--ease-out) backwards;
+  transition: border-color 0.3s ease, background 0.3s ease;
+  box-shadow: var(--shadow-card-rest);
+  position: relative;
+}
+
+.log-panel:hover {
+  border-color: var(--border-hover);
+}
+
+/* Subtle top-edge glow */
+.log-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 15%, transparent), transparent);
+  z-index: 1;
+  opacity: 0.6;
 }
 
 .log-container {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 6px 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.7;
 }
 
-.log-empty {
+/* ===== Empty State ===== */
+.log-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 240px;
+  gap: 12px;
+  padding: 40px;
+}
+
+.empty-icon {
+  width: 64px;
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 200px;
+  border-radius: 16px;
+  background: var(--bg-muted);
   color: var(--text-3);
-  font-family: var(--font-body);
-  font-size: 14px;
+  transition: all 0.3s ease;
 }
 
+.empty-icon.loading-icon {
+  animation: breathe 2s ease-in-out infinite;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.empty-text {
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.empty-hint {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* ===== Log Rows ===== */
 .log-row {
   display: flex;
-  gap: 8px;
-  padding: 1px 16px;
+  gap: 0;
+  padding: 0 16px 0 0;
   white-space: nowrap;
   transition: background 0.1s ease;
+  border-left: 2px solid transparent;
 }
 
 .log-row:hover {
@@ -337,62 +568,97 @@ function levelClass(level: string) {
 }
 
 .log-row.level-err {
-  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+  border-left-color: var(--danger);
 }
 
 .log-row.level-err:hover {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .log-row.level-wrn {
-  background: color-mix(in srgb, var(--warning) 3%, transparent);
+  background: color-mix(in srgb, var(--warning) 2%, transparent);
+  border-left-color: color-mix(in srgb, var(--warning) 50%, transparent);
 }
 
 .log-row.level-wrn:hover {
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
 }
 
+/* Line Number */
+.log-line-no {
+  color: var(--text-3);
+  opacity: 0.4;
+  min-width: 44px;
+  padding: 0 10px 0 14px;
+  text-align: right;
+  user-select: none;
+  font-size: 11px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  margin-right: 10px;
+}
+
+/* Timestamp */
 .log-time {
   color: var(--text-3);
   flex-shrink: 0;
+  margin-right: 8px;
+  font-size: 11px;
+  opacity: 0.7;
 }
 
-.log-level {
+/* Level Badge */
+.log-level-badge {
   flex-shrink: 0;
-  width: 28px;
+  width: 32px;
   text-align: center;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 0 2px;
+  margin-right: 8px;
+  border-radius: 3px;
 }
 
-.log-level.level-inf {
+.log-level-badge.level-inf {
   color: var(--accent);
 }
 
-.log-level.level-wrn {
+.log-level-badge.level-wrn {
   color: var(--warning);
 }
 
-.log-level.level-err {
+.log-level-badge.level-err {
   color: var(--danger);
 }
 
-.log-level.level-dbg {
+.log-level-badge.level-dbg {
   color: var(--text-3);
 }
 
+/* Category */
 .log-category {
-  color: var(--text-3);
+  color: var(--secondary);
   flex-shrink: 0;
-  max-width: 160px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-right: 10px;
+  opacity: 0.7;
+  font-size: 11px;
 }
 
+/* Message */
 .log-message {
   color: var(--text-1);
   white-space: pre-wrap;
   word-break: break-all;
   min-width: 0;
+}
+
+.log-row.level-err .log-message {
+  color: color-mix(in srgb, var(--danger) 80%, var(--text-1));
 }
 
 /* ===== Log Footer ===== */
@@ -403,12 +669,62 @@ function levelClass(level: string) {
   padding: 6px 16px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--bg-card) 80%, var(--bg-root));
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .log-count {
   font-size: 12px;
-  color: var(--text-3);
   font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.count-filtered {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.count-sep {
+  color: var(--text-3);
+  opacity: 0.5;
+}
+
+.count-total {
+  color: var(--text-3);
+}
+
+.count-label {
+  color: var(--text-3);
+  font-family: var(--font-body);
+  margin-left: 2px;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+}
+
+.scroll-btn {
+  font-size: 12px;
+}
+
+/* ===== Transitions ===== */
+.fade-btn-enter-active,
+.fade-btn-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.fade-btn-enter-from,
+.fade-btn-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
 }
 
 /* ===== Responsive ===== */
@@ -418,27 +734,46 @@ function levelClass(level: string) {
     min-height: calc(100vh - 120px);
   }
 
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .toolbar-left,
-  .toolbar-right {
+  .stats-row {
     flex-wrap: wrap;
   }
 
-  .toolbar-card {
-    padding: 12px 14px;
-  }
-
-  .log-row {
-    padding: 1px 10px;
+  .level-pill {
+    flex: 0 1 auto;
+    padding: 5px 10px;
     font-size: 11px;
   }
 
-  .search-group {
-    min-width: 140px;
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .toolbar-left {
+    flex: unset;
+  }
+
+  .toolbar-right {
+    justify-content: flex-end;
+  }
+
+  .search-box {
+    max-width: 100%;
+  }
+
+  .toolbar-card {
+    padding: 10px 12px;
+  }
+
+  .log-row {
+    padding: 0 10px 0 0;
+    font-size: 11px;
+  }
+
+  .log-line-no {
+    min-width: 34px;
+    padding: 0 6px 0 8px;
   }
 }
 
@@ -454,11 +789,33 @@ function levelClass(level: string) {
     border-radius: 10px;
   }
 
-  .level-filter {
-    gap: 8px;
+  .stats-row {
+    gap: 6px;
+  }
+
+  .level-pill {
+    padding: 4px 8px;
+    gap: 4px;
+    border-radius: 8px;
+  }
+
+  .pill-label {
+    display: none;
+  }
+
+  .log-line-no {
+    display: none;
   }
 
   .log-category {
+    display: none;
+  }
+
+  .log-time {
+    font-size: 10px;
+  }
+
+  .auto-scroll-toggle {
     display: none;
   }
 }

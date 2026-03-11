@@ -66,6 +66,7 @@ export type InstallStep =
   | 'InstallingAiTranslation'
   | 'GeneratingConfig'
   | 'ApplyingConfig'
+  | 'ExtractingAssets'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
   | 'Complete'
@@ -300,4 +301,30 @@ export interface LogEntry {
   level: string
   category: string
   message: string
+}
+
+export interface ExtractedText {
+  text: string
+  source: string
+  assetFile: string
+}
+
+export interface AssetExtractionResult {
+  gameId: string
+  texts: ExtractedText[]
+  detectedLanguage?: string
+  totalAssetsScanned: number
+  totalTextsExtracted: number
+  extractedAt: string
+}
+
+export type PreTranslationState = 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
+
+export interface PreTranslationStatus {
+  gameId: string
+  state: PreTranslationState
+  totalTexts: number
+  translatedTexts: number
+  failedTexts: number
+  error?: string
 }

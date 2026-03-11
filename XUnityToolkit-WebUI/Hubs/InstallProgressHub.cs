@@ -21,4 +21,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveLogGroup() =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, "logs");
+
+    public Task JoinPreTranslationGroup(string gameId) =>
+        Groups.AddToGroupAsync(Context.ConnectionId, $"pre-translation-{gameId}");
+
+    public Task LeavePreTranslationGroup(string gameId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, $"pre-translation-{gameId}");
 }

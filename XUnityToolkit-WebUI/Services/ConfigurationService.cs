@@ -138,6 +138,10 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
 
         var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
         {
+            ["General"] = new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Language"] = "zh",
+            },
             [tfSection] = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["EnableIMGUI"] = "True",

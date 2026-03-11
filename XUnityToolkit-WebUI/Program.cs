@@ -112,6 +112,8 @@ builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<GlossaryService>();
 builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddSingleton<GlossaryExtractionService>();
+builder.Services.AddSingleton<AssetExtractionService>();
+builder.Services.AddSingleton<PreTranslationService>();
 builder.Services.AddHostedService<SystemTrayService>();
 
 // SignalR with string enum serialization
@@ -155,6 +157,7 @@ app.MapSettingsEndpoints();
 app.MapTranslateEndpoints();
 app.MapImageEndpoints();
 app.MapLogEndpoints();
+app.MapAssetEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

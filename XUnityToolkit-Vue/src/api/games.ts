@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -101,6 +101,21 @@ export const gamesApi = {
     api.post<SteamStoreSearchResult[]>(`/api/games/${id}/cover/steam-search`, { query }),
   selectSteamCover: (id: string, steamAppId: number) =>
     api.post<CoverInfo>(`/api/games/${id}/cover/steam-select`, { steamAppId }),
+}
+
+export const assetApi = {
+  extractAssets: (id: string) =>
+    api.post<AssetExtractionResult>(`/api/games/${id}/extract-assets`, {}),
+  getExtractedTexts: (id: string) =>
+    api.get<AssetExtractionResult | null>(`/api/games/${id}/extracted-texts`),
+  deleteExtractedTexts: (id: string) =>
+    api.del<void>(`/api/games/${id}/extracted-texts`),
+  startPreTranslation: (id: string, fromLang?: string, toLang?: string) =>
+    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate`, { fromLang, toLang }),
+  getPreTranslationStatus: (id: string) =>
+    api.get<PreTranslationStatus>(`/api/games/${id}/pre-translate/status`),
+  cancelPreTranslation: (id: string) =>
+    api.post<void>(`/api/games/${id}/pre-translate/cancel`, {}),
 }
 
 export const dialogApi = {

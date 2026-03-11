@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -14,6 +16,8 @@ public sealed class InstallOrchestrator(
     XUnityInstallerService xUnityInstaller,
     ConfigurationService configService,
     AppSettingsService appSettingsService,
+    AssetExtractionService assetExtraction,
+    AppDataPaths appDataPaths,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
 {
@@ -287,7 +291,48 @@ public sealed class InstallOrchestrator(
                 }, ct);
         }
 
-        // Step 8: Complete
+        // Step 8: Extract game assets for language detection
+        await UpdateStatus(status, InstallStep.ExtractingAssets, 98, "正在提取游戏资产以检测语言...");
+        try
+        {
+            var extractResult = await assetExtraction.ExtractTextsAsync(
+                game.GamePath, game.ExecutableName, gameInfo, ct: ct);
+
+            if (extractResult.DetectedLanguage is not null)
+            {
+                await configService.PatchSectionAsync(game.GamePath, "General",
+                    new Dictionary<string, string>
+                    {
+                        ["FromLanguage"] = extractResult.DetectedLanguage
+                    }, ct);
+                await UpdateStatus(status, InstallStep.ExtractingAssets, 99,
+                    $"检测到游戏语言: {extractResult.DetectedLanguage} ({extractResult.TotalTextsExtracted} 条文本)");
+                logger.LogInformation("游戏语言检测完成: {Lang}, 提取 {Count} 条文本",
+                    extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
+            }
+
+            // Cache extracted texts for pre-translation reuse (don't overwrite existing manual extraction)
+            var cachePath = appDataPaths.ExtractedTextsFile(game.Id);
+            if (!File.Exists(cachePath) && extractResult.Texts.Count > 0)
+            {
+                extractResult.GameId = game.Id;
+                var json = JsonSerializer.Serialize(extractResult, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                    WriteIndented = false
+                });
+                await File.WriteAllTextAsync(cachePath, json, ct);
+                logger.LogInformation("安装时提取的文本已缓存: {Count} 条, 游戏 {GameId}",
+                    extractResult.TotalTextsExtracted, game.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "资产提取失败（不影响安装）");
+            await UpdateStatus(status, InstallStep.ExtractingAssets, 99, "资产提取失败（跳过）");
+        }
+
+        // Step 9: Complete
         game.InstalledXUnityVersion = xUnityRelease.TagName;
         game.InstallState = InstallState.FullyInstalled;
         await gameLibrary.UpdateAsync(game, ct);

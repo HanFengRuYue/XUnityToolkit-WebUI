@@ -12,8 +12,17 @@
 
   <!-- Embed LLMTranslate.dll if it has been built -->
   <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll')">
-    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll"
-                      LogicalName="LLMTranslate.dll" />
+    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll" LogicalName="LLMTranslate.dll" />
+  </ItemGroup>
+
+  <!-- Embed classdata.tpk for Unity asset type deserialization -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\classdata.tpk" LogicalName="classdata.tpk" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AssetsTools.NET" Version="3.0.4" />
+    <PackageReference Include="AssetsTools.NET.Cpp2IL" Version="3.0.4" />
+    <PackageReference Include="AssetsTools.NET.MonoCecil" Version="3.0.4" />
   </ItemGroup>
 
   <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->

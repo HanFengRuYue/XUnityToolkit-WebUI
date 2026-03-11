@@ -20,6 +20,8 @@ import {
   ErrorOutlineOutlined,
   CallReceivedOutlined,
   AutoFixHighOutlined,
+  CheckCircleOutlined,
+  ArrowRightAltOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
@@ -82,6 +84,18 @@ const connectionLabel = computed(() => {
   }
 })
 
+const successRate = computed(() => {
+  const received = aiStore.stats?.totalReceived ?? 0
+  const errors = aiStore.stats?.totalErrors ?? 0
+  if (received === 0) return null
+  return ((1 - errors / received) * 100).toFixed(1)
+})
+
+const successRateNumber = computed(() => {
+  if (successRate.value === null) return 100
+  return Number(successRate.value)
+})
+
 const lastRequestFormatted = computed(() => {
   if (!aiStore.stats?.lastRequestAt) return '从未'
   const date = new Date(aiStore.stats.lastRequestAt)
@@ -89,6 +103,8 @@ const lastRequestFormatted = computed(() => {
 })
 
 const isEnabled = computed(() => aiStore.stats?.enabled ?? true)
+
+const isActivelyTranslating = computed(() => (aiStore.stats?.translating ?? 0) > 0)
 
 const extractionEndpointOptions = computed(() => {
   const endpoints = aiSettings.value.endpoints ?? []
@@ -191,8 +207,48 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Live Metrics Strip -->
+    <div class="metrics-strip" style="animation-delay: 0.03s">
+      <div class="metric-pill">
+        <div class="metric-icon">
+          <NIcon :size="14"><CallReceivedOutlined /></NIcon>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
+          <span class="metric-label">已接收</span>
+        </div>
+      </div>
+      <div class="metric-pill" :class="{ 'rate-good': successRateNumber >= 95, 'rate-warn': successRateNumber < 95 && successRateNumber >= 80, 'rate-bad': successRateNumber < 80 }">
+        <div class="metric-icon">
+          <NIcon :size="14"><CheckCircleOutlined /></NIcon>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value">{{ successRate ?? '--' }}<small>%</small></span>
+          <span class="metric-label">成功率</span>
+        </div>
+      </div>
+      <div class="metric-pill">
+        <div class="metric-icon">
+          <NIcon :size="14"><SpeedOutlined /></NIcon>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value">{{ formatTime(aiStore.stats?.averageResponseTimeMs ?? 0) }}</span>
+          <span class="metric-label">均速 · {{ aiStore.stats?.requestsPerMinute ?? 0 }}/min</span>
+        </div>
+      </div>
+      <div class="metric-pill">
+        <div class="metric-icon">
+          <NIcon :size="14"><TokenOutlined /></NIcon>
+        </div>
+        <div class="metric-data">
+          <span class="metric-value">{{ formatTokens(aiStore.stats?.totalTokensUsed ?? 0) }}</span>
+          <span class="metric-label">Token</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Status Dashboard -->
-    <div class="section-card" style="animation-delay: 0.05s">
+    <div class="section-card" :class="{ 'is-translating': isActivelyTranslating }" style="animation-delay: 0.05s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon status">
@@ -203,101 +259,78 @@ onUnmounted(() => {
           </span>
           翻译状态
         </h2>
-        <NButton size="small" quaternary @click="aiStore.fetchStats()">
-          刷新
-        </NButton>
+        <div class="header-actions">
+          <span class="connection-badge" :class="connectionStatus">
+            <span class="connection-dot"></span>
+            {{ connectionLabel }}
+            <span class="connection-time">{{ lastRequestFormatted }}</span>
+          </span>
+          <NButton size="small" quaternary @click="aiStore.fetchStats()">
+            刷新
+          </NButton>
+        </div>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon connection" :class="connectionStatus">
-            <NIcon :size="20">
-              <LinkOutlined v-if="connectionStatus === 'active'" />
-              <LinkOffOutlined v-else />
-            </NIcon>
+      <!-- Pipeline Flow -->
+      <div class="stats-group-label">处理进度</div>
+      <div class="pipeline-flow">
+        <div class="pipeline-stage queued-stage">
+          <div class="stage-icon queued">
+            <NIcon :size="18"><HourglassEmptyOutlined /></NIcon>
           </div>
-          <div class="stat-content">
-            <span class="stat-label">连接状态</span>
-            <span class="stat-value" :class="connectionStatus">{{ connectionLabel }}</span>
-            <span class="stat-hint">最近请求: {{ lastRequestFormatted }}</span>
+          <div class="stage-content">
+            <span class="stage-value">{{ aiStore.stats?.queued ?? 0 }}</span>
+            <span class="stage-label">排队等待</span>
           </div>
         </div>
 
-        <div class="stat-card">
-          <div class="stat-icon translated">
-            <NIcon :size="20"><TranslateOutlined /></NIcon>
+        <div class="pipeline-arrow" :class="{ active: isActivelyTranslating }">
+          <NIcon :size="18"><ArrowRightAltOutlined /></NIcon>
+        </div>
+
+        <div class="pipeline-stage translating-stage" :class="{ 'is-active': isActivelyTranslating }">
+          <div class="stage-icon translating">
+            <NIcon :size="18"><SyncOutlined /></NIcon>
           </div>
-          <div class="stat-content">
-            <span class="stat-label">已翻译</span>
-            <span class="stat-value">{{ aiStore.stats?.totalTranslated ?? 0 }}</span>
-            <span class="stat-hint">条文本（本次会话）</span>
+          <div class="stage-content">
+            <span class="stage-value">{{ aiStore.stats?.translating ?? 0 }}</span>
+            <span class="stage-label">正在翻译</span>
           </div>
         </div>
 
-        <div class="stat-card">
-          <div class="stat-icon translating">
-            <NIcon :size="20"><SyncOutlined /></NIcon>
-          </div>
-          <div class="stat-content">
-            <span class="stat-label">正在翻译</span>
-            <span class="stat-value">{{ aiStore.stats?.translating ?? 0 }}</span>
-            <span class="stat-hint">条文本正在调用 API</span>
-          </div>
+        <div class="pipeline-arrow" :class="{ active: isActivelyTranslating }">
+          <NIcon :size="18"><ArrowRightAltOutlined /></NIcon>
         </div>
 
-        <div class="stat-card">
-          <div class="stat-icon queued">
-            <NIcon :size="20"><HourglassEmptyOutlined /></NIcon>
+        <div class="pipeline-stage translated-stage">
+          <div class="stage-icon translated">
+            <NIcon :size="18"><TranslateOutlined /></NIcon>
           </div>
-          <div class="stat-content">
-            <span class="stat-label">排队等待</span>
-            <span class="stat-value">{{ aiStore.stats?.queued ?? 0 }}</span>
-            <span class="stat-hint">条文本等待发送</span>
-          </div>
-        </div>
-
-        <div class="stat-card">
-          <div class="stat-icon tokens">
-            <NIcon :size="20"><TokenOutlined /></NIcon>
-          </div>
-          <div class="stat-content">
-            <span class="stat-label">Token 用量</span>
-            <span class="stat-value">{{ formatTokens(aiStore.stats?.totalTokensUsed ?? 0) }}</span>
-            <span class="stat-hint">累计已使用 Token</span>
+          <div class="stage-content">
+            <span class="stage-value">{{ aiStore.stats?.totalTranslated ?? 0 }}</span>
+            <span class="stage-label">已翻译</span>
           </div>
         </div>
+      </div>
 
-        <div class="stat-card">
-          <div class="stat-icon speed">
-            <NIcon :size="20"><SpeedOutlined /></NIcon>
-          </div>
-          <div class="stat-content">
-            <span class="stat-label">API 速度</span>
-            <span class="stat-value">{{ formatTime(aiStore.stats?.averageResponseTimeMs ?? 0) }}</span>
-            <span class="stat-hint">{{ aiStore.stats?.requestsPerMinute ?? 0 }} 请求/分钟</span>
-          </div>
+      <!-- Error / Success Bar -->
+      <div class="error-bar" :class="{ 'has-errors': (aiStore.stats?.totalErrors ?? 0) > 0 }">
+        <div class="error-bar-left">
+          <NIcon :size="15"><ErrorOutlineOutlined /></NIcon>
+          <span v-if="(aiStore.stats?.totalErrors ?? 0) > 0" class="error-bar-text">
+            {{ aiStore.stats!.totalErrors }} 次翻译失败
+          </span>
+          <span v-else class="error-bar-text">暂无错误</span>
         </div>
-
-        <div class="stat-card">
-          <div class="stat-icon received">
-            <NIcon :size="20"><CallReceivedOutlined /></NIcon>
+        <div class="error-bar-right" v-if="successRate !== null">
+          <div class="success-track">
+            <div
+              class="success-fill"
+              :class="{ warn: successRateNumber < 95, bad: successRateNumber < 80 }"
+              :style="{ width: successRate + '%' }"
+            ></div>
           </div>
-          <div class="stat-content">
-            <span class="stat-label">已接收</span>
-            <span class="stat-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
-            <span class="stat-hint">累计收到的翻译请求</span>
-          </div>
-        </div>
-
-        <div class="stat-card" v-if="(aiStore.stats?.totalErrors ?? 0) > 0">
-          <div class="stat-icon errors">
-            <NIcon :size="20"><ErrorOutlineOutlined /></NIcon>
-          </div>
-          <div class="stat-content">
-            <span class="stat-label">错误</span>
-            <span class="stat-value error-value">{{ aiStore.stats?.totalErrors ?? 0 }}</span>
-            <span class="stat-hint">翻译失败次数</span>
-          </div>
+          <span class="error-bar-rate">{{ successRate }}%</span>
         </div>
       </div>
     </div>
@@ -315,6 +348,9 @@ onUnmounted(() => {
           </span>
           最近翻译
         </h2>
+        <span class="recent-count-badge">
+          {{ aiStore.stats!.recentTranslations.length }} 条
+        </span>
       </div>
 
       <div class="recent-list">
@@ -322,17 +358,23 @@ onUnmounted(() => {
           v-for="(item, index) in aiStore.stats!.recentTranslations"
           :key="index"
           class="recent-item"
+          :style="{ animationDelay: index * 0.03 + 's' }"
         >
-          <div class="recent-texts">
-            <span class="recent-original">{{ item.original }}</span>
-            <span class="recent-arrow">→</span>
-            <span class="recent-translated">{{ item.translated }}</span>
-          </div>
-          <div class="recent-meta">
-            <span>{{ item.endpointName }}</span>
-            <span>{{ item.tokensUsed }} tokens</span>
-            <span>{{ formatTime(item.responseTimeMs) }}</span>
-            <span>{{ formatRelativeTime(item.timestamp) }}</span>
+          <span class="recent-index">{{ index + 1 }}</span>
+          <div class="recent-body">
+            <div class="recent-texts">
+              <span class="recent-original">{{ item.original }}</span>
+              <span class="recent-arrow">
+                <NIcon :size="12"><ArrowRightAltOutlined /></NIcon>
+              </span>
+              <span class="recent-translated">{{ item.translated }}</span>
+            </div>
+            <div class="recent-meta">
+              <span class="meta-tag endpoint">{{ item.endpointName }}</span>
+              <span class="meta-tag">{{ item.tokensUsed }} tok</span>
+              <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
+              <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -403,22 +445,42 @@ onUnmounted(() => {
           </div>
 
           <div v-if="extractionStats" class="extraction-stats">
-            <div class="extraction-stat-row">
-              <div class="extraction-stat">
-                <span class="extraction-stat-label">已提取术语</span>
-                <span class="extraction-stat-value">{{ extractionStats.totalExtracted }}</span>
+            <div class="ext-metrics">
+              <div class="ext-metric-card">
+                <div class="ext-metric-icon">
+                  <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
+                </div>
+                <div class="ext-metric-data">
+                  <span class="ext-metric-value">{{ extractionStats.totalExtracted }}</span>
+                  <span class="ext-metric-label">已提取术语</span>
+                </div>
               </div>
-              <div class="extraction-stat">
-                <span class="extraction-stat-label">提取调用</span>
-                <span class="extraction-stat-value">{{ extractionStats.totalExtractionCalls }}</span>
+              <div class="ext-metric-card">
+                <div class="ext-metric-icon">
+                  <NIcon :size="16"><SyncOutlined /></NIcon>
+                </div>
+                <div class="ext-metric-data">
+                  <span class="ext-metric-value">{{ extractionStats.totalExtractionCalls }}</span>
+                  <span class="ext-metric-label">提取调用</span>
+                </div>
               </div>
-              <div class="extraction-stat" v-if="extractionStats.activeExtractions > 0">
-                <span class="extraction-stat-label">正在提取</span>
-                <span class="extraction-stat-value active">{{ extractionStats.activeExtractions }}</span>
+              <div v-if="extractionStats.activeExtractions > 0" class="ext-metric-card is-active">
+                <div class="ext-metric-icon active">
+                  <NIcon :size="16"><HourglassEmptyOutlined /></NIcon>
+                </div>
+                <div class="ext-metric-data">
+                  <span class="ext-metric-value">{{ extractionStats.activeExtractions }}</span>
+                  <span class="ext-metric-label">正在提取</span>
+                </div>
               </div>
-              <div class="extraction-stat" v-if="extractionStats.totalErrors > 0">
-                <span class="extraction-stat-label">错误</span>
-                <span class="extraction-stat-value error">{{ extractionStats.totalErrors }}</span>
+              <div v-if="extractionStats.totalErrors > 0" class="ext-metric-card has-error">
+                <div class="ext-metric-icon error">
+                  <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
+                </div>
+                <div class="ext-metric-data">
+                  <span class="ext-metric-value">{{ extractionStats.totalErrors }}</span>
+                  <span class="ext-metric-label">错误</span>
+                </div>
               </div>
             </div>
 
@@ -429,9 +491,11 @@ onUnmounted(() => {
                 :key="index"
                 class="extraction-recent-item"
               >
-                <span class="extraction-recent-game">{{ getGameName(item.gameId) }}</span>
-                <span class="extraction-recent-count">+{{ item.termsExtracted }} 条</span>
-                <span class="extraction-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
+                <div class="ext-recent-left">
+                  <span class="ext-recent-game">{{ getGameName(item.gameId) }}</span>
+                  <span class="ext-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
+                </div>
+                <span class="ext-recent-badge">+{{ item.termsExtracted }}</span>
               </div>
             </div>
           </div>
@@ -501,6 +565,105 @@ onUnmounted(() => {
   color: var(--text-2);
 }
 
+/* ===== Metrics Strip ===== */
+.metrics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  animation: slideUp 0.45s var(--ease-out) backwards;
+}
+
+.metric-pill {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: all 0.25s ease;
+  box-shadow: var(--shadow-card-rest);
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-pill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.metric-pill:hover {
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.metric-pill:hover::before {
+  opacity: 0.5;
+}
+
+.metric-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.metric-pill.rate-good .metric-icon {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.metric-pill.rate-warn .metric-icon {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+}
+
+.metric-pill.rate-bad .metric-icon {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.metric-data {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.metric-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.metric-value small {
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 /* ===== Section Card ===== */
 .section-card {
   display: flex;
@@ -512,10 +675,49 @@ onUnmounted(() => {
   animation: slideUp 0.5s var(--ease-out) backwards;
   transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   box-shadow: var(--shadow-card-rest);
+  position: relative;
 }
 
 .section-card:hover {
   border-color: var(--border-hover);
+}
+
+/* Active translating glow */
+.section-card.is-translating {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--accent) 6%, transparent),
+              var(--shadow-card-rest);
+  animation: slideUp 0.5s var(--ease-out) backwards, translating-glow 3s ease-in-out infinite;
+}
+
+@keyframes translating-glow {
+  0%, 100% {
+    box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 5%, transparent),
+                var(--shadow-card-rest);
+  }
+  50% {
+    box-shadow: 0 0 50px color-mix(in srgb, var(--accent) 10%, transparent),
+                0 0 80px color-mix(in srgb, var(--accent) 3%, transparent),
+                var(--shadow-card-rest);
+  }
+}
+
+/* Scanning line for active state */
+.section-card.is-translating::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scan-line 2.5s ease-in-out infinite;
+}
+
+@keyframes scan-line {
+  0% { opacity: 0; transform: scaleX(0.3); }
+  50% { opacity: 0.8; transform: scaleX(1); }
+  100% { opacity: 0; transform: scaleX(0.3); }
 }
 
 .section-header {
@@ -557,30 +759,156 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
-/* ===== Stats Grid ===== */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+/* ===== Connection Badge ===== */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.stat-card {
+.connection-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  transition: all 0.3s ease;
+}
+
+.connection-badge.active,
+.connection-badge.idle {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.connection-badge.idle {
+  opacity: 0.7;
+}
+
+.connection-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.connection-badge.active .connection-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px transparent; }
+}
+
+.connection-time {
+  color: var(--text-3);
+  font-weight: 400;
+  padding-left: 4px;
+  border-left: 1px solid var(--border);
+  margin-left: 2px;
+}
+
+/* ===== Stats Group Label ===== */
+.stats-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.stats-group-label:first-of-type {
+  margin-top: 0;
+}
+
+/* ===== Pipeline Flow ===== */
+.pipeline-flow {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 0;
+  margin-bottom: 16px;
+}
+
+.pipeline-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
   gap: 14px;
   padding: 18px 20px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: all 0.3s ease;
 }
 
-.stat-card:hover {
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  opacity: 0.25;
+  transition: all 0.3s ease;
+}
+
+.pipeline-arrow.active {
+  opacity: 0.6;
+  color: var(--accent);
+  animation: arrow-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes arrow-pulse {
+  0%, 100% { opacity: 0.4; transform: translateX(0); }
+  50% { opacity: 0.8; transform: translateX(3px); }
+}
+
+.pipeline-stage:hover {
   border-color: var(--border-hover);
   background: var(--bg-subtle-hover);
 }
 
-.stat-icon {
+.queued-stage {
+  border-left: 3px solid var(--accent);
+  padding-left: 17px;
+  opacity: 0.75;
+}
+
+.translating-stage {
+  border-left: 3px solid var(--accent);
+  padding-left: 17px;
+}
+
+.translating-stage.is-active {
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
+  border-color: var(--accent-border);
+  border-left-color: var(--accent);
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent);
+  animation: active-glow 3s ease-in-out infinite;
+}
+
+@keyframes active-glow {
+  0%, 100% { box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent); }
+  50% { box-shadow: inset 0 0 30px color-mix(in srgb, var(--accent) 6%, transparent); }
+}
+
+.translated-stage {
+  border-left: 3px solid var(--accent);
+  padding-left: 17px;
+  opacity: 0.9;
+}
+
+.stage-icon {
   width: 42px;
   height: 42px;
   display: flex;
@@ -588,59 +916,27 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: 10px;
   flex-shrink: 0;
-}
-
-.stat-icon.connection {
-  background: var(--bg-muted);
-  color: var(--text-3);
-}
-
-.stat-icon.connection.active {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
-.stat-icon.connection.idle {
-  background: var(--accent-soft);
-  color: var(--accent);
-  opacity: 0.7;
+.translating-stage.is-active .stage-icon {
+  animation: spin-icon 2s linear infinite;
 }
 
-.stat-icon.translated,
-.stat-icon.translating,
-.stat-icon.queued,
-.stat-icon.tokens,
-.stat-icon.speed,
-.stat-icon.received {
-  background: var(--accent-soft);
-  color: var(--accent);
+@keyframes spin-icon {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-.stat-icon.errors {
-  background: rgba(248, 113, 113, 0.10);
-  color: var(--danger);
-}
-
-.error-value {
-  color: var(--danger) !important;
-}
-
-.stat-content {
+.stage-content {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
 
-.stat-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.stat-value {
+.stage-value {
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 600;
@@ -649,41 +945,130 @@ onUnmounted(() => {
   line-height: 1.2;
 }
 
-.stat-value.active {
-  color: var(--accent);
-}
-
-.stat-value.idle {
-  color: var(--text-2);
-}
-
-.stat-value.stale,
-.stat-value.never {
-  color: var(--text-3);
-}
-
-.stat-hint {
+.stage-label {
   font-size: 12px;
+  font-weight: 500;
   color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-/* ===== Recent Translations ===== */
-.recent-list {
+/* ===== Error Bar ===== */
+.error-bar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+  transition: all 0.3s ease;
+}
+
+.error-bar.has-errors {
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.error-bar-left {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
+.error-bar-text {
+  font-weight: 500;
+}
+
+.error-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.success-track {
+  width: 80px;
+  height: 4px;
+  background: var(--bg-muted);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.success-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 2px;
+  transition: width 0.6s var(--ease-out);
+}
+
+.success-fill.warn {
+  background: var(--warning);
+}
+
+.success-fill.bad {
+  background: var(--danger);
+}
+
+.error-bar-rate {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  opacity: 0.8;
+}
+
+/* ===== Recent Translations ===== */
+.recent-count-badge {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--bg-muted);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
 .recent-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   padding: 12px 16px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
+  animation: fadeIn 0.3s ease backwards;
 }
 
 .recent-item:hover {
   border-color: var(--border-hover);
+  background: var(--bg-subtle-hover);
+}
+
+.recent-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  opacity: 0.5;
+  min-width: 20px;
+  text-align: right;
+  padding-top: 2px;
+  flex-shrink: 0;
+}
+
+.recent-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .recent-texts {
@@ -704,8 +1089,11 @@ onUnmounted(() => {
 }
 
 .recent-arrow {
-  color: var(--text-3);
+  color: var(--accent);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  opacity: 0.5;
 }
 
 .recent-translated {
@@ -720,9 +1108,29 @@ onUnmounted(() => {
 
 .recent-meta {
   display: flex;
-  gap: 12px;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.meta-tag {
   font-size: 11px;
   color: var(--text-3);
+  padding: 1px 6px;
+  background: var(--bg-muted);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.meta-tag.endpoint {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.meta-tag.time {
+  color: var(--text-3);
+  background: transparent;
+  padding: 1px 0;
+  opacity: 0.7;
 }
 
 /* ===== Error Log ===== */
@@ -811,44 +1219,95 @@ onUnmounted(() => {
 .extraction-stats {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.extraction-stat-row {
+/* Extraction mini metric cards */
+.ext-metrics {
   display: flex;
-  gap: 20px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.extraction-stat {
+.ext-metric-card {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+  flex: 1;
+  min-width: 130px;
 }
 
-.extraction-stat-label {
-  font-size: 11px;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.ext-metric-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-subtle-hover);
 }
 
-.extraction-stat-value {
-  font-family: var(--font-display);
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-1);
-  letter-spacing: -0.02em;
+.ext-metric-card.is-active {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
 }
 
-.extraction-stat-value.active {
+.ext-metric-card.has-error {
+  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+}
+
+.ext-metric-icon {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
-.extraction-stat-value.error {
+.ext-metric-icon.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.ext-metric-icon.error {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--danger);
 }
 
+.ext-metric-data {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ext-metric-value {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.ext-metric-card.has-error .ext-metric-value {
+  color: var(--danger);
+}
+
+.ext-metric-label {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* Extraction recent list */
 .extraction-recent {
   display: flex;
   flex-direction: column;
@@ -856,54 +1315,84 @@ onUnmounted(() => {
 }
 
 .extraction-recent-title {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
 }
 
 .extraction-recent-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 14px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  transition: border-color 0.2s ease;
 }
 
-.extraction-recent-game {
-  color: var(--text-2);
-  flex: 1;
+.extraction-recent-item:hover {
+  border-color: var(--border-hover);
+}
+
+.ext-recent-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
+  flex: 1;
+}
+
+.ext-recent-game {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.extraction-recent-count {
-  font-weight: 600;
-  color: var(--accent);
+.ext-recent-time {
+  font-size: 11px;
+  color: var(--text-3);
   flex-shrink: 0;
 }
 
-.extraction-recent-time {
-  color: var(--text-3);
+.ext-recent-badge {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 10px;
+  border-radius: 10px;
   flex-shrink: 0;
 }
 
 /* ===== Responsive ===== */
 @media (max-width: 960px) {
-  .stats-grid {
+  .metrics-strip {
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 768px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
+  .metrics-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pipeline-flow {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .pipeline-arrow {
+    width: auto;
+    height: 24px;
+    transform: rotate(90deg);
   }
 
   .section-card {
@@ -914,6 +1403,34 @@ onUnmounted(() => {
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .connection-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+  }
+
+  .connection-time {
+    display: none;
+  }
+
+  .error-bar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .error-bar-right {
+    width: 100%;
+  }
+
+  .success-track {
+    flex: 1;
   }
 }
 
@@ -930,22 +1447,46 @@ onUnmounted(() => {
     border-radius: 10px;
   }
 
+  .metrics-strip {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .metric-pill {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+
+  .metric-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+  }
+
+  .metric-value {
+    font-size: 15px;
+  }
+
   .section-card {
     padding: 14px;
     border-radius: var(--radius-md);
   }
 
-  .stat-card {
+  .pipeline-stage {
     padding: 14px 16px;
   }
 
-  .stat-icon {
+  .pipeline-stage {
+    padding-left: 13px;
+  }
+
+  .stage-icon {
     width: 36px;
     height: 36px;
     border-radius: 8px;
   }
 
-  .stat-value {
+  .stage-value {
     font-size: 18px;
   }
 
@@ -960,7 +1501,11 @@ onUnmounted(() => {
 
   .recent-meta {
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 4px;
+  }
+
+  .recent-index {
+    display: none;
   }
 }
 </style>

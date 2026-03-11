@@ -36,11 +36,12 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}` for install progress, `ai-translation` for stats, `logs` for real-time log streaming)
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}` for install progress, `ai-translation` for stats, `logs` for real-time log streaming, `pre-translation-{gameId}` for pre-translation progress)
 - **Persistence:** JSON files in program directory (`library.json`, `settings.json`) — portable, survives OS reinstall
 - **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
 - **TranslatorEndpoint:** net35 class library producing `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; hand-rolled JSON (no System.Text.Json in Unity Mono); configurable via `[LLMTranslate]` INI section: `MaxConcurrency` (10), `MaxTranslationsPerRequest` (10), `DebugMode`, `GameId`, `DisableSpamChecks` (true), `TranslationDelay` (0.1s)
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing with priority + speed/error scoring; per-text parallel calls bounded by `SemaphoreSlim`; per-game glossary at `{programDir}/glossaries/{gameId}.json`; real-time stats via SignalR
+- **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract MonoBehaviour strings + TextAsset from Unity `.assets` files AND bundle files (`data.unity3d` + `StreamingAssets/**/*.bundle`); supports both Mono (`MonoCecilTempGenerator`) and IL2CPP (`Cpp2IlTempGenerator`) backends; `PreTranslationService` batch-translates extracted texts and writes XUnity cache files
 
 ### Frontend Structure
 
@@ -55,9 +56,9 @@ XUnityToolkit-Vue/src/
 │   ├── progress/   # InstallProgressDrawer (SignalR progress)
 │   └── settings/   # Settings page components
 ├── composables/    # Reusable composition functions (useAddGameFlow)
-├── stores/         # Pinia stores (games, install, theme, aiTranslation, log)
-├── views/          # LibraryView, GameDetailView, AiTranslationView, LogView, SettingsView, ConfigEditorView
-└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /ai-translation, /logs, /settings)
+├── stores/         # Pinia stores (games, install, theme, aiTranslation, assetExtraction, log)
+├── views/          # LibraryView, GameDetailView, AssetExtractionView, AiTranslationView, LogView, SettingsView, ConfigEditorView
+└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /games/:id/asset-extraction, /ai-translation, /logs, /settings)
 ```
 
 ### Frontend Design System
@@ -100,6 +101,8 @@ XUnityToolkit-Vue/src/
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
 - **Glossary:** `GET/PUT /api/games/{id}/glossary`
+- **Asset Extraction:** `POST /api/games/{id}/extract-assets`, `GET/DELETE /api/games/{id}/extracted-texts` (cached results)
+- **Pre-Translation:** `POST /api/games/{id}/pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`
 - **Logs:** `GET /api/logs?count=` (from ring buffer), `GET /api/logs/history?lines=` (from file), `GET /api/logs/download` (raw file stream, **not ApiResult**)
 - **ApiResult pattern:** `ApiResult<T>.Ok(data)` with data; `ApiResult.Ok()` without data; request records at bottom of Endpoints files
 
@@ -112,7 +115,7 @@ XUnityToolkit-Vue/src/
 - Non-Unity games: only show run + open folder; hide install/config
 - `AppSettingsService`: in-memory volatile cache; `GetAsync()` no disk I/O; callers must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
 - `GlossaryService`: `ConcurrentDictionary` cache per game; `GetAsync` returns cached on fast path
-- **Data storage:** All data (config, cache, logs, glossaries, backups) stored in `AppContext.BaseDirectory` (program exe directory) — portable app pattern; `AppDataPaths` is the centralized path manager; `Program.cs` bootstrap duplicates the root path for pre-DI settings/log init
+- **Data storage:** All data (config, cache, logs, glossaries, backups) stored in `AppContext.BaseDirectory` (program exe directory) — portable app pattern; `AppDataPaths` is the centralized path manager; `Program.cs` bootstrap duplicates the root path for pre-DI settings/log init; extracted texts cached at `{programDir}/cache/extracted-texts/{gameId}.json`
 - **App URL:** Default `http://127.0.0.1:51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`, hangs)
 - Named `HttpClient` instances: `"GitHub"`, `"Mirror"`, `"LLM"` (120s timeout, 200 max connections), `"SteamGridDB"` (30s)
 - `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()` (logging captures encoding at init)
@@ -126,6 +129,7 @@ XUnityToolkit-Vue/src/
 - Section compatibility: `[TextFrameworks]` (primary) / `[TextFramework]` (legacy); `PatchAsync` detects actual name
 - PatchAsync null semantics: `null` = skip, `""` = clear value; `AddEngineKeyModification` skips both null and ""
 - `PatchSectionAsync(gamePath, section, keys)` patches single section — used to set `[LLMTranslate] ToolkitUrl`
+- `ApplyOptimalDefaultsAsync` sets `[General] Language = zh` (Simplified Chinese as default target); `OverrideFont = Microsoft YaHei`; all text frameworks enabled; `Endpoint = LLMTranslate` with `FallbackEndpoint = GoogleTranslateV2`
 
 ### Glossary Extraction
 
@@ -152,6 +156,16 @@ XUnityToolkit-Vue/src/
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
 - LLM base URLs: DeepSeek (`api.deepseek.com/v1`), Qwen (`dashscope.aliyuncs.com/compatible-mode/v1`), GLM (`open.bigmodel.cn/api/paas/v4`), Kimi (`api.moonshot.cn/v1`) — all OpenAI-compatible; Claude and Gemini have dedicated implementations
 
+### Asset Extraction (AssetsTools.NET)
+
+- `MonoCecilTempGenerator` and `Cpp2IlTempGenerator` both live in namespace `AssetsTools.NET.Extra` (not their package-specific namespaces); for IL2CPP, use fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
+- `classdata.tpk` embedded as resource; source: UABEA repo `ReleaseFiles/classdata.tpk`
+- `AssetsManager.LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration (not just `UnloadAll()` at end)
+- **Bundle files:** Many Unity games pack assets into `data.unity3d` or Addressable `.bundle` files instead of `.assets`; use `LoadBundleFile(path, true)` → iterate `bunInst.file.BlockAndDirInfo.DirectoryInfos` (skip `.resource`/`.resS` entries) → `LoadAssetsFileFromBundle(bunInst, index, false)` → `UnloadBundleFile(bunInst)` after processing
+- **TypeTree fallback:** When class database doesn't match, check `afile.Metadata.TypeTreeEnabled` — bundles usually embed type trees, allowing extraction without class db
+- Install flow auto-extracts assets (Step `ExtractingAssets`) → detects language → patches `[General] FromLanguage` → caches texts to `cache/extracted-texts/{gameId}.json` (skip if cache exists, preserves manual extractions); failure doesn't block install
+- XUnity translation cache format: `encoded_original=encoded_translation` per line; escape `\\`, `\n`, `\r`, `\=`; written to `BepInEx/Translation/{lang}/Text/_PreTranslated.txt`
+
 ### DI & Provider Gotchas
 
 - When registering a pre-constructed `ILoggerProvider` instance via both `AddProvider` and `AddSingleton`, use factory registration `AddSingleton<T>(_ => instance)` to avoid double-dispose (logging infra owns disposal)
@@ -177,6 +191,7 @@ XUnityToolkit-Vue/src/
 - TypeScript: use `Object.assign({}, obj, patch)` not spread for typed objects
 - Lazy-loaded modals: `defineAsyncComponent(() => import(...))`
 - **Icon/card colors:** decorative icons use `--accent`; only use `--danger`/`--warning`/`--success` for semantic status. Use `color-mix(in srgb, var(--xxx) N%, transparent)` instead of hardcoded `rgba()` for theme-aware translucent backgrounds
+- `NDataTable`: `virtual-scroll` and `pagination` are mutually exclusive — do not combine
 - After changes, verify with both `npx vue-tsc --noEmit` and `npm run build`
 - Verify icon availability: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 
