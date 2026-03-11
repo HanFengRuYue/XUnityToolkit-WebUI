@@ -36,11 +36,11 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}` for install progress, `ai-translation` for stats)
-- **Persistence:** JSON files at `%APPDATA%/XUnityToolkit/` (`library.json`, `settings.json`)
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}` for install progress, `ai-translation` for stats, `logs` for real-time log streaming)
+- **Persistence:** JSON files in program directory (`library.json`, `settings.json`) — portable, survives OS reinstall
 - **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
 - **TranslatorEndpoint:** net35 class library producing `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; hand-rolled JSON (no System.Text.Json in Unity Mono); configurable via `[LLMTranslate]` INI section: `MaxConcurrency` (10), `MaxTranslationsPerRequest` (10), `DebugMode`, `GameId`, `DisableSpamChecks` (true), `TranslationDelay` (0.1s)
-- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing with priority + speed/error scoring; per-text parallel calls bounded by `SemaphoreSlim`; per-game glossary at `%APPDATA%/XUnityToolkit/glossaries/{gameId}.json`; real-time stats via SignalR
+- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing with priority + speed/error scoring; per-text parallel calls bounded by `SemaphoreSlim`; per-game glossary at `{programDir}/glossaries/{gameId}.json`; real-time stats via SignalR
 
 ### Frontend Structure
 
@@ -55,9 +55,9 @@ XUnityToolkit-Vue/src/
 │   ├── progress/   # InstallProgressDrawer (SignalR progress)
 │   └── settings/   # Settings page components
 ├── composables/    # Reusable composition functions (useAddGameFlow)
-├── stores/         # Pinia stores (games, install, theme, aiTranslation)
-├── views/          # LibraryView, GameDetailView, AiTranslationView, SettingsView, ConfigEditorView
-└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /ai-translation, /settings)
+├── stores/         # Pinia stores (games, install, theme, aiTranslation, log)
+├── views/          # LibraryView, GameDetailView, AiTranslationView, LogView, SettingsView, ConfigEditorView
+└── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /ai-translation, /logs, /settings)
 ```
 
 ### Frontend Design System
@@ -68,8 +68,8 @@ XUnityToolkit-Vue/src/
 - **Theme:** Dark/light mode via `data-theme` attribute; `useThemeStore` manages mode + accentColor + localStorage; light mode auto-darkens accent 15%
 - **Layout:** Custom sidebar (230px) + scrollable content; responsive at 768px (tablet drawer) and 480px (phone single-column)
 - **Game library:** Grid (default) + list view; 2:3 GameCard with covers (Steam CDN / SteamGridDB / upload); `LibraryCustomizer` controls card size (S/M/L/XL), gap, labels, accent
-- **Section cards:** `.section-icon` + `.section-title` with color variants (`.download`, `.translate`, `.warning`)
-- **Info cards:** `.info-card` with `.info-card-icon` (variants: `.folder`/`.file`/`.unity`/`.code`/`.arch`)
+- **Section cards:** `.section-icon` + `.section-title` — base uses `--accent-soft`/`--accent`; only semantic overrides (`.danger` → `--danger`, `.warning` → `--warning`)
+- **Info cards:** `.info-card` with `.info-card-icon` — base uses `--accent-soft`/`--accent`; no per-type color variants
 - **Page layouts:** Full-width; two-column grids collapse at 960px/768px
 - **Settings page:** `display: flex; flex-direction: column; gap: 16px` — no individual `margin-bottom`
 - **Content padding:** `36px 40px` (desktop), `20px 16px` (tablet), `16px 12px` (phone)
@@ -98,8 +98,9 @@ XUnityToolkit-Vue/src/
 - **Dialogs:** `POST /api/dialog/select-folder`, `POST /api/dialog/select-file`
 - **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `POST /api/translate/test`
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`
-- **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` in INI
+- **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
 - **Glossary:** `GET/PUT /api/games/{id}/glossary`
+- **Logs:** `GET /api/logs?count=` (from ring buffer), `GET /api/logs/history?lines=` (from file), `GET /api/logs/download` (raw file stream, **not ApiResult**)
 - **ApiResult pattern:** `ApiResult<T>.Ok(data)` with data; `ApiResult.Ok()` without data; request records at bottom of Endpoints files
 
 ## Development Notes
@@ -111,6 +112,7 @@ XUnityToolkit-Vue/src/
 - Non-Unity games: only show run + open folder; hide install/config
 - `AppSettingsService`: in-memory volatile cache; `GetAsync()` no disk I/O; callers must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
 - `GlossaryService`: `ConcurrentDictionary` cache per game; `GetAsync` returns cached on fast path
+- **Data storage:** All data (config, cache, logs, glossaries, backups) stored in `AppContext.BaseDirectory` (program exe directory) — portable app pattern; `AppDataPaths` is the centralized path manager; `Program.cs` bootstrap duplicates the root path for pre-DI settings/log init
 - **App URL:** Default `http://127.0.0.1:51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`, hangs)
 - Named `HttpClient` instances: `"GitHub"`, `"Mirror"`, `"LLM"` (120s timeout, 200 max connections), `"SteamGridDB"` (30s)
 - `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()` (logging captures encoding at init)
@@ -124,6 +126,13 @@ XUnityToolkit-Vue/src/
 - Section compatibility: `[TextFrameworks]` (primary) / `[TextFramework]` (legacy); `PatchAsync` detects actual name
 - PatchAsync null semantics: `null` = skip, `""` = clear value; `AddEngineKeyModification` skips both null and ""
 - `PatchSectionAsync(gamePath, section, keys)` patches single section — used to set `[LLMTranslate] ToolkitUrl`
+
+### Glossary Extraction
+
+- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → merge into glossary
+- **Critical:** settings check (async) must happen BEFORE buffer drain — otherwise pairs are lost when disabled
+- `TryTriggerExtraction` is synchronous (called from hot-path); async work deferred to `DrainAndExtractAsync`
+- DLL must send `gameId` in `POST /api/translate` for extraction to work — requires `[LLMTranslate] GameId` in INI
 
 ### Concurrency & Performance
 
@@ -143,6 +152,17 @@ XUnityToolkit-Vue/src/
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
 - LLM base URLs: DeepSeek (`api.deepseek.com/v1`), Qwen (`dashscope.aliyuncs.com/compatible-mode/v1`), GLM (`open.bigmodel.cn/api/paas/v4`), Kimi (`api.moonshot.cn/v1`) — all OpenAI-compatible; Claude and Gemini have dedicated implementations
 
+### DI & Provider Gotchas
+
+- When registering a pre-constructed `ILoggerProvider` instance via both `AddProvider` and `AddSingleton`, use factory registration `AddSingleton<T>(_ => instance)` to avoid double-dispose (logging infra owns disposal)
+- `Program.cs` top-level statements: `IHubContext<T>.SendAsync` is an extension method — requires `using Microsoft.AspNetCore.SignalR;`
+
+### Adding a New Page
+
+- Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems` array (with icon from `@vicons/material`)
+- SignalR store pattern: guard `connect()` with `connection.state !== Disconnected` (not just `=== Connected`), re-join group in `onreconnected`
+- Reading log files held open by `FileLoggerProvider`: must use `FileShare.ReadWrite` to avoid `IOException`
+
 ### Frontend Patterns
 
 - Use composables (`src/composables/`) for complex multi-step UI flows
@@ -156,6 +176,7 @@ XUnityToolkit-Vue/src/
 - Vue `v-for` ref not resetting on prop change: add `watch` to reset loading state
 - TypeScript: use `Object.assign({}, obj, patch)` not spread for typed objects
 - Lazy-loaded modals: `defineAsyncComponent(() => import(...))`
+- **Icon/card colors:** decorative icons use `--accent`; only use `--danger`/`--warning`/`--success` for semantic status. Use `color-mix(in srgb, var(--xxx) N%, transparent)` instead of hardcoded `rgba()` for theme-aware translucent backgrounds
 - After changes, verify with both `npx vue-tsc --noEmit` and `npm run build`
 - Verify icon availability: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 
@@ -165,6 +186,7 @@ XUnityToolkit-Vue/src/
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
 - Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`; new "load only when installed" state needs same treatment
 - Install store `operationType` tracks install vs uninstall (don't infer from step values)
+- **`[LLMTranslate]` INI config:** Written in 3 places — `POST /ai-endpoint` (GameEndpoints), `InstallOrchestrator` (after install), DLL `Initialize` (GetOrCreateSetting defaults). All 3 must stay in sync for keys like `ToolkitUrl`, `GameId`, `MaxConcurrency`
 
 ### Build & Deploy
 
@@ -174,5 +196,5 @@ XUnityToolkit-Vue/src/
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
 - Frontend changes require `npm run build` + restart backend (unless using `npm run dev`)
 - Default system prompt: Chinese, 7 translation rules; `{from}`/`{to}` replaced; `{0}` etc. are literal
-- Logs: `%APPDATA%/XUnityToolkit/logs/app.log` (5MB rotation); error ring buffer (50) pushed via SignalR
+- Logs: `{programDir}/logs/app.log` (5MB rotation); error ring buffer (50) pushed via SignalR; `FileLoggerProvider` also has 500-entry `ConcurrentQueue` ring buffer + `LogBroadcast` callback for real-time log page
 - Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing

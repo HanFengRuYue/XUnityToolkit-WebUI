@@ -535,8 +535,8 @@ const priorityMarks = computed(() => {
 }
 
 .section-icon.ai {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .ai-form {

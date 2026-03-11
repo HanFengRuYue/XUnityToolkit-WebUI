@@ -80,6 +80,8 @@ const settings = ref<AppSettings>({
     systemPrompt: '',
     temperature: 0.3,
     endpoints: [],
+    glossaryExtractionEnabled: false,
+    glossaryExtractionEndpointId: undefined,
   },
   steamGridDbApiKey: undefined,
   libraryViewMode: 'grid',
@@ -519,29 +521,9 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.section-icon.storage {
-  background: rgba(251, 191, 36, 0.10);
-  color: #fbbf24;
-}
-
-.section-icon.download {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
-
 .section-icon.danger {
-  background: rgba(239, 68, 68, 0.10);
-  color: #ef4444;
-}
-
-.section-icon.about {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
-}
-
-.section-icon.covers {
-  background: rgba(52, 211, 153, 0.10);
-  color: #34d399;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
 }
 
 /* ===== Info Grid & Cards ===== */
@@ -585,35 +567,6 @@ onMounted(() => {
   color: var(--accent);
 }
 
-.info-card-icon.file-count {
-  background: rgba(251, 146, 60, 0.10);
-  color: #fb923c;
-}
-
-.info-card-icon.size {
-  background: rgba(251, 191, 36, 0.10);
-  color: #fbbf24;
-}
-
-.info-card-icon.version {
-  background: rgba(59, 130, 246, 0.10);
-  color: #3b82f6;
-}
-
-.info-card-icon.tech {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
-
-.info-card-icon.author {
-  background: rgba(251, 146, 60, 0.10);
-  color: #fb923c;
-}
-
-.info-card-icon.github {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
-}
 
 .info-card-content {
   display: flex;
@@ -729,11 +682,11 @@ onMounted(() => {
   flex-direction: row;
   padding: 0;
   overflow: hidden;
-  border-color: rgba(239, 68, 68, 0.15);
+  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
 }
 
 .danger-card:hover {
-  border-color: rgba(239, 68, 68, 0.30);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .danger-bar {

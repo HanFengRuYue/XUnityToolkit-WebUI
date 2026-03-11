@@ -313,7 +313,7 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
   transform: scale(0.8);
   opacity: 0;
   transition: all 0.3s var(--ease-out);
-  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 4px 20px var(--accent-glow);
   padding-left: 3px;
 }
 
@@ -324,7 +324,7 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 
 .play-btn:hover {
   transform: scale(1.1) !important;
-  box-shadow: 0 6px 28px rgba(59, 130, 246, 0.6);
+  box-shadow: 0 6px 28px var(--accent-glow);
 }
 
 .play-btn:active {
@@ -376,15 +376,15 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 }
 
 .status-success {
-  background: rgba(52, 211, 153, 0.2);
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  background: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
 }
 
 .status-warning {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
 }
 
 .status-default {
@@ -394,9 +394,9 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 }
 
 .status-non-unity {
-  background: rgba(167, 139, 250, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(167, 139, 250, 0.25);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* ===== Card Info ===== */

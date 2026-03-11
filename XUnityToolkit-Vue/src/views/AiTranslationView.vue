@@ -4,6 +4,7 @@ import {
   NIcon,
   NButton,
   NSwitch,
+  NSelect,
   useMessage,
 } from 'naive-ui'
 import {
@@ -18,13 +19,16 @@ import {
   HistoryOutlined,
   ErrorOutlineOutlined,
   CallReceivedOutlined,
+  AutoFixHighOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
+import { useGamesStore } from '@/stores/games'
 import { settingsApi } from '@/api/games'
 import type { AppSettings, AiTranslationSettings } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 
 const aiStore = useAiTranslationStore()
+const gamesStore = useGamesStore()
 const message = useMessage()
 
 const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
@@ -44,6 +48,8 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
     '输入示例：["Hello","World"] → 输出：["你好","世界"]',
   temperature: 0.3,
   endpoints: [],
+  glossaryExtractionEnabled: false,
+  glossaryExtractionEndpointId: undefined,
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -83,6 +89,23 @@ const lastRequestFormatted = computed(() => {
 })
 
 const isEnabled = computed(() => aiStore.stats?.enabled ?? true)
+
+const extractionEndpointOptions = computed(() => {
+  const endpoints = aiSettings.value.endpoints ?? []
+  return [
+    { label: '自动选择（第一个可用）', value: '' },
+    ...endpoints
+      .filter(e => e.enabled && e.apiKey)
+      .map(e => ({ label: e.name || e.provider, value: e.id })),
+  ]
+})
+
+const extractionStats = computed(() => aiStore.extractionStats)
+
+function getGameName(gameId: string): string {
+  const game = gamesStore.games.find(g => g.id === gameId)
+  return game?.name ?? gameId
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
@@ -138,8 +161,11 @@ async function handleSave() {
 
 onMounted(async () => {
   await aiStore.connect()
-  await aiStore.fetchStats()
-  await loadSettings()
+  await Promise.all([
+    aiStore.fetchStats(),
+    loadSettings(),
+    gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
+  ])
 })
 
 onUnmounted(() => {
@@ -343,6 +369,76 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Glossary Extraction -->
+    <div class="section-card" style="animation-delay: 0.095s" v-if="settings">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon extraction">
+            <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
+          </span>
+          自动术语提取
+        </h2>
+        <NSwitch
+          :value="aiSettings.glossaryExtractionEnabled"
+          @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
+          size="small"
+        />
+      </div>
+
+      <div class="extraction-content">
+        <p class="extraction-desc">
+          翻译过程中自动从原文和译文中提取专有名词、角色名等术语，并加入对应游戏的术语表。
+        </p>
+
+        <div v-if="aiSettings.glossaryExtractionEnabled" class="extraction-config">
+          <div class="extraction-field">
+            <label class="extraction-label">提取使用的 AI 提供商</label>
+            <NSelect
+              :value="aiSettings.glossaryExtractionEndpointId ?? ''"
+              @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
+              :options="extractionEndpointOptions"
+              size="small"
+              style="max-width: 320px"
+            />
+          </div>
+
+          <div v-if="extractionStats" class="extraction-stats">
+            <div class="extraction-stat-row">
+              <div class="extraction-stat">
+                <span class="extraction-stat-label">已提取术语</span>
+                <span class="extraction-stat-value">{{ extractionStats.totalExtracted }}</span>
+              </div>
+              <div class="extraction-stat">
+                <span class="extraction-stat-label">提取调用</span>
+                <span class="extraction-stat-value">{{ extractionStats.totalExtractionCalls }}</span>
+              </div>
+              <div class="extraction-stat" v-if="extractionStats.activeExtractions > 0">
+                <span class="extraction-stat-label">正在提取</span>
+                <span class="extraction-stat-value active">{{ extractionStats.activeExtractions }}</span>
+              </div>
+              <div class="extraction-stat" v-if="extractionStats.totalErrors > 0">
+                <span class="extraction-stat-label">错误</span>
+                <span class="extraction-stat-value error">{{ extractionStats.totalErrors }}</span>
+              </div>
+            </div>
+
+            <div v-if="extractionStats.recentExtractions.length > 0" class="extraction-recent">
+              <span class="extraction-recent-title">最近提取</span>
+              <div
+                v-for="(item, index) in extractionStats.recentExtractions.slice().reverse().slice(0, 5)"
+                :key="index"
+                class="extraction-recent-item"
+              >
+                <span class="extraction-recent-game">{{ getGameName(item.gameId) }}</span>
+                <span class="extraction-recent-count">+{{ item.termsExtracted }} 条</span>
+                <span class="extraction-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- AI Settings -->
     <AiTranslationCard
       v-if="settings"
@@ -388,8 +484,8 @@ onUnmounted(() => {
   width: 42px;
   height: 42px;
   border-radius: 12px;
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
+  background: var(--accent-soft);
+  color: var(--accent);
   flex-shrink: 0;
 }
 
@@ -452,13 +548,13 @@ onUnmounted(() => {
 }
 
 .section-icon.status {
-  background: rgba(52, 211, 153, 0.10);
-  color: #34d399;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .section-icon.history {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* ===== Stats Grid ===== */
@@ -495,57 +591,38 @@ onUnmounted(() => {
 }
 
 .stat-icon.connection {
-  background: rgba(107, 114, 128, 0.10);
-  color: #6b7280;
+  background: var(--bg-muted);
+  color: var(--text-3);
 }
 
 .stat-icon.connection.active {
-  background: rgba(52, 211, 153, 0.10);
-  color: #34d399;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .stat-icon.connection.idle {
-  background: rgba(251, 191, 36, 0.10);
-  color: #fbbf24;
+  background: var(--accent-soft);
+  color: var(--accent);
+  opacity: 0.7;
 }
 
-.stat-icon.translated {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
-
-.stat-icon.translating {
-  background: rgba(52, 211, 153, 0.10);
-  color: #34d399;
-}
-
-.stat-icon.queued {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
-}
-
-.stat-icon.tokens {
-  background: rgba(251, 146, 60, 0.10);
-  color: #fb923c;
-}
-
-.stat-icon.speed {
-  background: rgba(52, 211, 153, 0.10);
-  color: #34d399;
-}
-
+.stat-icon.translated,
+.stat-icon.translating,
+.stat-icon.queued,
+.stat-icon.tokens,
+.stat-icon.speed,
 .stat-icon.received {
-  background: rgba(56, 189, 248, 0.10);
-  color: #38bdf8;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .stat-icon.errors {
   background: rgba(248, 113, 113, 0.10);
-  color: #f87171;
+  color: var(--danger);
 }
 
 .error-value {
-  color: #f87171 !important;
+  color: var(--danger) !important;
 }
 
 .stat-content {
@@ -573,11 +650,11 @@ onUnmounted(() => {
 }
 
 .stat-value.active {
-  color: #34d399;
+  color: var(--accent);
 }
 
 .stat-value.idle {
-  color: #fbbf24;
+  color: var(--text-2);
 }
 
 .stat-value.stale,
@@ -650,15 +727,15 @@ onUnmounted(() => {
 
 /* ===== Error Log ===== */
 .section-icon.error-log {
-  background: rgba(248, 113, 113, 0.10);
-  color: #f87171;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
 }
 
 .error-count-badge {
   font-size: 12px;
   font-weight: 500;
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.08);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   padding: 2px 10px;
   border-radius: 12px;
 }
@@ -673,8 +750,8 @@ onUnmounted(() => {
 
 .error-item {
   padding: 10px 14px;
-  background: rgba(248, 113, 113, 0.04);
-  border: 1px solid rgba(248, 113, 113, 0.12);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 12%, transparent);
   border-radius: var(--radius-md);
 }
 
@@ -690,6 +767,131 @@ onUnmounted(() => {
   gap: 12px;
   font-size: 11px;
   color: var(--text-3);
+}
+
+/* ===== Extraction Section ===== */
+.section-icon.extraction {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.extraction-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.extraction-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.extraction-config {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.extraction-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extraction-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.extraction-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.extraction-stat-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.extraction-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.extraction-stat-label {
+  font-size: 11px;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.extraction-stat-value {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+}
+
+.extraction-stat-value.active {
+  color: var(--accent);
+}
+
+.extraction-stat-value.error {
+  color: var(--danger);
+}
+
+.extraction-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extraction-recent-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.extraction-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.extraction-recent-game {
+  color: var(--text-2);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extraction-recent-count {
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.extraction-recent-time {
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
 /* ===== Responsive ===== */

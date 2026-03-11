@@ -182,6 +182,8 @@ export interface AiTranslationSettings {
   systemPrompt: string
   temperature: number
   endpoints: ApiEndpointConfig[]
+  glossaryExtractionEnabled: boolean
+  glossaryExtractionEndpointId?: string
 }
 
 export interface AppSettings {
@@ -250,6 +252,21 @@ export interface GlossaryEntry {
   isRegex: boolean
 }
 
+export interface GlossaryExtractionStats {
+  enabled: boolean
+  totalExtracted: number
+  activeExtractions: number
+  totalExtractionCalls: number
+  totalErrors: number
+  recentExtractions: RecentExtractionItem[]
+}
+
+export interface RecentExtractionItem {
+  gameId: string
+  termsExtracted: number
+  timestamp: string
+}
+
 export interface SteamGridDbSearchResult {
   id: number
   name: string
@@ -276,4 +293,11 @@ export interface SteamStoreSearchResult {
   id: number
   name: string
   tinyImage: string
+}
+
+export interface LogEntry {
+  timestamp: string
+  level: string
+  category: string
+  message: string
 }

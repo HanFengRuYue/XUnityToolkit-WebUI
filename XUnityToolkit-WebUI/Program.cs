@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Console;
 using XUnityToolkit_WebUI.Endpoints;
 using XUnityToolkit_WebUI.Hubs;
@@ -12,8 +13,7 @@ Console.InputEncoding = System.Text.Encoding.UTF8;
 var builder = WebApplication.CreateBuilder(args);
 
 // 从 settings.json 读取端口，如果文件不存在或端口无效则使用默认值
-var appDataRoot = Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
+var appDataRoot = AppContext.BaseDirectory;
 var settingsPath = Path.Combine(appDataRoot, "settings.json");
 var listenPort = 51821;
 if (File.Exists(settingsPath))
@@ -48,9 +48,11 @@ builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 builder.Logging.AddFilter("XUnityToolkit_WebUI", LogLevel.Information);
 
-// 文件日志：写入 %APPDATA%/XUnityToolkit/logs/app.log
+// 文件日志：写入程序目录/logs/app.log
 var logFilePath = Path.Combine(appDataRoot, "logs", "app.log");
-builder.Logging.AddProvider(new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logFilePath));
+var fileLoggerProvider = new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logFilePath);
+builder.Logging.AddProvider(fileLoggerProvider);
+builder.Services.AddSingleton<FileLoggerProvider>(_ => fileLoggerProvider);
 
 // Infrastructure
 builder.Services.AddSingleton<AppDataPaths>();
@@ -109,6 +111,7 @@ builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<GlossaryService>();
 builder.Services.AddSingleton<LlmTranslationService>();
+builder.Services.AddSingleton<GlossaryExtractionService>();
 builder.Services.AddHostedService<SystemTrayService>();
 
 // SignalR with string enum serialization
@@ -151,12 +154,18 @@ app.MapCacheEndpoints();
 app.MapSettingsEndpoints();
 app.MapTranslateEndpoints();
 app.MapImageEndpoints();
+app.MapLogEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");
 
 // SPA fallback
 app.MapFallbackToFile("index.html");
+
+// Wire log broadcast: push new log entries to SignalR "logs" group
+var hubContext = app.Services.GetRequiredService<IHubContext<InstallProgressHub>>();
+fileLoggerProvider.LogBroadcast = entry =>
+    _ = hubContext.Clients.Group("logs").SendAsync("logEntry", entry);
 
 // Initialize AI translation enabled state from settings
 try

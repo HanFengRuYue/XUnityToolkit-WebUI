@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -147,4 +147,11 @@ export const translateApi = {
     api.get<string[]>(`/api/ai/models?provider=${provider}&apiBaseUrl=${encodeURIComponent(apiBaseUrl)}&apiKey=${encodeURIComponent(apiKey)}`),
   testTranslate: (endpoints: ApiEndpointConfig[], systemPrompt: string, temperature: number) =>
     api.post<EndpointTestResult[]>('/api/translate/test', { endpoints, systemPrompt, temperature }),
+  getExtractionStats: () => api.get<GlossaryExtractionStats>('/api/ai/extraction/stats'),
+}
+
+export const logsApi = {
+  getRecent: (count = 200) => api.get<LogEntry[]>(`/api/logs?count=${count}`),
+  getHistory: (lines = 500) => api.get<LogEntry[]>(`/api/logs/history?lines=${lines}`),
+  getDownloadUrl: () => '/api/logs/download',
 }

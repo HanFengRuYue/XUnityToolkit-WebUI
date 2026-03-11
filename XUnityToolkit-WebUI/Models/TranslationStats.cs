@@ -38,3 +38,18 @@ public sealed record EndpointTestResult(
     string? Error,
     double ResponseTimeMs
 );
+
+public sealed record GlossaryExtractionStats(
+    bool Enabled,
+    long TotalExtracted,
+    int ActiveExtractions,
+    long TotalExtractionCalls,
+    long TotalErrors,
+    IList<RecentExtraction> RecentExtractions
+);
+
+public sealed record RecentExtraction(
+    string GameId,
+    int TermsExtracted,
+    DateTime Timestamp
+);

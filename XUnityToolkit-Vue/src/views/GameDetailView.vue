@@ -1059,23 +1059,8 @@ onUnmounted(() => stopWatch())
 }
 
 .section-icon.warning {
-  background: rgba(251, 191, 36, 0.10);
-  color: #fbbf24;
-}
-
-.section-icon.download {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
-
-.section-icon.translate {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
-}
-
-.section-icon.ai {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
 }
 
 .header-btn-group {
@@ -1120,30 +1105,6 @@ onUnmounted(() => stopWatch())
   color: var(--accent);
 }
 
-.info-card-icon.folder {
-  background: rgba(251, 191, 36, 0.10);
-  color: #fbbf24;
-}
-
-.info-card-icon.file {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
-
-.info-card-icon.unity {
-  background: rgba(59, 130, 246, 0.10);
-  color: #3b82f6;
-}
-
-.info-card-icon.code {
-  background: rgba(167, 139, 250, 0.10);
-  color: #a78bfa;
-}
-
-.info-card-icon.arch {
-  background: rgba(251, 146, 60, 0.10);
-  color: #fb923c;
-}
 
 .info-card-content {
   display: flex;
@@ -1400,10 +1361,6 @@ onUnmounted(() => stopWatch())
 }
 
 /* ===== Glossary ===== */
-.section-icon.glossary {
-  background: rgba(96, 165, 250, 0.10);
-  color: #60a5fa;
-}
 
 .glossary-actions-header {
   display: flex;

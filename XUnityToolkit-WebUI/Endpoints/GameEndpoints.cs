@@ -395,7 +395,8 @@ public static class GameEndpoints
                     {
                         ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
                         ["MaxConcurrency"] = "10",
-                        ["MaxTranslationsPerRequest"] = "10"
+                        ["MaxTranslationsPerRequest"] = "10",
+                        ["GameId"] = id
                     }, ct);
             }
 

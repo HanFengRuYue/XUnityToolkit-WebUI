@@ -11,6 +11,7 @@ public static class TranslateEndpoints
         app.MapPost("/api/translate", async (
             TranslateRequest request,
             LlmTranslationService translationService,
+            GlossaryExtractionService extractionService,
             ILogger<LlmTranslationService> logger,
             CancellationToken ct) =>
         {
@@ -23,6 +24,15 @@ public static class TranslateEndpoints
                     request.Texts, request.From ?? "ja", request.To ?? "zh",
                     request.GameId, ct);
                 logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
+
+                // Buffer for glossary extraction (fire-and-forget, non-blocking)
+                if (!string.IsNullOrEmpty(request.GameId))
+                {
+                    for (int i = 0; i < request.Texts.Count; i++)
+                        extractionService.BufferTranslation(request.GameId, request.Texts[i], translations[i]);
+                    extractionService.TryTriggerExtraction(request.GameId);
+                }
+
                 return Results.Ok(new TranslateResponse(translations));
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("已停用"))
@@ -64,6 +74,9 @@ public static class TranslateEndpoints
 
         app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
             Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
+
+        app.MapGet("/api/ai/extraction/stats", (GlossaryExtractionService extractionService) =>
+            Results.Ok(ApiResult<GlossaryExtractionStats>.Ok(extractionService.GetStats())));
 
         // Toggle AI translation on/off
         app.MapPost("/api/ai/toggle", async (

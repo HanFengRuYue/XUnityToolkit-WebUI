@@ -1,10 +1,13 @@
+using System.Collections.Concurrent;
 using System.Text;
+using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Infrastructure;
 
 /// <summary>
 /// Minimal file logger provider — appends timestamped log lines to a file.
 /// Rotates when file exceeds 5 MB (rename to .old, start fresh).
+/// Also maintains an in-memory ring buffer and optional broadcast callback for real-time log streaming.
 /// </summary>
 internal sealed class FileLoggerProvider : ILoggerProvider
 {
@@ -13,6 +16,15 @@ internal sealed class FileLoggerProvider : ILoggerProvider
     private StreamWriter _writer;
     private readonly Lock _lock = new();
     private const long MaxFileSize = 5 * 1024 * 1024; // 5 MB
+
+    private readonly ConcurrentQueue<LogEntry> _recentEntries = new();
+    private const int RingBufferSize = 500;
+
+    /// <summary>
+    /// Optional callback invoked (outside lock) for each new log entry.
+    /// Set after DI build to broadcast via SignalR.
+    /// </summary>
+    internal Action<LogEntry>? LogBroadcast { get; set; }
 
     public FileLoggerProvider(string filePath, LogLevel minLevel = LogLevel.Information)
     {
@@ -48,11 +60,14 @@ internal sealed class FileLoggerProvider : ILoggerProvider
             _ => "???"
         };
 
+        var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        var fullMessage = exception is not null ? $"{message}\n  Exception: {exception}" : message;
+
         lock (_lock)
         {
             try
             {
-                _writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{levelTag}] [{shortCategory}] {message}");
+                _writer.WriteLine($"{timestamp} [{levelTag}] [{shortCategory}] {message}");
                 if (exception is not null)
                     _writer.WriteLine($"  Exception: {exception}");
 
@@ -69,6 +84,22 @@ internal sealed class FileLoggerProvider : ILoggerProvider
                 // Logging should never crash the app
             }
         }
+
+        // Outside lock: enqueue to ring buffer and broadcast
+        var entry = new LogEntry(timestamp, levelTag, shortCategory, fullMessage);
+        _recentEntries.Enqueue(entry);
+        while (_recentEntries.Count > RingBufferSize)
+            _recentEntries.TryDequeue(out _);
+
+        try { LogBroadcast?.Invoke(entry); } catch { /* never crash */ }
+    }
+
+    internal string FilePath => _filePath;
+
+    internal LogEntry[] GetRecentEntries(int count)
+    {
+        var all = _recentEntries.ToArray();
+        return count >= all.Length ? all : all[^count..];
     }
 
     private void RotateIfNeeded()

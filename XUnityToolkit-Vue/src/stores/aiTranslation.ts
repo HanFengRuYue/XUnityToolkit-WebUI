@@ -2,10 +2,11 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { translateApi } from '@/api/games'
-import type { TranslationStats } from '@/api/types'
+import type { TranslationStats, GlossaryExtractionStats } from '@/api/types'
 
 export const useAiTranslationStore = defineStore('aiTranslation', () => {
   const stats = ref<TranslationStats | null>(null)
+  const extractionStats = ref<GlossaryExtractionStats | null>(null)
 
   let connection: signalR.HubConnection | null = null
 
@@ -19,6 +20,10 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
 
     connection.on('statsUpdate', (update: TranslationStats) => {
       stats.value = update
+    })
+
+    connection.on('extractionStatsUpdate', (update: GlossaryExtractionStats) => {
+      extractionStats.value = update
     })
 
     await connection.start()
@@ -39,6 +44,11 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
 
   async function fetchStats() {
     stats.value = await translateApi.getStats()
+    try {
+      extractionStats.value = await translateApi.getExtractionStats()
+    } catch {
+      // Extraction stats endpoint may not exist on older backends
+    }
   }
 
   async function toggleEnabled(enabled: boolean) {
@@ -48,5 +58,5 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
     }
   }
 
-  return { stats, connect, disconnect, fetchStats, toggleEnabled }
+  return { stats, extractionStats, connect, disconnect, fetchStats, toggleEnabled }
 })

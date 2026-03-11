@@ -15,4 +15,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveAiTranslationGroup() =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, "ai-translation");
+
+    public Task JoinLogGroup() =>
+        Groups.AddToGroupAsync(Context.ConnectionId, "logs");
+
+    public Task LeaveLogGroup() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, "logs");
 }

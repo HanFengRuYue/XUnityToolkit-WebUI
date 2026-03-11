@@ -28,6 +28,10 @@ public sealed class AiTranslationSettings
 
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
+    // Glossary extraction
+    public bool GlossaryExtractionEnabled { get; set; }
+    public string? GlossaryExtractionEndpointId { get; set; }
+
     // Legacy fields — map old JSON field names so deserialization picks them up.
     // After migration, set to null so they are not serialized.
     [JsonPropertyName("provider")]

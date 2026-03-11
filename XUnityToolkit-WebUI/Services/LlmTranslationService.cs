@@ -333,28 +333,50 @@ public sealed class LlmTranslationService(
         _ => ""
     };
 
+    // ── Raw LLM call (used by GlossaryExtractionService) ──
+
+    /// <summary>
+    /// Call an LLM endpoint with arbitrary system prompt and user content.
+    /// Returns the raw text content and token count.
+    /// </summary>
+    public async Task<(string content, long tokens)> CallLlmRawAsync(
+        ApiEndpointConfig endpoint, string systemPrompt, string userContent,
+        double temperature, CancellationToken ct)
+    {
+        return endpoint.Provider switch
+        {
+            LlmProvider.OpenAI or LlmProvider.DeepSeek or LlmProvider.Qwen
+                or LlmProvider.GLM or LlmProvider.Kimi
+                => await CallOpenAiCompatRawAsync(endpoint, systemPrompt, userContent,
+                    temperature, GetDefaultBaseUrl(endpoint), ct),
+            LlmProvider.Custom => await CallOpenAiCompatRawAsync(endpoint, systemPrompt, userContent,
+                temperature, endpoint.ApiBaseUrl, ct),
+            LlmProvider.Claude => await CallClaudeRawAsync(endpoint, systemPrompt, userContent, temperature, ct),
+            LlmProvider.Gemini => await CallGeminiRawAsync(endpoint, systemPrompt, userContent, temperature, ct),
+            _ => throw new NotSupportedException($"未支持的 LLM 提供商: {endpoint.Provider}")
+        };
+    }
+
     // ── OpenAI-compatible (OpenAI, DeepSeek, Qwen, GLM, Kimi, Custom) ──
 
-    private async Task<(IList<string>, long)> CallOpenAiCompatAsync(
-        ApiEndpointConfig ep, AiTranslationSettings ai,
-        IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string baseUrl, CancellationToken ct)
+    private async Task<(string content, long tokens)> CallOpenAiCompatRawAsync(
+        ApiEndpointConfig ep, string systemPrompt, string userContent,
+        double temperature, string baseUrl, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
             throw new InvalidOperationException("API Base URL 未配置");
 
         var model = string.IsNullOrWhiteSpace(ep.ModelName) ? GetDefaultModel(ep) : ep.ModelName;
         var endpoint = baseUrl.TrimEnd('/') + "/chat/completions";
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
 
         var body = new
         {
             model,
-            temperature = ai.Temperature,
+            temperature,
             messages = new object[]
             {
                 new { role = "system", content = systemPrompt },
-                new { role = "user", content = JsonSerializer.Serialize(texts) }
+                new { role = "user", content = userContent }
             }
         };
 
@@ -379,28 +401,37 @@ public sealed class LlmTranslationService(
             ?? throw new InvalidOperationException("LLM 响应格式无效");
 
         var tokens = ExtractOpenAiTokens(node);
+        return (content, tokens);
+    }
+
+    private async Task<(IList<string>, long)> CallOpenAiCompatAsync(
+        ApiEndpointConfig ep, AiTranslationSettings ai,
+        IList<string> texts, string from, string to,
+        List<GlossaryEntry>? glossary, string baseUrl, CancellationToken ct)
+    {
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var userContent = JsonSerializer.Serialize(texts);
+        var (content, tokens) = await CallOpenAiCompatRawAsync(ep, systemPrompt, userContent, ai.Temperature, baseUrl, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
     }
 
     // ── Claude ──
 
-    private async Task<(IList<string>, long)> CallClaudeAsync(
-        ApiEndpointConfig ep, AiTranslationSettings ai,
-        IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, CancellationToken ct)
+    private async Task<(string content, long tokens)> CallClaudeRawAsync(
+        ApiEndpointConfig ep, string systemPrompt, string userContent,
+        double temperature, CancellationToken ct)
     {
         var baseUrl = string.IsNullOrWhiteSpace(ep.ApiBaseUrl) ? "https://api.anthropic.com/v1" : ep.ApiBaseUrl;
         var model = string.IsNullOrWhiteSpace(ep.ModelName) ? GetDefaultModel(ep) : ep.ModelName;
         var endpoint = baseUrl.TrimEnd('/') + "/messages";
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
 
         var body = new
         {
             model,
             max_tokens = 4096,
-            temperature = ai.Temperature,
+            temperature,
             system = systemPrompt,
-            messages = new[] { new { role = "user", content = JsonSerializer.Serialize(texts) } }
+            messages = new[] { new { role = "user", content = userContent } }
         };
 
         var client = httpClientFactory.CreateClient("LLM");
@@ -426,28 +457,37 @@ public sealed class LlmTranslationService(
 
         var inputTokens = node?["usage"]?["input_tokens"]?.GetValue<long>() ?? 0;
         var outputTokens = node?["usage"]?["output_tokens"]?.GetValue<long>() ?? 0;
-        return (ParseTranslationArray(content, texts.Count), inputTokens + outputTokens);
+        return (content, inputTokens + outputTokens);
+    }
+
+    private async Task<(IList<string>, long)> CallClaudeAsync(
+        ApiEndpointConfig ep, AiTranslationSettings ai,
+        IList<string> texts, string from, string to,
+        List<GlossaryEntry>? glossary, CancellationToken ct)
+    {
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var userContent = JsonSerializer.Serialize(texts);
+        var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
+        return (ParseTranslationArray(content, texts.Count), tokens);
     }
 
     // ── Gemini ──
 
-    private async Task<(IList<string>, long)> CallGeminiAsync(
-        ApiEndpointConfig ep, AiTranslationSettings ai,
-        IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, CancellationToken ct)
+    private async Task<(string content, long tokens)> CallGeminiRawAsync(
+        ApiEndpointConfig ep, string systemPrompt, string userContent,
+        double temperature, CancellationToken ct)
     {
         var model = string.IsNullOrWhiteSpace(ep.ModelName) ? GetDefaultModel(ep) : ep.ModelName;
         var baseUrl = string.IsNullOrWhiteSpace(ep.ApiBaseUrl)
             ? "https://generativelanguage.googleapis.com/v1beta"
             : ep.ApiBaseUrl;
         var endpoint = $"{baseUrl.TrimEnd('/')}/models/{model}:generateContent?key={ep.ApiKey}";
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
 
-        var userText = systemPrompt + "\n\n" + JsonSerializer.Serialize(texts);
+        var combinedContent = systemPrompt + "\n\n" + userContent;
         var body = new
         {
-            contents = new[] { new { role = "user", parts = new[] { new { text = userText } } } },
-            generationConfig = new { temperature = ai.Temperature }
+            contents = new[] { new { role = "user", parts = new[] { new { text = combinedContent } } } },
+            generationConfig = new { temperature }
         };
 
         var client = httpClientFactory.CreateClient("LLM");
@@ -471,7 +511,18 @@ public sealed class LlmTranslationService(
 
         var promptTokens = node?["usageMetadata"]?["promptTokenCount"]?.GetValue<long>() ?? 0;
         var candidateTokens = node?["usageMetadata"]?["candidatesTokenCount"]?.GetValue<long>() ?? 0;
-        return (ParseTranslationArray(content, texts.Count), promptTokens + candidateTokens);
+        return (content, promptTokens + candidateTokens);
+    }
+
+    private async Task<(IList<string>, long)> CallGeminiAsync(
+        ApiEndpointConfig ep, AiTranslationSettings ai,
+        IList<string> texts, string from, string to,
+        List<GlossaryEntry>? glossary, CancellationToken ct)
+    {
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var userContent = JsonSerializer.Serialize(texts);
+        var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
+        return (ParseTranslationArray(content, texts.Count), tokens);
     }
 
     // ── System prompt + glossary injection ──

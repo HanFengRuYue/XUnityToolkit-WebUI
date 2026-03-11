@@ -608,8 +608,8 @@ export default {
 
 .info-pill.non-unity {
   color: var(--text-3);
-  border-color: rgba(167, 139, 250, 0.15);
-  background: rgba(167, 139, 250, 0.06);
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
 }
 
 .game-row:hover .info-pill {
@@ -645,7 +645,7 @@ export default {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-  box-shadow: 0 2px 12px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 2px 12px var(--accent-glow);
 }
 
 /* Row Status */

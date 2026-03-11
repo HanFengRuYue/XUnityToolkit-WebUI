@@ -13,6 +13,7 @@ public sealed class InstallOrchestrator(
     BepInExInstallerService bepInExInstaller,
     XUnityInstallerService xUnityInstaller,
     ConfigurationService configService,
+    AppSettingsService appSettingsService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
 {
@@ -272,6 +273,19 @@ public sealed class InstallOrchestrator(
         }
 
         await UpdateStatus(status, InstallStep.ApplyingConfig, 97, "配置应用完成");
+
+        // Patch LLMTranslate section with GameId and ToolkitUrl
+        if (File.Exists(configPath) && xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath))
+        {
+            var appSettings = await appSettingsService.GetAsync(ct);
+            var port = appSettings.AiTranslation.Port;
+            await configService.PatchSectionAsync(game.GamePath, "LLMTranslate",
+                new Dictionary<string, string>
+                {
+                    ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+                    ["GameId"] = game.Id
+                }, ct);
+        }
 
         // Step 8: Complete
         game.InstalledXUnityVersion = xUnityRelease.TagName;
