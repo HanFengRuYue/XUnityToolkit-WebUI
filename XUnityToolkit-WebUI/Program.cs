@@ -48,9 +48,9 @@ builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 builder.Logging.AddFilter("XUnityToolkit_WebUI", LogLevel.Information);
 
-// 文件日志：写入程序目录/logs/app.log
-var logFilePath = Path.Combine(appDataRoot, "logs", "app.log");
-var fileLoggerProvider = new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logFilePath);
+// 文件日志：写入程序目录/logs/，每次启动创建新日志文件，保留最近 10 个
+var logsDirectory = Path.Combine(appDataRoot, "logs");
+var fileLoggerProvider = new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logsDirectory);
 builder.Logging.AddProvider(fileLoggerProvider);
 builder.Services.AddSingleton<FileLoggerProvider>(_ => fileLoggerProvider);
 
@@ -114,6 +114,7 @@ builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddSingleton<GlossaryExtractionService>();
 builder.Services.AddSingleton<AssetExtractionService>();
 builder.Services.AddSingleton<PreTranslationService>();
+builder.Services.AddSingleton<PluginPackageService>();
 builder.Services.AddHostedService<SystemTrayService>();
 
 // SignalR with string enum serialization
@@ -158,6 +159,8 @@ app.MapTranslateEndpoints();
 app.MapImageEndpoints();
 app.MapLogEndpoints();
 app.MapAssetEndpoints();
+app.MapTranslationEditorEndpoints();
+app.MapPluginPackageEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

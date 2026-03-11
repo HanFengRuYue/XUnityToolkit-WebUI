@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, h, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, h, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
   NAlert,
   NIcon,
   NInput,
-  NSwitch,
   NDropdown,
   useMessage,
   useDialog,
@@ -27,18 +26,20 @@ import {
   ViewInArOutlined,
   SmartToyOutlined,
   MenuBookOutlined,
-  AddOutlined,
-  DeleteOutlined,
+  DescriptionOutlined,
   PhotoCameraOutlined,
   DriveFileRenameOutlineOutlined,
   CloudUploadOutlined,
   DeleteOutlineOutlined,
+  InventoryOutlined,
+  FileUploadOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
-import type { Game, XUnityConfig, ModFrameworkType, GlossaryEntry } from '@/api/types'
-import { gamesApi } from '@/api/games'
+import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
+import { gamesApi, pluginPackageApi, dialogApi } from '@/api/games'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
+import { useAutoSave } from '@/composables/useAutoSave'
 import { defineAsyncComponent } from 'vue'
 
 const CoverPickerModal = defineAsyncComponent(
@@ -58,9 +59,10 @@ const config = ref<XUnityConfig | null>(null)
 const loading = ref(true)
 const aiEndpointInstalled = ref<boolean | null>(null)
 const aiEndpointLoading = ref(false)
-const glossaryEntries = ref<GlossaryEntry[]>([])
-const glossarySaving = ref(false)
+const aiDescription = ref('')
 const showCoverPicker = ref(false)
+const packageExporting = ref(false)
+const packageImporting = ref(false)
 
 // Name editing state
 const editingName = ref(false)
@@ -101,12 +103,27 @@ const frameworkDisplayNames: Record<ModFrameworkType, string> = {
   Standalone: 'Standalone',
 }
 
+// Auto-save for description
+const { enable: enableDescAutoSave, disable: disableDescAutoSave } = useAutoSave(
+  () => aiDescription.value,
+  async () => {
+    try {
+      await gamesApi.saveDescription(gameId, aiDescription.value || null)
+      if (game.value) game.value.aiDescription = aiDescription.value || undefined
+    } catch {
+      message.error('保存描述失败')
+    }
+  },
+  { debounceMs: 1000 },
+)
+
 onMounted(async () => {
   await loadGame()
 })
 
 async function loadGame() {
   loading.value = true
+  disableDescAutoSave()
   try {
     game.value = await gamesApi.get(gameId)
     if (isInstalled.value) {
@@ -117,21 +134,19 @@ async function loadGame() {
       } catch {
         aiEndpointInstalled.value = null
       }
-      try {
-        glossaryEntries.value = await gamesApi.getGlossary(gameId)
-      } catch {
-        glossaryEntries.value = []
-      }
     } else {
       config.value = null
       aiEndpointInstalled.value = null
-      glossaryEntries.value = []
     }
+    // Description is always available (not gated by install state)
+    aiDescription.value = game.value?.aiDescription ?? ''
   } catch {
     message.error('加载游戏信息失败')
   } finally {
     loading.value = false
   }
+  await nextTick()
+  enableDescAutoSave()
 }
 
 async function handleInstall() {
@@ -156,16 +171,6 @@ function handleUninstall() {
       }
     },
   })
-}
-
-async function handleSaveConfig(cfg: XUnityConfig) {
-  try {
-    await gamesApi.saveConfig(gameId, cfg)
-    config.value = cfg
-    message.success('配置已保存')
-  } catch {
-    message.error('保存配置失败')
-  }
 }
 
 async function handleOpenFolder() {
@@ -308,32 +313,52 @@ function handleUninstallAiEndpoint() {
   })
 }
 
-function addGlossaryEntry() {
-  glossaryEntries.value = [...glossaryEntries.value, { original: '', translation: '', isRegex: false }]
-}
-
-function removeGlossaryEntry(index: number) {
-  glossaryEntries.value = glossaryEntries.value.filter((_, i) => i !== index)
-}
-
-function updateGlossaryEntry(index: number, field: keyof GlossaryEntry, value: string | boolean) {
-  const entries: GlossaryEntry[] = [...glossaryEntries.value]
-  entries[index] = Object.assign({}, entries[index], { [field]: value })
-  glossaryEntries.value = entries
-}
-
-async function handleSaveGlossary() {
-  // Filter out empty entries
-  const valid = glossaryEntries.value.filter(e => e.original.trim())
-  glossarySaving.value = true
+async function handleExportPackage() {
+  packageExporting.value = true
   try {
-    await gamesApi.saveGlossary(gameId, valid)
-    glossaryEntries.value = valid
-    message.success('术语库已保存')
-  } catch {
-    message.error('保存术语库失败')
+    const url = pluginPackageApi.getExportUrl(gameId)
+    const resp = await fetch(url, { method: 'POST' })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let msg = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) msg = json.error } catch { /* ignore */ }
+      throw new Error(msg)
+    }
+    const blob = await resp.blob()
+    const disposition = resp.headers.get('content-disposition')
+    let fileName = '汉化包.zip'
+    if (disposition) {
+      // Extract filename from content-disposition, handling both filename= and filename*=UTF-8''
+      const utf8Match = disposition.match(/filename\*=UTF-8''(.+?)(?:;|$)/i)
+      const plainMatch = disposition.match(/filename="?(.+?)"?(?:;|$)/i)
+      const raw = utf8Match?.[1] ?? plainMatch?.[1]
+      if (raw) fileName = decodeURIComponent(raw)
+    }
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = fileName
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+    message.success('汉化包已生成')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '生成汉化包失败')
   } finally {
-    glossarySaving.value = false
+    packageExporting.value = false
+  }
+}
+
+async function handleImportPackage() {
+  packageImporting.value = true
+  try {
+    const filePath = await dialogApi.selectFile('ZIP 压缩包 (*.zip)|*.zip')
+    if (!filePath) return
+    await pluginPackageApi.importPackage(gameId, filePath)
+    message.success('汉化包导入成功')
+    await loadGame()
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '导入汉化包失败')
+  } finally {
+    packageImporting.value = false
   }
 }
 
@@ -659,7 +684,6 @@ onUnmounted(() => stopWatch())
         :config="config"
         :disabled="!isInstalled"
         :game-id="gameId"
-        @save="handleSaveConfig"
       />
     </div>
 
@@ -728,68 +752,93 @@ onUnmounted(() => stopWatch())
       </p>
     </div>
 
-    <!-- Glossary Card (only when fully installed) -->
+    <!-- Translation Editor Card -->
     <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
       <div class="section-header">
         <h2 class="section-title">
-          <span class="section-icon glossary">
+          <span class="section-icon">
+            <NIcon :size="16"><DriveFileRenameOutlineOutlined /></NIcon>
+          </span>
+          译文编辑器
+        </h2>
+        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/translation-editor`)">
+          打开
+        </NButton>
+      </div>
+      <p class="asset-extraction-desc">
+        可视化编辑游戏的自动翻译文件，修改、新增或删除翻译条目，支持导入和导出翻译文件。
+      </p>
+    </div>
+
+    <!-- Glossary Editor Card -->
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
             <NIcon :size="16"><MenuBookOutlined /></NIcon>
           </span>
           AI 翻译术语库
         </h2>
-        <div class="glossary-actions-header">
-          <NButton size="small" @click="addGlossaryEntry">
-            <template #icon><NIcon><AddOutlined /></NIcon></template>
-            添加
-          </NButton>
-          <NButton size="small" :loading="glossarySaving" @click="handleSaveGlossary">
-            保存
-          </NButton>
-        </div>
+        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/glossary-editor`)">
+          打开
+        </NButton>
       </div>
+      <p class="asset-extraction-desc">
+        管理该游戏的专用术语表，术语会自动注入翻译提示词并对结果进行后处理替换，支持导入和导出。
+      </p>
+    </div>
 
-      <div v-if="glossaryEntries.length === 0" class="glossary-empty">
-        <p>暂无术语，点击"添加"为该游戏配置专用术语表。术语会自动注入翻译提示词并对结果进行后处理替换。</p>
+    <!-- AI Description Card (available for all Unity games, even before install) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.5s' : '0.45s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><DescriptionOutlined /></NIcon>
+          </span>
+          游戏背景描述
+        </h2>
       </div>
+      <p class="ai-description-hint">
+        为该游戏填写背景信息（类型、世界观、角色等），AI 翻译时会自动参考，提升翻译的准确性和一致性。
+      </p>
+      <NInput
+        v-model:value="aiDescription"
+        type="textarea"
+        :rows="4"
+        placeholder="例如：这是一款日式 RPG 游戏，背景设定在中世纪奇幻世界。主角是一名年轻的剑士，同伴包括女法师艾拉和精灵弓手雷恩..."
+      />
+    </div>
 
-      <div v-else class="glossary-list">
-        <div class="glossary-table-header">
-          <span class="glossary-col-original">原文</span>
-          <span class="glossary-col-translation">译文</span>
-          <span class="glossary-col-regex">正则</span>
-          <span class="glossary-col-action"></span>
-        </div>
-        <div v-for="(entry, index) in glossaryEntries" :key="index" class="glossary-row">
-          <NInput
-            :value="entry.original"
-            @update:value="(v: string) => updateGlossaryEntry(index, 'original', v)"
-            placeholder="原文 / 正则表达式"
-            size="small"
-            class="glossary-col-original"
-          />
-          <NInput
-            :value="entry.translation"
-            @update:value="(v: string) => updateGlossaryEntry(index, 'translation', v)"
-            placeholder="译文"
-            size="small"
-            class="glossary-col-translation"
-          />
-          <NSwitch
-            :value="entry.isRegex"
-            @update:value="(v: boolean) => updateGlossaryEntry(index, 'isRegex', v)"
-            size="small"
-            class="glossary-col-regex"
-          />
-          <NButton
-            size="tiny"
-            quaternary
-            type="error"
-            class="glossary-col-action"
-            @click="removeGlossaryEntry(index)"
-          >
-            <template #icon><NIcon><DeleteOutlined /></NIcon></template>
-          </NButton>
-        </div>
+    <!-- Plugin Package Card -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><InventoryOutlined /></NIcon>
+          </span>
+          汉化包
+        </h2>
+      </div>
+      <p class="asset-extraction-desc">
+        将当前游戏的全部插件和翻译文件打包为 ZIP 汉化补丁，方便分享给其他玩家。其他玩家解压到游戏目录即可使用。导入汉化包会覆盖同名文件。
+      </p>
+      <div class="pkg-actions">
+        <NButton
+          type="primary"
+          :loading="packageExporting"
+          :disabled="!isInstalled"
+          @click="handleExportPackage"
+        >
+          <template #icon><NIcon><InventoryOutlined /></NIcon></template>
+          生成汉化包
+        </NButton>
+        <NButton
+          :loading="packageImporting"
+          @click="handleImportPackage"
+        >
+          <template #icon><NIcon><FileUploadOutlined /></NIcon></template>
+          导入汉化包
+        </NButton>
       </div>
     </div>
 
@@ -1381,72 +1430,24 @@ onUnmounted(() => stopWatch())
   line-height: 1.6;
 }
 
+.pkg-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
 .ai-endpoint-actions {
   flex-shrink: 0;
 }
 
-/* ===== Glossary ===== */
+/* ===== AI Description ===== */
 
-.glossary-actions-header {
-  display: flex;
-  gap: 8px;
-}
-
-.glossary-empty {
-  padding: 20px;
-  text-align: center;
-  color: var(--text-3);
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  border: 1px dashed var(--border);
-}
-
-.glossary-empty p {
-  margin: 0;
+.ai-description-hint {
+  margin: 0 0 12px;
   font-size: 13px;
+  color: var(--text-2);
   line-height: 1.6;
-}
-
-.glossary-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.glossary-table-header {
-  display: flex;
-  gap: 8px;
-  padding: 0 4px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.glossary-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.glossary-col-original {
-  flex: 2;
-  min-width: 0;
-}
-
-.glossary-col-translation {
-  flex: 2;
-  min-width: 0;
-}
-
-.glossary-col-regex {
-  flex-shrink: 0;
-  width: 40px;
-}
-
-.glossary-col-action {
-  flex-shrink: 0;
 }
 
 /* ===== Responsive ===== */

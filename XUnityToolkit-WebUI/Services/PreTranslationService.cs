@@ -8,6 +8,8 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class PreTranslationService(
     LlmTranslationService translationService,
+    GlossaryExtractionService extractionService,
+    AppSettingsService settingsService,
     GameLibraryService gameLibrary,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<PreTranslationService> logger)
@@ -16,7 +18,15 @@ public sealed class PreTranslationService(
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellations = [];
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = [];
 
-    private const int BatchSize = 10;
+    // ── Broadcast throttle (per-game) ──
+    private readonly ConcurrentDictionary<string, long> _lastBroadcastTicks = [];
+
+    /// <summary>Thread-safe progress counters for Parallel.ForEachAsync.</summary>
+    private sealed class ProgressCounters
+    {
+        public int Translated;
+        public int Failed;
+    }
 
     public PreTranslationStatus GetStatus(string gameId)
     {
@@ -92,39 +102,55 @@ public sealed class PreTranslationService(
 
         await BroadcastStatus(gameId, status);
 
-        var translations = new Dictionary<string, string>();
+        var translations = new ConcurrentDictionary<string, string>();
         var textList = texts.Select(t => t.Text).ToList();
 
-        // Process in batches
-        for (int i = 0; i < textList.Count; i += BatchSize)
-        {
-            ct.ThrowIfCancellationRequested();
+        // Read max concurrency from settings
+        var settings = await settingsService.GetAsync(ct);
+        var maxConc = Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
+        const int batchSize = 10; // Match DLL's MaxTranslationsPerRequest for consistent batching
 
-            var batch = textList.Skip(i).Take(BatchSize).ToList();
+        var counters = new ProgressCounters();
 
-            try
+        // Chunk texts into batches for efficient LLM calls with context
+        var batches = textList.Chunk(batchSize).ToList();
+
+        await Parallel.ForEachAsync(batches,
+            new ParallelOptions { MaxDegreeOfParallelism = maxConc, CancellationToken = ct },
+            async (batch, token) =>
             {
-                var results = await translationService.TranslateAsync(
-                    batch, fromLang, toLang, gameId, ct);
-
-                for (int j = 0; j < batch.Count; j++)
+                try
                 {
-                    translations[batch[j]] = results[j];
-                    status.TranslatedTexts++;
+                    var batchList = batch.ToList();
+                    var results = await translationService.TranslateAsync(
+                        batchList, fromLang, toLang, gameId, token);
+
+                    for (int i = 0; i < batchList.Count; i++)
+                    {
+                        translations[batchList[i]] = results[i];
+
+                        // Buffer for glossary extraction
+                        if (!string.IsNullOrEmpty(gameId))
+                            extractionService.BufferTranslation(gameId, batchList[i], results[i]);
+                    }
+                    if (!string.IsNullOrEmpty(gameId))
+                        extractionService.TryTriggerExtraction(gameId);
+
+                    Interlocked.Add(ref counters.Translated, batchList.Count);
                 }
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "批次翻译失败 ({Batch}/{Total})", i / BatchSize + 1,
-                    (textList.Count + BatchSize - 1) / BatchSize);
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Interlocked.Add(ref counters.Failed, batch.Length);
+                    logger.LogWarning(ex, "预翻译批次失败 ({Count} 条文本)", batch.Length);
+                }
 
-                // Count failed texts but continue
-                status.FailedTexts += batch.Count;
-            }
+                await ThrottledBroadcastStatus(gameId, status, counters);
+            });
 
-            await BroadcastStatus(gameId, status);
-        }
+        // Final status update (single-threaded after Parallel.ForEachAsync completes)
+        status.TranslatedTexts = Volatile.Read(ref counters.Translated);
+        status.FailedTexts = Volatile.Read(ref counters.Failed);
 
         // Write translation cache file
         if (translations.Count > 0)
@@ -143,7 +169,7 @@ public sealed class PreTranslationService(
     /// Format: encoded_original=encoded_translation (one per line)
     /// </summary>
     private async Task WriteTranslationCacheAsync(
-        string gamePath, string toLang, Dictionary<string, string> translations,
+        string gamePath, string toLang, ConcurrentDictionary<string, string> translations,
         CancellationToken ct)
     {
         var translationDir = Path.Combine(gamePath, "BepInEx", "Translation", toLang, "Text");
@@ -180,38 +206,27 @@ public sealed class PreTranslationService(
         await File.AppendAllTextAsync(filePath, sb.ToString(), ct);
     }
 
-    /// <summary>
-    /// Encode a string for XUnity translation cache file.
-    /// </summary>
-    private static string EncodeForXUnity(string text)
-    {
-        var sb = new StringBuilder(text.Length + 10);
-        for (int i = 0; i < text.Length; i++)
-        {
-            var ch = text[i];
-            switch (ch)
-            {
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '=': sb.Append("\\="); break;
-                default: sb.Append(ch); break;
-            }
-        }
-        return sb.ToString();
-    }
+    private static string EncodeForXUnity(string text) => XUnityTranslationFormat.Encode(text);
+    private static int FindUnescapedEquals(string line) => XUnityTranslationFormat.FindUnescapedEquals(line);
 
     /// <summary>
-    /// Find the first unescaped '=' in a line.
+    /// Throttled broadcast: CAS-based, skips if last broadcast was less than 200ms ago.
+    /// Only the CAS-winning thread snapshots the counters into the status object,
+    /// avoiding concurrent writes to the plain int properties.
     /// </summary>
-    private static int FindUnescapedEquals(string line)
+    private async Task ThrottledBroadcastStatus(
+        string gameId, PreTranslationStatus status, ProgressCounters counters)
     {
-        for (int i = 0; i < line.Length; i++)
-        {
-            if (line[i] == '\\') { i++; continue; } // Skip escaped char
-            if (line[i] == '=') return i;
-        }
-        return -1;
+        var now = DateTime.UtcNow.Ticks;
+        var last = _lastBroadcastTicks.GetOrAdd(gameId, 0L);
+        if (now - last < TimeSpan.FromMilliseconds(200).Ticks)
+            return;
+        if (!_lastBroadcastTicks.TryUpdate(gameId, now, last))
+            return;
+
+        status.TranslatedTexts = Volatile.Read(ref counters.Translated);
+        status.FailedTexts = Volatile.Read(ref counters.Failed);
+        await BroadcastStatus(gameId, status);
     }
 
     private async Task BroadcastStatus(string gameId, PreTranslationStatus status)

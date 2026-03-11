@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   NIcon,
   NButton,
@@ -28,6 +28,7 @@ import { useGamesStore } from '@/stores/games'
 import { settingsApi } from '@/api/games'
 import type { AppSettings, AiTranslationSettings } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
+import { useAutoSave } from '@/composables/useAutoSave'
 
 const aiStore = useAiTranslationStore()
 const gamesStore = useGamesStore()
@@ -49,13 +50,13 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
     '7. 在忠实原文含义的前提下，使译文符合目标语言的表达习惯，并考虑游戏类型和角色性格，力求达到"信、达、雅"。\n\n' +
     '输入示例：["Hello","World"] → 输出：["你好","世界"]',
   temperature: 0.3,
+  contextSize: 10,
   endpoints: [],
   glossaryExtractionEnabled: false,
   glossaryExtractionEndpointId: undefined,
 }
 
 const settings = ref<AppSettings | null>(null)
-const settingsLoading = ref(false)
 
 const aiSettings = computed({
   get: () => settings.value?.aiTranslation ?? { ...DEFAULT_AI_TRANSLATION },
@@ -118,6 +119,19 @@ const extractionEndpointOptions = computed(() => {
 
 const extractionStats = computed(() => aiStore.extractionStats)
 
+const { enable: enableAutoSave } = useAutoSave(
+  () => settings.value,
+  async () => {
+    if (!settings.value) return
+    try {
+      await settingsApi.save(settings.value)
+    } catch {
+      message.error('保存设置失败')
+    }
+  },
+  { debounceMs: 1000, deep: true },
+)
+
 function getGameName(gameId: string): string {
   const game = gamesStore.games.find(g => g.id === gameId)
   return game?.name ?? gameId
@@ -160,19 +174,8 @@ async function loadSettings() {
   } catch {
     // Use defaults
   }
-}
-
-async function handleSave() {
-  if (!settings.value) return
-  settingsLoading.value = true
-  try {
-    await settingsApi.save(settings.value)
-    message.success('设置已保存')
-  } catch {
-    message.error('保存设置失败')
-  } finally {
-    settingsLoading.value = false
-  }
+  await nextTick()
+  enableAutoSave()
 }
 
 onMounted(async () => {
@@ -507,8 +510,6 @@ onUnmounted(() => {
     <AiTranslationCard
       v-if="settings"
       v-model="aiSettings"
-      :saving="settingsLoading"
-      @save="handleSave"
       style="animation-delay: 0.1s"
     />
   </div>

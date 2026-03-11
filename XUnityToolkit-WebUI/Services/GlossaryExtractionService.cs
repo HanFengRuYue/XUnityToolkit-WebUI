@@ -48,12 +48,13 @@ public sealed class GlossaryExtractionService(
         "5. 组织名、种族名\n" +
         "6. 其他游戏特有的专有名词\n\n" +
         "要求：\n" +
-        "1. 仅返回 JSON 数组，每个元素包含 \"original\"（原文术语）和 \"translation\"（译文术语）字段。\n" +
-        "2. 不要提取常见词汇、语法结构或通用表达。\n" +
-        "3. 不要提取单个字符、数字或标点符号。\n" +
-        "4. 确保提取的术语是完整的词或短语，不是句子片段。\n" +
-        "5. 如果没有找到有价值的术语，返回空数组 []。\n" +
-        "6. 不要添加任何解释、说明或 markdown 格式。";
+        "1. 仅返回 JSON 数组，每个元素包含 \"original\"（原文术语）、\"translation\"（译文术语）和 \"description\"（术语描述）字段。\n" +
+        "2. description 字段用简短的文字说明该术语的含义或上下文（如\"主角的名字\"、\"王国名称\"、\"火属性技能\"等），帮助翻译时理解语境。\n" +
+        "3. 不要提取常见词汇、语法结构或通用表达。\n" +
+        "4. 不要提取单个字符、数字或标点符号。\n" +
+        "5. 确保提取的术语是完整的词或短语，不是句子片段。\n" +
+        "6. 如果没有找到有价值的术语，返回空数组 []。\n" +
+        "7. 不要添加任何解释、说明或 markdown 格式。";
 
     /// <summary>
     /// Buffer a completed translation pair for future extraction.
@@ -228,7 +229,10 @@ public sealed class GlossaryExtractionService(
             sb.Append("\n\n以下术语已存在于术语表中，请不要重复提取：\n");
             foreach (var entry in existingGlossary.TakeLast(50)) // Limit context size
             {
-                sb.Append($"  {entry.Original} → {entry.Translation}\n");
+                sb.Append($"  {entry.Original} → {entry.Translation}");
+                if (!string.IsNullOrWhiteSpace(entry.Description))
+                    sb.Append($" ({entry.Description})");
+                sb.Append('\n');
             }
         }
 
@@ -266,11 +270,13 @@ public sealed class GlossaryExtractionService(
                 var translation = item?["translation"]?.GetValue<string>();
                 if (!string.IsNullOrWhiteSpace(original) && !string.IsNullOrWhiteSpace(translation))
                 {
+                    var description = item?["description"]?.GetValue<string>();
                     result.Add(new GlossaryEntry
                     {
                         Original = original,
                         Translation = translation,
-                        IsRegex = false
+                        IsRegex = false,
+                        Description = string.IsNullOrWhiteSpace(description) ? null : description
                     });
                 }
             }

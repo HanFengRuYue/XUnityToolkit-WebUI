@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -53,6 +53,10 @@ export const gamesApi = {
   getGlossary: (id: string) => api.get<GlossaryEntry[]>(`/api/games/${id}/glossary`),
   saveGlossary: (id: string, entries: GlossaryEntry[]) =>
     api.put<GlossaryEntry[]>(`/api/games/${id}/glossary`, entries),
+
+  getDescription: (id: string) => api.get<string | null>(`/api/games/${id}/description`),
+  saveDescription: (id: string, description: string | null) =>
+    api.put<void>(`/api/games/${id}/description`, { description }),
 
   // Icon
   getIconUrl: (id: string) => `/api/games/${id}/icon`,
@@ -163,6 +167,23 @@ export const translateApi = {
   testTranslate: (endpoints: ApiEndpointConfig[], systemPrompt: string, temperature: number) =>
     api.post<EndpointTestResult[]>('/api/translate/test', { endpoints, systemPrompt, temperature }),
   getExtractionStats: () => api.get<GlossaryExtractionStats>('/api/ai/extraction/stats'),
+}
+
+export const translationEditorApi = {
+  getEntries: (id: string) =>
+    api.get<TranslationEditorData>(`/api/games/${id}/translation-editor`),
+  saveEntries: (id: string, entries: TranslationEntry[]) =>
+    api.put<void>(`/api/games/${id}/translation-editor`, { entries }),
+  parseImport: (id: string, content: string) =>
+    api.post<TranslationEntry[]>(`/api/games/${id}/translation-editor/import`, { content }),
+  getExportUrl: (id: string) =>
+    `/api/games/${id}/translation-editor/export`,
+}
+
+export const pluginPackageApi = {
+  getExportUrl: (id: string) => `/api/games/${id}/plugin-package/export`,
+  importPackage: (id: string, zipPath: string) =>
+    api.post<void>(`/api/games/${id}/plugin-package/import`, { zipPath }),
 }
 
 export const logsApi = {

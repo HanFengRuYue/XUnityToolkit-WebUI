@@ -68,7 +68,9 @@ export const useThemeStore = defineStore('theme', () => {
   function loadInitialTheme(): ThemeMode {
     const saved = localStorage.getItem('theme')
     if (saved === 'light' || saved === 'dark') return saved
-    return 'dark'
+    // Auto-detect OS theme, default to light if unavailable
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
+    return 'light'
   }
 
   function loadInitialAccent(): string {

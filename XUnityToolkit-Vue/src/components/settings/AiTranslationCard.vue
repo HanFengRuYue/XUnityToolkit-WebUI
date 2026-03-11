@@ -27,12 +27,10 @@ import { translateApi } from '@/api/games'
 
 const props = defineProps<{
   modelValue: AiTranslationSettings
-  saving: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: AiTranslationSettings]
-  save: []
 }>()
 
 const message = useMessage()
@@ -297,17 +295,30 @@ const priorityMarks = computed(() => {
         <span class="form-hint">使用 {from} 和 {to} 作为语言占位符</span>
       </div>
 
-      <div class="form-row">
-        <label class="form-label">温度</label>
-        <NInputNumber
-          :value="modelValue.temperature"
-          @update:value="(v: number | null) => update({ temperature: v ?? 0.3 })"
-          :min="0"
-          :max="2"
-          :step="0.1"
-          style="width: 140px"
-        />
-        <span class="form-hint">较低的值产生更确定的翻译</span>
+      <div class="form-row-inline">
+        <div class="form-row" style="flex: 1">
+          <label class="form-label">温度</label>
+          <NInputNumber
+            :value="modelValue.temperature"
+            @update:value="(v: number | null) => update({ temperature: v ?? 0.3 })"
+            :min="0"
+            :max="2"
+            :step="0.1"
+            style="width: 140px"
+          />
+          <span class="form-hint">较低的值产生更确定的翻译</span>
+        </div>
+        <div class="form-row" style="flex: 1">
+          <label class="form-label">翻译记忆条数</label>
+          <NInputNumber
+            :value="modelValue.contextSize"
+            @update:value="(v: number | null) => update({ contextSize: v ?? 10 })"
+            :min="0"
+            :max="100"
+            style="width: 140px"
+          />
+          <span class="form-hint">附带的近期翻译对数量，0 为关闭（0-100）</span>
+        </div>
       </div>
     </div>
 
@@ -471,6 +482,7 @@ const priorityMarks = computed(() => {
     </div>
 
     <div class="section-footer">
+      <span></span>
       <NButton
         :loading="testing"
         @click="handleTestAll"
@@ -480,9 +492,6 @@ const priorityMarks = computed(() => {
           <NIcon><ScienceOutlined /></NIcon>
         </template>
         测试所有提供商
-      </NButton>
-      <NButton type="primary" :loading="saving" @click="emit('save')">
-        保存设置
       </NButton>
     </div>
   </div>

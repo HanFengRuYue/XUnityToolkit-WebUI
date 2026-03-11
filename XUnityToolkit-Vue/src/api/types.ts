@@ -49,6 +49,7 @@ export interface Game {
   steamAppId?: number
   steamGridDbGameId?: number
   lastPlayedAt?: string
+  aiDescription?: string
 }
 
 export interface AddGameResponse {
@@ -182,6 +183,7 @@ export interface AiTranslationSettings {
   port: number
   systemPrompt: string
   temperature: number
+  contextSize: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
   glossaryExtractionEndpointId?: string
@@ -251,6 +253,7 @@ export interface GlossaryEntry {
   original: string
   translation: string
   isRegex: boolean
+  description?: string
 }
 
 export interface GlossaryExtractionStats {
@@ -327,4 +330,16 @@ export interface PreTranslationStatus {
   translatedTexts: number
   failedTexts: number
   error?: string
+}
+
+export interface TranslationEntry {
+  original: string
+  translation: string
+}
+
+export interface TranslationEditorData {
+  filePath: string
+  fileExists: boolean
+  entryCount: number
+  entries: TranslationEntry[]
 }

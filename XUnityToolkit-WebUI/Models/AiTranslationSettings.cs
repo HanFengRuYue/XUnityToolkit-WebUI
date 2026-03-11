@@ -26,6 +26,11 @@ public sealed class AiTranslationSettings
 
     public double Temperature { get; set; } = 0.3;
 
+    /// <summary>
+    /// Number of recent translation pairs to include as context (0 = disabled, max 100).
+    /// </summary>
+    public int ContextSize { get; set; } = 10;
+
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
     // Glossary extraction

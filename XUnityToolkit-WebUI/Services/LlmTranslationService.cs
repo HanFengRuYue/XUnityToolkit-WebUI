@@ -14,9 +14,41 @@ public sealed class LlmTranslationService(
     IHttpClientFactory httpClientFactory,
     AppSettingsService settingsService,
     GlossaryService glossaryService,
+    GameLibraryService gameLibraryService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<LlmTranslationService> logger)
 {
+    // ── Translation memory (per-game, volatile) ──
+    private record TranslationMemoryEntry(string Original, string Translated);
+
+    private sealed class TranslationMemoryBuffer
+    {
+        private readonly ConcurrentQueue<TranslationMemoryEntry> _queue = new();
+
+        public void Add(IList<string> originals, IList<string> translations, int maxSize)
+        {
+            for (int i = 0; i < originals.Count && i < translations.Count; i++)
+                _queue.Enqueue(new TranslationMemoryEntry(originals[i], translations[i]));
+            while (_queue.Count > maxSize)
+                _queue.TryDequeue(out _);
+        }
+
+        public IList<TranslationMemoryEntry> GetSnapshot() => _queue.ToArray();
+    }
+
+    private readonly ConcurrentDictionary<string, TranslationMemoryBuffer> _translationMemory = new();
+
+    // ── Per-game description cache (avoids disk I/O on hot path) ──
+    private readonly ConcurrentDictionary<string, string?> _descriptionCache = new();
+
+    /// <summary>
+    /// Update the cached description for a game. Call from the description PUT endpoint.
+    /// </summary>
+    public void InvalidateDescriptionCache(string gameId, string? description)
+    {
+        _descriptionCache[gameId] = description;
+    }
+
     // ── Core stats (thread-safe) ──
     private long _totalTranslated;
     private long _totalReceived; // total incoming translation requests
@@ -109,7 +141,10 @@ public sealed class LlmTranslationService(
         _ = BroadcastStats();
 
         if (!_enabled)
+        {
+            RecordError("AI 翻译功能已停用");
             throw new InvalidOperationException("AI 翻译功能已停用");
+        }
 
         try
         {
@@ -118,7 +153,10 @@ public sealed class LlmTranslationService(
 
             var enabledEndpoints = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
             if (enabledEndpoints.Count == 0)
+            {
+                RecordError("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
+            }
 
             // Load glossary for the game (if available)
             List<GlossaryEntry>? glossary = null;
@@ -128,38 +166,63 @@ public sealed class LlmTranslationService(
                 if (glossary.Count == 0) glossary = null;
             }
 
+            // Load per-game description (cached in-memory, no disk I/O)
+            string? gameDescription = null;
+            if (!string.IsNullOrEmpty(gameId))
+            {
+                if (!_descriptionCache.TryGetValue(gameId, out gameDescription))
+                {
+                    // First access: populate cache from disk (one-time per game per session)
+                    var game = await gameLibraryService.GetByIdAsync(gameId, ct);
+                    gameDescription = game?.AiDescription;
+                    _descriptionCache[gameId] = gameDescription;
+                }
+                if (gameDescription is { Length: > 500 })
+                    gameDescription = gameDescription[..500];
+            }
+
+            // Load translation memory context
+            var contextSize = Math.Clamp(ai.ContextSize, 0, 100);
+            IList<TranslationMemoryEntry>? memoryContext = null;
+            if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
+            {
+                var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
+                memoryContext = buffer.GetSnapshot();
+                if (memoryContext.Count == 0) memoryContext = null;
+            }
+
             // Ensure semaphore matches configured concurrency
             var maxConc = Math.Clamp(ai.MaxConcurrency, 1, 100);
             EnsureSemaphore(maxConc);
             var semaphore = Volatile.Read(ref _semaphore)!; // Acquire-read for ARM safety
 
-            // Parallel per-text translation
-            var tasks = new Task<(string translated, long tokens, double ms, string endpointName)>[texts.Count];
-            for (int i = 0; i < texts.Count; i++)
+            // Batch translation: send entire batch as one LLM call
+            var (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
+                texts, from, to, ai, enabledEndpoints, glossary,
+                gameDescription, memoryContext, semaphore, ct);
+
+            // Copy to mutable list for post-processing
+            var translations = new List<string>(batchResult);
+
+            // Apply glossary post-processing
+            for (int i = 0; i < translations.Count; i++)
             {
-                var text = texts[i];
-                tasks[i] = TranslateSingleAsync(text, from, to, ai, enabledEndpoints, glossary, semaphore, ct);
-            }
-
-            var results = await Task.WhenAll(tasks);
-
-            // Aggregate results
-            var translations = new string[texts.Count];
-            for (int i = 0; i < results.Length; i++)
-            {
-                var (translated, tokens, ms, endpointName) = results[i];
-                translations[i] = translated;
-
-                // Apply glossary post-processing
                 if (glossary is not null)
                     translations[i] = ApplyGlossaryPostProcess(translations[i], glossary);
 
                 // Record recent translation
                 var recent = new RecentTranslation(
-                    texts[i], translations[i], DateTime.UtcNow, tokens, Math.Round(ms, 1), endpointName);
+                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName);
                 _recentTranslations.Enqueue(recent);
                 while (_recentTranslations.Count > MaxRecentTranslations)
                     _recentTranslations.TryDequeue(out _);
+            }
+
+            // Accumulate translation memory
+            if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
+            {
+                var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
+                buffer.Add(texts, translations, contextSize);
             }
 
             Interlocked.Add(ref _totalTranslated, texts.Count);
@@ -171,29 +234,29 @@ public sealed class LlmTranslationService(
         }
     }
 
-    private async Task<(string translated, long tokens, double ms, string endpointName)> TranslateSingleAsync(
-        string text, string from, string to,
+    private async Task<(IList<string> translations, long tokens, double ms, string endpointName)> TranslateBatchAsync(
+        IList<string> texts, string from, string to,
         AiTranslationSettings ai, List<ApiEndpointConfig> endpoints,
-        List<GlossaryEntry>? glossary, SemaphoreSlim semaphore, CancellationToken ct)
+        List<GlossaryEntry>? glossary, string? gameDescription,
+        IList<TranslationMemoryEntry>? memoryContext,
+        SemaphoreSlim semaphore, CancellationToken ct)
     {
         Interlocked.Increment(ref _queued);
         _ = BroadcastStats();
 
+        bool semaphoreAcquired = false;
         try
         {
-            // Timeout prevents HTTP connections from hanging indefinitely when
-            // the game-side DLL sends more concurrent requests than the semaphore allows.
-            var acquired = await semaphore.WaitAsync(TimeSpan.FromSeconds(60), ct);
-            if (!acquired)
+            semaphoreAcquired = await semaphore.WaitAsync(TimeSpan.FromSeconds(60), ct);
+            if (!semaphoreAcquired)
             {
-                Interlocked.Decrement(ref _queued);
-                _ = BroadcastStats();
                 logger.LogWarning("翻译队列超时: 等待超过 60 秒，当前排队 {Queued}", Interlocked.Read(ref _queued));
                 throw new InvalidOperationException("翻译队列已满，请稍后重试");
             }
         }
-        catch (OperationCanceledException)
+        catch
         {
+            // Semaphore not acquired (timeout or cancellation): only decrement queued
             Interlocked.Decrement(ref _queued);
             _ = BroadcastStats();
             throw;
@@ -210,7 +273,8 @@ public sealed class LlmTranslationService(
             chosenEndpoint = SelectEndpoint(endpoints);
             var sw = Stopwatch.StartNew();
 
-            var (result, tokens) = await CallProviderAsync(chosenEndpoint, ai, [text], from, to, glossary, ct);
+            var (result, tokens) = await CallProviderAsync(
+                chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, ct);
             sw.Stop();
 
             var elapsedMs = sw.Elapsed.TotalMilliseconds;
@@ -225,8 +289,17 @@ public sealed class LlmTranslationService(
             Interlocked.Increment(ref _totalRequests);
             _requestTimestamps.Enqueue(DateTime.UtcNow.Ticks);
 
-            var translated = result.Count > 0 ? result[0] : text;
-            return (translated, tokens, elapsedMs, chosenEndpoint.Name);
+            // Defensive: ensure result count matches input
+            if (result.Count != texts.Count)
+            {
+                logger.LogWarning("LLM 返回数量不匹配: 期望 {Expected}, 实际 {Actual}", texts.Count, result.Count);
+                var padded = new List<string>(texts.Count);
+                for (int i = 0; i < texts.Count; i++)
+                    padded.Add(i < result.Count ? result[i] : texts[i]);
+                result = padded;
+            }
+
+            return (result, tokens, elapsedMs, chosenEndpoint.Name);
         }
         catch (Exception ex)
         {
@@ -240,8 +313,9 @@ public sealed class LlmTranslationService(
         }
         finally
         {
+            // Only release semaphore and decrement translating if we actually acquired it
             Interlocked.Decrement(ref _translating);
-            semaphore.Release(); // Release the same instance we acquired
+            semaphore.Release();
             _ = BroadcastStats();
         }
     }
@@ -285,24 +359,27 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string> translations, long tokens)> CallProviderAsync(
         ApiEndpointConfig endpoint, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, CancellationToken ct)
+        List<GlossaryEntry>? glossary, string? gameDescription,
+        IList<TranslationMemoryEntry>? memoryContext, CancellationToken ct)
     {
         return endpoint.Provider switch
         {
             LlmProvider.OpenAI => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, GetDefaultBaseUrl(endpoint), ct),
             LlmProvider.DeepSeek => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, GetDefaultBaseUrl(endpoint), ct),
             LlmProvider.Qwen => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, GetDefaultBaseUrl(endpoint), ct),
             LlmProvider.GLM => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, GetDefaultBaseUrl(endpoint), ct),
             LlmProvider.Kimi => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, GetDefaultBaseUrl(endpoint), ct),
             LlmProvider.Custom => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                endpoint.ApiBaseUrl, ct),
-            LlmProvider.Claude => await CallClaudeAsync(endpoint, ai, texts, from, to, glossary, ct),
-            LlmProvider.Gemini => await CallGeminiAsync(endpoint, ai, texts, from, to, glossary, ct),
+                gameDescription, memoryContext, endpoint.ApiBaseUrl, ct),
+            LlmProvider.Claude => await CallClaudeAsync(endpoint, ai, texts, from, to, glossary,
+                gameDescription, memoryContext, ct),
+            LlmProvider.Gemini => await CallGeminiAsync(endpoint, ai, texts, from, to, glossary,
+                gameDescription, memoryContext, ct),
             _ => throw new NotSupportedException($"未支持的 LLM 提供商: {endpoint.Provider}")
         };
     }
@@ -407,9 +484,10 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallOpenAiCompatAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string baseUrl, CancellationToken ct)
+        List<GlossaryEntry>? glossary, string? gameDescription,
+        IList<TranslationMemoryEntry>? memoryContext, string baseUrl, CancellationToken ct)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallOpenAiCompatRawAsync(ep, systemPrompt, userContent, ai.Temperature, baseUrl, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -463,9 +541,10 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallClaudeAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, CancellationToken ct)
+        List<GlossaryEntry>? glossary, string? gameDescription,
+        IList<TranslationMemoryEntry>? memoryContext, CancellationToken ct)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -517,9 +596,10 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallGeminiAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, CancellationToken ct)
+        List<GlossaryEntry>? glossary, string? gameDescription,
+        IList<TranslationMemoryEntry>? memoryContext, CancellationToken ct)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary);
+        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -527,25 +607,46 @@ public sealed class LlmTranslationService(
 
     // ── System prompt + glossary injection ──
 
-    private static string BuildSystemPrompt(string template, string from, string to, List<GlossaryEntry>? glossary)
+    private static string BuildSystemPrompt(string template, string from, string to,
+        List<GlossaryEntry>? glossary, string? gameDescription = null,
+        IList<TranslationMemoryEntry>? memoryContext = null)
     {
-        var prompt = template.Replace("{from}", from).Replace("{to}", to);
+        var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
+
+        if (!string.IsNullOrWhiteSpace(gameDescription))
+        {
+            sb.Append("\n\n游戏背景：\n");
+            sb.Append(gameDescription);
+        }
 
         if (glossary is { Count: > 0 })
         {
-            var sb = new StringBuilder(prompt);
             sb.Append("\n\nGlossary (use these exact translations):\n");
             foreach (var entry in glossary)
             {
                 if (entry.IsRegex)
-                    sb.Append($"  Pattern: /{entry.Original}/ → {entry.Translation}\n");
+                    sb.Append($"  Pattern: /{entry.Original}/ → {entry.Translation}");
                 else
-                    sb.Append($"  {entry.Original} → {entry.Translation}\n");
+                    sb.Append($"  {entry.Original} → {entry.Translation}");
+
+                if (!string.IsNullOrWhiteSpace(entry.Description))
+                    sb.Append($" ({entry.Description})");
+
+                sb.Append('\n');
             }
-            prompt = sb.ToString();
         }
 
-        return prompt;
+        if (memoryContext is { Count: > 0 })
+        {
+            sb.Append("\n\n以下是近期翻译示例（供参考，保持风格一致）：\n");
+            foreach (var entry in memoryContext)
+            {
+                sb.Append($"  {from}: {entry.Original}\n");
+                sb.Append($"  {to}: {entry.Translated}\n");
+            }
+        }
+
+        return sb.ToString();
     }
 
     // ── Glossary post-processing ──
@@ -685,7 +786,7 @@ public sealed class LlmTranslationService(
             try
             {
                 var sw = Stopwatch.StartNew();
-                var (translations, _) = await CallProviderAsync(ep, ai, testTexts, "en", "zh", null, ct);
+                var (translations, _) = await CallProviderAsync(ep, ai, testTexts, "en", "zh", null, null, null, ct);
                 sw.Stop();
                 return new EndpointTestResult(ep.Id, ep.Name, true, translations, null, Math.Round(sw.Elapsed.TotalMilliseconds, 1));
             }

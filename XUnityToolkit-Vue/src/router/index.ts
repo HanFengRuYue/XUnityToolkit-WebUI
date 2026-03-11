@@ -25,6 +25,16 @@ const router = createRouter({
       component: () => import('@/views/AssetExtractionView.vue'),
     },
     {
+      path: '/games/:id/translation-editor',
+      name: 'translation-editor',
+      component: () => import('@/views/TranslationEditorView.vue'),
+    },
+    {
+      path: '/games/:id/glossary-editor',
+      name: 'glossary-editor',
+      component: () => import('@/views/GlossaryEditorView.vue'),
+    },
+    {
       path: '/ai-translation',
       name: 'ai-translation',
       component: () => import('@/views/AiTranslationView.vue'),

@@ -17,14 +17,14 @@ public static class LogEndpoints
             return Results.Ok(ApiResult<LogEntry[]>.Ok(entries));
         });
 
+        // Download current session log (in-memory ring buffer)
         group.MapGet("/download", (FileLoggerProvider provider) =>
         {
-            var filePath = provider.FilePath;
-            if (!File.Exists(filePath))
-                return Results.NotFound();
-
-            var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            return Results.File(stream, "text/plain", "app.log");
+            var content = provider.ExportSessionLog();
+            var bytes = Encoding.UTF8.GetBytes(content);
+            var stream = new MemoryStream(bytes);
+            var fileName = $"XUnityToolkit_{provider.SessionTimestamp}.log";
+            return Results.File(stream, "text/plain", fileName);
         });
 
         group.MapGet("/history", (FileLoggerProvider provider, int? lines) =>

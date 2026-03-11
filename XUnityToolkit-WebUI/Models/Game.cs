@@ -25,4 +25,5 @@ public sealed class Game
     public int? SteamAppId { get; set; }
     public int? SteamGridDbGameId { get; set; }
     public DateTime? LastPlayedAt { get; set; }
+    public string? AiDescription { get; set; }
 }

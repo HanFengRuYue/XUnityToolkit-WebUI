@@ -38,7 +38,6 @@ public static class TranslateEndpoints
             catch (InvalidOperationException ex) when (ex.Message.Contains("已停用"))
             {
                 logger.LogWarning("AI 翻译已停用");
-                translationService.RecordError("AI 翻译功能已停用");
                 return Results.Json(ApiResult.Fail(ex.Message), statusCode: 503);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("队列已满"))
@@ -49,7 +48,6 @@ public static class TranslateEndpoints
             catch (InvalidOperationException ex)
             {
                 logger.LogWarning("AI 翻译配置错误: {Message}", ex.Message);
-                translationService.RecordError($"配置错误: {ex.Message}");
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)

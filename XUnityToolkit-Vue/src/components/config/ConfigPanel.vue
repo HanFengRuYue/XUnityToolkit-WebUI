@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NForm,
@@ -12,9 +12,12 @@ import {
   NCollapseItem,
   NButton,
   NIcon,
+  useMessage,
 } from 'naive-ui'
 import { EditNoteOutlined } from '@vicons/material'
 import type { XUnityConfig } from '@/api/types'
+import { gamesApi } from '@/api/games'
+import { useAutoSave } from '@/composables/useAutoSave'
 
 const props = defineProps<{
   config: XUnityConfig | null
@@ -23,10 +26,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-
-const emit = defineEmits<{
-  save: [config: XUnityConfig]
-}>()
+const message = useMessage()
 
 const form = ref<XUnityConfig>({
   translationEngine: 'GoogleTranslateV2',
@@ -136,10 +136,25 @@ const hasAnyKeyFields = computed(() =>
   showPrimaryDeepLFreeToggle.value || showFallbackDeepLFreeToggle.value
 )
 
+const { enable: enableAutoSave, disable: disableAutoSave } = useAutoSave(
+  () => form.value,
+  async () => {
+    try {
+      await gamesApi.saveConfig(props.gameId, form.value)
+    } catch {
+      message.error('保存配置失败')
+    }
+  },
+  { debounceMs: 2000, deep: true },
+)
+
 watch(
   () => props.config,
-  (cfg) => {
+  async (cfg) => {
+    disableAutoSave()
     if (cfg) form.value = { ...cfg }
+    await nextTick()
+    enableAutoSave()
   },
   { immediate: true },
 )
@@ -182,10 +197,6 @@ const textureHashOptions = [
   { label: '按图片数据', value: 'FromImageData' },
   { label: '按图片名称和场景', value: 'FromImageNameAndScene' },
 ]
-
-function handleSave() {
-  emit('save', { ...form.value })
-}
 
 function openConfigEditor() {
   router.push(`/games/${props.gameId}/config-editor`)
@@ -440,14 +451,12 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
       </NCollapse>
 
       <div class="config-footer">
+        <span></span>
         <NButton :disabled="disabled" @click="openConfigEditor">
           <template #icon>
             <NIcon><EditNoteOutlined /></NIcon>
           </template>
           编辑配置文件
-        </NButton>
-        <NButton type="primary" :disabled="disabled" @click="handleSave">
-          保存配置
         </NButton>
       </div>
     </NForm>

@@ -93,9 +93,17 @@ public static class AssetEndpoints
             string id,
             PreTranslateRequest request,
             PreTranslationService preTranslation,
+            AppSettingsService settingsService,
             AppDataPaths paths,
             CancellationToken ct) =>
         {
+            // Pre-flight: check AI provider configuration
+            var settings = await settingsService.GetAsync(ct);
+            var ai = settings.AiTranslation;
+            var hasProvider = ai.Endpoints.Any(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey));
+            if (!hasProvider)
+                return Results.BadRequest(ApiResult.Fail("请先在 AI 翻译页面配置至少一个 AI 提供商"));
+
             var cachePath = paths.ExtractedTextsFile(id);
             if (!File.Exists(cachePath))
                 return Results.BadRequest(ApiResult.Fail("请先提取游戏资产"));

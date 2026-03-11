@@ -5,17 +5,19 @@ using XUnityToolkit_WebUI.Models;
 namespace XUnityToolkit_WebUI.Infrastructure;
 
 /// <summary>
-/// Minimal file logger provider — appends timestamped log lines to a file.
-/// Rotates when file exceeds 5 MB (rename to .old, start fresh).
+/// File logger provider — creates a timestamped log file per application startup.
+/// Retains the most recent 10 log files and cleans up older ones.
 /// Also maintains an in-memory ring buffer and optional broadcast callback for real-time log streaming.
 /// </summary>
 internal sealed class FileLoggerProvider : ILoggerProvider
 {
+    private readonly string _logsDirectory;
     private readonly string _filePath;
+    private readonly string _sessionTimestamp;
     internal readonly LogLevel _minLevel;
-    private StreamWriter _writer;
+    private readonly StreamWriter _writer;
     private readonly Lock _lock = new();
-    private const long MaxFileSize = 5 * 1024 * 1024; // 5 MB
+    private const int MaxLogFiles = 10;
 
     private readonly ConcurrentQueue<LogEntry> _recentEntries = new();
     private const int RingBufferSize = 500;
@@ -26,13 +28,15 @@ internal sealed class FileLoggerProvider : ILoggerProvider
     /// </summary>
     internal Action<LogEntry>? LogBroadcast { get; set; }
 
-    public FileLoggerProvider(string filePath, LogLevel minLevel = LogLevel.Information)
+    public FileLoggerProvider(string logsDirectory, LogLevel minLevel = LogLevel.Information)
     {
-        _filePath = filePath;
+        _logsDirectory = logsDirectory;
         _minLevel = minLevel;
-        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-        RotateIfNeeded();
-        _writer = new StreamWriter(filePath, append: true, Encoding.UTF8) { AutoFlush = true };
+        _sessionTimestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+        Directory.CreateDirectory(logsDirectory);
+        CleanupOldLogFiles();
+        _filePath = Path.Combine(logsDirectory, $"XUnityToolkit_{_sessionTimestamp}.log");
+        _writer = new StreamWriter(_filePath, append: false, Encoding.UTF8) { AutoFlush = true };
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(categoryName, this);
@@ -70,14 +74,6 @@ internal sealed class FileLoggerProvider : ILoggerProvider
                 _writer.WriteLine($"{timestamp} [{levelTag}] [{shortCategory}] {message}");
                 if (exception is not null)
                     _writer.WriteLine($"  Exception: {exception}");
-
-                // Check rotation
-                if (_writer.BaseStream.Length > MaxFileSize)
-                {
-                    _writer.Dispose();
-                    RotateIfNeeded();
-                    _writer = new StreamWriter(_filePath, append: true, Encoding.UTF8) { AutoFlush = true };
-                }
             }
             catch
             {
@@ -96,25 +92,56 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 
     internal string FilePath => _filePath;
 
+    /// <summary>
+    /// The session timestamp used for this log file, for consistent export naming.
+    /// </summary>
+    internal string SessionTimestamp => _sessionTimestamp;
+
     internal LogEntry[] GetRecentEntries(int count)
     {
         var all = _recentEntries.ToArray();
         return count >= all.Length ? all : all[^count..];
     }
 
-    private void RotateIfNeeded()
+    /// <summary>
+    /// Export all in-memory ring buffer entries as formatted log text.
+    /// </summary>
+    internal string ExportSessionLog()
+    {
+        var entries = _recentEntries.ToArray();
+        var sb = new StringBuilder();
+        foreach (var entry in entries)
+        {
+            sb.AppendLine($"{entry.Timestamp} [{entry.Level}] [{entry.Category}] {entry.Message}");
+        }
+        return sb.ToString();
+    }
+
+    private void CleanupOldLogFiles()
     {
         try
         {
-            if (File.Exists(_filePath) && new FileInfo(_filePath).Length > MaxFileSize)
+            var logFiles = Directory.GetFiles(_logsDirectory, "XUnityToolkit_*.log")
+                .OrderByDescending(File.GetLastWriteTime)
+                .ToList();
+
+            // Keep only MaxLogFiles - 1 (the new one will be created after this)
+            for (int i = MaxLogFiles - 1; i < logFiles.Count; i++)
             {
-                var oldPath = _filePath + ".old";
-                File.Move(_filePath, oldPath, overwrite: true);
+                try { File.Delete(logFiles[i]); } catch { /* best effort */ }
             }
+
+            // Also clean up legacy log files
+            var legacyLog = Path.Combine(_logsDirectory, "app.log");
+            if (File.Exists(legacyLog))
+                try { File.Delete(legacyLog); } catch { /* best effort */ }
+            var legacyOld = Path.Combine(_logsDirectory, "app.log.old");
+            if (File.Exists(legacyOld))
+                try { File.Delete(legacyOld); } catch { /* best effort */ }
         }
         catch
         {
-            // Best effort
+            // Best effort cleanup
         }
     }
 }

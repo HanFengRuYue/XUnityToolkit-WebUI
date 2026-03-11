@@ -446,6 +446,39 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
         });
 
+        // Game AI description (per-game context for translation)
+        group.MapGet("/{id}/description", async (
+            string id,
+            GameLibraryService library,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            return Results.Ok(ApiResult<string?>.Ok(game.AiDescription));
+        });
+
+        group.MapPut("/{id}/description", async (
+            string id,
+            UpdateDescriptionRequest request,
+            GameLibraryService library,
+            LlmTranslationService translationService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            game.AiDescription = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+            await library.UpdateAsync(game, ct);
+
+            // Invalidate in-memory cache so hot-path picks up the new description
+            translationService.InvalidateDescriptionCache(id, game.AiDescription);
+
+            return Results.Ok(ApiResult.Ok());
+        });
+
         // Uninstall a non-BepInEx mod framework
         group.MapDelete("/{id}/framework/{framework}", async (
             string id,
@@ -480,3 +513,4 @@ public record AddGameRequest(string GamePath, string? Name = null, string? Execu
 public record AddWithDetectionRequest(string FolderPath, string? ExePath = null);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
 public record AiEndpointStatus(bool Installed);
+public record UpdateDescriptionRequest(string? Description);

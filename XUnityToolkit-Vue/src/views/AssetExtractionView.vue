@@ -27,7 +27,7 @@ import {
   DataObjectOutlined,
 } from '@vicons/material'
 import { useAssetExtractionStore } from '@/stores/assetExtraction'
-import { gamesApi } from '@/api/games'
+import { gamesApi, settingsApi } from '@/api/games'
 import type { Game, ExtractedText } from '@/api/types'
 
 const route = useRoute()
@@ -41,6 +41,7 @@ const loading = ref(true)
 const searchKeyword = ref('')
 const fromLang = ref('ja')
 const toLang = ref('zh')
+const hasAiProvider = ref(false)
 
 const langOptions = [
   { label: '日语 (ja)', value: 'ja' },
@@ -101,6 +102,12 @@ onMounted(async () => {
     if (isPreTranslating.value) {
       await store.connect(gameId)
     }
+    // Check if AI providers are configured
+    try {
+      const settings = await settingsApi.get()
+      const endpoints = settings.aiTranslation?.endpoints ?? []
+      hasAiProvider.value = endpoints.some(e => e.enabled && e.apiKey)
+    } catch { /* ignore */ }
   } catch {
     message.error('加载失败')
   } finally {
@@ -285,11 +292,23 @@ function langLabel(code: string): string {
           </div>
         </div>
 
+        <!-- AI Provider Warning -->
+        <NAlert
+          v-if="!hasAiProvider"
+          type="warning"
+          style="margin-bottom: 12px"
+        >
+          尚未配置 AI 翻译提供商，请先前往
+          <router-link to="/ai-translation" style="color: var(--accent); font-weight: 500">AI 翻译页面</router-link>
+          添加至少一个提供商。
+        </NAlert>
+
         <!-- Action Buttons -->
         <div class="action-row">
           <NButton
             v-if="!isPreTranslating"
             type="primary"
+            :disabled="!hasAiProvider"
             @click="handleStartPreTranslation"
           >
             <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>

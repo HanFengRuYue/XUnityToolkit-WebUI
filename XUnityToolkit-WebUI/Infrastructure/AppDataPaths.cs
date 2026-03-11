@@ -15,7 +15,6 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
     public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
     public string LogsDirectory => Path.Combine(_root, "logs");
-    public string LogFile => Path.Combine(LogsDirectory, "app.log");
     public string ExtractedTextsDirectory => Path.Combine(CacheDirectory, "extracted-texts");
 
     public string GlossaryFile(string gameId) =>

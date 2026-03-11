@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
@@ -29,6 +29,7 @@ import { cacheApi, settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
+import { useAutoSave } from '@/composables/useAutoSave'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -79,6 +80,7 @@ const settings = ref<AppSettings>({
     port: 51821,
     systemPrompt: '',
     temperature: 0.3,
+    contextSize: 10,
     endpoints: [],
     glossaryExtractionEnabled: false,
     glossaryExtractionEndpointId: undefined,
@@ -91,12 +93,22 @@ const settings = ref<AppSettings>({
   libraryGap: 'normal',
   libraryShowLabels: true,
 })
-const settingsLoading = ref(false)
-
 const themeOptions = [
   { label: '深色主题', value: 'dark' },
   { label: '浅色主题', value: 'light' },
 ]
+
+const { enable: enableAutoSave } = useAutoSave(
+  () => settings.value,
+  async () => {
+    try {
+      await settingsApi.save(settings.value)
+    } catch {
+      message.error('保存设置失败')
+    }
+  },
+  { debounceMs: 1000, deep: true },
+)
 
 // Sync theme changes immediately when user selects
 watch(() => settings.value.theme, (newTheme) => {
@@ -111,28 +123,16 @@ watch(() => settings.value.accentColor, (newColor) => {
 async function loadSettings() {
   try {
     const loaded = await settingsApi.get()
+    // Use frontend theme store as source of truth (localStorage + OS detection),
+    // don't let backend defaults override the correctly detected theme
+    loaded.theme = themeStore.mode
+    loaded.accentColor = loaded.accentColor || themeStore.accentColor
     settings.value = loaded
-    // Sync loaded theme with theme store
-    themeStore.setTheme(loaded.theme as ThemeMode)
-    // Sync accent color
-    if (loaded.accentColor) {
-      themeStore.setAccentColor(loaded.accentColor)
-    }
   } catch {
     // Use defaults
   }
-}
-
-async function handleSaveSettings() {
-  settingsLoading.value = true
-  try {
-    await settingsApi.save(settings.value)
-    message.success('设置已保存')
-  } catch {
-    message.error('保存设置失败')
-  } finally {
-    settingsLoading.value = false
-  }
+  await nextTick()
+  enableAutoSave()
 }
 
 // Version
@@ -302,12 +302,6 @@ onMounted(() => {
             <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
           </div>
         </div>
-        <div class="section-footer">
-          <span></span>
-          <NButton type="primary" :loading="settingsLoading" @click="handleSaveSettings">
-            保存设置
-          </NButton>
-        </div>
       </div>
     </div>
 
@@ -336,12 +330,6 @@ onMounted(() => {
             — 用于在游戏库中搜索高清封面图
           </span>
         </div>
-      </div>
-      <div class="section-footer">
-        <span></span>
-        <NButton type="primary" :loading="settingsLoading" @click="handleSaveSettings">
-          保存设置
-        </NButton>
       </div>
     </div>
 
