@@ -455,7 +455,7 @@ onUnmounted(() => {
               @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
               :options="extractionEndpointOptions"
               size="small"
-              style="max-width: 320px"
+              class="extraction-select"
             />
           </div>
 
@@ -1312,6 +1312,10 @@ onUnmounted(() => {
   letter-spacing: 0.05em;
 }
 
+.extraction-select {
+  max-width: 320px;
+}
+
 .extraction-stats {
   display: flex;
   flex-direction: column;
@@ -1501,6 +1505,11 @@ onUnmounted(() => {
     gap: 12px;
   }
 
+  .section-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
   .header-actions {
     flex-wrap: wrap;
     gap: 8px;
@@ -1527,6 +1536,19 @@ onUnmounted(() => {
 
   .success-track {
     flex: 1;
+  }
+
+  .extraction-select {
+    max-width: none;
+  }
+
+  .ext-metrics {
+    flex-direction: column;
+  }
+
+  .recent-original,
+  .recent-translated {
+    max-width: none;
   }
 }
 

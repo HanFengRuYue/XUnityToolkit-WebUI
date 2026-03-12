@@ -1147,6 +1147,20 @@ onUnmounted(() => {
     gap: 16px;
   }
 
+  .form-row :deep(.n-input-number) {
+    width: 100% !important;
+  }
+
+  .status-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .status-right {
+    justify-content: flex-end;
+  }
+
   .catalog-item {
     flex-direction: column;
     align-items: stretch;
@@ -1180,5 +1194,9 @@ onUnmounted(() => {
     flex-direction: column;
   }
 
+  .info-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
 }
 </style>

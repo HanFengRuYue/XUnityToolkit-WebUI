@@ -681,6 +681,10 @@ const priorityMarks = computed(() => {
     flex-direction: column;
     gap: 16px;
   }
+
+  .form-row :deep(.n-input-number) {
+    width: 100% !important;
+  }
 }
 
 @media (max-width: 480px) {
