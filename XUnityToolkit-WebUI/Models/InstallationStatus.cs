@@ -8,6 +8,7 @@ public enum InstallStep
     InstallingBepInEx,
     DownloadingXUnity,
     InstallingXUnity,
+    InstallingTmpFont,
     InstallingAiTranslation,
     GeneratingConfig,
     ApplyingConfig,

@@ -12,9 +12,10 @@ import {
   NCollapseItem,
   NButton,
   NIcon,
+  NTooltip,
   useMessage,
 } from 'naive-ui'
-import { EditNoteOutlined } from '@vicons/material'
+import { EditNoteOutlined, DownloadOutlined, DeleteOutlineOutlined } from '@vicons/material'
 import type { XUnityConfig } from '@/api/types'
 import { gamesApi } from '@/api/games'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -216,6 +217,53 @@ onUnmounted(() => {
 
 const labelPlacement = computed(() => isMobile.value ? 'top' as const : 'left' as const)
 const labelWidth = computed(() => isMobile.value ? undefined : '160')
+
+// TMP font state
+const tmpFontInstalled = ref<boolean | null>(null)
+const tmpFontLoading = ref(false)
+
+async function loadTmpFontStatus() {
+  try {
+    const status = await gamesApi.getTmpFontStatus(props.gameId)
+    tmpFontInstalled.value = status.installed
+  } catch {
+    tmpFontInstalled.value = null
+  }
+}
+
+async function handleInstallTmpFont() {
+  tmpFontLoading.value = true
+  try {
+    const result = await gamesApi.installTmpFont(props.gameId)
+    tmpFontInstalled.value = result.installed
+    message.success('TMP 字体已安装')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '安装失败')
+  } finally {
+    tmpFontLoading.value = false
+  }
+}
+
+async function handleUninstallTmpFont() {
+  tmpFontLoading.value = true
+  try {
+    const result = await gamesApi.uninstallTmpFont(props.gameId)
+    tmpFontInstalled.value = result.installed
+    message.success('TMP 字体已卸载')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '卸载失败')
+  } finally {
+    tmpFontLoading.value = false
+  }
+}
+
+watch(() => props.disabled, (disabled) => {
+  if (!disabled) {
+    loadTmpFontStatus()
+  } else {
+    tmpFontInstalled.value = null
+  }
+}, { immediate: true })
 </script>
 
 <template>
@@ -364,11 +412,39 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
               />
             </NFormItem>
             <NFormItem label="TMP 后备字体">
-              <NInput
-                :value="form.fallbackFontTextMeshPro ?? ''"
-                @update:value="(v: string) => { form.fallbackFontTextMeshPro = v }"
-                placeholder="TextMeshPro 后备字体" clearable
-              />
+              <div class="tmp-font-row">
+                <NInput
+                  :value="form.fallbackFontTextMeshPro ?? ''"
+                  @update:value="(v: string) => { form.fallbackFontTextMeshPro = v }"
+                  placeholder="TextMeshPro 后备字体" clearable
+                />
+                <NTooltip v-if="tmpFontInstalled !== null">
+                  <template #trigger>
+                    <NButton
+                      v-if="!tmpFontInstalled"
+                      size="small"
+                      type="primary"
+                      :loading="tmpFontLoading"
+                      @click="handleInstallTmpFont"
+                    >
+                      <template #icon><NIcon :size="14"><DownloadOutlined /></NIcon></template>
+                      安装字体
+                    </NButton>
+                    <NButton
+                      v-else
+                      size="small"
+                      type="error"
+                      ghost
+                      :loading="tmpFontLoading"
+                      @click="handleUninstallTmpFont"
+                    >
+                      <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
+                      卸载
+                    </NButton>
+                  </template>
+                  {{ tmpFontInstalled ? 'TMP 字体资源已安装到游戏内' : '安装思源黑体 TMP 字体资源（自动匹配 Unity 版本）' }}
+                </NTooltip>
+              </div>
             </NFormItem>
             <NFormItem label="行间距缩放">
               <NInput
@@ -510,6 +586,17 @@ const labelWidth = computed(() => isMobile.value ? undefined : '160')
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0 24px;
+}
+
+.tmp-font-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+}
+
+.tmp-font-row .n-input {
+  flex: 1;
 }
 
 .config-footer {

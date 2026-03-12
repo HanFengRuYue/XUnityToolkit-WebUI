@@ -14,6 +14,7 @@ public sealed class InstallOrchestrator(
     GitHubReleaseService gitHub,
     BepInExInstallerService bepInExInstaller,
     XUnityInstallerService xUnityInstaller,
+    TmpFontService tmpFontService,
     ConfigurationService configService,
     AppSettingsService appSettingsService,
     AssetExtractionService assetExtraction,
@@ -202,15 +203,34 @@ public sealed class InstallOrchestrator(
 
         await xUnityInstaller.InstallAsync(game.GamePath, xUnityZip, ct);
 
+        // Step: Install TMP font asset bundle
+        await UpdateStatus(status, InstallStep.InstallingTmpFont, 81, "正在安装 TMP 字体...");
+        try
+        {
+            if (tmpFontService.InstallFont(game.GamePath, gameInfo))
+            {
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体已安装");
+            }
+            else
+            {
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体不可用（跳过）");
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "TMP 字体安装失败（不影响安装）");
+            await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体安装失败（跳过）");
+        }
+
         // Deploy LLMTranslate translator endpoint DLL (if available)
-        await UpdateStatus(status, InstallStep.InstallingAiTranslation, 82, "正在部署 AI 翻译端点...");
+        await UpdateStatus(status, InstallStep.InstallingAiTranslation, 83, "正在部署 AI 翻译端点...");
         if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
-            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 84, "AI 翻译端点已部署");
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 85, "AI 翻译端点已部署");
         else
-            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 84, "AI 翻译端点不可用（跳过）");
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 85, "AI 翻译端点不可用（跳过）");
 
         // Step 6: Launch game to generate config file
-        await UpdateStatus(status, InstallStep.GeneratingConfig, 85, "正在启动游戏以生成配置文件...");
+        await UpdateStatus(status, InstallStep.GeneratingConfig, 86, "正在启动游戏以生成配置文件...");
 
         var configPath = configService.GetConfigPath(game.GamePath);
         var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable

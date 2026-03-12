@@ -115,6 +115,7 @@ builder.Services.AddSingleton<PluginDetectionService>();
 builder.Services.AddSingleton<GitHubReleaseService>();
 builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
+builder.Services.AddSingleton<TmpFontService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();

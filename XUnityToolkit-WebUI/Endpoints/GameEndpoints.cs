@@ -416,6 +416,64 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(false)));
         });
 
+        // TMP font management
+        group.MapGet("/{id}/tmp-font", async (
+            string id,
+            GameLibraryService library,
+            TmpFontService tmpFontService) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var installed = tmpFontService.IsFontInstalled(game.GamePath);
+            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(installed)));
+        });
+
+        group.MapPost("/{id}/tmp-font", async (
+            string id,
+            GameLibraryService library,
+            TmpFontService tmpFontService,
+            ConfigurationService configService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (game.InstallState != InstallState.FullyInstalled)
+                return Results.BadRequest(ApiResult.Fail("请先安装 BepInEx 和 XUnity.AutoTranslator。"));
+
+            if (game.DetectedInfo is null)
+                return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
+
+            var installed = tmpFontService.InstallFont(game.GamePath, game.DetectedInfo);
+            if (!installed)
+                return Results.BadRequest(ApiResult.Fail("未找到可用的 TMP 字体文件。"));
+
+            // Patch config to set FallbackFontTextMeshPro
+            await configService.PatchSectionAsync(game.GamePath, "Behaviour",
+                new Dictionary<string, string>
+                {
+                    ["FallbackFontTextMeshPro"] = TmpFontService.ConfigValue
+                }, ct);
+
+            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(true)));
+        });
+
+        group.MapDelete("/{id}/tmp-font", async (
+            string id,
+            GameLibraryService library,
+            TmpFontService tmpFontService) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            tmpFontService.RemoveFont(game.GamePath);
+            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(false)));
+        });
+
         // Glossary management
         group.MapGet("/{id}/glossary", async (
             string id,
@@ -513,4 +571,5 @@ public record AddGameRequest(string GamePath, string? Name = null, string? Execu
 public record AddWithDetectionRequest(string FolderPath, string? ExePath = null);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
 public record AiEndpointStatus(bool Installed);
+public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);

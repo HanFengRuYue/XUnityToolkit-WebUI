@@ -246,6 +246,7 @@ XUnityToolkit-Vue/src/
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/`; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- **TMP fonts:** csproj `Content Include` copies `fonts/` to output; do NOT duplicate in `build.ps1` (PowerShell `Copy-Item -Recurse` creates nested `fonts/fonts/` when dest exists)
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
 - Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
 - Logs: `{programDir}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`

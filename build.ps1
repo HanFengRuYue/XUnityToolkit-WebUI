@@ -116,6 +116,8 @@ foreach ($rid in $Runtimes) {
             Remove-Item -Force
     }
 
+    # TMP fonts are copied automatically by dotnet publish via csproj Content items
+
     $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
     $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
     Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green

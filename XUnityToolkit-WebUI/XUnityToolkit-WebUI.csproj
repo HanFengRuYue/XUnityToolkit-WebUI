@@ -26,6 +26,11 @@
     <PackageReference Include="System.Management" Version="9.0.3" />
   </ItemGroup>
 
+  <!-- Copy TMP fonts to output directory during build -->
+  <ItemGroup Condition="Exists('..\fonts')">
+    <Content Include="..\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="fonts\%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->
   <Target Name="BuildFrontend" BeforeTargets="Build" Condition="'$(SkipFrontendBuild)' != 'true'">
     <Message Importance="high" Text="Installing frontend dependencies..." />

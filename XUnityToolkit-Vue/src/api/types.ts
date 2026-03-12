@@ -64,6 +64,7 @@ export type InstallStep =
   | 'InstallingBepInEx'
   | 'DownloadingXUnity'
   | 'InstallingXUnity'
+  | 'InstallingTmpFont'
   | 'InstallingAiTranslation'
   | 'GeneratingConfig'
   | 'ApplyingConfig'
@@ -240,6 +241,10 @@ export interface TranslationStats {
 }
 
 export interface AiEndpointStatus {
+  installed: boolean
+}
+
+export interface TmpFontStatus {
   installed: boolean
 }
 
