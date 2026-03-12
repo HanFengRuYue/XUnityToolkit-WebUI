@@ -283,29 +283,29 @@ function formatTimestamp(ts: string) {
   flex-direction: column;
   gap: 12px;
   animation: fadeIn 0.3s ease;
-  height: calc(100vh - 72px);
+  height: calc(100vh - 48px);
 }
 
 /* ===== Header ===== */
 .page-title {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--text-1);
   margin-bottom: 0;
   letter-spacing: -0.03em;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .page-title-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
@@ -779,14 +779,14 @@ function formatTimestamp(ts: string) {
 
 @media (max-width: 480px) {
   .page-title {
-    font-size: 22px;
-    gap: 10px;
+    font-size: 20px;
+    gap: 8px;
   }
 
   .page-title-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
   .stats-row {

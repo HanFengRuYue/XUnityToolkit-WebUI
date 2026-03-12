@@ -36,12 +36,14 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}` for install progress, `ai-translation` for stats, `logs` for real-time log streaming, `pre-translation-{gameId}` for pre-translation progress)
-- **Persistence:** JSON files in program directory (`library.json`, `settings.json`) — portable, survives OS reinstall
-- **System Tray:** NotifyIcon on dedicated STA thread; auto-opens browser, hides console on startup
-- **TranslatorEndpoint:** net35 class library producing `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; hand-rolled JSON (no System.Text.Json in Unity Mono); configurable via `[LLMTranslate]` INI section: `MaxConcurrency` (10), `MaxTranslationsPerRequest` (10), `DebugMode`, `GameId`, `DisableSpamChecks` (true), `TranslationDelay` (0.1s)
-- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing with priority + speed/error scoring; **batch mode** (whole batch as one LLM call, not per-text fan-out) bounded by `SemaphoreSlim`; per-game glossary at `{programDir}/glossaries/{gameId}.json`; per-game translation memory (in-memory circular buffer); per-game AI description (`Game.AiDescription`); real-time stats via SignalR
-- **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract MonoBehaviour strings + TextAsset from Unity `.assets` files AND bundle files (`data.unity3d` + `StreamingAssets/**/*.bundle`); supports both Mono (`MonoCecilTempGenerator`) and IL2CPP (`Cpp2IlTempGenerator`) backends; `PreTranslationService` batch-translates extracted texts and writes XUnity cache files
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`)
+- **Persistence:** JSON files in program directory (`library.json`, `settings.json`) — portable app pattern
+- **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
+- **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
+- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description; real-time stats via SignalR
+- **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries downloaded on-demand; local mode forces concurrency=1, disables glossary extraction
+- **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
+- **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/backups/{gameId}.json`
 
 ### Frontend Structure
 
@@ -56,7 +58,7 @@ XUnityToolkit-Vue/src/
 │   ├── progress/   # InstallProgressDrawer (SignalR progress)
 │   └── settings/   # Settings page components
 ├── composables/    # Reusable composition functions (useAddGameFlow)
-├── stores/         # Pinia stores (games, install, theme, aiTranslation, assetExtraction, log)
+├── stores/         # Pinia stores (games, install, theme, aiTranslation, assetExtraction, log, localLlm)
 ├── views/          # LibraryView, GameDetailView, AssetExtractionView, TranslationEditorView, GlossaryEditorView, AiTranslationView, LogView, SettingsView, ConfigEditorView
 └── router/         # Vue Router config (/, /games/:id, /games/:id/config-editor, /games/:id/asset-extraction, /games/:id/translation-editor, /games/:id/glossary-editor, /ai-translation, /logs, /settings)
 ```
@@ -66,13 +68,11 @@ XUnityToolkit-Vue/src/
 - **Fonts:** Lexend (headings), DM Sans (body), JetBrains Mono (mono) — loaded via Google Fonts
 - **Colors:** Deep dark base (`#0b0b11`), dynamic accent (default `#3b82f6`, user-customizable), violet secondary (`#a78bfa`)
 - **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, `--radius-lg`, etc.)
-- **Theme:** Dark/light mode via `data-theme` attribute; `useThemeStore` manages mode + accentColor + localStorage; first visit auto-detects OS `prefers-color-scheme` (default: light); light mode auto-darkens accent 15%
+- **Theme:** Dark/light mode via `data-theme`; `useThemeStore` manages mode + accentColor + localStorage; first visit auto-detects OS preference; light mode auto-darkens accent 15%
 - **Layout:** Custom sidebar (230px) + scrollable content; responsive at 768px (tablet drawer) and 480px (phone single-column)
-- **Game library:** Grid (default) + list view; 2:3 GameCard with covers (Steam CDN / SteamGridDB / upload); `LibraryCustomizer` controls card size (S/M/L/XL), gap, labels, accent
-- **Section cards:** `.section-icon` + `.section-title` — base uses `--accent-soft`/`--accent`; only semantic overrides (`.danger` → `--danger`, `.warning` → `--warning`)
-- **Info cards:** `.info-card` with `.info-card-icon` — base uses `--accent-soft`/`--accent`; no per-type color variants
-- **Page layouts:** Full-width; two-column grids collapse at 960px/768px
-- **Settings page:** `display: flex; flex-direction: column; gap: 16px` — no individual `margin-bottom`
+- **Game library:** Grid (default) + list view; 2:3 GameCard with covers; `LibraryCustomizer` controls card size/gap/labels/accent
+- **Cards:** `.section-card` with `.section-icon`/`.section-title` (base `--accent`; semantic `.danger`/`.warning` only); `.info-card` same pattern
+- **Page layouts:** Full-width; two-column grids collapse at 960px/768px; settings uses `flex-column` with `gap: 16px`
 - **Content padding:** `36px 40px` (desktop), `20px 16px` (tablet), `16px 12px` (phone)
 
 ## Code Conventions
@@ -86,168 +86,167 @@ XUnityToolkit-Vue/src/
 
 ## API Endpoints
 
-- **Game CRUD:** `POST /api/games/add-with-detection` (auto-detect), `PUT /api/games/{id}` (rename), `POST /api/games/{id}/detect` (re-detect)
-- **Game actions:** `POST /api/games/{id}/open-folder`, `POST /api/games/{id}/launch`
-- **Framework:** `DELETE /api/games/{id}/framework/{framework}` — uninstall non-BepInEx frameworks
-- **Install:** `GET /api/games/{id}/status`, `POST /api/games/{id}/cancel`
+- **Game:** `GET/POST /api/games/`, `GET/DELETE /api/games/{id}`, `POST .../add-with-detection`, `PUT /api/games/{id}` (rename), `POST .../detect`, `POST .../open-folder`, `POST .../launch`
+- **Framework:** `DELETE /api/games/{id}/framework/{framework}`
+- **Install:** `POST /api/games/{id}/install`, `DELETE .../install` (uninstall), `GET .../status`, `POST .../cancel`
 - **Icon:** `GET /api/games/{id}/icon` (custom > exe icon), `POST .../icon/upload`, `DELETE .../icon/custom`
-- **Cover:** `GET /api/games/{id}/cover` (raw bytes, 404 if none), `POST .../cover/upload` (5MB), `POST .../cover/search` (SteamGridDB), `POST .../cover/grids`, `POST .../cover/select`, `POST .../cover/steam-search` (free), `POST .../cover/steam-select`, `DELETE .../cover`
-- **Config:** `PUT /api/games/{id}/config` (PatchAsync read-modify-write), `GET/PUT .../config/raw` (raw INI)
-- **Settings:** `GET/PUT /api/settings`, `GET /api/settings/version`, `POST /api/settings/reset`
-- **Cache:** `GET/DELETE /api/cache/downloads`
-- **Releases:** `GET /api/releases/bepinex`, `GET /api/releases/xunity`
-- **Dialogs:** `POST /api/dialog/select-folder`, `POST /api/dialog/select-file`
+- **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select}`, `DELETE .../cover`
+- **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
+- **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`
+- **Cache:** `GET/DELETE /api/cache/downloads` | **Releases:** `GET /api/releases/{bepinex,xunity}` | **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
 - **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `POST /api/translate/test`
-- **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`
+- **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
+- **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `POST .../download-llama` + `.../download` (model) — each has `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
-- **Glossary:** `GET/PUT /api/games/{id}/glossary`
-- **Game Description:** `GET/PUT /api/games/{id}/description` — per-game AI translation context (genre, characters, world setting)
-- **Asset Extraction:** `POST /api/games/{id}/extract-assets`, `GET/DELETE /api/games/{id}/extracted-texts` (cached results)
-- **Pre-Translation:** `POST /api/games/{id}/pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`
-- **Translation Editor:** `GET/PUT /api/games/{id}/translation-editor` (read/write entries), `POST .../import` (parse imported content), `GET .../export` (raw file download, **not ApiResult**)
-- **Plugin Package:** `POST /api/games/{id}/plugin-package/export` (ZIP download, **not ApiResult**), `POST .../import` accepts `{ zipPath }` from file dialog
-- **Logs:** `GET /api/logs?count=` (from ring buffer), `GET /api/logs/history?lines=` (from file), `GET /api/logs/download` (ring buffer as text, session-timestamped filename, **not ApiResult**)
-- **ApiResult pattern:** `ApiResult<T>.Ok(data)` with data; `ApiResult.Ok()` without data; request records at bottom of Endpoints files
+- **Glossary:** `GET/PUT /api/games/{id}/glossary` | **Description:** `GET/PUT .../description`
+- **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
+- **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`
+- **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
+- **Plugin Package:** `POST .../plugin-package/export` (ZIP, **not ApiResult**), `POST .../import`
+- **Logs:** `GET /api/logs?count=`, `GET .../history?lines=`, `GET .../download` (**not ApiResult**)
+- **ApiResult pattern:** `ApiResult<T>.Ok(data)` / `ApiResult.Ok()`; request records at bottom of Endpoints files
 
 ## Development Notes
 
 ### Backend Core
 
-- `Game.IsUnityGame` defaults to `true` for backward compatibility with existing `library.json`
-- Add-game flow: folder picker → auto-detect → exe selection if needed → Unity detection; detects `steam_appid.txt` → auto-fetches Steam cover
+- **No migration code:** Project is pre-stable — no backward-compat migrations or old-format converters
+- Add-game flow: folder picker → auto-detect → exe selection → Unity detection; `steam_appid.txt` → auto-fetches cover
 - Non-Unity games: only show run + open folder; hide install/config
-- `AppSettingsService`: in-memory volatile cache; `GetAsync()` no disk I/O; callers must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
-- `GlossaryService`: `ConcurrentDictionary` cache per game; `GetAsync` returns cached on fast path
-- **Data storage:** All data (config, cache, logs, glossaries, backups) stored in `AppContext.BaseDirectory` (program exe directory) — portable app pattern; `AppDataPaths` is the centralized path manager; `Program.cs` bootstrap duplicates the root path for pre-DI settings/log init; extracted texts cached at `{programDir}/cache/extracted-texts/{gameId}.json`
-- **App URL:** Default `http://127.0.0.1:51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`, hangs)
-- Named `HttpClient` instances: `"GitHub"`, `"Mirror"`, `"LLM"` (120s timeout, 200 max connections), `"SteamGridDB"` (30s)
-- `Console.OutputEncoding = UTF8` MUST be set before `WebApplication.CreateBuilder()` (logging captures encoding at init)
-- P/Invoke: Use `[DllImport]` not `[LibraryImport]` (no `AllowUnsafeBlocks` in csproj)
-- When renaming public methods: search all call sites globally (Endpoints, Services, Orchestrator)
+- `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
+- `GlossaryService`: `ConcurrentDictionary` cache; `GetAsync` returns cached on fast path
+- **Data storage:** `AppContext.BaseDirectory` (portable); `AppDataPaths` centralizes paths
+- **App URL:** `http://127.0.0.1:51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`)
+- Named `HttpClient`: `"GitHub"`, `"Mirror"`, `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h)
+- **Mirror:** `AppSettings.GhMirrorUrl`/`HfMirrorUrl`; `MirrorProbeService` 8s HEAD probe; GitHub ghproxy-style prefix, HF host-replacement
+- **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
+- **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
+- `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
+- P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
 
 ### INI Configuration
 
-- **Never generate XUnity config from scratch** — always `PatchAsync` read-modify-write (preserves plugin defaults)
-- Config filename: `AutoTranslatorConfig.ini` at `BepInEx/config/` (not BepInEx GUID-style)
-- Section compatibility: `[TextFrameworks]` (primary) / `[TextFramework]` (legacy); `PatchAsync` detects actual name
-- PatchAsync null semantics: `null` = skip, `""` = clear value; `AddEngineKeyModification` skips both null and ""
-- `PatchSectionAsync(gamePath, section, keys)` patches single section — used to set `[LLMTranslate] ToolkitUrl`
-- `ApplyOptimalDefaultsAsync` sets `[General] Language = zh` (Simplified Chinese as default target); `OverrideFont = Microsoft YaHei`; all text frameworks enabled; `Endpoint = LLMTranslate` with `FallbackEndpoint = GoogleTranslateV2`
-- **Sensitive INI sections** (contain API keys, must sanitize for export): `GoogleLegitimate`/`GoogleTranslateV2`, `BingLegitimate`/`BingTranslate`, `Baidu`/`BaiduTranslate`, `Yandex`/`YandexTranslate`, `DeepLLegitimate`/`DeepLTranslate`, `PapagoTranslate`, `LingoCloud`, `Watson`, `Custom`, `LecPowerTranslator15`, `ezTrans` — each has a primary and legacy alias section name
+- **Never generate XUnity config from scratch** — always `PatchAsync` read-modify-write
+- Config filename: `AutoTranslatorConfig.ini` at `BepInEx/config/`
+- PatchAsync null semantics: `null` = skip, `""` = clear value
+- `PatchSectionAsync(gamePath, section, keys)` patches single section
+- `ApplyOptimalDefaultsAsync` sets `[General] Language = zh`, `OverrideFont = Microsoft YaHei`, `Endpoint = LLMTranslate` with `FallbackEndpoint = GoogleTranslateV2`
+- **Sensitive sections** (sanitize for export): `GoogleLegitimate`, `BingLegitimate`, `Baidu`, `Yandex`, `DeepLLegitimate`, `PapagoTranslate`, `LingoCloud`, `Watson`, `Custom`, `LecPowerTranslator15`, `ezTrans`
 
 ### Glossary Extraction
 
-- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → merge into glossary; extraction prompt requests `description` field for each term
-- **GlossaryEntry model:** `Original`, `Translation`, `IsRegex`, `Description` (nullable) — description is injected into LLM system prompt as context hint and auto-generated by extraction
-- **Critical:** settings check (async) must happen BEFORE buffer drain — otherwise pairs are lost when disabled
-- `TryTriggerExtraction` is synchronous (called from hot-path); async work deferred to `DrainAndExtractAsync`
-- DLL must send `gameId` in `POST /api/translate` for extraction to work — requires `[LLMTranslate] GameId` in INI
-- **All translation paths** must call `BufferTranslation` + `TryTriggerExtraction` after success, guarded by `!string.IsNullOrEmpty(gameId)` — see `TranslateEndpoints.cs` and `PreTranslationService.cs`
+- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → merge
+- **GlossaryEntry model:** `Original`, `Translation`, `IsRegex`, `Description` (nullable)
+- **Critical:** settings check (async) BEFORE buffer drain — otherwise pairs lost when disabled
+- `TryTriggerExtraction` is synchronous (hot-path); async work deferred to `DrainAndExtractAsync`
+- DLL must send `gameId` in `POST /api/translate` — requires `[LLMTranslate] GameId` in INI
+- **All translation paths** must call `BufferTranslation` + `TryTriggerExtraction`, guarded by `!string.IsNullOrEmpty(gameId)` AND `!isLocalMode`
 
 ### Concurrency & Performance
 
 - **Hot-path:** `POST /api/translate` receives 100+ req/s; all I/O must use in-memory caches, never disk per request
-- `SemaphoreSlim` pattern: `TranslateBatchAsync` acquires one semaphore slot per batch (not per text); `EnsureSemaphore` delays Dispose 3 min; 60s WaitAsync timeout returns 503; **critical:** semaphore wait and LLM call must be in separate `try` blocks — `_translating` decrement + `semaphore.Release()` only run when semaphore was actually acquired
-- **Hot-path caching:** `GameLibraryService.GetByIdAsync` reads from disk — never call on hot path; use `ConcurrentDictionary` caches with explicit invalidation from write endpoints (see `_descriptionCache` in `LlmTranslationService`)
-- `BroadcastStats` throttling: CAS pattern, 200ms; `force: true` for batch completion and errors
-- **RecordError ownership:** `LlmTranslationService.RecordError` is the sole error recording site; endpoint catch blocks must NOT also call `RecordError` to avoid double-counting `_totalErrors`
-- `volatile` vs `Volatile.Read`: don't combine on same field; `DateTime?` is value type — use `long` ticks + `Interlocked`
-- **Async + ref:** C# async methods cannot have `ref`/`in`/`out` parameters (CS1988); for thread-safe counters in `Parallel.ForEachAsync`, use a wrapper class with `Interlocked` fields
-- **Plugin concurrency:** DLL `MaxConcurrency` (10) × `MaxTranslationsPerRequest` (10) = 100 concurrent texts; Mono can't handle >15 connections (ThreadPool deadlock) — increase throughput via batching
-- **XUnity HTTP:** Uses `HttpWebRequest`; Mono `DefaultConnectionLimit` = 2; **use `FindServicePoint(uri).ConnectionLimit`**; do NOT set `Connection: close` (Mono CLOSE_WAIT bug)
-- **Pre-translation concurrency:** `Parallel.ForEachAsync(MaxDegreeOfParallelism = MaxConcurrency)` over batches of 10, **not** per-text; the internal `SemaphoreSlim` in `LlmTranslationService` controls actual LLM API concurrency; progress broadcast uses CAS-throttled 200ms pattern
+- `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks
+- **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
+- `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
+- **RecordError:** `LlmTranslationService.RecordError` is sole site — endpoint catch must NOT double-count
+- `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
+- **Plugin concurrency:** DLL 10×10 = 100 texts; Mono >15 connections deadlocks — batch instead
+- **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
+- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10; CAS-throttled 200ms progress
 
 ### AI Translation Context
 
-- **Batch mode:** `TranslateBatchAsync` sends entire batch (up to 10 texts) as one LLM call; `CallProviderAsync` already handles multi-text `IList<string>`; system prompt already expects JSON array I/O
-- **Translation memory:** `ConcurrentDictionary<gameId, TranslationMemoryBuffer>` in `LlmTranslationService`; volatile (rebuilt each session); `AiTranslationSettings.ContextSize` controls window (0=disabled, default 10, max 100)
-- **Game description:** `Game.AiDescription` in `library.json`; cached in `_descriptionCache` (invalidated by `PUT /description` endpoint); truncated to 500 chars before injection
-- **BuildSystemPrompt injection order:** template → game description → glossary → translation memory → [user content: texts array]
-- **Pre-translation batching:** `PreTranslationService` chunks texts into batches of 10 via `Chunk(batchSize)`; each chunk goes through `TranslateAsync` (same context pipeline as real-time path)
+- **Batch mode:** entire batch as one LLM call; JSON array I/O
+- **Translation memory:** per-game volatile; cloud `ContextSize` (10, max 100), local `LocalContextSize` (0, max 10)
+- **Game description:** `Game.AiDescription`; `_descriptionCache` invalidated by `PUT /description`; truncated to 500 chars
+- **SystemPrompt order:** template → description → glossary → memory → [texts]
+- **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 
 ### TranslatorEndpoint
 
-- Targets net35 (C# 7.3); `Microsoft.NETFramework.ReferenceAssemblies.net35` NuGet for `dotnet build`
-- Dependencies in `TranslatorEndpoint/libs/` (gitignored): `XUnity.AutoTranslator.Plugin.Core.dll`, `XUnity.Common.dll`
-- `DisableSpamChecks()` removes text stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
+- Targets net35 (C# 7.3); `Microsoft.NETFramework.ReferenceAssemblies.net35` NuGet
+- Dependencies in `TranslatorEndpoint/libs/` (gitignored)
+- `DisableSpamChecks()` removes stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
 - `GetOrCreateSetting` reads existing INI; changing DLL defaults won't affect installed games — use `PatchSectionAsync`
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
-- LLM base URLs: DeepSeek (`api.deepseek.com/v1`), Qwen (`dashscope.aliyuncs.com/compatible-mode/v1`), GLM (`open.bigmodel.cn/api/paas/v4`), Kimi (`api.moonshot.cn/v1`) — all OpenAI-compatible; Claude and Gemini have dedicated implementations
 
 ### Asset Extraction (AssetsTools.NET)
 
-- `MonoCecilTempGenerator` and `Cpp2IlTempGenerator` both live in namespace `AssetsTools.NET.Extra` (not their package-specific namespaces); for IL2CPP, use fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
-- `classdata.tpk` embedded as resource; source: UABEA repo `ReleaseFiles/classdata.tpk`
-- `AssetsManager.LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration (not just `UnloadAll()` at end)
-- **Bundle files:** Many Unity games pack assets into `data.unity3d` or Addressable `.bundle` files instead of `.assets`; use `LoadBundleFile(path, true)` → iterate `bunInst.file.BlockAndDirInfo.DirectoryInfos` (skip `.resource`/`.resS` entries) → `LoadAssetsFileFromBundle(bunInst, index, false)` → `UnloadBundleFile(bunInst)` after processing
-- **TypeTree fallback:** When class database doesn't match, check `afile.Metadata.TypeTreeEnabled` — bundles usually embed type trees, allowing extraction without class db
-- Install flow auto-extracts assets (Step `ExtractingAssets`) → detects language → patches `[General] FromLanguage` → caches texts to `cache/extracted-texts/{gameId}.json` (skip if cache exists, preserves manual extractions); failure doesn't block install
-- XUnity translation cache format: `encoded_original=encoded_translation` per line; escape `\\`, `\n`, `\r`, `\=`; shared encode/decode in `XUnityTranslationFormat` static class (`Services/`); `PreTranslationService` delegates to it; written to `BepInEx/Translation/{lang}/Text/_PreTranslated.txt`
-- **`{Lang}` in OutputFile:** INI `[Files] OutputFile` contains literal `{Lang}` placeholder — must substitute with `config.TargetLanguage`; resolved path relative to `{gamePath}/BepInEx/`; always guard against path traversal after resolution
+- `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` both in `AssetsTools.NET.Extra`; IL2CPP: fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
+- `classdata.tpk` embedded as resource
+- `LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration
+- **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
+- **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
+- Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
+- XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
+- **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
+
+### Local LLM
+
+- GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
+- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/llama/{cuda,vulkan,cpu}/`
+- **On-demand download:** `POST /download-llama` auto-detects GPU; download IDs: `"llama-cuda"`, `"llama-vulkan"`, `"llama-cpu"`
+- **Download pause/resume:** `PausedDownloads` for persistence; `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel
+- **GPU monitoring:** nvidia-smi polled every 3s when CUDA running; metrics in `LocalLlmStatus`
+- **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
+- Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
+- Settings: `local-llm-settings.json`; mirror settings unified in `AppSettings`
 
 ### Plugin Package (Export/Import)
 
-- `PluginPackageService`: exports BepInEx + XUnity files as ZIP (max compression), imports ZIP into game directory
-- **Exported root files:** `winhttp.dll`, `doorstop_config.ini`, `.doorstop_version`, `dobby.dll`; **directories:** `dotnet/`, `BepInEx/`
-- **Excluded from export:** `BepInEx/LogOutput.log`, `BepInEx/cache/`, all `*.log` files
-- **INI sanitization:** blanks all values in sensitive sections (see INI Configuration); `[LLMTranslate]` only blanks `GameId` (keeps `ToolkitUrl`)
+- `PluginPackageService`: exports BepInEx + XUnity as ZIP (max compression)
+- **Exported:** `winhttp.dll`, `doorstop_config.ini`, `.doorstop_version`, `dobby.dll`, `dotnet/`, `BepInEx/`
+- **Excluded:** `BepInEx/LogOutput.log`, `BepInEx/cache/`, `*.log`
+- **INI sanitization:** blanks sensitive section values; `[LLMTranslate]` only blanks `GameId`
 - **ZIP filename:** `{sanitized game name}_{target language}_{yyyy-MM-dd}.zip`
-- **ZipArchive + MemoryStream:** must use `leaveOpen: true`; reset `Position = 0` after archive dispose; dispose `MemoryStream` in catch block on error path
 
 ### DI & Provider Gotchas
 
-- When registering a pre-constructed `ILoggerProvider` instance via both `AddProvider` and `AddSingleton`, use factory registration `AddSingleton<T>(_ => instance)` to avoid double-dispose (logging infra owns disposal)
-- `Program.cs` top-level statements: `IHubContext<T>.SendAsync` is an extension method — requires `using Microsoft.AspNetCore.SignalR;`
+- Pre-constructed `ILoggerProvider`: use `AddSingleton<T>(_ => instance)` to avoid double-dispose
+- `IHubContext<T>.SendAsync` is extension method — requires `using Microsoft.AspNetCore.SignalR;`
+- **`SystemTrayService` DI:** `AddSingleton` + `AddHostedService(sp => sp.GetRequired...)` for injection + hosting
 
 ### Adding a New Page
 
-- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems` array (with icon from `@vicons/material`)
-- **Game sub-page** (e.g. asset-extraction, translation-editor): lazy route at `/games/:id/{name}`, navigation button in `GameDetailView.vue` — do NOT add to `navItems`; no Pinia store needed if no SignalR/cross-page state (use local refs)
-- SignalR store pattern: guard `connect()` with `connection.state !== Disconnected` (not just `=== Connected`), re-join group in `onreconnected`
-- Reading log files held open by `FileLoggerProvider`: must use `FileShare.ReadWrite` to avoid `IOException`
+- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
+- **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`
+- SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
+- Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
 
 ### Frontend Patterns
 
 - Use composables (`src/composables/`) for complex multi-step UI flows
-- **Auto-save pattern:** `useAutoSave(source, saveFn, { debounceMs, deep })` composable in `src/composables/useAutoSave.ts`; used by SettingsView (1s), AiTranslationView (1s), GameDetailView description (1s), GlossaryEditorView (2s), ConfigPanel (2s internal); pattern: `disable()` → load data → `nextTick()` → `enable()` to skip initial load; `disable()` MUST clear pending timer to prevent stale saves; `onBeforeUnmount` auto-flushes; silent on success, `message.error` on failure
-- **Auto-save + manual save combo:** When a page has both `useAutoSave` and a manual save button, the manual save MUST call `disableAutoSave()` before reassigning reactive data (e.g. `entries.value = toRows(valid)`) and `enableAutoSave()` in `finally` — otherwise the watcher fires a redundant save
-- **ConfigPanel auto-saves internally** — no longer emits `save` event; calls `gamesApi.saveConfig` directly using its `gameId` prop; 2s debounce for INI writes
-- Theme-aware CSS: use `--bg-subtle`, `--bg-muted` etc. — never hardcode `rgba(255,255,255,...)`
-- Naive UI light theme: pass `null` (not `lightTheme`); accent needs darker values for contrast
-- `NDrawer` width: numbers only — use `window.resize` listener + ref
-- `NForm` label-placement: toggle dynamically via computed (CSS media queries won't work)
-- `NInput` binding `string?`: use `:value="field ?? ''"` + `@update:value` (not `v-model`)
-- `NInput` `@blur` + `@keyup.enter` double-fire: add flag guard (`if (!editing.value) return`)
-- `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute` instead
-- Vue `v-for` ref not resetting on prop change: add `watch` to reset loading state
-- TypeScript: use `Object.assign({}, obj, patch)` not spread for typed objects
-- Lazy-loaded modals: `defineAsyncComponent(() => import(...))`
-- **Icon/card colors:** decorative icons use `--accent`; only use `--danger`/`--warning`/`--success` for semantic status. Use `color-mix(in srgb, var(--xxx) N%, transparent)` instead of hardcoded `rgba()` for theme-aware translucent backgrounds
-- `NDataTable`: `virtual-scroll` and `pagination` are mutually exclusive — do not combine; `virtual-scroll` requires `:item-size` (px) to function correctly
-- **NDataTable + search filter empty state:** guard table visibility with `filteredEntries.length > 0` (not `entries.length > 0`); add distinct empty states for "no search results" vs "no data at all"
-- `onBeforeRouteLeave` with async dialogs: must `return new Promise<boolean>()` — do NOT use `next()` callback (broken in Vue Router 4 with async)
-- **GameDetailView animation delays:** section cards use 0.05s increments; inserting a new card requires shifting ALL subsequent cards' `animationDelay` values
-- **Blob file download pattern:** `fetch(url)` → `resp.blob()` → `URL.createObjectURL(blob)` → `a.click()` → `setTimeout(() => URL.revokeObjectURL(...), 1000)` (delay prevents Firefox race condition); parse filename from `content-disposition` header
-- After changes, verify with both `npx vue-tsc --noEmit` and `npm run build`
-- Verify icon availability: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
-- **Theme/accent source of truth:** Frontend `useThemeStore` (localStorage + OS detection) is authoritative; `SettingsView.loadSettings()` must use `themeStore.mode` instead of backend response (backend `AppSettings.Theme` defaults to `"dark"`, would override OS-detected light theme on first launch)
+- **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
+- **ConfigPanel** auto-saves internally (2s), no `save` event
+- Theme-aware CSS: use `--bg-subtle`, `--bg-muted` — never hardcode `rgba(255,255,255,...)`
+- Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard
+- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`
+- `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
+- `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
+- **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
+- **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
+- After changes: verify with `npx vue-tsc --noEmit` and `npm run build`
+- Verify icon: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
+- **Theme source of truth:** `useThemeStore` (localStorage + OS) is authoritative, not backend `AppSettings.Theme`
+- **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
+- **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
+- **Icon/card colors:** decorative → `--accent`; semantic only for status. Use `color-mix()` for translucent backgrounds
+- TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
 
 ### Sync Points
 
-- **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue` (`installSteps`), `InstallOrchestrator.cs`
+- **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
-- Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`; new "load only when installed" state needs same treatment
-- Install store `operationType` tracks install vs uninstall (don't infer from step values)
-- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue` (inline default)
-- **`[LLMTranslate]` INI config:** Written in 3 places — `POST /ai-endpoint` (GameEndpoints), `InstallOrchestrator` (after install), DLL `Initialize` (GetOrCreateSetting defaults). All 3 must stay in sync for keys like `ToolkitUrl`, `GameId`, `MaxConcurrency`
+- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
+- Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`
+- Install store `operationType` tracks install vs uninstall
+- **`[LLMTranslate]` INI config:** Written in 3 places — `POST /ai-endpoint`, `InstallOrchestrator`, DLL `Initialize`
 
 ### Build & Deploy
 
-- `dotnet build` auto-runs frontend build; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: frontend once → TranslatorEndpoint (if libs exist) → publish per runtime to `Release/{rid}/`
-- Publish cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
+- `build.ps1`: frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/`; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
-- Frontend changes require `npm run build` + restart backend (unless using `npm run dev`)
-- Default system prompt: Chinese, 7 translation rules; `{from}`/`{to}` replaced; `{0}` etc. are literal
-- Logs: `{programDir}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log` (per-session file, max 10 retained); `FileLoggerProvider` constructor takes logs directory path; 500-entry `ConcurrentQueue` ring buffer + `LogBroadcast` callback for real-time log page; `/api/logs/download` exports ring buffer (not disk file)
+- Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
+- Logs: `{programDir}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
 - Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing

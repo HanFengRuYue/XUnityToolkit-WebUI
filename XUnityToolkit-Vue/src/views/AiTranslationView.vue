@@ -22,12 +22,15 @@ import {
   AutoFixHighOutlined,
   CheckCircleOutlined,
   ArrowRightAltOutlined,
+  CloudOutlined,
+  ComputerOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
 import { settingsApi } from '@/api/games'
 import type { AppSettings, AiTranslationSettings } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
+import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 
 const aiStore = useAiTranslationStore()
@@ -36,6 +39,7 @@ const message = useMessage()
 
 const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   enabled: true,
+  activeMode: 'cloud',
   maxConcurrency: 4,
   port: 51821,
   systemPrompt:
@@ -51,6 +55,7 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
     '输入示例：["Hello","World"] → 输出：["你好","世界"]',
   temperature: 0.3,
   contextSize: 10,
+  localContextSize: 0,
   endpoints: [],
   glossaryExtractionEnabled: false,
   glossaryExtractionEndpointId: undefined,
@@ -118,6 +123,13 @@ const extractionEndpointOptions = computed(() => {
 })
 
 const extractionStats = computed(() => aiStore.extractionStats)
+
+const activeMode = computed(() => aiSettings.value.activeMode ?? 'cloud')
+const isLocalMode = computed(() => activeMode.value === 'local')
+
+function setMode(mode: 'cloud' | 'local') {
+  aiSettings.value = { ...aiSettings.value, activeMode: mode }
+}
 
 const { enable: enableAutoSave } = useAutoSave(
   () => settings.value,
@@ -414,8 +426,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Glossary Extraction -->
-    <div class="section-card" style="animation-delay: 0.095s" v-if="settings">
+    <!-- Glossary Extraction (cloud mode only) -->
+    <div class="section-card" style="animation-delay: 0.095s" v-if="settings && !isLocalMode">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon extraction">
@@ -506,12 +518,50 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- AI Settings -->
-    <AiTranslationCard
-      v-if="settings"
-      v-model="aiSettings"
-      style="animation-delay: 0.1s"
-    />
+    <!-- AI Settings with Mode Tabs -->
+    <div class="section-card" style="animation-delay: 0.1s" v-if="settings">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon ai">
+            <NIcon :size="16"><SmartToyOutlined /></NIcon>
+          </span>
+          AI 翻译设置
+        </h2>
+      </div>
+
+      <!-- Mode Tabs -->
+      <div class="mode-tabs">
+        <button
+          class="mode-tab"
+          :class="{ active: activeMode === 'cloud' }"
+          @click="setMode('cloud')"
+        >
+          <NIcon :size="16"><CloudOutlined /></NIcon>
+          <span>云端 AI</span>
+        </button>
+        <button
+          class="mode-tab"
+          :class="{ active: activeMode === 'local' }"
+          @click="setMode('local')"
+        >
+          <NIcon :size="16"><ComputerOutlined /></NIcon>
+          <span>本地 AI</span>
+        </button>
+      </div>
+
+      <!-- Cloud Settings -->
+      <AiTranslationCard
+        v-if="activeMode === 'cloud'"
+        v-model="aiSettings"
+        :embedded="true"
+      />
+
+      <!-- Local AI Panel -->
+      <LocalAiPanel
+        v-if="activeMode === 'local'"
+        v-model="aiSettings"
+      />
+    </div>
   </div>
 </template>
 
@@ -532,23 +582,23 @@ onUnmounted(() => {
 
 .page-title {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--text-1);
-  margin-bottom: 12px;
+  margin-bottom: 0;
   letter-spacing: -0.03em;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .page-title-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
@@ -725,12 +775,12 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .section-title {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;
@@ -1178,6 +1228,51 @@ onUnmounted(() => {
   color: var(--text-3);
 }
 
+/* ===== AI Icon ===== */
+.section-icon.ai {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ===== Mode Tabs ===== */
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 20px;
+}
+
+.mode-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  border-radius: calc(var(--radius-md) - 2px);
+  transition: all 0.2s ease;
+}
+
+.mode-tab:hover {
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--bg-card) 50%, transparent);
+}
+
+.mode-tab.active {
+  background: var(--bg-card);
+  color: var(--accent);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 5%, transparent);
+}
+
 /* ===== Extraction Section ===== */
 .section-icon.extraction {
   background: var(--accent-soft);
@@ -1437,15 +1532,14 @@ onUnmounted(() => {
 
 @media (max-width: 480px) {
   .page-title {
-    font-size: 22px;
-    margin-bottom: 0;
-    gap: 10px;
+    font-size: 20px;
+    gap: 8px;
   }
 
   .page-title-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
   .metrics-strip {

@@ -18,6 +18,8 @@ public sealed class SystemTrayService(
     private const int SW_SHOW = 5;
 
     private Thread? _staThread;
+    private volatile NotifyIcon? _trayIcon;
+    private volatile SynchronizationContext? _syncContext;
 
     private string AppUrl
     {
@@ -84,6 +86,9 @@ public sealed class SystemTrayService(
         using var trayIcon = BuildTrayIcon();
         trayIcon.Visible = true;
 
+        _syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        _trayIcon = trayIcon;
+
         trayIcon.ShowBalloonTip(
             3000,
             "XUnity Toolkit WebUI",
@@ -92,7 +97,21 @@ public sealed class SystemTrayService(
 
         Application.Run(); // Blocks until Application.Exit() is called
 
+        _trayIcon = null;
         trayIcon.Visible = false;
+    }
+
+    public void ShowNotification(string title, string body, ToolTipIcon icon = ToolTipIcon.Info)
+    {
+        var ctx = _syncContext;
+        var tray = _trayIcon;
+        if (tray is null || ctx is null) return;
+
+        ctx.Post(_ =>
+        {
+            try { tray.ShowBalloonTip(3000, title, body, icon); }
+            catch { /* best effort */ }
+        }, null);
     }
 
     private NotifyIcon BuildTrayIcon()

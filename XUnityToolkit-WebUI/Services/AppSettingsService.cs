@@ -91,16 +91,7 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
             return new AppSettings();
 
         var json = await File.ReadAllTextAsync(paths.SettingsFile, ct);
-        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
-
-        // Migrate legacy single-provider AI settings to multi-provider format
-        if (settings.AiTranslation.MigrateFromLegacy())
-        {
-            logger.LogInformation("已迁移旧版 AI 翻译设置到多提供商格式");
-            await WriteAsync(settings, ct);
-        }
-
-        return settings;
+        return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
     }
 
     private async Task WriteAsync(AppSettings settings, CancellationToken ct)

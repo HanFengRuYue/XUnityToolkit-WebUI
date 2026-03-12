@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -184,6 +184,31 @@ export const pluginPackageApi = {
   getExportUrl: (id: string) => `/api/games/${id}/plugin-package/export`,
   importPackage: (id: string, zipPath: string) =>
     api.post<void>(`/api/games/${id}/plugin-package/import`, { zipPath }),
+}
+
+export const localLlmApi = {
+  test: () => api.post<LocalLlmTestResult>('/api/local-llm/test'),
+  getStatus: () => api.get<LocalLlmStatus>('/api/local-llm/status'),
+  getGpus: () => api.get<GpuInfo[]>('/api/local-llm/gpus'),
+  refreshGpus: () => api.post<GpuInfo[]>('/api/local-llm/gpus/refresh'),
+  getSettings: () => api.get<LocalLlmSettings>('/api/local-llm/settings'),
+  saveSettings: (req: { gpuLayers: number; contextLength: number }) =>
+    api.put<void>('/api/local-llm/settings', req),
+  getCatalog: () => api.get<BuiltInModelInfo[]>('/api/local-llm/catalog'),
+  getLlamaStatus: () => api.get<LlamaStatus>('/api/local-llm/llama-status'),
+  downloadLlama: () => api.post<void>('/api/local-llm/download-llama'),
+  pauseLlamaDownload: (downloadId: string) => api.post<void>('/api/local-llm/download-llama/pause', { downloadId }),
+  cancelLlamaDownload: (downloadId: string, backend: string) =>
+    api.post<void>('/api/local-llm/download-llama/cancel', { downloadId, backend }),
+  start: (modelPath: string, gpuLayers?: number, contextLength?: number) =>
+    api.post<LocalLlmStatus>('/api/local-llm/start', { modelPath, gpuLayers, contextLength }),
+  stop: () => api.post<LocalLlmStatus>('/api/local-llm/stop'),
+  downloadModel: (catalogId: string) => api.post<void>('/api/local-llm/download', { catalogId }),
+  pauseDownload: (catalogId: string) => api.post<void>('/api/local-llm/download/pause', { catalogId }),
+  cancelDownload: (catalogId: string) => api.post<void>('/api/local-llm/download/cancel', { catalogId }),
+  getModels: () => api.get<LocalModelEntry[]>('/api/local-llm/models'),
+  addModel: (filePath: string, name: string) => api.post<LocalModelEntry>('/api/local-llm/models/add', { filePath, name }),
+  removeModel: (id: string) => api.del<void>(`/api/local-llm/models/${id}`),
 }
 
 export const logsApi = {

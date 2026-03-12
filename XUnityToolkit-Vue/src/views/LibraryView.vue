@@ -142,7 +142,12 @@ const gridStyle = computed(() => {
     <!-- Header -->
     <div class="library-header">
       <div class="header-left">
-        <h1 class="library-title">游戏库</h1>
+        <h1 class="library-title">
+          <span class="page-title-icon">
+            <NIcon :size="22"><GamepadFilled /></NIcon>
+          </span>
+          游戏库
+        </h1>
         <span v-if="gamesStore.games.length > 0" class="game-count">
           {{ gamesStore.games.length }} 款游戏
         </span>
@@ -367,23 +372,38 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   animation: slideUp 0.4s var(--ease-out) backwards;
 }
 
 .header-left {
   display: flex;
-  align-items: baseline;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
 }
 
 .library-title {
   font-family: var(--font-display);
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--text-1);
   letter-spacing: -0.03em;
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-title-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .game-count {
@@ -715,7 +735,14 @@ export default {
   }
 
   .library-title {
-    font-size: 22px;
+    font-size: 20px;
+    gap: 8px;
+  }
+
+  .page-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
   .games-grid {
@@ -749,6 +776,13 @@ export default {
 @media (max-width: 480px) {
   .library-title {
     font-size: 20px;
+    gap: 8px;
+  }
+
+  .page-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
   .games-grid {

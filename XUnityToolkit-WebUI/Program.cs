@@ -98,7 +98,16 @@ builder.Services.AddHttpClient("SteamGridDB", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+// HTTP client for local LLM model downloads — long timeout for large files
+builder.Services.AddHttpClient("LocalLlmDownload", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
+    client.Timeout = TimeSpan.FromHours(12);
+});
+
 // Services
+builder.Services.AddSingleton<MirrorProbeService>();
+builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
@@ -115,7 +124,8 @@ builder.Services.AddSingleton<GlossaryExtractionService>();
 builder.Services.AddSingleton<AssetExtractionService>();
 builder.Services.AddSingleton<PreTranslationService>();
 builder.Services.AddSingleton<PluginPackageService>();
-builder.Services.AddHostedService<SystemTrayService>();
+builder.Services.AddSingleton<SystemTrayService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemTrayService>());
 
 // SignalR with string enum serialization
 builder.Services.AddSignalR()
@@ -161,6 +171,7 @@ app.MapLogEndpoints();
 app.MapAssetEndpoints();
 app.MapTranslationEditorEndpoints();
 app.MapPluginPackageEndpoints();
+app.MapLocalLlmEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");

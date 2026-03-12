@@ -245,7 +245,7 @@ watch(() => route.path, () => {
 .main-content {
   flex: 1;
   overflow-y: auto;
-  padding: 36px 40px;
+  padding: 24px 28px;
   position: relative;
 }
 
@@ -376,7 +376,7 @@ watch(() => route.path, () => {
 
   /* Main Content padding */
   .main-content {
-    padding: 20px 16px;
+    padding: 20px 20px;
   }
 }
 

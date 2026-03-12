@@ -1005,7 +1005,7 @@ onUnmounted(() => stopWatch())
 
 .game-title {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;
@@ -1098,12 +1098,12 @@ onUnmounted(() => stopWatch())
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .section-title {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;

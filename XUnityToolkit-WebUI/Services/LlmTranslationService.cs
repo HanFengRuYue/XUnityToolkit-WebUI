@@ -151,6 +151,9 @@ public sealed class LlmTranslationService(
             var settings = await settingsService.GetAsync(ct);
             var ai = settings.AiTranslation;
 
+            // Local mode restrictions
+            var isLocalMode = string.Equals(ai.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
+
             var enabledEndpoints = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
             if (enabledEndpoints.Count == 0)
             {
@@ -158,9 +161,9 @@ public sealed class LlmTranslationService(
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
 
-            // Load glossary for the game (if available)
+            // Load glossary for the game (if available) — disabled in local mode
             List<GlossaryEntry>? glossary = null;
-            if (!string.IsNullOrEmpty(gameId))
+            if (!isLocalMode && !string.IsNullOrEmpty(gameId))
             {
                 glossary = await glossaryService.GetAsync(gameId, ct);
                 if (glossary.Count == 0) glossary = null;
@@ -181,8 +184,10 @@ public sealed class LlmTranslationService(
                     gameDescription = gameDescription[..500];
             }
 
-            // Load translation memory context
-            var contextSize = Math.Clamp(ai.ContextSize, 0, 100);
+            // Load translation memory context — local mode uses separate LocalContextSize (capped at 10)
+            var contextSize = isLocalMode
+                ? Math.Clamp(ai.LocalContextSize, 0, 10)
+                : Math.Clamp(ai.ContextSize, 0, 100);
             IList<TranslationMemoryEntry>? memoryContext = null;
             if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
             {
@@ -191,8 +196,8 @@ public sealed class LlmTranslationService(
                 if (memoryContext.Count == 0) memoryContext = null;
             }
 
-            // Ensure semaphore matches configured concurrency
-            var maxConc = Math.Clamp(ai.MaxConcurrency, 1, 100);
+            // Ensure semaphore matches configured concurrency — forced to 1 in local mode
+            var maxConc = isLocalMode ? 1 : Math.Clamp(ai.MaxConcurrency, 1, 100);
             EnsureSemaphore(maxConc);
             var semaphore = Volatile.Read(ref _semaphore)!; // Acquire-read for ARM safety
 
@@ -696,9 +701,23 @@ public sealed class LlmTranslationService(
     {
         var json = content.Trim();
 
-        // LLM may wrap JSON in markdown code blocks
+        // Strip <think>...</think> blocks produced by reasoning models (e.g. Qwen3).
+        // Find the LAST </think> tag to handle multi-block or nested output.
+        var thinkEnd = json.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+        if (thinkEnd >= 0)
+            json = json[(thinkEnd + "</think>".Length)..].TrimStart();
+
+        // Strip markdown code fences (``` or ```json)
         if (json.StartsWith("```"))
         {
+            var start = json.IndexOf('[');
+            var end = json.LastIndexOf(']');
+            if (start >= 0 && end > start)
+                json = json[start..(end + 1)];
+        }
+        else if (!json.StartsWith('['))
+        {
+            // Model may have wrapped the array in prose text — extract JSON array
             var start = json.IndexOf('[');
             var end = json.LastIndexOf(']');
             if (start >= 0 && end > start)

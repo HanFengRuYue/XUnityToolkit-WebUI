@@ -25,9 +25,12 @@ import {
 import type { AiTranslationSettings, ApiEndpointConfig, LlmProvider } from '@/api/types'
 import { translateApi } from '@/api/games'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: AiTranslationSettings
-}>()
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   'update:modelValue': [value: AiTranslationSettings]
@@ -233,8 +236,8 @@ const priorityMarks = computed(() => {
 </script>
 
 <template>
-  <div class="section-card">
-    <div class="section-header">
+  <div :class="{ 'section-card': !embedded }">
+    <div v-if="!embedded" class="section-header">
       <h2 class="section-title">
         <span class="section-icon ai">
           <NIcon :size="16"><SmartToyOutlined /></NIcon>

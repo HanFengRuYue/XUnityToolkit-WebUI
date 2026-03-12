@@ -31,6 +31,7 @@ $totalSteps = 2 + $Runtimes.Count + $(if ($hasEndpoint) { 1 } else { 0 })
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
 Write-Host "    Target: $($Runtimes -join ', ')" -ForegroundColor DarkGray
+Write-Host "    llama.cpp: downloaded on-demand at runtime" -ForegroundColor DarkGray
 Write-Host ""
 
 # Step 1: Build frontend once
@@ -72,6 +73,18 @@ if ($hasEndpoint) {
 # Clean Release folder
 Write-Host ""
 Write-Host "[$nextStep/$totalSteps] Preparing Release folder..." -ForegroundColor Yellow
+
+# Stop processes that may lock files in Release folder
+$processesToStop = @('XUnityToolkit-WebUI', 'llama-server')
+foreach ($procName in $processesToStop) {
+    $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
+    if ($procs) {
+        Write-Host "  Stopping $procName..." -ForegroundColor DarkYellow
+        $procs | Stop-Process -Force
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 if (Test-Path $ReleaseRoot) {
     Remove-Item $ReleaseRoot -Recurse -Force
 }
@@ -118,7 +131,8 @@ foreach ($rid in $Runtimes) {
     Write-Host "$rid :" -ForegroundColor Yellow
     Get-ChildItem $dir | ForEach-Object {
         if ($_.PSIsContainer) {
-            $size = "<DIR>"
+            $folderSize = [math]::Round(((Get-ChildItem $_.FullName -File -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+            $size = "<DIR> $folderSize MB"
         } else {
             $size = "$([math]::Round($_.Length / 1MB, 1)) MB"
         }

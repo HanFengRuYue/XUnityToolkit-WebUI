@@ -16,7 +16,7 @@ public sealed class Game
     public string? ExecutableName { get; set; }
     public DateTime AddedAt { get; init; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-    public bool IsUnityGame { get; set; } = true;
+    public bool IsUnityGame { get; set; }
     public UnityGameInfo? DetectedInfo { get; set; }
     public InstallState InstallState { get; set; } = InstallState.NotInstalled;
     public List<DetectedModFramework>? DetectedFrameworks { get; set; }

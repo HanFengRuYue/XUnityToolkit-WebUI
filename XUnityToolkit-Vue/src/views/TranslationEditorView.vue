@@ -444,14 +444,15 @@ function handleExport() {
 }
 
 .editor-page {
-  padding: 36px 40px;
-  max-width: 1100px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .page-header {
   display: flex;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: -8px;
   animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
@@ -476,11 +477,13 @@ function handleExport() {
 .page-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 22px;
+  gap: 12px;
+  font-family: var(--font-display);
+  font-size: 24px;
   font-weight: 600;
   color: var(--text-1);
-  margin: 0 0 20px;
+  margin: 0;
+  letter-spacing: -0.03em;
   animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
@@ -488,11 +491,12 @@ function handleExport() {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--accent-soft);
   color: var(--accent);
+  flex-shrink: 0;
 }
 
 .unsaved-badge {
@@ -509,7 +513,6 @@ function handleExport() {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
-  margin-bottom: 16px;
   animation: slideUp 0.5s var(--ease-out) backwards;
   transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
   box-shadow: var(--shadow-card-rest);
@@ -522,28 +525,31 @@ function handleExport() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .section-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .section-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: var(--accent-soft);
   color: var(--accent);
+  flex-shrink: 0;
 }
 
 .header-btn-group {
@@ -617,9 +623,6 @@ function handleExport() {
 }
 
 @media (max-width: 768px) {
-  .editor-page {
-    padding: 20px 16px;
-  }
   .section-card {
     padding: 16px;
   }
@@ -636,15 +639,18 @@ function handleExport() {
 }
 
 @media (max-width: 480px) {
-  .editor-page {
-    padding: 16px 12px;
-  }
   .section-card {
     padding: 14px;
     border-radius: var(--radius-md);
   }
   .page-title {
-    font-size: 18px;
+    font-size: 20px;
+    gap: 8px;
+  }
+  .page-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 }
 </style>

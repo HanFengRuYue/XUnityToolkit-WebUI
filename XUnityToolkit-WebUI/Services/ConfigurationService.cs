@@ -18,9 +18,6 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
 
         var ini = ParseIni(File.ReadAllText(configPath));
 
-        // TextFrameworks section: prefer [TextFrameworks] (plural), fall back to [TextFramework] (singular)
-        var tfSection = ini.ContainsKey("TextFrameworks") ? "TextFrameworks" : "TextFramework";
-
         var config = new XUnityConfig
         {
             // [Service]
@@ -32,12 +29,12 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             // [Files]
             OutputFile = GetNullableValue(ini, "Files", "OutputFile"),
             // [TextFrameworks]
-            EnableIMGUI = GetBool(ini, tfSection, "EnableIMGUI", false),
-            EnableUGUI = GetBool(ini, tfSection, "EnableUGUI", true),
-            EnableNGUI = GetBool(ini, tfSection, "EnableNGUI", true),
-            EnableTextMeshPro = GetBool(ini, tfSection, "EnableTextMeshPro", true),
-            EnableTextMesh = GetBool(ini, tfSection, "EnableTextMesh", false),
-            EnableFairyGUI = GetBool(ini, tfSection, "EnableFairyGUI", true),
+            EnableIMGUI = GetBool(ini, "TextFrameworks", "EnableIMGUI", false),
+            EnableUGUI = GetBool(ini, "TextFrameworks", "EnableUGUI", true),
+            EnableNGUI = GetBool(ini, "TextFrameworks", "EnableNGUI", true),
+            EnableTextMeshPro = GetBool(ini, "TextFrameworks", "EnableTextMeshPro", true),
+            EnableTextMesh = GetBool(ini, "TextFrameworks", "EnableTextMesh", false),
+            EnableFairyGUI = GetBool(ini, "TextFrameworks", "EnableFairyGUI", true),
             // [Behaviour]
             MaxCharactersPerTranslation = GetInt(ini, "Behaviour", "MaxCharactersPerTranslation", 200),
             ForceSplitTextAfterCharacters = GetInt(ini, "Behaviour", "ForceSplitTextAfterCharacters", 0),
@@ -64,19 +61,13 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             LoadUnmodifiedTextures = GetBool(ini, "Texture", "LoadUnmodifiedTextures", false),
             TextureHashGenerationStrategy = GetValue(ini, "Texture", "TextureHashGenerationStrategy", "FromImageName"),
             EnableSpriteHooking = GetBool(ini, "Texture", "EnableSpriteHooking", false),
-            // Engine API credentials (with backward-compat fallback for old section names)
-            GoogleLegitimateApiKey = GetNullableValue(ini, "GoogleLegitimate", "GoogleAPIKey")
-                                    ?? GetNullableValue(ini, "GoogleTranslateV2", "GoogleAPIKey"),
-            BingLegitimateSubscriptionKey = GetNullableValue(ini, "BingLegitimate", "OcpApimSubscriptionKey")
-                                           ?? GetNullableValue(ini, "BingTranslate", "OcpApimSubscriptionKey"),
-            BaiduAppId = GetNullableValue(ini, "Baidu", "BaiduAppId")
-                         ?? GetNullableValue(ini, "BaiduTranslate", "BaiduAppId"),
-            BaiduAppSecret = GetNullableValue(ini, "Baidu", "BaiduAppSecret")
-                             ?? GetNullableValue(ini, "BaiduTranslate", "BaiduAppSecret"),
-            YandexApiKey = GetNullableValue(ini, "Yandex", "YandexAPIKey")
-                           ?? GetNullableValue(ini, "YandexTranslate", "YandexAPIKey"),
-            DeepLLegitimateApiKey = GetNullableValue(ini, "DeepLLegitimate", "ApiKey")
-                                   ?? GetNullableValue(ini, "DeepLTranslate", "DeepLAPIKey"),
+            // Engine API credentials
+            GoogleLegitimateApiKey = GetNullableValue(ini, "GoogleLegitimate", "GoogleAPIKey"),
+            BingLegitimateSubscriptionKey = GetNullableValue(ini, "BingLegitimate", "OcpApimSubscriptionKey"),
+            BaiduAppId = GetNullableValue(ini, "Baidu", "BaiduAppId"),
+            BaiduAppSecret = GetNullableValue(ini, "Baidu", "BaiduAppSecret"),
+            YandexApiKey = GetNullableValue(ini, "Yandex", "YandexAPIKey"),
+            DeepLLegitimateApiKey = GetNullableValue(ini, "DeepLLegitimate", "ApiKey"),
             DeepLLegitimateFree = GetBool(ini, "DeepLLegitimate", "Free", false),
             PapagoClientId = GetNullableValue(ini, "PapagoTranslate", "PapagoClientId"),
             PapagoClientSecret = GetNullableValue(ini, "PapagoTranslate", "PapagoClientSecret"),
@@ -128,10 +119,6 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
 
         var lines = File.ReadAllLines(configPath).ToList();
 
-        var tfSection = lines.Any(l => l.Trim().Equals("[TextFrameworks]", StringComparison.OrdinalIgnoreCase))
-            ? "TextFrameworks"
-            : "TextFramework";
-
         // Read current port from settings for LLMTranslate URL
         var settings = await settingsService.GetAsync(ct);
         var port = settings.AiTranslation.Port;
@@ -142,7 +129,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             {
                 ["Language"] = "zh",
             },
-            [tfSection] = new(StringComparer.OrdinalIgnoreCase)
+            ["TextFrameworks"] = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["EnableIMGUI"] = "True",
                 ["EnableUGUI"] = "True",
@@ -192,11 +179,6 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
 
         var lines = File.ReadAllLines(configPath).ToList();
 
-        // Detect actual TextFrameworks section name used in the file
-        var tfSection = lines.Any(l => l.Trim().Equals("[TextFrameworks]", StringComparison.OrdinalIgnoreCase))
-            ? "TextFrameworks"
-            : "TextFramework";
-
         // Build the modifications we want to apply
         var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
         {
@@ -208,7 +190,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
                 ("FromLanguage", config.SourceLanguage)),
             ["Files"] = BuildSectionMods(
                 ("OutputFile", config.OutputFile)),
-            [tfSection] = BuildSectionMods(
+            ["TextFrameworks"] = BuildSectionMods(
                 ("EnableIMGUI", config.EnableIMGUI.ToString()),
                 ("EnableUGUI", config.EnableUGUI.ToString()),
                 ("EnableNGUI", config.EnableNGUI.ToString()),

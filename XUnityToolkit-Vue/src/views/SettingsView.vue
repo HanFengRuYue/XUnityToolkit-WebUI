@@ -72,15 +72,18 @@ async function handleClearCache() {
 
 // Settings
 const settings = ref<AppSettings>({
-  mirrorUrl: 'https://ghfast.top/',
+  ghMirrorUrl: 'https://ghfast.top/',
+  hfMirrorUrl: 'https://hf-mirror.com',
   theme: themeStore.mode,
   aiTranslation: {
     enabled: true,
-    maxConcurrency: 5,
+    activeMode: 'cloud',
+    maxConcurrency: 4,
     port: 51821,
     systemPrompt: '',
     temperature: 0.3,
     contextSize: 10,
+    localContextSize: 0,
     endpoints: [],
     glossaryExtractionEnabled: false,
     glossaryExtractionEndpointId: undefined,
@@ -262,12 +265,30 @@ onMounted(() => {
               <NIcon :size="14" color="var(--text-3)"><SpeedOutlined /></NIcon>
               GitHub 镜像地址
             </label>
+            <div class="mirror-input-row">
+              <NInput
+                v-model:value="settings.ghMirrorUrl"
+                placeholder="https://ghfast.top/"
+                clearable
+                style="flex: 1"
+              />
+              <NButton size="small" quaternary @click="settings.ghMirrorUrl = 'https://mirror.ghproxy.com'">
+                备用镜像
+              </NButton>
+            </div>
+            <span class="form-hint">加速 GitHub 资源下载（BepInEx、XUnity、llama.cpp），留空使用直连</span>
+          </div>
+          <div class="form-row">
+            <label class="form-label">
+              <NIcon :size="14" color="var(--text-3)"><CloudDownloadOutlined /></NIcon>
+              HuggingFace 镜像地址
+            </label>
             <NInput
-              v-model:value="settings.mirrorUrl"
-              placeholder="https://ghfast.top/"
+              v-model:value="settings.hfMirrorUrl"
+              placeholder="https://hf-mirror.com"
               clearable
             />
-            <span class="form-hint">加速 GitHub 资源下载，留空使用直连</span>
+            <span class="form-hint">加速 AI 模型下载，留空使用直连</span>
           </div>
           <div class="form-row">
             <label class="form-label">
@@ -430,24 +451,24 @@ onMounted(() => {
 
 .page-title {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--text-1);
-  margin-bottom: 12px;
+  margin-bottom: 0;
   letter-spacing: -0.03em;
   animation: slideUp 0.4s var(--ease-out) backwards;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .page-title-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--accent-soft);
   color: var(--accent);
   flex-shrink: 0;
@@ -482,12 +503,12 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .section-title {
   font-family: var(--font-display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;
@@ -628,6 +649,12 @@ onMounted(() => {
   color: var(--text-3);
 }
 
+.mirror-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ===== Accent Color Swatches ===== */
 .accent-color-row {
   display: flex;
@@ -756,15 +783,14 @@ onMounted(() => {
 
 @media (max-width: 480px) {
   .page-title {
-    font-size: 22px;
-    margin-bottom: 20px;
-    gap: 10px;
+    font-size: 20px;
+    gap: 8px;
   }
 
   .page-title-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 
   .section-card {

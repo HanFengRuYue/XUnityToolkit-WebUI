@@ -10,13 +10,8 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger)
 
     private static readonly HashSet<string> SensitiveSections = new(StringComparer.OrdinalIgnoreCase)
     {
-        "GoogleLegitimate", "GoogleTranslateV2",
-        "BingLegitimate", "BingTranslate",
-        "Baidu", "BaiduTranslate",
-        "Yandex", "YandexTranslate",
-        "DeepLLegitimate", "DeepLTranslate",
-        "PapagoTranslate", "LingoCloud",
-        "Watson", "Custom", "LecPowerTranslator15", "ezTrans"
+        "GoogleLegitimate", "BingLegitimate", "Baidu", "Yandex", "DeepLLegitimate",
+        "PapagoTranslate", "LingoCloud", "Watson", "Custom", "LecPowerTranslator15", "ezTrans"
     };
 
     private static readonly string[] RootFiles = ["winhttp.dll", "doorstop_config.ini", ".doorstop_version", "dobby.dll"];

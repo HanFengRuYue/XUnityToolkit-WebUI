@@ -12,6 +12,7 @@ public static class TranslateEndpoints
             TranslateRequest request,
             LlmTranslationService translationService,
             GlossaryExtractionService extractionService,
+            AppSettingsService settingsService,
             ILogger<LlmTranslationService> logger,
             CancellationToken ct) =>
         {
@@ -26,7 +27,10 @@ public static class TranslateEndpoints
                 logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
 
                 // Buffer for glossary extraction (fire-and-forget, non-blocking)
-                if (!string.IsNullOrEmpty(request.GameId))
+                // Disabled in local mode — local models can't handle extra inference
+                var appSettings = await settingsService.GetAsync(ct);
+                var isLocalMode = string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
+                if (!isLocalMode && !string.IsNullOrEmpty(request.GameId))
                 {
                     for (int i = 0; i < request.Texts.Count; i++)
                         extractionService.BufferTranslation(request.GameId, request.Texts[i], translations[i]);

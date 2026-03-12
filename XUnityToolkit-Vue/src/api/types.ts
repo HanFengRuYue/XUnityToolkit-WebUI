@@ -179,18 +179,21 @@ export interface ApiEndpointConfig {
 
 export interface AiTranslationSettings {
   enabled: boolean
+  activeMode: 'cloud' | 'local'
   maxConcurrency: number
   port: number
   systemPrompt: string
   temperature: number
   contextSize: number
+  localContextSize: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
   glossaryExtractionEndpointId?: string
 }
 
 export interface AppSettings {
-  mirrorUrl: string
+  ghMirrorUrl: string
+  hfMirrorUrl: string
   theme: string
   aiTranslation: AiTranslationSettings
   steamGridDbApiKey?: string
@@ -342,4 +345,103 @@ export interface TranslationEditorData {
   fileExists: boolean
   entryCount: number
   entries: TranslationEntry[]
+}
+
+// ── Local LLM ──
+
+export type GpuBackend = 'CUDA' | 'Vulkan' | 'CPU'
+
+export type LocalLlmServerState = 'Idle' | 'Starting' | 'Running' | 'Stopping' | 'Failed'
+
+export interface LocalLlmSettings {
+  gpuLayers: number
+  contextLength: number
+  loadedModelPath?: string
+  endpointId: string
+  models: LocalModelEntry[]
+  pausedDownloads: PausedDownload[]
+  pausedLlamaDownloads: PausedLlamaDownload[]
+}
+
+export interface PausedLlamaDownload {
+  backend: string
+  downloadId: string
+  bytesDownloaded: number
+  totalBytes: number
+}
+
+export interface PausedDownload {
+  catalogId: string
+  bytesDownloaded: number
+  totalBytes: number
+}
+
+export interface LocalModelEntry {
+  id: string
+  name: string
+  filePath: string
+  fileSizeBytes: number
+  isBuiltIn: boolean
+  catalogId?: string
+  addedAt: string
+}
+
+export interface GpuInfo {
+  name: string
+  vendor: string
+  vramBytes: number
+  recommendedBackend: GpuBackend
+}
+
+export interface LocalLlmStatus {
+  state: LocalLlmServerState
+  loadedModelPath?: string
+  loadedModelName?: string
+  gpuBackendName?: string
+  error?: string
+  gpuUtilizationPercent?: number
+  gpuVramUsedMb?: number
+  gpuVramTotalMb?: number
+}
+
+export interface LlamaBackendInfo {
+  backend: GpuBackend
+  downloadId: string
+  isInstalled: boolean
+  llamaVersion: string
+}
+
+export interface LlamaStatus {
+  bundledVersion: string
+  backends: LlamaBackendInfo[]
+  recommendedBackend: GpuBackend
+}
+
+export interface BuiltInModelInfo {
+  id: string
+  name: string
+  description: string
+  fileSizeBytes: number
+  recommendedVramGb: number
+  huggingFaceRepo: string
+  huggingFaceFile: string
+  tags: string[]
+}
+
+export interface LocalLlmTestResult {
+  success: boolean
+  translations?: string[]
+  error?: string
+  responseTimeMs: number
+}
+
+export interface LocalLlmDownloadProgress {
+  catalogId: string
+  bytesDownloaded: number
+  totalBytes: number
+  speedBytesPerSec: number
+  done: boolean
+  error?: string
+  paused?: boolean
+  useMirror?: boolean
 }

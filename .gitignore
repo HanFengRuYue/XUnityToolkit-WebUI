@@ -19,6 +19,9 @@ XUnityToolkit-Vue/src/components.d.ts
 # Build output
 Release/
 
+# llama.cpp pre-built binaries (downloaded during build)
+llama-bin/
+
 # TranslatorEndpoint reference DLLs (downloaded from XUnity release)
 TranslatorEndpoint/libs/
 

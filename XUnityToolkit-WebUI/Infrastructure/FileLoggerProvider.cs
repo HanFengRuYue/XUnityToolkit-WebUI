@@ -131,13 +131,6 @@ internal sealed class FileLoggerProvider : ILoggerProvider
                 try { File.Delete(logFiles[i]); } catch { /* best effort */ }
             }
 
-            // Also clean up legacy log files
-            var legacyLog = Path.Combine(_logsDirectory, "app.log");
-            if (File.Exists(legacyLog))
-                try { File.Delete(legacyLog); } catch { /* best effort */ }
-            var legacyOld = Path.Combine(_logsDirectory, "app.log.old");
-            if (File.Exists(legacyOld))
-                try { File.Delete(legacyOld); } catch { /* best effort */ }
         }
         catch
         {

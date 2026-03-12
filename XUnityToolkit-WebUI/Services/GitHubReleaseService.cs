@@ -10,13 +10,13 @@ public sealed class GitHubReleaseService(
     IHttpClientFactory httpClientFactory,
     AppDataPaths paths,
     AppSettingsService settingsService,
+    MirrorProbeService mirrorProbeService,
     ILogger<GitHubReleaseService> logger)
 {
     private readonly ConcurrentDictionary<string, (DateTime CachedAt, List<GitHubRelease> Releases)> _cache = [];
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private const int MaxRetries = 3;
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(8);
 
     public async Task<List<GitHubRelease>> GetReleasesAsync(
         string owner, string repo, CancellationToken ct = default)
@@ -82,11 +82,11 @@ public sealed class GitHubReleaseService(
         logger.LogInformation("开始下载: {Url}", url);
 
         var settings = await settingsService.GetAsync(ct);
-        var mirrorBase = string.IsNullOrWhiteSpace(settings.MirrorUrl) ? null : settings.MirrorUrl;
+        var mirrorBase = string.IsNullOrWhiteSpace(settings.GhMirrorUrl) ? null : settings.GhMirrorUrl;
 
         var tmpPath = destPath + ".tmp";
-        string? mirrorUrl = mirrorBase != null ? BuildMirrorUrl(url, mirrorBase) : null;
-        var useMirror = mirrorBase != null && await ShouldUseMirrorAsync(url, ct);
+        string? mirrorUrl = mirrorBase != null ? MirrorProbeService.BuildMirrorUrl(url, mirrorBase) : null;
+        var useMirror = mirrorBase != null && await mirrorProbeService.ShouldUseMirrorAsync(url, ct);
 
         if (useMirror)
             logger.LogInformation("GitHub 直连较慢，使用镜像加速: {Mirror}", mirrorUrl);
@@ -185,32 +185,6 @@ public sealed class GitHubReleaseService(
         }
     }
 
-    private async Task<bool> ShouldUseMirrorAsync(string url, CancellationToken ct)
-    {
-        try
-        {
-            var client = httpClientFactory.CreateClient("GitHub");
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(ProbeTimeout);
-
-            using var request = new HttpRequestMessage(HttpMethod.Head, url);
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            return false; // Direct connection works
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            // Probe timed out — GitHub is slow
-            logger.LogInformation("GitHub 连接测试超时 ({Seconds}s)，将使用镜像",
-                ProbeTimeout.TotalSeconds);
-            return true;
-        }
-        catch (HttpRequestException ex)
-        {
-            logger.LogInformation(ex, "GitHub 连接测试失败，将使用镜像");
-            return true;
-        }
-    }
-
     private HttpClient CreateClientForUrl(string url, string? mirrorBase)
     {
         if (mirrorBase != null)
@@ -220,15 +194,6 @@ public sealed class GitHubReleaseService(
                 return httpClientFactory.CreateClient("Mirror");
         }
         return httpClientFactory.CreateClient("GitHub");
-    }
-
-    private static string BuildMirrorUrl(string originalUrl, string mirrorBase)
-    {
-        var normalizedBase = mirrorBase.TrimEnd('/') + "/";
-        var mirrorHost = new Uri(normalizedBase).Host;
-        if (originalUrl.Contains(mirrorHost, StringComparison.OrdinalIgnoreCase))
-            return originalUrl; // Already a mirror URL
-        return normalizedBase + originalUrl;
     }
 
     private static string FormatSpeed(double bytesPerSecond) =>

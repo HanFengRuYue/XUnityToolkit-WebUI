@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace XUnityToolkit_WebUI.Models;
 
 public enum LlmProvider { OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Kimi, Custom }
@@ -7,6 +5,9 @@ public enum LlmProvider { OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Kimi, Cus
 public sealed class AiTranslationSettings
 {
     public bool Enabled { get; set; } = true;
+
+    /// <summary>"cloud" or "local". When "local", concurrency=1, no glossary extraction, contextSize capped at 10.</summary>
+    public string ActiveMode { get; set; } = "cloud";
 
     public int MaxConcurrency { get; set; } = 4;
 
@@ -31,50 +32,16 @@ public sealed class AiTranslationSettings
     /// </summary>
     public int ContextSize { get; set; } = 10;
 
+    /// <summary>
+    /// Number of recent translation pairs for local mode (0 = disabled, max 10). Separate from cloud ContextSize.
+    /// </summary>
+    public int LocalContextSize { get; set; }
+
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }
     public string? GlossaryExtractionEndpointId { get; set; }
-
-    // Legacy fields — map old JSON field names so deserialization picks them up.
-    // After migration, set to null so they are not serialized.
-    [JsonPropertyName("provider")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public LlmProvider? LegacyProvider { get; set; }
-
-    [JsonPropertyName("apiBaseUrl")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyApiBaseUrl { get; set; }
-
-    [JsonPropertyName("apiKey")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyApiKey { get; set; }
-
-    [JsonPropertyName("modelName")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyModelName { get; set; }
-
-    public bool MigrateFromLegacy()
-    {
-        if (LegacyProvider is null || string.IsNullOrEmpty(LegacyApiKey))
-            return false;
-
-        Endpoints.Add(new ApiEndpointConfig
-        {
-            Name = "迁移的提供商",
-            Provider = LegacyProvider ?? LlmProvider.OpenAI,
-            ApiBaseUrl = LegacyApiBaseUrl ?? "",
-            ApiKey = LegacyApiKey ?? "",
-            ModelName = LegacyModelName ?? "",
-        });
-
-        LegacyProvider = null;
-        LegacyApiBaseUrl = null;
-        LegacyApiKey = null;
-        LegacyModelName = null;
-        return true;
-    }
 }
 
 public sealed class ApiEndpointConfig
