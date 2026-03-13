@@ -43,9 +43,9 @@ jobs:
           echo "bepinex5=$B5" >> "$GITHUB_OUTPUT"
           echo "BepInEx 5: $B5"
 
-          # BepInEx 6 BE (HTML scrape — POSIX ERE, no PCRE dependency)
+          # BepInEx 6 BE (HTML scrape — extract build number from IL2CPP x64 link)
           B6=$(curl -sSf "https://builds.bepinex.dev/projects/bepinex_be" \
-            | grep -oE '/[0-9]+/BepInEx-Unity\.IL2CPP-win-x64' | head -1 | grep -oE '[0-9]+')
+            | grep -oE '[0-9]+/BepInEx-Unity\.IL2CPP-win-x64' | cut -d/ -f1 | sort -rn | head -1)
           if [ -z "$B6" ]; then
             echo "::error::Failed to parse BepInEx 6 BE build number from builds.bepinex.dev"
             exit 1
