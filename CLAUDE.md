@@ -235,6 +235,9 @@ XUnityToolkit-Vue/src/
 - `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`
 - `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
 - `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
+- **Page transitions:** Direction-aware via `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); `AppShell.vue` `router.beforeEach` compares depths → `page` (same-level crossfade), `page-slide-left` (deeper), `page-slide-right` (shallower); adding a new route requires `meta: { depth: N }`
+- **RouterView key:** `:key="route.path"` ensures transitions fire for same-component different-route navigations
+- **RouteMeta extension:** `env.d.ts` declares `depth?: number` on `RouteMeta` for TypeScript
 - **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
 - **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
 - After changes: verify with `npx vue-tsc --noEmit` and `npm run build`
@@ -287,6 +290,13 @@ XUnityToolkit-Vue/src/
 - **Versioning:** `build.ps1` auto-generates `1.0.{YYYYMMDDHHmm}` and passes `-p:InformationalVersion=$BuildVersion` to `dotnet publish`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 per segment, max 65535) which overflows with timestamp; `GET /api/settings/version` reads `AssemblyInformationalVersionAttribute`; AppShell sidebar + SettingsView both dynamically fetch version from API
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API (BepInEx 5/XUnity/llama.cpp from GitHub Releases, BepInEx 6 BE from builds.bepinex.dev); no hardcoded version pins; llama.cpp prefers CUDA 12.4 when multiple CUDA versions available; `Download-IfMissing` caches by filename (old versions retained, `BundledAssetPaths` glob picks latest); copied post-publish (NOT via csproj Content Include — `PublishSingleFile` silently drops files with `+` in names)
 - **TMP fonts:** live in `bundled/fonts/`; csproj `Content Include` copies to `bundled/fonts/` in output during dev build; release build uses `build.ps1` post-publish `Copy-Item` of entire `bundled/` tree
+- **CI/CD:** GitHub Actions in `.github/workflows/`; `build.yml` (reusable), `release.yml` (tag `v*` → release), `dep-check.yml` (daily BepInEx/XUnity update check → auto pre-release)
+- **CI version tracking:** `.github/deps.json` stores last-known BepInEx 5/6/XUnity versions; `dep-check.yml` compares upstream and commits updates
+- **CI cannot call `build.ps1` directly** — `Wait-Exit` blocks in non-interactive; workflow replicates download logic inline
+- **CI TranslatorEndpoint:** downloads XUnity reference DLLs from GitHub release ZIP (libs/ is gitignored)
+- **.NET 10 preview in CI:** `setup-dotnet@v5` with `dotnet-quality: 'preview'`
+- **CI gotcha — `$GITHUB_OUTPUT`:** multiline values corrupt format; use heredoc (`key<<EOF`) or `jq -c` for JSON; `grep -oE '[0-9]+'` can match unintended numbers (e.g., `64` from `x64`)
+- **CI gotcha — `gh release create --notes`:** backticks in `${{ }}` become bash command substitution; always use `--notes-file` instead
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
 - Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
 - Logs: `{programDir}/data/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`

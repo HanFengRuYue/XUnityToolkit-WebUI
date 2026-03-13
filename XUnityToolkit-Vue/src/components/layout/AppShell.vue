@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined } from '@vicons/material'
@@ -37,6 +37,26 @@ function isActive(key: string): boolean {
   if (key === '/') return route.path === '/' || route.path.startsWith('/games/')
   return route.path.startsWith(key)
 }
+
+// Direction-aware page transitions
+const transitionName = ref('page')
+
+const removeGuard = router.beforeEach((to, from) => {
+  const toDepth = to.meta.depth ?? 1
+  const fromDepth = from.meta.depth ?? 1
+
+  if (toDepth > fromDepth) {
+    transitionName.value = 'page-slide-left'
+  } else if (toDepth < fromDepth) {
+    transitionName.value = 'page-slide-right'
+  } else {
+    transitionName.value = 'page'
+  }
+})
+
+onUnmounted(() => {
+  removeGuard()
+})
 
 watch(() => route.path, () => {
   sidebarOpen.value = false
@@ -100,8 +120,8 @@ watch(() => route.path, () => {
 
     <main class="main-content">
       <RouterView v-slot="{ Component }">
-        <Transition name="page" mode="out-in">
-          <component :is="Component" />
+        <Transition :name="transitionName" mode="out-in">
+          <component :is="Component" :key="route.path" />
         </Transition>
       </RouterView>
     </main>
@@ -210,7 +230,7 @@ watch(() => route.path, () => {
   color: var(--text-2);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s var(--ease-out);
   position: relative;
   text-decoration: none;
   font-size: 14px;
@@ -218,7 +238,13 @@ watch(() => route.path, () => {
   user-select: none;
   border-left: 3px solid transparent;
   margin-left: -1px;
+  animation: slideInLeft 0.4s var(--ease-out) backwards;
 }
+
+.nav-item:nth-child(1) { animation-delay: 0.12s; }
+.nav-item:nth-child(2) { animation-delay: 0.18s; }
+.nav-item:nth-child(3) { animation-delay: 0.24s; }
+.nav-item:nth-child(4) { animation-delay: 0.30s; }
 
 .nav-item:hover {
   background: var(--bg-subtle-hover);
@@ -229,11 +255,13 @@ watch(() => route.path, () => {
   border-left-color: var(--accent);
   background: var(--accent-soft);
   color: var(--text-1);
+  box-shadow: inset 0 0 16px -8px var(--accent-soft);
 }
 
 .nav-item.active .n-icon {
   color: var(--accent);
   filter: drop-shadow(0 0 6px var(--accent-glow));
+  transition: filter 0.3s ease, color 0.3s ease;
 }
 
 /* ===== Sidebar Footer ===== */
@@ -251,6 +279,7 @@ watch(() => route.path, () => {
   font-size: 11px;
   color: var(--text-3);
   letter-spacing: 0.02em;
+  animation: fadeIn 0.6s var(--ease-out) 0.5s backwards;
 }
 
 /* ===== Main Content ===== */
