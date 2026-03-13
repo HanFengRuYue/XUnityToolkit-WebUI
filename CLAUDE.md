@@ -37,13 +37,13 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
 - **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`)
-- **Persistence:** JSON files in program directory (`library.json`, `settings.json`) — portable app pattern
+- **Persistence:** JSON files in `{programDir}/data/` (`library.json`, `settings.json`) — portable app pattern; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description; real-time stats via SignalR
-- **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries downloaded on-demand; local mode forces concurrency=1, disables glossary extraction
+- **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, disables glossary extraction
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
-- **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/backups/{gameId}.json`
+- **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/data/backups/{gameId}.json`
 
 ### Frontend Structure
 
@@ -54,7 +54,7 @@ XUnityToolkit-Vue/src/
 ├── components/
 │   ├── layout/     # AppShell (sidebar + content layout)
 │   ├── config/     # ConfigPanel (translation settings form)
-│   ├── library/    # GameCard, CoverPickerModal, LibraryCustomizer
+│   ├── library/    # GameCard, CoverPickerModal, IconPickerModal, WebImageSearchTab, LibraryCustomizer
 │   ├── progress/   # InstallProgressDrawer (SignalR progress)
 │   └── settings/   # Settings page components
 ├── composables/    # Reusable composition functions (useAddGameFlow)
@@ -89,14 +89,14 @@ XUnityToolkit-Vue/src/
 - **Game:** `GET/POST /api/games/`, `GET/DELETE /api/games/{id}`, `POST .../add-with-detection`, `PUT /api/games/{id}` (rename), `POST .../detect`, `POST .../open-folder`, `POST .../launch`
 - **Framework:** `DELETE /api/games/{id}/framework/{framework}`
 - **Install:** `POST /api/games/{id}/install`, `DELETE .../install` (uninstall), `GET .../status`, `POST .../cancel`
-- **Icon:** `GET /api/games/{id}/icon` (custom > exe icon), `POST .../icon/upload`, `DELETE .../icon/custom`
-- **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select}`, `DELETE .../cover`
+- **Icon:** `GET /api/games/{id}/icon` (custom > exe icon), `POST .../icon/upload`, `DELETE .../icon/custom`, `POST .../icon/{search,grids,select}` (SteamGridDB), `POST .../icon/web-search`, `POST .../icon/web-select`
+- **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../cover`
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
 - **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`
-- **Cache:** `GET/DELETE /api/cache/downloads` | **Releases:** `GET /api/releases/{bepinex,xunity}` | **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
+- **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
 - **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `POST /api/translate/test`
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
-- **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `POST .../download-llama` + `.../download` (model) — each has `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
+- **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `.../download` (model) + `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
 - **Glossary:** `GET/PUT /api/games/{id}/glossary` | **Description:** `GET/PUT .../description`
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
@@ -115,10 +115,12 @@ XUnityToolkit-Vue/src/
 - Non-Unity games: only show run + open folder; hide install/config
 - `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
 - `GlossaryService`: `ConcurrentDictionary` cache; `GetAsync` returns cached on fast path
-- **Data storage:** `AppContext.BaseDirectory` (portable); `AppDataPaths` centralizes paths
+- **Data storage:** `{programDir}/data/` for all runtime data; `AppDataPaths` centralizes paths (`_root = {baseDir}/data`); shipped assets (`bundled/`, `wwwroot/`) stay at program root
+- **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; plaintext passthrough for unencrypted values; decryption failure preserves ciphertext + creates `.bak` backup
+- **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `{baseDir}/data` before DI — must stay in sync with `AppDataPaths._root` formula
 - **App URL:** `http://127.0.0.1:51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`)
-- Named `HttpClient`: `"GitHub"`, `"Mirror"`, `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h)
-- **Mirror:** `AppSettings.GhMirrorUrl`/`HfMirrorUrl`; `MirrorProbeService` 8s HEAD probe; GitHub ghproxy-style prefix, HF host-replacement
+- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h)
+- **Mirror:** `AppSettings.HfMirrorUrl` (default `https://hf-mirror.com`); HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
 - **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
 - **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
 - `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
@@ -184,13 +186,20 @@ XUnityToolkit-Vue/src/
 ### Local LLM
 
 - GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
-- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/llama/{cuda,vulkan,cpu}/`
-- **On-demand download:** `POST /download-llama` auto-detects GPU; download IDs: `"llama-cuda"`, `"llama-vulkan"`, `"llama-cpu"`
-- **Download pause/resume:** `PausedDownloads` for persistence; `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel
+- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/data/llama/{cuda,vulkan,cpu}/`
+- **Bundled binaries:** ZIPs in `bundled/llama/`; lazy-extracted on first `POST /start` via `ExtractLlamaZipAsync` to `{programDir}/data/llama/{cuda,vulkan,cpu}/`
+- **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel
 - **GPU monitoring:** nvidia-smi polled every 3s when CUDA running; metrics in `LocalLlmStatus`
 - **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
 - Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
-- Settings: `local-llm-settings.json`; mirror settings unified in `AppSettings`
+- Settings: `data/local-llm-settings.json`; mirror settings unified in `AppSettings`
+
+### BepInEx Installation (Bundled)
+
+- **Mono games:** BepInEx 5 from `bundled/bepinex5/` (x64 + x86 ZIPs)
+- **IL2CPP games:** BepInEx 6 BE from `bundled/bepinex6/` (x64 + x86 ZIPs); uses builds.bepinex.dev bleeding edge (supports IL2CPP metadata v31+)
+- **`BundledAssetPaths`:** resolves bundled ZIPs via `FindBepInEx5Zip(archPattern)` / `FindBepInEx6Zip(archPattern)`; also exposes `FontsDirectory` for TMP fonts
+- **`BepInExInstallerService`:** `InstallAsync` is plain ZIP extraction; version parsed from filename
 
 ### Plugin Package (Export/Import)
 
@@ -233,6 +242,21 @@ XUnityToolkit-Vue/src/
 - **Icon/card colors:** decorative → `--accent`; semantic only for status. Use `color-mix()` for translucent backgrounds
 - TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
 
+### Web Image Search
+
+- **`WebImageSearchService`:** Scrapes Bing (`/images/async` endpoint) and Google (`AF_initDataCallback` regex) for image results; no API key needed
+- **Bing parsing:** `<a class="iusc" m='JSON'>` → extract `murl` (full URL) + `turl` (thumbnail); SafeSearch off via Cookie `SRCHHPGUSR=ADLT=OFF`
+- **Google parsing:** regex `AF_initDataCallback` blocks → `["url", width, height]` tuples; SafeSearch off via `safe=off`; consent cookie `CONSENT=YES+...`
+- **Size filters (Bing `qft`):** `+filterui:imagesize-{large,medium,small}`, `+filterui:aspect-{tall,square}`; auto mode: cover→large+tall, icon→small+square
+- **SSRF protection:** `ValidateImageUrl` rejects non-http(s), loopback, private IPs before server-side download
+- **Content-Type validation:** Must check `IsAllowedContentType` before saving downloaded images
+- Named `HttpClient`: `"WebImageSearch"` (15s timeout, browser UA, no base address)
+- **CoverPickerModal:** 4 tabs (Steam, SteamGridDB, 网络搜索, 自定义上传); `WebImageSearchTab` with `mode="cover"`
+- **IconPickerModal:** 3 tabs (SteamGridDB, 网络搜索, 本地上传); SteamGridDB tab uses `icons/game/{id}` API (vs cover's `grids/game/{id}`); `WebImageSearchTab` with `mode="icon"`; opened from GameDetailView title-icon left-click or right-click "搜索图标"
+- **GameDetailView title-icon:** left-click → IconPickerModal; right-click → context menu (更换封面/搜索图标/上传图标/删除图标)
+- **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
+- **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
+
 ### Sync Points
 
 - **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
@@ -245,9 +269,10 @@ XUnityToolkit-Vue/src/
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/`; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **TMP fonts:** csproj `Content Include` copies `fonts/` to output; do NOT duplicate in `build.ps1` (PowerShell `Copy-Item -Recurse` creates nested `fonts/fonts/` when dest exists)
+- `build.ps1`: downloads bundled assets (`-SkipDownload` to skip) → frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/` → copies `bundled/` to output; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API (BepInEx 5/XUnity/llama.cpp from GitHub Releases, BepInEx 6 BE from builds.bepinex.dev); no hardcoded version pins; llama.cpp prefers CUDA 12.4 when multiple CUDA versions available; `Download-IfMissing` caches by filename (old versions retained, `BundledAssetPaths` glob picks latest); copied post-publish (NOT via csproj Content Include — `PublishSingleFile` silently drops files with `+` in names)
+- **TMP fonts:** live in `bundled/fonts/`; csproj `Content Include` copies to `bundled/fonts/` in output during dev build; release build uses `build.ps1` post-publish `Copy-Item` of entire `bundled/` tree
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
 - Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
-- Logs: `{programDir}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
+- Logs: `{programDir}/data/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
 - Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing

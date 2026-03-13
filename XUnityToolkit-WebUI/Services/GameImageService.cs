@@ -126,6 +126,40 @@ public sealed class GameImageService(
             await SaveCustomIconFromSteamGridDbAsync(gameId, steamGridDbGameId.Value, ct);
     }
 
+    public async Task SaveCoverFromWebSearchAsync(
+        string gameId, byte[] bytes, string contentType,
+        string sourceUrl, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(paths.CoversDirectory);
+
+            var coverPath = paths.CoverFile(gameId);
+            var tmpPath = coverPath + ".tmp";
+            await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+            File.Move(tmpPath, coverPath, overwrite: true);
+
+            var meta = new CoverMeta
+            {
+                ContentType = contentType,
+                Source = "web",
+                SourceUrl = sourceUrl,
+                SavedAt = DateTime.UtcNow
+            };
+            var metaJson = JsonSerializer.Serialize(meta, JsonOptions);
+            var metaTmpPath = paths.CoverMetaFile(gameId) + ".tmp";
+            await File.WriteAllTextAsync(metaTmpPath, metaJson, ct);
+            File.Move(metaTmpPath, paths.CoverMetaFile(gameId), overwrite: true);
+
+            logger.LogInformation("已保存游戏 {GameId} 的封面图 (来源: 网络搜索)", gameId);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task SaveCoverFromUploadAsync(string gameId, Stream imageStream, string contentType, CancellationToken ct = default)
     {
         using var ms = new MemoryStream();
@@ -224,6 +258,32 @@ public sealed class GameImageService(
         {
             _lock.Release();
         }
+    }
+
+    public async Task<List<SteamGridDbImage>> GetIconsAsync(int steamGridDbGameId, CancellationToken ct = default)
+    {
+        var apiKey = await GetApiKeyAsync(ct);
+        var client = httpClientFactory.CreateClient("SteamGridDB");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"icons/game/{steamGridDbGameId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var response = await client.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        return await ParseSteamGridDbResponse<List<SteamGridDbImage>>(response, ct);
+    }
+
+    public async Task SaveCustomIconFromUrlAsync(string gameId, string imageUrl, CancellationToken ct = default)
+    {
+        var client = httpClientFactory.CreateClient("SteamGridDB");
+        var response = await client.GetAsync(imageUrl, ct);
+        response.EnsureSuccessStatusCode();
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var pngBytes = ConvertToPng(bytes);
+        await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
     }
 
     public async Task SaveCustomIconFromSteamGridDbAsync(string gameId, int steamGridDbGameId, CancellationToken ct = default)

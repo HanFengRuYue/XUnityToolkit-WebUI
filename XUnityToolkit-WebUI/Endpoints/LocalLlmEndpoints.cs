@@ -33,34 +33,10 @@ public static class LocalLlmEndpoints
         group.MapGet("/catalog", () =>
             ApiResult<IReadOnlyList<BuiltInModelInfo>>.Ok(BuiltInModelCatalog.Models));
 
-        // ── llama.cpp binary management ──
+        // ── llama.cpp binary status ──
 
         group.MapGet("/llama-status", async (LocalLlmService svc, CancellationToken ct) =>
             ApiResult<LlamaStatus>.Ok(await svc.GetLlamaStatusAsync(ct)));
-
-        group.MapPost("/download-llama", (LocalLlmService svc) =>
-        {
-            _ = Task.Run(async () =>
-            {
-                try { await svc.DownloadRequiredLlamaAsync(CancellationToken.None); }
-                catch { /* errors broadcast via SignalR */ }
-            });
-            return Results.Accepted(value: ApiResult.Ok());
-        });
-
-        group.MapPost("/download-llama/pause", (LocalLlmService svc, PauseLlamaRequest req) =>
-        {
-            svc.PauseLlamaDownload(req.DownloadId);
-            return ApiResult.Ok();
-        });
-
-        group.MapPost("/download-llama/cancel", async (LocalLlmService svc, CancelLlamaRequest req) =>
-        {
-            if (!Enum.TryParse<GpuBackend>(req.Backend, true, out var backend))
-                return Results.BadRequest(ApiResult.Fail("无效的后端名称"));
-            await svc.CancelLlamaDownloadAsync(req.DownloadId, backend);
-            return Results.Ok(ApiResult.Ok());
-        });
 
         // ── Test ──
 
@@ -165,6 +141,4 @@ public record DownloadModelRequest(string CatalogId);
 public record PauseDownloadRequest(string CatalogId);
 public record CancelDownloadRequest(string CatalogId);
 public record AddModelRequest(string FilePath, string Name);
-public record PauseLlamaRequest(string DownloadId);
-public record CancelLlamaRequest(string DownloadId, string Backend);
 public record LocalLlmTestResult(bool Success, string[]? Translations, string? Error, double ResponseTimeMs);

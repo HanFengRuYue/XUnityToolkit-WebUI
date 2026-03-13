@@ -3,21 +3,17 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
-  NPopconfirm,
   NSelect,
   NIcon,
   useMessage,
   useDialog,
 } from 'naive-ui'
 import {
-  StorageOutlined,
   CloudDownloadOutlined,
   InfoOutlined,
-  SpeedOutlined,
   PaletteOutlined,
   TuneOutlined,
   CodeOutlined,
-  DeleteOutlined,
   PersonOutlined,
   OpenInNewOutlined,
   WarningAmberOutlined,
@@ -25,7 +21,7 @@ import {
   ColorLensOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
-import { cacheApi, settingsApi } from '@/api/games'
+import { settingsApi } from '@/api/games'
 import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
@@ -35,44 +31,8 @@ const message = useMessage()
 const dialog = useDialog()
 const themeStore = useThemeStore()
 
-// Cache
-const cacheFileCount = ref(0)
-const cacheSize = ref('')
-const cacheLoading = ref(false)
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${bytes} B`
-}
-
-async function loadCacheInfo() {
-  try {
-    const info = await cacheApi.getInfo()
-    cacheFileCount.value = info.fileCount
-    cacheSize.value = info.totalBytes > 0 ? formatBytes(info.totalBytes) : '0 B'
-  } catch {
-    cacheSize.value = '加载失败'
-  }
-}
-
-async function handleClearCache() {
-  cacheLoading.value = true
-  try {
-    const result = await cacheApi.clear()
-    message.success(`已清除 ${result.fileCount} 个文件（${formatBytes(result.totalBytes)}）`)
-    cacheFileCount.value = 0
-    cacheSize.value = '0 B'
-  } catch {
-    message.error('清除缓存失败')
-  } finally {
-    cacheLoading.value = false
-  }
-}
-
 // Settings
 const settings = ref<AppSettings>({
-  ghMirrorUrl: 'https://ghfast.top/',
   hfMirrorUrl: 'https://hf-mirror.com',
   theme: themeStore.mode,
   aiTranslation: {
@@ -96,6 +56,7 @@ const settings = ref<AppSettings>({
   libraryGap: 'normal',
   libraryShowLabels: true,
 })
+
 const themeOptions = [
   { label: '深色主题', value: 'dark' },
   { label: '浅色主题', value: 'light' },
@@ -185,7 +146,6 @@ function handleReset() {
 }
 
 onMounted(() => {
-  loadCacheInfo()
   loadSettings()
   loadVersion()
 })
@@ -200,128 +160,60 @@ onMounted(() => {
       设置
     </h1>
 
-    <!-- Top row: Cache + Download Settings side by side -->
-    <div class="settings-grid">
-      <!-- Cache Management -->
-      <div class="section-card" style="animation-delay: 0.05s">
-        <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon storage">
-              <NIcon :size="16"><StorageOutlined /></NIcon>
-            </span>
-            下载缓存
-          </h2>
-        </div>
-        <div class="info-grid">
-          <div class="info-card">
-            <div class="info-card-icon file-count">
-              <NIcon :size="18"><DeleteOutlined /></NIcon>
-            </div>
-            <div class="info-card-content">
-              <span class="info-label">缓存文件</span>
-              <span class="info-value">{{ cacheFileCount }} 个文件</span>
-            </div>
-          </div>
-          <div class="info-card">
-            <div class="info-card-icon size">
-              <NIcon :size="18"><StorageOutlined /></NIcon>
-            </div>
-            <div class="info-card-content">
-              <span class="info-label">占用空间</span>
-              <span class="info-value mono">{{ cacheSize }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="section-footer">
-          <span class="footer-hint">清除已缓存的 BepInEx 和 XUnity 安装包</span>
-          <NPopconfirm
-            @positive-click="handleClearCache"
-            negative-text="取消"
-            positive-text="确认清除"
-          >
-            <template #trigger>
-              <NButton size="small" :loading="cacheLoading" ghost type="warning">
-                清除缓存
-              </NButton>
-            </template>
-            确定要清除所有下载缓存？
-          </NPopconfirm>
-        </div>
+    <!-- Settings card -->
+    <div class="section-card" style="animation-delay: 0.05s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon download">
+            <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
+          </span>
+          外观与下载
+        </h2>
       </div>
-
-      <!-- Mirror & Theme Settings -->
-      <div class="section-card" style="animation-delay: 0.1s">
-        <div class="section-header">
-          <h2 class="section-title">
-            <span class="section-icon download">
-              <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
-            </span>
-            下载设置
-          </h2>
+      <div class="settings-form">
+        <div class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><PaletteOutlined /></NIcon>
+            界面主题
+          </label>
+          <NSelect
+            v-model:value="settings.theme"
+            :options="themeOptions"
+          />
         </div>
-        <div class="settings-form">
-          <div class="form-row">
-            <label class="form-label">
-              <NIcon :size="14" color="var(--text-3)"><SpeedOutlined /></NIcon>
-              GitHub 镜像地址
-            </label>
-            <div class="mirror-input-row">
-              <NInput
-                v-model:value="settings.ghMirrorUrl"
-                placeholder="https://ghfast.top/"
-                clearable
-                style="flex: 1"
-              />
-              <NButton size="small" quaternary @click="settings.ghMirrorUrl = 'https://mirror.ghproxy.com'">
-                备用镜像
-              </NButton>
-            </div>
-            <span class="form-hint">加速 GitHub 资源下载（BepInEx、XUnity、llama.cpp），留空使用直连</span>
+        <div class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><ColorLensOutlined /></NIcon>
+            主题色
+          </label>
+          <div class="accent-color-row">
+            <button
+              v-for="preset in accentPresets"
+              :key="preset.hex"
+              class="accent-swatch"
+              :class="{ active: settings.accentColor === preset.hex }"
+              :style="{ '--swatch-color': preset.hex }"
+              :title="preset.name"
+              @click="settings.accentColor = preset.hex"
+            >
+              <svg v-if="settings.accentColor === preset.hex" class="swatch-check" viewBox="0 0 16 16" fill="none">
+                <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </div>
-          <div class="form-row">
-            <label class="form-label">
-              <NIcon :size="14" color="var(--text-3)"><CloudDownloadOutlined /></NIcon>
-              HuggingFace 镜像地址
-            </label>
-            <NInput
-              v-model:value="settings.hfMirrorUrl"
-              placeholder="https://hf-mirror.com"
-              clearable
-            />
-            <span class="form-hint">加速 AI 模型下载，留空使用直连</span>
-          </div>
-          <div class="form-row">
-            <label class="form-label">
-              <NIcon :size="14" color="var(--text-3)"><PaletteOutlined /></NIcon>
-              界面主题
-            </label>
-            <NSelect
-              v-model:value="settings.theme"
-              :options="themeOptions"
-            />
-          </div>
-          <div class="form-row">
-            <label class="form-label">
-              <NIcon :size="14" color="var(--text-3)"><ColorLensOutlined /></NIcon>
-              主题色
-            </label>
-            <div class="accent-color-row">
-              <button
-                v-for="preset in accentPresets"
-                :key="preset.hex"
-                class="accent-swatch"
-                :class="{ active: settings.accentColor === preset.hex }"
-                :style="{ '--swatch-color': preset.hex }"
-                :title="preset.name"
-                @click="settings.accentColor = preset.hex"
-              >
-                <svg v-if="settings.accentColor === preset.hex" class="swatch-check" viewBox="0 0 16 16" fill="none">
-                  <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </button>
-            </div>
-            <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
-          </div>
+          <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
+        </div>
+        <div class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><CloudDownloadOutlined /></NIcon>
+            HuggingFace 镜像地址
+          </label>
+          <NInput
+            v-model:value="settings.hfMirrorUrl"
+            placeholder="https://hf-mirror.com"
+            clearable
+          />
+          <span class="form-hint">加速 AI 模型下载（留空使用官方地址）</span>
         </div>
       </div>
     </div>
@@ -474,14 +366,6 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* ===== Settings Grid (two-column, equal height) ===== */
-.settings-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: stretch;
-}
-
 /* ===== Section Card ===== */
 .section-card {
   display: flex;
@@ -533,13 +417,6 @@ onMounted(() => {
 .section-icon.danger {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--danger);
-}
-
-/* ===== Info Grid & Cards ===== */
-.info-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
 }
 
 .about-grid {
@@ -605,23 +482,6 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-/* ===== Section Footer ===== */
-.section-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 16px;
-  margin-top: auto;
-  border-top: 1px solid var(--border);
-  gap: 12px;
-}
-
-
-.footer-hint {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
 /* ===== Settings Form ===== */
 .settings-form {
   display: flex;
@@ -647,12 +507,6 @@ onMounted(() => {
 .form-hint {
   font-size: 12px;
   color: var(--text-3);
-}
-
-.mirror-input-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 /* ===== Accent Color Swatches ===== */
@@ -758,21 +612,12 @@ onMounted(() => {
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .settings-grid {
-    grid-template-columns: 1fr;
-  }
-
   .section-card {
     padding: 16px;
   }
 
   .danger-body {
     padding: 16px;
-  }
-
-  .info-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
   }
 
   .about-grid {
@@ -798,10 +643,6 @@ onMounted(() => {
     border-radius: var(--radius-md);
   }
 
-  .info-grid {
-    grid-template-columns: 1fr;
-  }
-
   .about-grid {
     grid-template-columns: 1fr;
   }
@@ -816,14 +657,5 @@ onMounted(() => {
     padding: 14px;
   }
 
-  .section-footer {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
-  }
-
-  .footer-hint {
-    text-align: center;
-  }
 }
 </style>

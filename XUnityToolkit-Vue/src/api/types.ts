@@ -60,9 +60,7 @@ export interface AddGameResponse {
 export type InstallStep =
   | 'Idle'
   | 'DetectingGame'
-  | 'DownloadingBepInEx'
   | 'InstallingBepInEx'
-  | 'DownloadingXUnity'
   | 'InstallingXUnity'
   | 'InstallingTmpFont'
   | 'InstallingAiTranslation'
@@ -80,8 +78,6 @@ export interface InstallationStatus {
   progressPercent: number
   message?: string
   error?: string
-  downloadSpeed?: string
-  retryMessage?: string
 }
 
 export interface XUnityConfig {
@@ -146,25 +142,6 @@ export interface XUnityConfig {
   ezTransInstallPath?: string
 }
 
-export interface GitHubRelease {
-  tagName: string
-  name: string
-  prerelease: boolean
-  publishedAt: string
-  assets: GitHubAsset[]
-}
-
-export interface GitHubAsset {
-  name: string
-  browserDownloadUrl: string
-  size: number
-}
-
-export interface CacheInfo {
-  fileCount: number
-  totalBytes: number
-}
-
 export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'DeepSeek' | 'Qwen' | 'GLM' | 'Kimi' | 'Custom'
 
 export interface ApiEndpointConfig {
@@ -193,7 +170,6 @@ export interface AiTranslationSettings {
 }
 
 export interface AppSettings {
-  ghMirrorUrl: string
   hfMirrorUrl: string
   theme: string
   aiTranslation: AiTranslationSettings
@@ -307,6 +283,14 @@ export interface SteamStoreSearchResult {
   tinyImage: string
 }
 
+export interface WebImageResult {
+  thumbUrl: string
+  fullUrl: string
+  width: number | null
+  height: number | null
+  title: string | null
+}
+
 export interface LogEntry {
   timestamp: string
   level: string
@@ -365,14 +349,6 @@ export interface LocalLlmSettings {
   endpointId: string
   models: LocalModelEntry[]
   pausedDownloads: PausedDownload[]
-  pausedLlamaDownloads: PausedLlamaDownload[]
-}
-
-export interface PausedLlamaDownload {
-  backend: string
-  downloadId: string
-  bytesDownloaded: number
-  totalBytes: number
 }
 
 export interface PausedDownload {
@@ -411,7 +387,6 @@ export interface LocalLlmStatus {
 
 export interface LlamaBackendInfo {
   backend: GpuBackend
-  downloadId: string
   isInstalled: boolean
   llamaVersion: string
 }

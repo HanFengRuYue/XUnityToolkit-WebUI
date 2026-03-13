@@ -4,6 +4,7 @@ import { NModal, NInput, NButton, NIcon, NTabs, NTabPane, NSpin, useMessage } fr
 import { SearchRound, CloudUploadOutlined } from '@vicons/material'
 import { gamesApi } from '@/api/games'
 import type { Game, SteamGridDbSearchResult, SteamGridDbImage, SteamStoreSearchResult } from '@/api/types'
+import WebImageSearchTab from './WebImageSearchTab.vue'
 
 const props = defineProps<{
   show: boolean
@@ -175,6 +176,11 @@ function clearUpload() {
   uploadPreview.value = null
 }
 
+function onWebSaved() {
+  emit('saved')
+  emit('update:show', false)
+}
+
 async function deleteCover() {
   try {
     await gamesApi.deleteCover(props.game.id)
@@ -301,6 +307,11 @@ async function deleteCover() {
             </div>
           </div>
         </div>
+      </NTabPane>
+
+      <!-- Web Image Search -->
+      <NTabPane name="web" tab="网络搜索">
+        <WebImageSearchTab :game="game" mode="cover" @saved="onWebSaved" />
       </NTabPane>
 
       <!-- Custom Upload -->
@@ -544,6 +555,12 @@ async function deleteCover() {
 .preview-actions {
   display: flex;
   gap: 10px;
+}
+
+/* Tabs equal width */
+:deep(.n-tabs-tab) {
+  flex: 1;
+  justify-content: center;
 }
 
 /* Footer */

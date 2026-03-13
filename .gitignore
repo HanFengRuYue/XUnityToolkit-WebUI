@@ -19,6 +19,9 @@ XUnityToolkit-Vue/src/components.d.ts
 # Build output
 Release/
 
+# Bundled assets (downloaded during build)
+bundled/
+
 # llama.cpp pre-built binaries (downloaded during build)
 llama-bin/
 

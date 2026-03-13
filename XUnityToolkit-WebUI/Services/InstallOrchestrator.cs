@@ -11,13 +11,13 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class InstallOrchestrator(
     GameLibraryService gameLibrary,
     UnityDetectionService detection,
-    GitHubReleaseService gitHub,
     BepInExInstallerService bepInExInstaller,
     XUnityInstallerService xUnityInstaller,
     TmpFontService tmpFontService,
     ConfigurationService configService,
     AppSettingsService appSettingsService,
     AssetExtractionService assetExtraction,
+    BundledAssetPaths bundledPaths,
     AppDataPaths appDataPaths,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
@@ -48,8 +48,6 @@ public sealed class InstallOrchestrator(
             status.ProgressPercent = 0;
             status.Error = null;
             status.Message = null;
-            status.DownloadSpeed = null;
-            status.RetryMessage = null;
 
             var cts = new CancellationTokenSource();
             _cancellations[gameId] = cts;
@@ -100,8 +98,6 @@ public sealed class InstallOrchestrator(
             status.ProgressPercent = 0;
             status.Error = null;
             status.Message = null;
-            status.DownloadSpeed = null;
-            status.RetryMessage = null;
 
             _ = Task.Run(async () =>
             {
@@ -147,90 +143,52 @@ public sealed class InstallOrchestrator(
         var gameInfo = game.DetectedInfo!;
         var usesBepInEx6 = gameInfo.Backend == UnityBackend.IL2CPP;
 
-        // Step 2: Download BepInEx
-        await UpdateStatus(status, InstallStep.DownloadingBepInEx, 10, "Fetching BepInEx releases...");
+        // Step 2: Install BepInEx (from bundled ZIP)
+        await UpdateStatus(status, InstallStep.InstallingBepInEx, 10, "正在安装 BepInEx...");
 
-        var bepInExReleases = await gitHub.GetReleasesAsync("BepInEx", "BepInEx", ct);
-        var bepInExRelease = usesBepInEx6
-            ? bepInExReleases.FirstOrDefault(r => r.TagName.StartsWith("v6"))
-            : bepInExReleases.FirstOrDefault(r => !r.Prerelease && r.TagName.StartsWith("v5"));
-
-        if (bepInExRelease is null)
-            throw new InvalidOperationException("No suitable BepInEx release found.");
-
-        var bepInExAsset = bepInExInstaller.ResolveAsset(gameInfo, bepInExRelease.Assets, usesBepInEx6)
-            ?? throw new InvalidOperationException(
-                $"No compatible BepInEx build found for {gameInfo.Backend} {gameInfo.Architecture}.");
-
-        await UpdateStatus(status, InstallStep.DownloadingBepInEx, 15,
-            $"Downloading {bepInExAsset.Name}...");
-
-        var bepProgress = MakeDownloadProgress(status, basePercent: 15, rangePercent: 25);
-
-        var bepInExZip = await gitHub.DownloadAssetAsync(
-            bepInExAsset.BrowserDownloadUrl, bepInExAsset.Name, bepProgress, ct);
-
-        // Step 3: Install BepInEx
-        await UpdateStatus(status, InstallStep.InstallingBepInEx, 40, "Installing BepInEx...");
+        var bepInExZip = bepInExInstaller.ResolveBundledZip(gameInfo, bundledPaths);
+        var installedBepInExVersion = BepInExInstallerService.ParseVersionFromZip(bepInExZip);
 
         await bepInExInstaller.InstallAsync(game.GamePath, bepInExZip, ct);
+        await UpdateStatus(status, InstallStep.InstallingBepInEx, 35, "BepInEx 安装完成");
 
-        game.InstalledBepInExVersion = bepInExRelease.TagName;
+        game.InstalledBepInExVersion = installedBepInExVersion;
         game.InstallState = InstallState.BepInExOnly;
         await gameLibrary.UpdateAsync(game, ct);
 
-        // Step 4: Download XUnity.AutoTranslator
-        await UpdateStatus(status, InstallStep.DownloadingXUnity, 50,
-            "Fetching XUnity.AutoTranslator releases...");
+        // Step 3: Install XUnity.AutoTranslator (from bundled ZIP)
+        await UpdateStatus(status, InstallStep.InstallingXUnity, 40, "正在安装 XUnity.AutoTranslator...");
 
-        var xUnityRelease = await gitHub.GetLatestReleaseAsync(
-            "bbepis", "XUnity.AutoTranslator", ct: ct)
-            ?? throw new InvalidOperationException("No XUnity.AutoTranslator release found.");
-
-        var xUnityAsset = xUnityInstaller.ResolveAsset(gameInfo, xUnityRelease.Assets)
-            ?? throw new InvalidOperationException("No compatible XUnity.AutoTranslator build found.");
-
-        await UpdateStatus(status, InstallStep.DownloadingXUnity, 55,
-            $"Downloading {xUnityAsset.Name}...");
-
-        var xProgress = MakeDownloadProgress(status, basePercent: 55, rangePercent: 25);
-
-        var xUnityZip = await gitHub.DownloadAssetAsync(
-            xUnityAsset.BrowserDownloadUrl, xUnityAsset.Name, xProgress, ct);
-
-        // Step 5: Install XUnity.AutoTranslator
-        await UpdateStatus(status, InstallStep.InstallingXUnity, 80, "Installing XUnity.AutoTranslator...");
+        var xUnityZip = xUnityInstaller.ResolveBundledZip(gameInfo, bundledPaths);
+        var installedXUnityVersion = XUnityInstallerService.ParseVersionFromZip(xUnityZip);
 
         await xUnityInstaller.InstallAsync(game.GamePath, xUnityZip, ct);
+        await UpdateStatus(status, InstallStep.InstallingXUnity, 65, "XUnity.AutoTranslator 安装完成");
 
-        // Step: Install TMP font asset bundle
-        await UpdateStatus(status, InstallStep.InstallingTmpFont, 81, "正在安装 TMP 字体...");
+        // Step 4: Install TMP font
+        await UpdateStatus(status, InstallStep.InstallingTmpFont, 66, "正在安装 TMP 字体...");
         try
         {
             if (tmpFontService.InstallFont(game.GamePath, gameInfo))
-            {
-                await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体已安装");
-            }
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体已安装");
             else
-            {
-                await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体不可用（跳过）");
-            }
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体不可用（跳过）");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "TMP 字体安装失败（不影响安装）");
-            await UpdateStatus(status, InstallStep.InstallingTmpFont, 82, "TMP 字体安装失败（跳过）");
+            await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体安装失败（跳过）");
         }
 
-        // Deploy LLMTranslate translator endpoint DLL (if available)
-        await UpdateStatus(status, InstallStep.InstallingAiTranslation, 83, "正在部署 AI 翻译端点...");
+        // Step 5: Deploy LLMTranslate translator endpoint DLL
+        await UpdateStatus(status, InstallStep.InstallingAiTranslation, 70, "正在部署 AI 翻译端点...");
         if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
-            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 85, "AI 翻译端点已部署");
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点已部署");
         else
-            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 85, "AI 翻译端点不可用（跳过）");
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点不可用（跳过）");
 
         // Step 6: Launch game to generate config file
-        await UpdateStatus(status, InstallStep.GeneratingConfig, 86, "正在启动游戏以生成配置文件...");
+        await UpdateStatus(status, InstallStep.GeneratingConfig, 73, "正在启动游戏以生成配置文件...");
 
         var configPath = configService.GetConfigPath(game.GamePath);
         var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable
@@ -247,7 +205,6 @@ public sealed class InstallOrchestrator(
                 UseShellExecute = true
             });
 
-            // Wait for config file to appear (poll every second, timeout 60s)
             var timeout = TimeSpan.FromSeconds(60);
             var elapsed = TimeSpan.Zero;
             var interval = TimeSpan.FromSeconds(1);
@@ -258,7 +215,7 @@ public sealed class InstallOrchestrator(
                 await Task.Delay(interval, ct);
                 elapsed += interval;
                 await UpdateStatus(status, InstallStep.GeneratingConfig,
-                    85 + (int)(elapsed.TotalSeconds / timeout.TotalSeconds * 5),
+                    73 + (int)(elapsed.TotalSeconds / timeout.TotalSeconds * 12),
                     $"等待配置文件生成... ({(int)elapsed.TotalSeconds}s)");
             }
 
@@ -269,7 +226,6 @@ public sealed class InstallOrchestrator(
         }
         finally
         {
-            // Kill the game process
             if (gameProcess != null && !gameProcess.HasExited)
             {
                 try
@@ -287,16 +243,16 @@ public sealed class InstallOrchestrator(
         }
 
         // Step 7: Apply optimal defaults and user config
-        await UpdateStatus(status, InstallStep.ApplyingConfig, 91, "正在应用最佳默认配置...");
+        await UpdateStatus(status, InstallStep.ApplyingConfig, 86, "正在应用最佳默认配置...");
         await configService.ApplyOptimalDefaultsAsync(game.GamePath, ct);
 
         if (config != null)
         {
-            await UpdateStatus(status, InstallStep.ApplyingConfig, 94, "正在应用用户配置...");
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 89, "正在应用用户配置...");
             await configService.PatchAsync(game.GamePath, config, ct);
         }
 
-        await UpdateStatus(status, InstallStep.ApplyingConfig, 97, "配置应用完成");
+        await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "配置应用完成");
 
         // Patch LLMTranslate section with GameId and ToolkitUrl
         if (File.Exists(configPath) && xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath))
@@ -312,7 +268,7 @@ public sealed class InstallOrchestrator(
         }
 
         // Step 8: Extract game assets for language detection
-        await UpdateStatus(status, InstallStep.ExtractingAssets, 98, "正在提取游戏资产以检测语言...");
+        await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "正在提取游戏资产以检测语言...");
         try
         {
             var extractResult = await assetExtraction.ExtractTextsAsync(
@@ -331,7 +287,6 @@ public sealed class InstallOrchestrator(
                     extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
             }
 
-            // Cache extracted texts for pre-translation reuse (don't overwrite existing manual extraction)
             var cachePath = appDataPaths.ExtractedTextsFile(game.Id);
             if (!File.Exists(cachePath) && extractResult.Texts.Count > 0)
             {
@@ -353,7 +308,7 @@ public sealed class InstallOrchestrator(
         }
 
         // Step 9: Complete
-        game.InstalledXUnityVersion = xUnityRelease.TagName;
+        game.InstalledXUnityVersion = installedXUnityVersion;
         game.InstallState = InstallState.FullyInstalled;
         await gameLibrary.UpdateAsync(game, ct);
 
@@ -376,19 +331,6 @@ public sealed class InstallOrchestrator(
         await UpdateStatus(status, InstallStep.Complete, 100, "Uninstall complete!");
     }
 
-    private IProgress<DownloadProgress> MakeDownloadProgress(
-        InstallationStatus status, int basePercent, int rangePercent)
-    {
-        return new Progress<DownloadProgress>(p =>
-        {
-            status.ProgressPercent = basePercent + p.Percent * rangePercent / 100;
-            status.DownloadSpeed = p.SpeedFormatted;
-            if (p.RetryMessage is not null)
-                status.RetryMessage = p.RetryMessage;
-            _ = BroadcastStatus(status);
-        });
-    }
-
     private async Task UpdateStatus(InstallationStatus status, InstallStep step, int percent,
         string? message = null, string? error = null)
     {
@@ -396,8 +338,6 @@ public sealed class InstallOrchestrator(
         status.ProgressPercent = percent;
         status.Message = message;
         status.Error = error;
-        status.DownloadSpeed = null;
-        status.RetryMessage = null;
         await BroadcastStatus(status);
     }
 

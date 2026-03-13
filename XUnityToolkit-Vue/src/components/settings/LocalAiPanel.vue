@@ -21,7 +21,6 @@ import {
   PauseOutlined,
   ExpandMoreOutlined,
   RestoreOutlined,
-  WarningAmberOutlined,
   ScienceOutlined,
 } from '@vicons/material'
 import { useLocalLlmStore } from '@/stores/localLlm'
@@ -74,41 +73,18 @@ function formatSpeed(bytesPerSec: number): string {
 const allModels = computed(() => store.settings?.models ?? [])
 const pausedDownloads = computed(() =>
   (store.settings?.pausedDownloads ?? []).filter(p => !store.downloads.has(p.catalogId)))
-const pausedLlamaDownloads = computed(() =>
-  (store.settings?.pausedLlamaDownloads ?? []).filter(p => !store.downloads.has(p.downloadId)))
 
 const hasDownloadTasks = computed(() =>
-  store.downloads.size > 0 || pausedDownloads.value.length > 0 || pausedLlamaDownloads.value.length > 0)
+  store.downloads.size > 0 || pausedDownloads.value.length > 0)
 
 // llama binary status
 const llamaInstalled = computed(() =>
   store.llamaStatus?.backends?.some(b => b.isInstalled) ?? false)
 
-const showLlamaNotInstalled = computed(() =>
-  store.llamaStatus !== null && !llamaInstalled.value)
-
-const isLlamaDownloading = computed(() => {
-  for (const [key] of store.downloads) {
-    if (key.startsWith('llama-')) return true
-  }
-  return false
-})
-
-// Show "LLAMA_NOT_INSTALLED" sentinel as download prompt, not error
 const showErrorBanner = computed(() =>
-  store.status?.state === 'Failed'
-  && !!store.status?.error
-  && store.status?.error !== 'LLAMA_NOT_INSTALLED')
-
-const LLAMA_DOWNLOAD_NAMES: Record<string, string> = {
-  'llama-cuda': 'llama.cpp CUDA 后端',
-  'llama-vulkan': 'llama.cpp Vulkan 后端',
-  'llama-cpu': 'llama.cpp CPU 后端',
-}
+  store.status?.state === 'Failed' && !!store.status?.error)
 
 function getDownloadName(downloadId: string): string {
-  if (downloadId.startsWith('llama-'))
-    return LLAMA_DOWNLOAD_NAMES[downloadId] ?? downloadId
   return store.catalog.find(c => c.id === downloadId)?.name ?? downloadId
 }
 
@@ -168,17 +144,6 @@ async function handleStop() {
   }
 }
 
-async function handleDownloadLlama() {
-  await handleSaveSettings()
-  try {
-    await localLlmApi.downloadLlama()
-    message.info('开始下载 llama.cpp 运行库...')
-    store.fetchSettings() // clear paused state
-  } catch (e: unknown) {
-    message.error(`下载失败: ${e instanceof Error ? e.message : '未知错误'}`)
-  }
-}
-
 async function handleDownload(catalog: BuiltInModelInfo) {
   await handleSaveSettings()
   try {
@@ -203,26 +168,14 @@ async function handleResumeDownload(catalogId: string) {
 
 async function handlePauseDownload(catalogId: string) {
   try {
-    if (catalogId.startsWith('llama-')) {
-      await localLlmApi.pauseLlamaDownload(catalogId)
-    } else {
-      await store.pauseDownload(catalogId)
-    }
+    await store.pauseDownload(catalogId)
     message.info('下载已暂停')
   } catch { /* ignore */ }
 }
 
 async function handleCancelDownload(catalogId: string) {
   try {
-    if (catalogId.startsWith('llama-')) {
-      const backend = catalogId.replace('llama-', '')
-      await localLlmApi.cancelLlamaDownload(catalogId, backend)
-      store.downloads.delete(catalogId)
-      await store.fetchSettings()
-      await store.fetchLlamaStatus()
-    } else {
-      await store.cancelDownload(catalogId)
-    }
+    await store.cancelDownload(catalogId)
     message.info('下载已取消')
   } catch { /* ignore */ }
 }
@@ -304,27 +257,6 @@ onUnmounted(() => {
 
 <template>
   <div class="local-ai-panel">
-    <!-- llama.cpp Not Installed Banner -->
-    <div v-if="showLlamaNotInstalled && !isLlamaDownloading" class="llama-install-banner">
-      <div class="llama-install-icon">
-        <NIcon :size="24"><WarningAmberOutlined /></NIcon>
-      </div>
-      <div class="llama-install-content">
-        <div class="llama-install-title">llama.cpp 运行库未安装</div>
-        <div class="llama-install-desc">
-          需要下载 llama.cpp 运行库才能使用本地 AI 推理。
-          将根据你的显卡自动下载对应后端
-          <template v-if="store.llamaStatus">
-            ({{ store.llamaStatus.recommendedBackend }})
-          </template>。
-        </div>
-      </div>
-      <NButton type="primary" @click="handleDownloadLlama">
-        <template #icon><NIcon><DownloadOutlined /></NIcon></template>
-        一键下载
-      </NButton>
-    </div>
-
     <!-- Server Status -->
     <div class="status-bar" :class="store.status?.state?.toLowerCase()">
       <div class="status-left">
@@ -621,36 +553,6 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Paused llama downloads -->
-        <div v-for="paused in pausedLlamaDownloads" :key="paused.downloadId" class="download-task-item paused">
-          <div class="download-task-info">
-            <div class="download-task-name">
-              {{ getDownloadName(paused.downloadId) }}
-              <NTag size="small" type="warning" :bordered="false">已暂停</NTag>
-            </div>
-            <NProgress
-              type="line"
-              status="warning"
-              :percentage="paused.totalBytes > 0 ? Math.round((paused.bytesDownloaded / paused.totalBytes) * 100) : 0"
-              :show-indicator="false"
-              :height="6"
-            />
-          </div>
-          <div class="download-task-actions">
-            <NButton size="small" type="primary" ghost @click="handleDownloadLlama">
-              <template #icon><NIcon><PlayArrowOutlined /></NIcon></template>
-              继续
-            </NButton>
-            <NPopconfirm @positive-click="handleCancelDownload(paused.downloadId)">
-              <template #trigger>
-                <NButton size="small" quaternary type="error">
-                  <template #icon><NIcon><CloseOutlined /></NIcon></template>
-                </NButton>
-              </template>
-              确定取消下载？已下载的部分将被删除。
-            </NPopconfirm>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -712,43 +614,6 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 20px;
 }
-
-/* llama Install Banner */
-.llama-install-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  padding: 18px 20px;
-  background: color-mix(in srgb, var(--warning) 6%, var(--bg-subtle));
-  border: 1px solid color-mix(in srgb, var(--warning) 20%, var(--border));
-  border-radius: var(--radius-md);
-}
-
-.llama-install-icon {
-  color: var(--warning);
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.llama-install-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.llama-install-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.llama-install-desc {
-  font-size: 13px;
-  color: var(--text-2);
-  line-height: 1.5;
-}
-
 
 /* Status Bar */
 .status-bar {
@@ -1188,10 +1053,6 @@ onUnmounted(() => {
 
   .download-task-actions {
     justify-content: flex-end;
-  }
-
-  .llama-install-banner {
-    flex-direction: column;
   }
 
   .info-header {

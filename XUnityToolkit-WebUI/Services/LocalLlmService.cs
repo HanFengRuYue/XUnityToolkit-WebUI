@@ -15,8 +15,8 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class LocalLlmService(
     IHttpClientFactory httpClientFactory,
     AppSettingsService settingsService,
-    MirrorProbeService mirrorProbeService,
     AppDataPaths paths,
+    BundledAssetPaths bundledPaths,
     IHubContext<InstallProgressHub> hubContext,
     SystemTrayService trayService,
     ILogger<LocalLlmService> logger)
@@ -29,7 +29,7 @@ public sealed class LocalLlmService(
     private GpuBackend _activeBackend;
     private LocalLlmSettings? _settingsCache;
 
-    // Download tracking (shared by model + llama binary downloads)
+    // Download tracking (model downloads only)
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _downloads = new();
     private readonly ConcurrentDictionary<string, bool> _pauseRequests = new();
     private readonly ConcurrentDictionary<string, bool> _downloadMirrorState = new();
@@ -46,16 +46,6 @@ public sealed class LocalLlmService(
     // ── llama.cpp binary constants ──
 
     public const string LlamaVersion = "b8272";
-    private const string GhBaseUrl = "https://github.com/ggml-org/llama.cpp/releases/download";
-
-    private static readonly IReadOnlyDictionary<GpuBackend, (string Asset, string? CudaRuntime)> LlamaAssets =
-        new Dictionary<GpuBackend, (string, string?)>
-        {
-            [GpuBackend.CUDA]   = ($"llama-{LlamaVersion}-bin-win-cuda-12.4-x64.zip",
-                                   "cudart-llama-bin-win-cuda-12.4-x64.zip"),
-            [GpuBackend.Vulkan] = ($"llama-{LlamaVersion}-bin-win-vulkan-x64.zip", null),
-            [GpuBackend.CPU]    = ($"llama-{LlamaVersion}-bin-win-cpu-x64.zip",    null),
-        };
 
     // ── Settings persistence ──
 
@@ -63,24 +53,17 @@ public sealed class LocalLlmService(
     {
         if (_settingsCache is not null) return _settingsCache;
 
-        var path = paths.LocalLlmSettingsFile;
-        if (File.Exists(path))
-        {
-            try
-            {
-                var json = await File.ReadAllTextAsync(path, ct);
-                _settingsCache = JsonSerializer.Deserialize<LocalLlmSettings>(json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
-            }
-            catch
-            {
-                _settingsCache = new LocalLlmSettings();
-            }
-        }
-        else
+        if (!File.Exists(paths.LocalLlmSettingsFile))
         {
             _settingsCache = new LocalLlmSettings();
+            return _settingsCache;
         }
+
+        var json = await File.ReadAllTextAsync(paths.LocalLlmSettingsFile, ct);
+        _settingsCache = JsonSerializer.Deserialize<LocalLlmSettings>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        }) ?? new LocalLlmSettings();
         return _settingsCache;
     }
 
@@ -174,13 +157,7 @@ public sealed class LocalLlmService(
         return GpuBackend.CPU;
     }
 
-    /// <summary>Returns the backends that should be downloaded based on detected GPUs.</summary>
-    public IReadOnlyList<GpuBackend> GetRequiredBackendsForGpu(List<GpuInfo> gpus)
-    {
-        return [GetBestBackend(gpus)];
-    }
-
-    // ── llama.cpp Binary Management ──
+    // ── llama.cpp Binary Management (bundled) ──
 
     public async Task<LlamaStatus> GetLlamaStatusAsync(CancellationToken ct = default)
     {
@@ -191,12 +168,10 @@ public sealed class LocalLlmService(
         foreach (var backend in new[] { GpuBackend.CUDA, GpuBackend.Vulkan, GpuBackend.CPU })
         {
             var serverPath = GetLlamaServerPath(backend);
-            var isInstalled = File.Exists(serverPath);
-            var downloadId = $"llama-{backend.ToString().ToLowerInvariant()}";
+            var isInstalled = File.Exists(serverPath) || BundledLlamaZipExists(backend);
 
             backends.Add(new LlamaBackendInfo(
                 backend.ToString(),
-                downloadId,
                 isInstalled,
                 isInstalled ? LlamaVersion : ""));
         }
@@ -204,276 +179,72 @@ public sealed class LocalLlmService(
         return new LlamaStatus(LlamaVersion, backends, recommended);
     }
 
-    public async Task DownloadRequiredLlamaAsync(CancellationToken ct)
+    /// <summary>
+    /// Ensures the llama.cpp binary for the given backend is extracted from the bundled ZIP.
+    /// Called automatically before starting the server.
+    /// </summary>
+    private async Task EnsureLlamaExtractedAsync(GpuBackend backend)
     {
-        var gpus = await DetectGpusAsync();
-        var required = GetRequiredBackendsForGpu(gpus);
+        var serverPath = GetLlamaServerPath(backend);
+        if (File.Exists(serverPath)) return;
 
-        foreach (var backend in required)
+        // Find and extract the main backend ZIP
+        var zipPattern = backend switch
         {
-            // Skip if already installed
-            if (File.Exists(GetLlamaServerPath(backend)))
-                continue;
+            GpuBackend.CUDA => "llama-*-bin-win-cuda-*.zip",
+            GpuBackend.Vulkan => "llama-*-bin-win-vulkan-*.zip",
+            GpuBackend.CPU => "llama-*-bin-win-cpu-*.zip",
+            _ => throw new InvalidOperationException($"未知后端: {backend}")
+        };
 
-            await DownloadLlamaBackendAsync(backend, ct);
-        }
-    }
+        var zip = bundledPaths.FindLlamaZip(zipPattern)
+            ?? throw new InvalidOperationException(
+                $"未找到捆绑的 llama.cpp {backend} ZIP。请重新构建发布版本。");
 
-    public async Task DownloadLlamaBackendAsync(GpuBackend backend, CancellationToken ct)
-    {
-        var downloadId = $"llama-{backend.ToString().ToLowerInvariant()}";
-
-        if (_downloads.ContainsKey(downloadId))
-            throw new InvalidOperationException("该后端正在下载中");
-
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (!_downloads.TryAdd(downloadId, cts))
-        {
-            cts.Dispose();
-            throw new InvalidOperationException("该后端正在下载中");
-        }
-
-        // Remove from paused list if resuming
-        var settings = await LoadSettingsAsync();
-        if (settings.PausedLlamaDownloads.RemoveAll(p => p.DownloadId == downloadId) > 0)
-            await SaveSettingsAsync(settings);
-
-        try
-        {
-            await DownloadLlamaInternalAsync(backend, downloadId, cts.Token);
-        }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
-        {
-            if (_pauseRequests.TryRemove(downloadId, out _))
-                await SavePausedLlamaStateAsync(backend, downloadId);
-            else
-                await CleanupLlamaDownloadAsync(downloadId, backend);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "llama.cpp {Backend} 下载失败", backend);
-            _downloadMirrorState.TryGetValue(downloadId, out var mirror);
-            await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-                downloadId, 0, 0, 0, false, ex.Message, UseMirror: mirror));
-            await CleanupLlamaDownloadAsync(downloadId, backend);
-            trayService.ShowNotification("下载失败", $"llama.cpp {backend} 后端下载失败", ToolTipIcon.Error);
-        }
-        finally
-        {
-            _downloads.TryRemove(downloadId, out _);
-            _downloadMirrorState.TryRemove(downloadId, out _);
-            cts.Dispose();
-        }
-    }
-
-    private async Task DownloadLlamaInternalAsync(GpuBackend backend, string downloadId, CancellationToken ct)
-    {
-        var (mainAsset, cudaRuntime) = LlamaAssets[backend];
-        var destDir = Path.Combine(paths.LlamaDirectory, backend.ToString().ToLowerInvariant());
+        var destDir = Path.GetDirectoryName(serverPath)!;
         Directory.CreateDirectory(destDir);
-        Directory.CreateDirectory(paths.LlamaDownloadsDirectory);
+        await ExtractLlamaZipAsync(zip, destDir);
 
-        var appSettings = await settingsService.GetAsync(ct);
-        var ghMirror = string.IsNullOrWhiteSpace(appSettings.GhMirrorUrl) ? null : appSettings.GhMirrorUrl;
-
-        // Probe GitHub once — reuse result for all assets in this download
-        var probeUrl = $"{GhBaseUrl}/{LlamaVersion}/{mainAsset}";
-        var useMirror = ghMirror != null && await mirrorProbeService.ShouldUseMirrorAsync(probeUrl, ct);
-        _downloadMirrorState[downloadId] = useMirror;
-        if (useMirror)
-            logger.LogInformation("GitHub 直连较慢，llama.cpp 下载使用镜像加速");
-
-        // Collect all ZIP assets to download
-        var assets = new List<string> { mainAsset };
-        if (cudaRuntime is not null) assets.Add(cudaRuntime);
-
-        foreach (var asset in assets)
+        // Also extract CUDA runtime if applicable
+        if (backend == GpuBackend.CUDA)
         {
-            var directUrl = $"{GhBaseUrl}/{LlamaVersion}/{asset}";
-            var url = useMirror ? MirrorProbeService.BuildMirrorUrl(directUrl, ghMirror!) : directUrl;
-            var tempPath = Path.Combine(paths.LlamaDownloadsDirectory, asset + ".downloading");
-            var zipPath = Path.Combine(paths.LlamaDownloadsDirectory, asset);
+            var cudaRtZip = bundledPaths.FindLlamaZip("cudart-*.zip");
+            if (cudaRtZip is not null)
+                await ExtractLlamaZipAsync(cudaRtZip, destDir);
+        }
 
-            long existingBytes = 0;
-            if (File.Exists(tempPath))
-                existingBytes = new FileInfo(tempPath).Length;
+        logger.LogInformation("llama.cpp {Backend} 后端已从捆绑包解压", backend);
+    }
 
-            var client = httpClientFactory.CreateClient("LocalLlmDownload");
-
-            if (existingBytes > 0)
+    private static Task ExtractLlamaZipAsync(string zipPath, string destDir)
+    {
+        return Task.Run(() =>
+        {
+            using var archive = ZipFile.OpenRead(zipPath);
+            foreach (var entry in archive.Entries)
             {
-                using var rangeReq = new HttpRequestMessage(HttpMethod.Get, url);
-                rangeReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existingBytes, null);
-                using var rangeResp = await client.SendAsync(rangeReq, HttpCompletionOption.ResponseHeadersRead, ct);
+                var fileName = Path.GetFileName(entry.FullName);
+                if (string.IsNullOrEmpty(fileName)) continue;
 
-                if (rangeResp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
-                {
-                    var actualSize = rangeResp.Content.Headers.ContentRange?.Length;
-                    if (actualSize.HasValue && existingBytes >= actualSize.Value)
-                    {
-                        // Already complete — extract
-                        if (File.Exists(zipPath)) File.Delete(zipPath);
-                        File.Move(tempPath, zipPath);
-                        await ExtractLlamaZipAsync(zipPath, destDir);
-                        continue;
-                    }
-                    File.Delete(tempPath);
-                }
-                else
-                {
-                    rangeResp.EnsureSuccessStatusCode();
-                    var totalBytes = rangeResp.Content.Headers.ContentLength.HasValue
-                        ? rangeResp.Content.Headers.ContentLength.Value + existingBytes
-                        : 0;
-                    await DownloadLlamaStreamAsync(downloadId, rangeResp, tempPath, existingBytes, totalBytes, useMirror, ct);
-                    if (File.Exists(zipPath)) File.Delete(zipPath);
-                    File.Move(tempPath, zipPath);
-                    await ExtractLlamaZipAsync(zipPath, destDir);
-                    continue;
-                }
+                var isServer = fileName.Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase);
+                var isDll = Path.GetExtension(fileName).Equals(".dll", StringComparison.OrdinalIgnoreCase);
+                if (!isServer && !isDll) continue;
+
+                entry.ExtractToFile(Path.Combine(destDir, fileName), overwrite: true);
             }
-
-            // Fresh download
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
-            resp.EnsureSuccessStatusCode();
-
-            var freshTotal = resp.Content.Headers.ContentLength ?? 0;
-            await DownloadLlamaStreamAsync(downloadId, resp, tempPath, 0, freshTotal, useMirror, ct);
-            if (File.Exists(zipPath)) File.Delete(zipPath);
-            File.Move(tempPath, zipPath);
-            await ExtractLlamaZipAsync(zipPath, destDir);
-        }
-
-        // Clean up downloaded ZIPs
-        foreach (var asset in assets)
-        {
-            var zipPath = Path.Combine(paths.LlamaDownloadsDirectory, asset);
-            try { if (File.Exists(zipPath)) File.Delete(zipPath); } catch { }
-        }
-
-        await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-            downloadId, 1, 1, 0, true, null, UseMirror: useMirror));
-
-        logger.LogInformation("llama.cpp {Backend} 后端下载完成", backend);
-        trayService.ShowNotification("下载完成", $"llama.cpp {backend} 后端已下载完成");
-    }
-
-    private async Task DownloadLlamaStreamAsync(string downloadId, HttpResponseMessage resp,
-        string tempPath, long existingBytes, long totalBytes, bool useMirror, CancellationToken ct)
-    {
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        await using var fs = new FileStream(tempPath, existingBytes > 0 ? FileMode.Append : FileMode.Create,
-            FileAccess.Write, FileShare.None, 81920);
-
-        var buffer = new byte[81920];
-        long bytesDownloaded = existingBytes;
-        var sw = Stopwatch.StartNew();
-        long lastBroadcastTicks = 0;
-
-        int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
-        {
-            await fs.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-            bytesDownloaded += bytesRead;
-
-            var now = sw.ElapsedTicks;
-            if (now - lastBroadcastTicks >= TimeSpan.FromMilliseconds(200).Ticks)
-            {
-                var elapsed = sw.Elapsed.TotalSeconds;
-                var speed = elapsed > 0 ? (long)((bytesDownloaded - existingBytes) / elapsed) : 0;
-
-                await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-                    downloadId, bytesDownloaded, totalBytes, speed, false, null, UseMirror: useMirror));
-                lastBroadcastTicks = now;
-            }
-        }
-    }
-
-    private static async Task ExtractLlamaZipAsync(string zipPath, string destDir)
-    {
-        using var archive = ZipFile.OpenRead(zipPath);
-        foreach (var entry in archive.Entries)
-        {
-            var fileName = Path.GetFileName(entry.FullName);
-            if (string.IsNullOrEmpty(fileName)) continue;
-
-            var isServer = fileName.Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase);
-            var isDll = Path.GetExtension(fileName).Equals(".dll", StringComparison.OrdinalIgnoreCase);
-            if (!isServer && !isDll) continue;
-
-            var destPath = Path.Combine(destDir, fileName);
-            entry.ExtractToFile(destPath, overwrite: true);
-        }
-    }
-
-    private async Task SavePausedLlamaStateAsync(GpuBackend backend, string downloadId)
-    {
-        // Calculate bytes downloaded from all temp files for this backend
-        var (mainAsset, cudaRuntime) = LlamaAssets[backend];
-        long bytesDownloaded = 0;
-        var tempPath = Path.Combine(paths.LlamaDownloadsDirectory, mainAsset + ".downloading");
-        if (File.Exists(tempPath)) bytesDownloaded += new FileInfo(tempPath).Length;
-        if (cudaRuntime is not null)
-        {
-            var cudaTempPath = Path.Combine(paths.LlamaDownloadsDirectory, cudaRuntime + ".downloading");
-            if (File.Exists(cudaTempPath)) bytesDownloaded += new FileInfo(cudaTempPath).Length;
-        }
-
-        var settings = await LoadSettingsAsync();
-        settings.PausedLlamaDownloads.RemoveAll(p => p.DownloadId == downloadId);
-        settings.PausedLlamaDownloads.Add(new PausedLlamaDownload
-        {
-            Backend = backend.ToString().ToLowerInvariant(),
-            DownloadId = downloadId,
-            BytesDownloaded = bytesDownloaded,
-            TotalBytes = 0 // unknown after pause
         });
-        await SaveSettingsAsync(settings);
-
-        await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-            downloadId, bytesDownloaded, 0, 0, false, null, Paused: true));
     }
 
-    private async Task CleanupLlamaDownloadAsync(string downloadId, GpuBackend backend)
+    private bool BundledLlamaZipExists(GpuBackend backend)
     {
-        var (mainAsset, cudaRuntime) = LlamaAssets[backend];
-        var filesToClean = new List<string> { mainAsset + ".downloading", mainAsset };
-        if (cudaRuntime is not null)
+        var pattern = backend switch
         {
-            filesToClean.Add(cudaRuntime + ".downloading");
-            filesToClean.Add(cudaRuntime);
-        }
-
-        foreach (var file in filesToClean)
-        {
-            var p = Path.Combine(paths.LlamaDownloadsDirectory, file);
-            try { if (File.Exists(p)) File.Delete(p); } catch { }
-        }
-
-        var settings = await LoadSettingsAsync();
-        if (settings.PausedLlamaDownloads.RemoveAll(p => p.DownloadId == downloadId) > 0)
-            await SaveSettingsAsync(settings);
-    }
-
-    public void PauseLlamaDownload(string downloadId)
-    {
-        if (_downloads.TryGetValue(downloadId, out var cts))
-        {
-            _pauseRequests.TryAdd(downloadId, true);
-            cts.Cancel();
-        }
-    }
-
-    public async Task CancelLlamaDownloadAsync(string downloadId, GpuBackend backend)
-    {
-        if (_downloads.TryGetValue(downloadId, out var cts))
-        {
-            _pauseRequests.TryRemove(downloadId, out _);
-            cts.Cancel();
-            return;
-        }
-        await CleanupLlamaDownloadAsync(downloadId, backend);
+            GpuBackend.CUDA => "llama-*-bin-win-cuda-*.zip",
+            GpuBackend.Vulkan => "llama-*-bin-win-vulkan-*.zip",
+            GpuBackend.CPU => "llama-*-bin-win-cpu-*.zip",
+            _ => ""
+        };
+        return bundledPaths.FindLlamaZip(pattern) is not null;
     }
 
     // ── Process Management ──
@@ -528,12 +299,15 @@ public sealed class LocalLlmService(
             var gpus = await DetectGpusAsync();
             _activeBackend = GetBestBackend(gpus);
 
+            // Ensure llama binary is extracted from bundled ZIP
+            await EnsureLlamaExtractedAsync(_activeBackend);
+
             // Find llama-server binary
             var serverPath = GetLlamaServerPath(_activeBackend);
             if (!File.Exists(serverPath))
             {
                 _state = LocalLlmServerState.Failed;
-                _error = "LLAMA_NOT_INSTALLED";
+                _error = $"llama-server.exe 未找到: {serverPath}";
                 await BroadcastStatus();
                 return GetStatus();
             }

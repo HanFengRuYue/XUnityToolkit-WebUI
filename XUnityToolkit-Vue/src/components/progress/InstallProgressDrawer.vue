@@ -16,9 +16,7 @@ const installStore = useInstallStore()
 
 const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'DetectingGame', label: '检测游戏' },
-  { key: 'DownloadingBepInEx', label: '下载 BepInEx' },
   { key: 'InstallingBepInEx', label: '安装 BepInEx' },
-  { key: 'DownloadingXUnity', label: '下载 XUnity.AutoTranslator' },
   { key: 'InstallingXUnity', label: '安装 XUnity.AutoTranslator' },
   { key: 'InstallingTmpFont', label: '安装 TMP 字体' },
   { key: 'InstallingAiTranslation', label: '部署 AI 翻译引擎' },
@@ -55,11 +53,6 @@ const isComplete = computed(() => installStore.status?.step === 'Complete')
 const isFailed = computed(() => installStore.status?.step === 'Failed')
 const isRunning = computed(
   () => installStore.status && !isComplete.value && !isFailed.value && installStore.status.step !== 'Idle',
-)
-
-const isDownloadStep = computed(() =>
-  installStore.status?.step === 'DownloadingBepInEx' ||
-  installStore.status?.step === 'DownloadingXUnity'
 )
 
 const title = computed(() => {
@@ -110,16 +103,6 @@ onUnmounted(() => {
           />
         </div>
 
-        <!-- Download Stats (speed + retry) -->
-        <div v-if="isDownloadStep" class="download-stats">
-          <span v-if="installStore.status?.downloadSpeed" class="speed-badge">
-            {{ installStore.status.downloadSpeed }}
-          </span>
-          <span v-if="installStore.status?.retryMessage" class="retry-notice">
-            {{ installStore.status.retryMessage }}
-          </span>
-        </div>
-
         <!-- Status Message -->
         <div v-if="installStore.status?.message" class="status-message">
           {{ installStore.status.message }}
@@ -165,36 +148,6 @@ onUnmounted(() => {
 
 .progress-section {
   margin-bottom: 8px;
-}
-
-.download-stats {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-  margin-bottom: 4px;
-  min-height: 24px;
-}
-
-.speed-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  border-radius: 100px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--accent);
-  letter-spacing: 0.02em;
-}
-
-.retry-notice {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--warning);
-  opacity: 0.9;
 }
 
 .status-message {

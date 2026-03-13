@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
+using static XUnityToolkit_WebUI.Infrastructure.DpapiProtector;
 
 namespace XUnityToolkit_WebUI.Services;
 
@@ -91,14 +92,60 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
             return new AppSettings();
 
         var json = await File.ReadAllTextAsync(paths.SettingsFile, ct);
-        return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+        var hasFailures = DecryptSettings(settings);
+        if (hasFailures)
+        {
+            // Back up the original file so ciphertext is not lost on subsequent saves
+            var backupPath = paths.SettingsFile + ".bak";
+            if (!File.Exists(backupPath))
+            {
+                await File.WriteAllTextAsync(backupPath, json, ct);
+                logger.LogWarning("已备份加密的设置文件到 {Path}", backupPath);
+            }
+        }
+        return settings;
     }
 
     private async Task WriteAsync(AppSettings settings, CancellationToken ct)
     {
+        // Deep-copy then encrypt — never mutate the in-memory cached object
         var json = JsonSerializer.Serialize(settings, JsonOptions);
+        var encryptedCopy = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)!;
+        EncryptSettings(encryptedCopy);
+        var encryptedJson = JsonSerializer.Serialize(encryptedCopy, JsonOptions);
+
         var tmpPath = paths.SettingsFile + ".tmp";
-        await File.WriteAllTextAsync(tmpPath, json, ct);
+        await File.WriteAllTextAsync(tmpPath, encryptedJson, ct);
         File.Move(tmpPath, paths.SettingsFile, overwrite: true);
     }
+
+    private static void EncryptSettings(AppSettings s)
+    {
+        s.SteamGridDbApiKey = Protect(s.SteamGridDbApiKey);
+        foreach (var ep in s.AiTranslation.Endpoints)
+            ep.ApiKey = Protect(ep.ApiKey) ?? "";
+    }
+
+    /// <summary>Returns true if any field failed to decrypt.</summary>
+    private bool DecryptSettings(AppSettings s)
+    {
+        var hasFailures = false;
+
+        var steamKey = Unprotect(s.SteamGridDbApiKey, logger);
+        if (steamKey != s.SteamGridDbApiKey) s.SteamGridDbApiKey = steamKey;
+        else if (IsEncrypted(s.SteamGridDbApiKey)) hasFailures = true;
+
+        foreach (var ep in s.AiTranslation.Endpoints)
+        {
+            var decrypted = Unprotect(ep.ApiKey, logger);
+            if (decrypted != ep.ApiKey) ep.ApiKey = decrypted ?? "";
+            else if (IsEncrypted(ep.ApiKey)) hasFailures = true;
+        }
+
+        return hasFailures;
+    }
+
+    private static bool IsEncrypted(string? value) =>
+        value is not null && value.StartsWith("ENC:DPAPI:", StringComparison.Ordinal);
 }

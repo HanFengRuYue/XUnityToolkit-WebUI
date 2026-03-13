@@ -4,7 +4,7 @@ using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
 
-public sealed partial class TmpFontService(AppDataPaths paths, ILogger<TmpFontService> logger)
+public sealed partial class TmpFontService(BundledAssetPaths bundledPaths, ILogger<TmpFontService> logger)
 {
     private const string FontFileName = "SourceHanSans";
     public const string ConfigValue = "BepInEx/Font/SourceHanSans";
@@ -91,7 +91,7 @@ public sealed partial class TmpFontService(AppDataPaths paths, ILogger<TmpFontSe
     /// </summary>
     private SortedDictionary<int, string> GetAvailableFonts()
     {
-        var fontsDir = paths.FontsDirectory;
+        var fontsDir = bundledPaths.FontsDirectory;
         var result = new SortedDictionary<int, string>();
 
         if (!Directory.Exists(fontsDir))

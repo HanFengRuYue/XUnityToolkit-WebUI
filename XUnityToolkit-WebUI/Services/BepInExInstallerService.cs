@@ -6,57 +6,36 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class BepInExInstallerService(ILogger<BepInExInstallerService> logger)
 {
-    public string? ResolveAssetName(UnityGameInfo info, IReadOnlyList<GitHubAsset> assets, bool useBepInEx6)
+    /// <summary>
+    /// Resolves the bundled BepInEx ZIP for the given game info.
+    /// BepInEx 5 for Mono, BepInEx 6 BE for IL2CPP.
+    /// </summary>
+    public string ResolveBundledZip(UnityGameInfo info, BundledAssetPaths bundled)
     {
-        string pattern;
+        var archStr = info.Architecture == Architecture.X64 ? "x64" : "x86";
+        var usesBepInEx6 = info.Backend == UnityBackend.IL2CPP;
 
-        if (useBepInEx6)
-        {
-            var runtime = info.Backend == UnityBackend.IL2CPP ? "IL2CPP" : "Mono";
-            var arch = info.Architecture == Architecture.X64 ? "x64" : "x86";
-            pattern = $"BepInEx-Unity.{runtime}-win-{arch}-";
-        }
-        else
-        {
-            if (info.Backend == UnityBackend.IL2CPP)
-                return null; // BepInEx 5 does not support IL2CPP
+        var zipPath = usesBepInEx6
+            ? bundled.FindBepInEx6Zip(archStr)
+            : bundled.FindBepInEx5Zip(archStr);
 
-            var arch = info.Architecture == Architecture.X64 ? "x64" : "x86";
-            pattern = $"BepInEx_win_{arch}_";
-        }
-
-        var asset = assets.FirstOrDefault(a =>
-            a.Name.StartsWith(pattern, StringComparison.OrdinalIgnoreCase) &&
-            a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
-
-        if (asset is null)
-            logger.LogWarning("未找到匹配的 BepInEx 资源，匹配规则: {Pattern}", pattern);
-
-        return asset?.Name;
+        return zipPath ?? throw new InvalidOperationException(
+            $"未找到捆绑的 BepInEx ZIP（{(usesBepInEx6 ? "IL2CPP" : "Mono")} {archStr}）。请重新构建发布版本。");
     }
 
-    public GitHubAsset? ResolveAsset(UnityGameInfo info, IReadOnlyList<GitHubAsset> assets, bool useBepInEx6)
+    /// <summary>Parses version string from bundled ZIP filename.</summary>
+    public static string ParseVersionFromZip(string zipPath)
     {
-        string pattern;
-
-        if (useBepInEx6)
+        var name = Path.GetFileNameWithoutExtension(zipPath);
+        if (name.Contains("IL2CPP"))
         {
-            var runtime = info.Backend == UnityBackend.IL2CPP ? "IL2CPP" : "Mono";
-            var arch = info.Architecture == Architecture.X64 ? "x64" : "x86";
-            pattern = $"BepInEx-Unity.{runtime}-win-{arch}-";
+            // BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.755+3fab71a
+            var beIdx = name.IndexOf("-be.", StringComparison.Ordinal);
+            return beIdx >= 0 ? $"v6.0.0-be.{name[(beIdx + 4)..]}" : "v6.0.0-be";
         }
-        else
-        {
-            if (info.Backend == UnityBackend.IL2CPP)
-                return null;
-
-            var arch = info.Architecture == Architecture.X64 ? "x64" : "x86";
-            pattern = $"BepInEx_win_{arch}_";
-        }
-
-        return assets.FirstOrDefault(a =>
-            a.Name.StartsWith(pattern, StringComparison.OrdinalIgnoreCase) &&
-            a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+        // BepInEx_win_x64_5.4.23.2
+        var parts = name.Split('_');
+        return parts.Length >= 4 ? $"v{parts[^1]}" : "v5.x";
     }
 
     public Task<List<string>> InstallAsync(string gamePath, string zipPath, CancellationToken ct = default)

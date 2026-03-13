@@ -3,7 +3,7 @@ namespace XUnityToolkit_WebUI.Infrastructure;
 public sealed class AppDataPaths(IConfiguration config)
 {
     private readonly string _root = config["AppData:Root"]
-        ?? AppContext.BaseDirectory;
+        ?? Path.Combine(AppContext.BaseDirectory, "data");
 
     public string Root => _root;
     public string LibraryFile => Path.Combine(_root, "library.json");
@@ -19,7 +19,6 @@ public sealed class AppDataPaths(IConfiguration config)
     public string LlamaDirectory => Path.Combine(_root, "llama");
     public string LlamaDownloadsDirectory => Path.Combine(LlamaDirectory, ".downloads");
     public string ModelsDirectory => Path.Combine(_root, "models");
-    public string FontsDirectory => Path.Combine(_root, "fonts");
     public string LocalLlmSettingsFile => Path.Combine(_root, "local-llm-settings.json");
 
     public string GlossaryFile(string gameId) =>
@@ -51,7 +50,6 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(ExtractedTextsDirectory);
         Directory.CreateDirectory(ModelsDirectory);
-        Directory.CreateDirectory(FontsDirectory);
         Directory.CreateDirectory(LlamaDirectory);
     }
 }

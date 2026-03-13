@@ -294,6 +294,144 @@ public static class GameEndpoints
             return Results.Ok(ApiResult.Ok());
         });
 
+        // Web image search for icon
+        group.MapPost("/{id}/icon/web-search", async (
+            WebImageSearchRequest request,
+            string id,
+            GameLibraryService library,
+            WebImageSearchService webSearch,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                var results = await webSearch.SearchAsync(
+                    request.Query, request.Engine,
+                    request.SizeFilter ?? "auto", "icon", ct);
+                return Results.Ok(ApiResult<List<WebImageResult>>.Ok(results));
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"图片搜索失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
+        // Select web image as icon
+        group.MapPost("/{id}/icon/web-select", async (
+            WebImageSelectRequest request,
+            string id,
+            GameLibraryService library,
+            WebImageSearchService webSearch,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                await webSearch.SelectAsIconAsync(id, request.ImageUrl, ct);
+                await library.UpdateAsync(game);
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"下载图片失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
+        // Search SteamGridDB games for icon
+        group.MapPost("/{id}/icon/search", async (
+            CoverSearchRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                var results = await imageService.SearchGamesAsync(request.Query, ct);
+                return Results.Ok(ApiResult<List<SteamGridDbSearchResult>>.Ok(results));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"SteamGridDB API 调用失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
+        // Get available icon images for a SteamGridDB game
+        group.MapPost("/{id}/icon/grids", async (
+            CoverGridsRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                var icons = await imageService.GetIconsAsync(request.SteamGridDbGameId, ct);
+                return Results.Ok(ApiResult<List<SteamGridDbImage>>.Ok(icons));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"SteamGridDB API 调用失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
+        // Download a selected SteamGridDB icon and set as game icon
+        group.MapPost("/{id}/icon/select", async (
+            IconSelectRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                await imageService.SaveCustomIconFromUrlAsync(id, request.ImageUrl, ct);
+                game.SteamGridDbGameId = request.SteamGridDbGameId;
+                await library.UpdateAsync(game);
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"下载图标失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
         group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
@@ -573,3 +711,4 @@ public record UpdateGameRequest(string? Name = null, string? ExecutableName = nu
 public record AiEndpointStatus(bool Installed);
 public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);
+public record IconSelectRequest(string ImageUrl, int SteamGridDbGameId);

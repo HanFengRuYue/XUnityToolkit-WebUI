@@ -25,22 +25,11 @@ public sealed class LocalLlmSettings
 
     /// <summary>Downloads that were paused and can be resumed.</summary>
     public List<PausedDownload> PausedDownloads { get; set; } = [];
-
-    /// <summary>Llama binary downloads that were paused and can be resumed.</summary>
-    public List<PausedLlamaDownload> PausedLlamaDownloads { get; set; } = [];
 }
 
 public sealed class PausedDownload
 {
     public string CatalogId { get; set; } = "";
-    public long BytesDownloaded { get; set; }
-    public long TotalBytes { get; set; }
-}
-
-public sealed class PausedLlamaDownload
-{
-    public string Backend { get; set; } = "";
-    public string DownloadId { get; set; } = "";
     public long BytesDownloaded { get; set; }
     public long TotalBytes { get; set; }
 }
@@ -79,7 +68,6 @@ public sealed record LocalLlmStatus(
 
 public sealed record LlamaBackendInfo(
     string Backend,
-    string DownloadId,
     bool IsInstalled,
     string LlamaVersion);
 

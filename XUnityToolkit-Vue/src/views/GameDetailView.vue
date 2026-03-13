@@ -33,6 +33,7 @@ import {
   DeleteOutlineOutlined,
   InventoryOutlined,
   FileUploadOutlined,
+  ImageSearchOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -44,6 +45,9 @@ import { defineAsyncComponent } from 'vue'
 
 const CoverPickerModal = defineAsyncComponent(
   () => import('@/components/library/CoverPickerModal.vue')
+)
+const IconPickerModal = defineAsyncComponent(
+  () => import('@/components/library/IconPickerModal.vue')
 )
 
 const route = useRoute()
@@ -61,6 +65,7 @@ const aiEndpointInstalled = ref<boolean | null>(null)
 const aiEndpointLoading = ref(false)
 const aiDescription = ref('')
 const showCoverPicker = ref(false)
+const showIconPicker = ref(false)
 const packageExporting = ref(false)
 const packageImporting = ref(false)
 
@@ -74,6 +79,7 @@ const iconContextMenuX = ref(0)
 const iconContextMenuY = ref(0)
 const iconContextMenuOptions = [
   { label: '更换封面', key: 'cover', icon: () => h(NIcon, { size: 16 }, { default: () => h(PhotoCameraOutlined) }) },
+  { label: '搜索图标', key: 'web-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(ImageSearchOutlined) }) },
   { label: '上传自定义图标', key: 'upload-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(CloudUploadOutlined) }) },
   { label: '删除自定义图标', key: 'delete-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(DeleteOutlineOutlined) }) },
 ]
@@ -240,6 +246,8 @@ async function handleIconContextMenuSelect(key: string) {
   showIconContextMenu.value = false
   if (key === 'cover') {
     showCoverPicker.value = true
+  } else if (key === 'web-icon') {
+    showIconPicker.value = true
   } else if (key === 'upload-icon') {
     iconFileInput.value?.click()
   } else if (key === 'delete-icon') {
@@ -255,6 +263,11 @@ async function handleIconContextMenuSelect(key: string) {
 }
 
 const iconFileInput = ref<HTMLInputElement | null>(null)
+
+async function handleIconSaved() {
+  await gamesStore.refreshGame(gameId)
+  if (game.value) game.value = await gamesApi.get(gameId)
+}
 
 async function handleIconFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
@@ -417,7 +430,7 @@ onUnmounted(() => stopWatch())
 
     <!-- Game Title -->
     <div class="game-title-section" style="animation-delay: 0.05s">
-      <div class="title-icon" @click="showCoverPicker = true" @contextmenu="handleIconContextMenu" title="左键更换封面 / 右键更多操作">
+      <div class="title-icon" @click="showIconPicker = true" @contextmenu="handleIconContextMenu" title="左键更换图标 / 右键更多操作">
         <img
           :src="iconUrl"
           :alt="game.name"
@@ -621,7 +634,7 @@ onUnmounted(() => stopWatch())
           </div>
           <div class="cta-text">
             <span class="cta-title">准备安装翻译插件</span>
-            <span class="cta-desc">将自动下载并安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
+            <span class="cta-desc">将自动安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
           </div>
         </div>
         <NButton
@@ -870,6 +883,15 @@ onUnmounted(() => stopWatch())
       :game="game"
       @update:show="showCoverPicker = $event"
       @saved="loadGame()"
+    />
+
+    <!-- Icon Picker Modal -->
+    <IconPickerModal
+      v-if="showIconPicker && game"
+      :show="showIconPicker"
+      :game="game"
+      @update:show="showIconPicker = $event"
+      @saved="handleIconSaved"
     />
   </div>
 </template>

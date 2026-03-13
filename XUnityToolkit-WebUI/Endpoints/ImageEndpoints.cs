@@ -204,6 +204,60 @@ public static class ImageEndpoints
             }
         });
 
+        // Web image search for cover
+        group.MapPost("/cover/web-search", async (
+            WebImageSearchRequest request,
+            string id,
+            GameLibraryService library,
+            WebImageSearchService webSearch,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                var results = await webSearch.SearchAsync(
+                    request.Query, request.Engine,
+                    request.SizeFilter ?? "auto", "cover", ct);
+                return Results.Ok(ApiResult<List<WebImageResult>>.Ok(results));
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"图片搜索失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
+        // Select web image as cover
+        group.MapPost("/cover/web-select", async (
+            WebImageSelectRequest request,
+            string id,
+            GameLibraryService library,
+            WebImageSearchService webSearch,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                await webSearch.SelectAsCoverAsync(id, request.ImageUrl, ct);
+                await library.UpdateAsync(game);
+                return Results.Ok(ApiResult<CoverInfo>.Ok(
+                    new CoverInfo(true, "web", null)));
+            }
+            catch (HttpRequestException ex)
+            {
+                return Results.Json(
+                    ApiResult.Fail($"下载图片失败: {ex.Message}"),
+                    statusCode: 502);
+            }
+        });
+
         // Delete cover image
         group.MapDelete("/cover", async (
             string id,
@@ -225,3 +279,5 @@ public record CoverSearchRequest(string Query);
 public record CoverGridsRequest(int SteamGridDbGameId);
 public record CoverSelectRequest(string ImageUrl, int SteamGridDbGameId);
 public record SteamCoverSelectRequest(int SteamAppId);
+public record WebImageSearchRequest(string Query, string Engine, string? SizeFilter);
+public record WebImageSelectRequest(string ImageUrl);

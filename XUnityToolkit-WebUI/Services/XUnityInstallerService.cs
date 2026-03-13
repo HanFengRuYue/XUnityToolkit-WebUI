@@ -75,22 +75,33 @@ public sealed class XUnityInstallerService(ILogger<XUnityInstallerService> logge
         return true;
     }
 
-    public GitHubAsset? ResolveAsset(UnityGameInfo info, IReadOnlyList<GitHubAsset> assets)
+    /// <summary>
+    /// Resolves the bundled XUnity ZIP for the given game info.
+    /// </summary>
+    public string ResolveBundledZip(UnityGameInfo info, BundledAssetPaths bundled)
     {
-        // IL2CPP games need the IL2CPP-specific build
         var isIL2CPP = info.Backend == UnityBackend.IL2CPP;
-
-        return assets.FirstOrDefault(a =>
+        var zips = bundled.GetXUnityZips();
+        var zip = zips.FirstOrDefault(z =>
         {
-            var name = a.Name;
-            if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                return false;
+            var name = Path.GetFileName(z);
             if (!name.StartsWith("XUnity.AutoTranslator-BepInEx", StringComparison.OrdinalIgnoreCase))
                 return false;
-
             var hasIL2CPP = name.Contains("IL2CPP", StringComparison.OrdinalIgnoreCase);
             return isIL2CPP == hasIL2CPP;
         });
+
+        return zip ?? throw new InvalidOperationException(
+            $"未找到捆绑的 XUnity ZIP（{(isIL2CPP ? "IL2CPP" : "Mono")}）。请重新构建发布版本。");
+    }
+
+    /// <summary>Parses version string from bundled ZIP filename.</summary>
+    public static string ParseVersionFromZip(string zipPath)
+    {
+        // XUnity.AutoTranslator-BepInEx-5.3.0.zip or XUnity.AutoTranslator-BepInEx-IL2CPP-5.3.0.zip
+        var name = Path.GetFileNameWithoutExtension(zipPath);
+        var lastDash = name.LastIndexOf('-');
+        return lastDash >= 0 ? $"v{name[(lastDash + 1)..]}" : "v?.?";
     }
 
     public Task<List<string>> InstallAsync(string gamePath, string zipPath, CancellationToken ct = default)

@@ -13,7 +13,8 @@ Console.InputEncoding = System.Text.Encoding.UTF8;
 var builder = WebApplication.CreateBuilder(args);
 
 // 从 settings.json 读取端口，如果文件不存在或端口无效则使用默认值
-var appDataRoot = AppContext.BaseDirectory;
+var appDataRoot = builder.Configuration["AppData:Root"]
+    ?? Path.Combine(AppContext.BaseDirectory, "data");
 var settingsPath = Path.Combine(appDataRoot, "settings.json");
 var listenPort = 51821;
 if (File.Exists(settingsPath))
@@ -56,27 +57,12 @@ builder.Services.AddSingleton<FileLoggerProvider>(_ => fileLoggerProvider);
 
 // Infrastructure
 builder.Services.AddSingleton<AppDataPaths>();
+builder.Services.AddSingleton<BundledAssetPaths>();
 
 // JSON serialization: enums as strings for API responses
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
-
-// HTTP client for GitHub API
-builder.Services.AddHttpClient("GitHub", client =>
-{
-    client.BaseAddress = new Uri("https://api.github.com/");
-    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
-    client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
-    client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-});
-
-// HTTP client for mirror downloads (no GitHub API headers)
-builder.Services.AddHttpClient("Mirror", client =>
-{
-    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
-    client.Timeout = TimeSpan.FromMinutes(10);
 });
 
 // HTTP client for LLM API calls — allow high concurrent connections for parallel translation
@@ -98,6 +84,15 @@ builder.Services.AddHttpClient("SteamGridDB", client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+// HTTP client for web image scraping (Bing/Google)
+builder.Services.AddHttpClient("WebImageSearch", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+    client.DefaultRequestHeaders.Add("Accept-Language", "en-US,en;q=0.9");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+
 // HTTP client for local LLM model downloads — long timeout for large files
 builder.Services.AddHttpClient("LocalLlmDownload", client =>
 {
@@ -106,13 +101,12 @@ builder.Services.AddHttpClient("LocalLlmDownload", client =>
 });
 
 // Services
-builder.Services.AddSingleton<MirrorProbeService>();
 builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
+builder.Services.AddSingleton<WebImageSearchService>();
 builder.Services.AddSingleton<GameLibraryService>();
 builder.Services.AddSingleton<UnityDetectionService>();
 builder.Services.AddSingleton<PluginDetectionService>();
-builder.Services.AddSingleton<GitHubReleaseService>();
 builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<TmpFontService>();
@@ -162,9 +156,7 @@ app.MapGameEndpoints();
 app.MapDetectionEndpoints();
 app.MapInstallEndpoints();
 app.MapConfigEndpoints();
-app.MapReleaseEndpoints();
 app.MapDialogEndpoints();
-app.MapCacheEndpoints();
 app.MapSettingsEndpoints();
 app.MapTranslateEndpoints();
 app.MapImageEndpoints();

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, CacheInfo, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -79,6 +79,12 @@ export const gamesApi = {
     }
   },
   deleteCustomIcon: (id: string) => api.del<void>(`/api/games/${id}/icon/custom`),
+  searchIconGames: (id: string, query: string) =>
+    api.post<SteamGridDbSearchResult[]>(`/api/games/${id}/icon/search`, { query }),
+  getIconGrids: (id: string, steamGridDbGameId: number) =>
+    api.post<SteamGridDbImage[]>(`/api/games/${id}/icon/grids`, { steamGridDbGameId }),
+  selectSteamGridDbIcon: (id: string, imageUrl: string, steamGridDbGameId: number) =>
+    api.post<void>(`/api/games/${id}/icon/select`, { imageUrl, steamGridDbGameId }),
 
   // Cover image
   getCoverUrl: (id: string) => `/api/games/${id}/cover`,
@@ -109,6 +115,16 @@ export const gamesApi = {
     api.post<SteamStoreSearchResult[]>(`/api/games/${id}/cover/steam-search`, { query }),
   selectSteamCover: (id: string, steamAppId: number) =>
     api.post<CoverInfo>(`/api/games/${id}/cover/steam-select`, { steamAppId }),
+
+  // Web image search
+  searchWebImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
+    api.post<WebImageResult[]>(`/api/games/${id}/cover/web-search`, { query, engine, sizeFilter }),
+  selectWebCover: (id: string, imageUrl: string) =>
+    api.post<CoverInfo>(`/api/games/${id}/cover/web-select`, { imageUrl }),
+  searchWebIconImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
+    api.post<WebImageResult[]>(`/api/games/${id}/icon/web-search`, { query, engine, sizeFilter }),
+  selectWebIcon: (id: string, imageUrl: string) =>
+    api.post<void>(`/api/games/${id}/icon/web-select`, { imageUrl }),
 }
 
 export const assetApi = {
@@ -129,16 +145,6 @@ export const assetApi = {
 export const dialogApi = {
   selectFolder: () => api.post<string>('/api/dialog/select-folder'),
   selectFile: (filter?: string) => api.post<string>('/api/dialog/select-file', { filter }),
-}
-
-export const releasesApi = {
-  getBepInEx: () => api.get<unknown[]>('/api/releases/bepinex'),
-  getXUnity: () => api.get<unknown[]>('/api/releases/xunity'),
-}
-
-export const cacheApi = {
-  getInfo: () => api.get<CacheInfo>('/api/cache/downloads'),
-  clear: () => api.del<CacheInfo>('/api/cache/downloads'),
 }
 
 export const settingsApi = {
@@ -200,10 +206,6 @@ export const localLlmApi = {
     api.put<void>('/api/local-llm/settings', req),
   getCatalog: () => api.get<BuiltInModelInfo[]>('/api/local-llm/catalog'),
   getLlamaStatus: () => api.get<LlamaStatus>('/api/local-llm/llama-status'),
-  downloadLlama: () => api.post<void>('/api/local-llm/download-llama'),
-  pauseLlamaDownload: (downloadId: string) => api.post<void>('/api/local-llm/download-llama/pause', { downloadId }),
-  cancelLlamaDownload: (downloadId: string, backend: string) =>
-    api.post<void>('/api/local-llm/download-llama/cancel', { downloadId, backend }),
   start: (modelPath: string, gpuLayers?: number, contextLength?: number) =>
     api.post<LocalLlmStatus>('/api/local-llm/start', { modelPath, gpuLayers, contextLength }),
   stop: () => api.post<LocalLlmStatus>('/api/local-llm/stop'),

@@ -32,17 +32,11 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
     })
 
     connection.on('localLlmDownloadProgress', (progress: LocalLlmDownloadProgress) => {
-      const isLlamaDownload = progress.catalogId.startsWith('llama-')
       if (progress.done || progress.error) {
         downloads.value.delete(progress.catalogId)
         downloads.value = new Map(downloads.value)
         if (progress.done && !progress.error) {
-          if (isLlamaDownload) {
-            fetchLlamaStatus()
-            fetchSettings() // clear pausedLlamaDownloads
-          } else {
-            fetchModels()
-          }
+          fetchModels()
         }
       } else if (progress.paused) {
         downloads.value.delete(progress.catalogId)
