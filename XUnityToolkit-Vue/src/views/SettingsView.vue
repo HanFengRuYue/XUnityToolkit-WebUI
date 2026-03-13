@@ -13,7 +13,9 @@ import {
   InfoOutlined,
   PaletteOutlined,
   TuneOutlined,
-  CodeOutlined,
+  LocalOfferOutlined,
+  LayersOutlined,
+  DisplaySettingsOutlined,
   PersonOutlined,
   OpenInNewOutlined,
   WarningAmberOutlined,
@@ -165,7 +167,7 @@ onMounted(() => {
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon download">
-            <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
+            <NIcon :size="16"><DisplaySettingsOutlined /></NIcon>
           </span>
           外观与下载
         </h2>
@@ -283,7 +285,7 @@ onMounted(() => {
       <div class="about-grid">
         <div class="info-card">
           <div class="info-card-icon version">
-            <NIcon :size="18"><CodeOutlined /></NIcon>
+            <NIcon :size="18"><LocalOfferOutlined /></NIcon>
           </div>
           <div class="info-card-content">
             <span class="info-label">版本</span>
@@ -292,7 +294,7 @@ onMounted(() => {
         </div>
         <div class="info-card">
           <div class="info-card-icon tech">
-            <NIcon :size="18"><InfoOutlined /></NIcon>
+            <NIcon :size="18"><LayersOutlined /></NIcon>
           </div>
           <div class="info-card-content">
             <span class="info-label">技术栈</span>

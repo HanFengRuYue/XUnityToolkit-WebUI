@@ -12,13 +12,12 @@ import {
   TranslateOutlined,
   HourglassEmptyOutlined,
   SyncOutlined,
-  LinkOutlined,
-  LinkOffOutlined,
+  DashboardOutlined,
   TokenOutlined,
   SpeedOutlined,
   HistoryOutlined,
   ErrorOutlineOutlined,
-  CallReceivedOutlined,
+  MoveToInboxOutlined,
   AutoFixHighOutlined,
   CheckCircleOutlined,
   ArrowRightAltOutlined,
@@ -226,7 +225,7 @@ onUnmounted(() => {
     <div class="metrics-strip" style="animation-delay: 0.03s">
       <div class="metric-pill">
         <div class="metric-icon">
-          <NIcon :size="14"><CallReceivedOutlined /></NIcon>
+          <NIcon :size="14"><MoveToInboxOutlined /></NIcon>
         </div>
         <div class="metric-data">
           <span class="metric-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
@@ -268,8 +267,7 @@ onUnmounted(() => {
         <h2 class="section-title">
           <span class="section-icon status">
             <NIcon :size="16">
-              <LinkOutlined v-if="connectionStatus === 'active'" />
-              <LinkOffOutlined v-else />
+              <DashboardOutlined />
             </NIcon>
           </span>
           翻译状态

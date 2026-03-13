@@ -19,11 +19,12 @@ import {
   InsertDriveFileOutlined,
   CodeOutlined,
   MemoryOutlined,
-  CloudDownloadOutlined,
+  GetAppOutlined,
   TranslateOutlined,
   WarningAmberOutlined,
   ExtensionOutlined,
-  ViewInArOutlined,
+  WidgetsOutlined,
+  DataObjectOutlined,
   SmartToyOutlined,
   MenuBookOutlined,
   DescriptionOutlined,
@@ -31,7 +32,7 @@ import {
   DriveFileRenameOutlineOutlined,
   CloudUploadOutlined,
   DeleteOutlineOutlined,
-  InventoryOutlined,
+  Inventory2Outlined,
   FileUploadOutlined,
   ImageSearchOutlined,
   WallpaperOutlined,
@@ -609,7 +610,7 @@ onUnmounted(() => stopWatch())
         <template v-if="game.isUnityGame">
           <div class="info-card">
             <div class="info-card-icon unity">
-              <NIcon :size="18"><ViewInArOutlined /></NIcon>
+              <NIcon :size="18"><WidgetsOutlined /></NIcon>
             </div>
             <div class="info-card-content">
               <span class="info-label">Unity 版本</span>
@@ -688,7 +689,7 @@ onUnmounted(() => stopWatch())
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon download">
-            <NIcon :size="16"><CloudDownloadOutlined /></NIcon>
+            <NIcon :size="16"><GetAppOutlined /></NIcon>
           </span>
           安装管理
         </h2>
@@ -835,7 +836,7 @@ onUnmounted(() => stopWatch())
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
-            <NIcon :size="16"><ViewInArOutlined /></NIcon>
+            <NIcon :size="16"><DataObjectOutlined /></NIcon>
           </span>
           资产提取与预翻译
         </h2>
@@ -910,7 +911,7 @@ onUnmounted(() => stopWatch())
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
-            <NIcon :size="16"><InventoryOutlined /></NIcon>
+            <NIcon :size="16"><Inventory2Outlined /></NIcon>
           </span>
           汉化包
         </h2>
@@ -925,7 +926,7 @@ onUnmounted(() => stopWatch())
           :disabled="!isInstalled"
           @click="handleExportPackage"
         >
-          <template #icon><NIcon><InventoryOutlined /></NIcon></template>
+          <template #icon><NIcon><Inventory2Outlined /></NIcon></template>
           生成汉化包
         </NButton>
         <NButton
