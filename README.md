@@ -157,5 +157,5 @@ cd XUnityToolkit-Vue \&\& npx vue-tsc --noEmit
 
 ## 许可证
 
-本项目仅供学习和个人使用。
+本项目基于 [MIT License](LICENSE) 开源。
 
