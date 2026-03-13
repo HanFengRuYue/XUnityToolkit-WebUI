@@ -46,7 +46,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Compute version
         id: ver
@@ -60,13 +60,13 @@ jobs:
       # ── SDK setup ──
 
       - name: Setup .NET 10 preview
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -300,7 +300,7 @@ jobs:
           Write-Host "Created $zipName ($sizeMB MB)"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-${{ matrix.rid }}
           path: XUnityToolkit-WebUI-${{ matrix.rid }}.zip
@@ -313,13 +313,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: release-*
           merge-multiple: true
+
+      - name: Write release notes to file
+        env:
+          RELEASE_BODY: ${{ inputs.release_body }}
+        run: printf '%s' "$RELEASE_BODY" > release_notes.md
 
       - name: Create GitHub Release
         env:
@@ -340,7 +345,7 @@ jobs:
             XUnityToolkit-WebUI-win-x64.zip \
             XUnityToolkit-WebUI-win-arm64.zip \
             --title "${{ inputs.release_name }}" \
-            --notes "${{ inputs.release_body }}" \
+            --notes-file release_notes.md \
             $PRERELEASE_FLAG \
             --repo "${{ github.repository }}"
 
