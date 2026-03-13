@@ -8,6 +8,45 @@ public static class DialogEndpoints
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    /// <summary>
+    /// 强制将窗口置于前台。通过 AttachThreadInput 绕过 Windows 对非前台进程的
+    /// SetForegroundWindow 限制。
+    /// </summary>
+    private static void ForceForegroundWindow(IntPtr hWnd)
+    {
+        var foregroundWnd = GetForegroundWindow();
+        var foregroundThread = GetWindowThreadProcessId(foregroundWnd, out _);
+        var currentThread = GetCurrentThreadId();
+
+        if (foregroundThread != currentThread)
+        {
+            AttachThreadInput(currentThread, foregroundThread, true);
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+            AttachThreadInput(currentThread, foregroundThread, false);
+        }
+        else
+        {
+            BringWindowToTop(hWnd);
+            SetForegroundWindow(hWnd);
+        }
+    }
+
     /// <summary>
     /// 在 STA 线程上使用 TopMost 隐藏窗体作为 owner 运行对话框，确保对话框出现在前台。
     /// </summary>
@@ -23,11 +62,11 @@ public static class DialogEndpoints
                 ShowInTaskbar = false,
                 FormBorderStyle = FormBorderStyle.None,
                 Size = new System.Drawing.Size(1, 1),
-                StartPosition = FormStartPosition.Manual,
-                Location = new System.Drawing.Point(-9999, -9999)
+                StartPosition = FormStartPosition.CenterScreen,
+                Opacity = 0
             };
             owner.Show();
-            SetForegroundWindow(owner.Handle);
+            ForceForegroundWindow(owner.Handle);
 
             result = showDialog(owner);
 

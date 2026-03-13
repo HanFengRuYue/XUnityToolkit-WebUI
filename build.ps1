@@ -12,14 +12,48 @@ $ErrorActionPreference = 'Stop'
 function Wait-Exit {
     param([int]$ExitCode = 0)
     Write-Host ""
-    Write-Host "Press 0 to exit..." -ForegroundColor DarkGray
-    do {
-        $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    } while ($key.Character -ne '0')
+    try {
+        Write-Host "Press 0 to exit..." -ForegroundColor DarkGray
+        do {
+            $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        } while ($key.Character -ne '0')
+    } catch {
+        # ReadKey may fail in non-interactive or non-standard hosts
+        Read-Host "Press Enter to exit"
+    }
     exit $ExitCode
 }
 
+function Invoke-WithRetry {
+    param(
+        [scriptblock]$ScriptBlock,
+        [int]$MaxRetries = 3,
+        [string]$Operation = "Operation"
+    )
+    $attempt = 0
+    while ($true) {
+        try {
+            $attempt++
+            return (& $ScriptBlock)
+        } catch {
+            if ($attempt -ge $MaxRetries) {
+                throw "${Operation}: failed after $MaxRetries attempts. Last error: $($_.Exception.Message)"
+            }
+            $waitSec = [math]::Pow(2, $attempt)
+            Write-Host "  [retry] $Operation failed (attempt $attempt/$MaxRetries), retrying in ${waitSec}s..." -ForegroundColor DarkYellow
+            Write-Host "          $($_.Exception.Message)" -ForegroundColor DarkGray
+            Start-Sleep -Seconds $waitSec
+        }
+    }
+}
+
 try {
+
+# Ensure TLS 1.2+ for all HTTPS requests (PowerShell 5.1 defaults to TLS 1.0)
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+# Suppress PowerShell progress bars globally (Invoke-WebRequest/RestMethod progress noise)
+$ProgressPreference = 'SilentlyContinue'
 
 $ProjectRoot = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
@@ -74,16 +108,26 @@ if (-not $SkipDownload) {
             Write-Host "  [cached] $FileName" -ForegroundColor DarkGray
             return
         }
+        # Clean up leftover partial download from previous failed attempt
+        $tmpPath = "$destPath.downloading"
+        if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force }
         Write-Host "  Downloading $FileName ..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $Url -OutFile $destPath -UseBasicParsing
-        $ProgressPreference = 'Continue'
+        Invoke-WithRetry -Operation "Download $FileName" -ScriptBlock {
+            Invoke-WebRequest -Uri $Url -OutFile $tmpPath -UseBasicParsing -TimeoutSec 600
+        }.GetNewClosure()
+        Move-Item $tmpPath $destPath -Force
         Write-Host "  [done] $FileName" -ForegroundColor Green
     }
 
-    # Remove old version ZIPs that are no longer needed
+    # Remove old version ZIPs and leftover temp files
     function Remove-OldVersions {
         param([string]$Dir, [string[]]$ExpectedFiles)
+        # Clean up .downloading temp files from interrupted downloads
+        Get-ChildItem -Path $Dir -Filter "*.downloading" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Write-Host "  [cleanup] Removing partial: $($_.Name)" -ForegroundColor DarkYellow
+                Remove-Item $_.FullName -Force
+            }
         $existing = Get-ChildItem -Path $Dir -Filter "*.zip" -ErrorAction SilentlyContinue
         foreach ($file in $existing) {
             if ($file.Name -notin $ExpectedFiles) {
@@ -95,7 +139,9 @@ if (-not $SkipDownload) {
 
     # ── BepInEx 5 (Mono) from GitHub Releases ──
     Write-Host "  Fetching BepInEx 5 latest stable release..." -ForegroundColor DarkGray
-    $bepinex5Releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' }
+    $bepinex5Releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
+        Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+    }.GetNewClosure()
     $bepinex5Release = $bepinex5Releases | Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } | Select-Object -First 1
     if (-not $bepinex5Release) { throw "BepInEx 5 stable release not found" }
     Write-Host "  BepInEx 5: $($bepinex5Release.tag_name)" -ForegroundColor DarkGray
@@ -114,7 +160,9 @@ if (-not $SkipDownload) {
 
     # ── BepInEx 6 BE (IL2CPP) from builds.bepinex.dev ──
     Write-Host "  Fetching BepInEx 6 BE latest build..." -ForegroundColor DarkGray
-    $buildsPage = Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing
+    $buildsPage = Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
+        Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
+    }
     $buildsHtml = $buildsPage.Content
 
     # Parse latest build number and commit from IL2CPP x64 link
@@ -123,7 +171,7 @@ if (-not $SkipDownload) {
         $be6Commit = $Matches[2]
         Write-Host "  BepInEx 6 BE: build $be6BuildNo ($be6Commit)" -ForegroundColor DarkGray
     } else {
-        throw "Failed to parse BepInEx 6 BE build info from builds.bepinex.dev"
+        throw "Failed to parse BepInEx 6 BE build info from builds.bepinex.dev (page size: $($buildsHtml.Length) chars)"
     }
 
     $expectedBepInEx6 = @()
@@ -137,7 +185,9 @@ if (-not $SkipDownload) {
 
     # ── XUnity.AutoTranslator from GitHub Releases ──
     Write-Host "  Fetching XUnity.AutoTranslator latest release..." -ForegroundColor DarkGray
-    $xunityReleases = Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' }
+    $xunityReleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
+        Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+    }.GetNewClosure()
     $xunityRelease = $xunityReleases | Select-Object -First 1
     if (-not $xunityRelease) { throw "XUnity.AutoTranslator release not found" }
     Write-Host "  XUnity: $($xunityRelease.tag_name)" -ForegroundColor DarkGray
@@ -153,7 +203,9 @@ if (-not $SkipDownload) {
 
     # ── llama.cpp binaries from GitHub Releases ──
     Write-Host "  Fetching llama.cpp latest release..." -ForegroundColor DarkGray
-    $llamaReleases = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' }
+    $llamaReleases = Invoke-WithRetry -Operation "Fetch llama.cpp releases" -ScriptBlock {
+        Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+    }
     $llamaRelease = $llamaReleases | Where-Object { -not $_.prerelease } | Select-Object -First 1
     if (-not $llamaRelease) { throw "llama.cpp release not found" }
     Write-Host "  llama.cpp: $($llamaRelease.tag_name)" -ForegroundColor DarkGray
@@ -308,6 +360,11 @@ Wait-Exit 0
     Write-Host ""
     Write-Host "=== BUILD FAILED ===" -ForegroundColor Red
     Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
+    # Show inner exception for network errors (contains actual HTTP status/message)
+    if ($_.Exception.InnerException) {
+        Write-Host "  Detail: $($_.Exception.InnerException.Message)" -ForegroundColor DarkRed
+    }
+    Write-Host "  Location: $($_.InvocationInfo.PositionMessage)" -ForegroundColor DarkGray
     Write-Host ""
     Wait-Exit 1
 }

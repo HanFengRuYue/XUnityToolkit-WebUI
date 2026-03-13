@@ -39,6 +39,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`)
 - **Persistence:** JSON files in `{programDir}/data/` (`library.json`, `settings.json`) — portable app pattern; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
+- **Console hiding:** `OutputType=WinExe` — no console window on startup (works with both conhost and Windows Terminal/ConPTY); "显示控制台" tray menu uses `AllocConsole()` + stream redirect on demand; close button removed via `DeleteMenu(SC_CLOSE)` to prevent accidental app termination; do NOT revert to `Exe` + `ShowWindow(SW_HIDE)` (fails under ConPTY)
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description; real-time stats via SignalR
 - **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, disables glossary extraction
@@ -126,6 +127,8 @@ XUnityToolkit-Vue/src/
 - **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
 - `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
 - P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
+- **Dialog foreground:** `SetForegroundWindow` silently fails from background processes; `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` to bypass this — do NOT simplify back to bare `SetForegroundWindow`
+- **Console P/Invoke:** `AllocConsole`/`FreeConsole` (kernel32), `GetSystemMenu`/`DeleteMenu` (user32) — used by `SystemTrayService` for on-demand console; `OutputType=WinExe` in csproj is critical — do NOT revert to `Exe`
 
 ### INI Configuration
 
@@ -169,7 +172,7 @@ XUnityToolkit-Vue/src/
 ### TranslatorEndpoint
 
 - Targets net35 (C# 7.3); `Microsoft.NETFramework.ReferenceAssemblies.net35` NuGet
-- Dependencies in `TranslatorEndpoint/libs/` (gitignored)
+- Dependencies in `TranslatorEndpoint/libs/` (tracked in git)
 - `DisableSpamChecks()` removes stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
 - `GetOrCreateSetting` reads existing INI; changing DLL defaults won't affect installed games — use `PatchSectionAsync`
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
@@ -293,7 +296,7 @@ XUnityToolkit-Vue/src/
 - **CI/CD:** GitHub Actions in `.github/workflows/`; `build.yml` (reusable), `release.yml` (tag `v*` → release), `dep-check.yml` (daily BepInEx/XUnity update check → auto pre-release)
 - **CI version tracking:** `.github/deps.json` stores last-known BepInEx 5/6/XUnity versions; `dep-check.yml` compares upstream and commits updates
 - **CI cannot call `build.ps1` directly** — `Wait-Exit` blocks in non-interactive; workflow replicates download logic inline
-- **CI TranslatorEndpoint:** downloads XUnity reference DLLs from GitHub release ZIP (libs/ is gitignored)
+- **CI TranslatorEndpoint:** XUnity reference DLLs tracked in `TranslatorEndpoint/libs/`
 - **.NET 10 preview in CI:** `setup-dotnet@v5` with `dotnet-quality: 'preview'`
 - **CI gotcha — `$GITHUB_OUTPUT`:** multiline values corrupt format; use heredoc (`key<<EOF`) or `jq -c` for JSON; `grep -oE '[0-9]+'` can match unintended numbers (e.g., `64` from `x64`)
 - **CI gotcha — `gh release create --notes`:** backticks in `${{ }}` become bash command substitution; always use `--notes-file` instead

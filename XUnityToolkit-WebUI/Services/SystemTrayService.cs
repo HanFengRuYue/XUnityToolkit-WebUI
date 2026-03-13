@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace XUnityToolkit_WebUI.Services;
 
@@ -14,8 +15,26 @@ public sealed class SystemTrayService(
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    [DllImport("kernel32.dll")]
+    private static extern bool AllocConsole();
+
+    [DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetSystemMenu(IntPtr hWnd, bool bRevert);
+
+    [DllImport("user32.dll")]
+    private static extern bool DeleteMenu(IntPtr hMenu, uint uPosition, uint uFlags);
+
     private const int SW_HIDE = 0;
     private const int SW_SHOW = 5;
+    private const uint SC_CLOSE = 0xF060;
+    private const uint MF_BYCOMMAND = 0x00000000;
 
     private Thread? _staThread;
     private volatile NotifyIcon? _trayIcon;
@@ -50,23 +69,7 @@ public sealed class SystemTrayService(
             }
         }, cancellationToken);
 
-        // Hide console window
-        Task.Run(() =>
-        {
-            try
-            {
-                var hwnd = GetConsoleWindow();
-                if (hwnd != IntPtr.Zero)
-                {
-                    ShowWindow(hwnd, SW_HIDE);
-                    logger.LogInformation("已隐藏控制台窗口");
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "隐藏控制台窗口失败");
-            }
-        }, cancellationToken);
+        // No console hiding needed — WinExe subsystem doesn't create a console window
 
         return Task.CompletedTask;
     }
@@ -134,12 +137,8 @@ public sealed class SystemTrayService(
         var openItem = new ToolStripMenuItem("打开浏览器");
         openItem.Click += (_, _) => OpenBrowser();
 
-        var showConsoleItem = new ToolStripMenuItem("显示控制台");
-        showConsoleItem.Click += (_, _) =>
-        {
-            var hwnd = GetConsoleWindow();
-            if (hwnd != IntPtr.Zero) ShowWindow(hwnd, SW_SHOW);
-        };
+        var consoleItem = new ToolStripMenuItem("显示控制台");
+        consoleItem.Click += (_, _) => ToggleConsole(consoleItem);
 
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) =>
@@ -149,10 +148,46 @@ public sealed class SystemTrayService(
         };
 
         menu.Items.Add(openItem);
-        menu.Items.Add(showConsoleItem);
+        menu.Items.Add(consoleItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
         return menu;
+    }
+
+    private void ToggleConsole(ToolStripMenuItem menuItem)
+    {
+        var hwnd = GetConsoleWindow();
+
+        if (hwnd == IntPtr.Zero)
+        {
+            // WinExe: no console allocated — create one on demand
+            AllocConsole();
+            hwnd = GetConsoleWindow();
+
+            // Remove close button to prevent accidental app termination
+            var sysMenu = GetSystemMenu(hwnd, false);
+            if (sysMenu != IntPtr.Zero)
+                DeleteMenu(sysMenu, SC_CLOSE, MF_BYCOMMAND);
+
+            // Redirect streams to new console
+            var stdOut = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
+            var stdErr = new StreamWriter(Console.OpenStandardError()) { AutoFlush = true };
+            Console.SetOut(stdOut);
+            Console.SetError(stdErr);
+            Console.OutputEncoding = Encoding.UTF8;
+
+            menuItem.Text = "隐藏控制台";
+        }
+        else if (IsWindowVisible(hwnd))
+        {
+            ShowWindow(hwnd, SW_HIDE);
+            menuItem.Text = "显示控制台";
+        }
+        else
+        {
+            ShowWindow(hwnd, SW_SHOW);
+            menuItem.Text = "隐藏控制台";
+        }
     }
 
     private void OpenBrowser()

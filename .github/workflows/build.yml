@@ -72,49 +72,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: XUnityToolkit-Vue/package-lock.json
 
-      # ── Download XUnity reference DLLs for TranslatorEndpoint ──
-
-      - name: Download XUnity reference DLLs
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $headers = @{
-            'Authorization' = "Bearer $env:GH_TOKEN"
-            'User-Agent'    = 'XUnityToolkit-CI/1.0'
-          }
-          $releases = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" `
-            -Headers $headers
-          $release = $releases | Select-Object -First 1
-          Write-Host "XUnity release: $($release.tag_name)"
-
-          # Find the BepInEx (non-IL2CPP) ZIP — it contains the reference DLLs
-          $asset = $release.assets |
-            Where-Object { $_.name -match '^XUnity\.AutoTranslator-BepInEx-[0-9]' } |
-            Select-Object -First 1
-          if (-not $asset) { throw "XUnity BepInEx asset not found" }
-
-          $zipPath = Join-Path $env:TEMP "xunity-ref.zip"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
-
-          $libsDir = "TranslatorEndpoint\libs"
-          New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
-
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-          try {
-            $targets = @('XUnity.AutoTranslator.Plugin.Core.dll', 'XUnity.Common.dll')
-            foreach ($entry in $zip.Entries) {
-              if ($entry.Name -in $targets) {
-                $destPath = Join-Path $libsDir $entry.Name
-                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destPath, $true)
-                Write-Host "  Extracted: $($entry.Name)"
-              }
-            }
-          } finally {
-            $zip.Dispose()
-          }
+      # XUnity reference DLLs (TranslatorEndpoint/libs/) are tracked in git — no download needed
 
       # ── Download bundled assets ──
 

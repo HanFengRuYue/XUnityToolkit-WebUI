@@ -20,13 +20,15 @@ XUnityToolkit-Vue/src/components.d.ts
 Release/
 
 # Bundled assets (downloaded during build)
-bundled/
+bundled/*
+# But track TMP fonts (required for CJK text rendering in Unity games)
+!bundled/fonts/
 
 # llama.cpp pre-built binaries (downloaded during build)
 llama-bin/
 
-# TranslatorEndpoint reference DLLs (downloaded from XUnity release)
-TranslatorEndpoint/libs/
+# TranslatorEndpoint reference DLLs (required for building LLMTranslate.dll)
+# TranslatorEndpoint/libs/
 
 # Playwright MCP
 .playwright-mcp/

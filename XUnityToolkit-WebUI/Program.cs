@@ -6,9 +6,16 @@ using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Services;
 
-// 控制台 UTF-8 编码，必须在任何输出之前设置
-Console.OutputEncoding = System.Text.Encoding.UTF8;
-Console.InputEncoding = System.Text.Encoding.UTF8;
+// 控制台 UTF-8 编码 — WinExe 模式下无控制台，安全跳过
+try
+{
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    Console.InputEncoding = System.Text.Encoding.UTF8;
+}
+catch
+{
+    // WinExe subsystem: no console allocated — encoding is irrelevant
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
