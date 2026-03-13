@@ -1,0 +1,177 @@
+# Daily dependency check for BepInEx 5, BepInEx 6 BE, and XUnity.AutoTranslator.
+# If any dependency has a new version, triggers a build and release,
+# then commits updated deps.json.
+name: Dependency Check
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Trigger build even if no dependency changed'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_build: ${{ steps.compare.outputs.needs_build }}
+      build_version: ${{ steps.compare.outputs.build_version }}
+      release_tag: ${{ steps.compare.outputs.release_tag }}
+      release_notes: ${{ steps.compare.outputs.release_notes }}
+      new_deps_json: ${{ steps.compare.outputs.new_deps_json }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch upstream versions
+        id: fetch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # BepInEx 5 (GitHub Releases)
+          B5=$(curl -sSf \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "User-Agent: XUnityToolkit-CI/1.0" \
+            "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" \
+            | jq -r '[.[] | select(.prerelease == false and (.tag_name | startswith("v5")))] | .[0].tag_name')
+          echo "bepinex5=$B5" >> "$GITHUB_OUTPUT"
+          echo "BepInEx 5: $B5"
+
+          # BepInEx 6 BE (HTML scrape — POSIX ERE, no PCRE dependency)
+          B6=$(curl -sSf "https://builds.bepinex.dev/projects/bepinex_be" \
+            | grep -oE '/[0-9]+/BepInEx-Unity\.IL2CPP-win-x64' | head -1 | grep -oE '[0-9]+')
+          if [ -z "$B6" ]; then
+            echo "::error::Failed to parse BepInEx 6 BE build number from builds.bepinex.dev"
+            exit 1
+          fi
+          echo "bepinex6_build=$B6" >> "$GITHUB_OUTPUT"
+          echo "BepInEx 6 BE build: $B6"
+
+          # XUnity.AutoTranslator (GitHub Releases)
+          XU=$(curl -sSf \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "User-Agent: XUnityToolkit-CI/1.0" \
+            "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" \
+            | jq -r '.[0].tag_name')
+          echo "xunity=$XU" >> "$GITHUB_OUTPUT"
+          echo "XUnity: $XU"
+
+      - name: Compare with stored versions
+        id: compare
+        run: |
+          STORED_B5=$(jq -r '.bepinex5 // ""' .github/deps.json)
+          STORED_B6=$(jq -r '.bepinex6_build // ""' .github/deps.json)
+          STORED_XU=$(jq -r '.xunity // ""' .github/deps.json)
+
+          NEW_B5="${{ steps.fetch.outputs.bepinex5 }}"
+          NEW_B6="${{ steps.fetch.outputs.bepinex6_build }}"
+          NEW_XU="${{ steps.fetch.outputs.xunity }}"
+
+          CHANGED=""
+          NOTES=""
+
+          if [ "$NEW_B5" != "$STORED_B5" ] && [ -n "$NEW_B5" ] && [ "$NEW_B5" != "null" ]; then
+            CHANGED="true"
+            NOTES="${NOTES}- **BepInEx 5 (Mono):** \`${STORED_B5}\` → \`${NEW_B5}\`\n"
+          fi
+          if [ "$NEW_B6" != "$STORED_B6" ] && [ -n "$NEW_B6" ]; then
+            CHANGED="true"
+            NOTES="${NOTES}- **BepInEx 6 BE (IL2CPP):** build \`${STORED_B6}\` → build \`${NEW_B6}\`\n"
+          fi
+          if [ "$NEW_XU" != "$STORED_XU" ] && [ -n "$NEW_XU" ] && [ "$NEW_XU" != "null" ]; then
+            CHANGED="true"
+            NOTES="${NOTES}- **XUnity.AutoTranslator:** \`${STORED_XU}\` → \`${NEW_XU}\`\n"
+          fi
+
+          FORCE="${{ inputs.force_build }}"
+          if [ -n "$CHANGED" ] || [ "$FORCE" = "true" ]; then
+            BUILD_VER="1.0.$(date -u +%Y%m%d%H%M)"
+            RELEASE_TAG="auto-${BUILD_VER}"
+
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+            echo "build_version=${BUILD_VER}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+            # Build new deps.json content (compact JSON to avoid multiline output corruption)
+            NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            NEW_JSON=$(jq -c \
+              --arg b5 "${NEW_B5:-$STORED_B5}" \
+              --arg b6 "${NEW_B6:-$STORED_B6}" \
+              --arg xu "${NEW_XU:-$STORED_XU}" \
+              --arg ts "$NOW" \
+              '.bepinex5 = $b5 | .bepinex6_build = $b6 | .xunity = $xu | .last_checked = $ts' \
+              .github/deps.json)
+            echo "new_deps_json=${NEW_JSON}" >> "$GITHUB_OUTPUT"
+
+            # Multi-line release notes
+            {
+              echo 'release_notes<<RELEASE_EOF'
+              echo "## XUnityToolkit-WebUI ${BUILD_VER}"
+              echo ""
+              echo "Automated dependency update build."
+              echo ""
+              echo "### Updated Dependencies"
+              if [ -n "$CHANGED" ]; then
+                printf '%b' "$NOTES"
+              else
+                echo "- Force build (no dependency changes)"
+              fi
+              echo ""
+              echo "### Downloads"
+              echo "| File | Platform |"
+              echo "|------|----------|"
+              echo "| \`XUnityToolkit-WebUI-win-x64.zip\` | Windows x64 |"
+              echo "| \`XUnityToolkit-WebUI-win-arm64.zip\` | Windows ARM64 |"
+              echo 'RELEASE_EOF'
+            } >> "$GITHUB_OUTPUT"
+
+            echo "Build needed: ${BUILD_VER}"
+          else
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+            echo "No dependency changes detected."
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.needs_build == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      build_version: ${{ needs.check.outputs.build_version }}
+      release_tag: ${{ needs.check.outputs.release_tag }}
+      release_name: "XUnityToolkit-WebUI ${{ needs.check.outputs.build_version }}"
+      release_body: ${{ needs.check.outputs.release_notes }}
+      prerelease: true
+    permissions:
+      contents: write
+
+  update-deps:
+    needs: [check, build]
+    if: always() && needs.check.outputs.needs_build == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update deps.json
+        run: |
+          echo '${{ needs.check.outputs.new_deps_json }}' | jq '.' > .github/deps.json
+          cat .github/deps.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/deps.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "ci: update dependency versions"
+            git pull --rebase origin main
+            git push
+          fi

@@ -1,0 +1,29 @@
+# Triggered when a v* tag is pushed.
+# Delegates all build work to build.yml.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    uses: ./.github/workflows/build.yml
+    with:
+      build_version: ${{ github.ref_name }}
+      release_tag: ${{ github.ref_name }}
+      release_name: "XUnityToolkit-WebUI ${{ github.ref_name }}"
+      release_body: |
+        ## XUnityToolkit-WebUI ${{ github.ref_name }}
+
+        ### Downloads
+        | File | Platform |
+        |------|----------|
+        | `XUnityToolkit-WebUI-win-x64.zip` | Windows x64 |
+        | `XUnityToolkit-WebUI-win-arm64.zip` | Windows ARM64 |
+
+        ### Installation
+        Download the ZIP for your architecture, extract, and run `XUnityToolkit-WebUI.exe`.
+      prerelease: false
+    permissions:
+      contents: write

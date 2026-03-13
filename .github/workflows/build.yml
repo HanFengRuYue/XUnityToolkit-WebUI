@@ -1,0 +1,347 @@
+# Reusable build workflow — called by release.yml and dep-check.yml
+# Can also be triggered manually via workflow_dispatch for testing.
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      build_version:
+        description: 'Version string (e.g. 1.0.202603130200 or v1.0.0)'
+        required: true
+        type: string
+      release_tag:
+        description: 'Git tag for the GitHub Release'
+        required: true
+        type: string
+      release_name:
+        description: 'Human-readable release title'
+        required: true
+        type: string
+      release_body:
+        description: 'Release notes markdown'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: 'Version override (default: auto-generated timestamp)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = '${{ inputs.build_version }}'
+          if (-not $v) { $v = "1.0.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Build version: $v"
+
+      # ── SDK setup ──
+
+      - name: Setup .NET 10 preview
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: XUnityToolkit-Vue/package-lock.json
+
+      # ── Download XUnity reference DLLs for TranslatorEndpoint ──
+
+      - name: Download XUnity reference DLLs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{
+            'Authorization' = "Bearer $env:GH_TOKEN"
+            'User-Agent'    = 'XUnityToolkit-CI/1.0'
+          }
+          $releases = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" `
+            -Headers $headers
+          $release = $releases | Select-Object -First 1
+          Write-Host "XUnity release: $($release.tag_name)"
+
+          # Find the BepInEx (non-IL2CPP) ZIP — it contains the reference DLLs
+          $asset = $release.assets |
+            Where-Object { $_.name -match '^XUnity\.AutoTranslator-BepInEx-[0-9]' } |
+            Select-Object -First 1
+          if (-not $asset) { throw "XUnity BepInEx asset not found" }
+
+          $zipPath = Join-Path $env:TEMP "xunity-ref.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+
+          $libsDir = "TranslatorEndpoint\libs"
+          New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $targets = @('XUnity.AutoTranslator.Plugin.Core.dll', 'XUnity.Common.dll')
+            foreach ($entry in $zip.Entries) {
+              if ($entry.Name -in $targets) {
+                $destPath = Join-Path $libsDir $entry.Name
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destPath, $true)
+                Write-Host "  Extracted: $($entry.Name)"
+              }
+            }
+          } finally {
+            $zip.Dispose()
+          }
+
+      # ── Download bundled assets ──
+
+      - name: Download bundled assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{
+            'Authorization' = "Bearer $env:GH_TOKEN"
+            'User-Agent'    = 'XUnityToolkit-CI/1.0'
+          }
+
+          function Download-Asset {
+            param([string]$Url, [string]$DestDir, [string]$FileName = $null)
+            if (-not $FileName) {
+              $FileName = [System.Uri]::UnescapeDataString(($Url -split '/')[-1])
+            }
+            $destPath = Join-Path $DestDir $FileName
+            if (Test-Path $destPath) {
+              Write-Host "  [cached] $FileName"
+              return
+            }
+            Write-Host "  Downloading $FileName..."
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $Url -OutFile $destPath -UseBasicParsing
+          }
+
+          $BundledRoot = "bundled"
+          foreach ($d in @(
+            "$BundledRoot\bepinex5",
+            "$BundledRoot\bepinex6",
+            "$BundledRoot\xunity",
+            "$BundledRoot\llama"
+          )) {
+            New-Item -ItemType Directory -Path $d -Force | Out-Null
+          }
+
+          # ── BepInEx 5 (Mono) ──
+          Write-Host "Fetching BepInEx 5..."
+          $b5releases = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" `
+            -Headers $headers
+          $b5rel = $b5releases |
+            Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } |
+            Select-Object -First 1
+          if (-not $b5rel) { throw "BepInEx 5 release not found" }
+          Write-Host "  BepInEx 5: $($b5rel.tag_name)"
+          foreach ($arch in @('x64', 'x86')) {
+            $asset = $b5rel.assets |
+              Where-Object { $_.name -like "BepInEx_win_${arch}_*" } |
+              Select-Object -First 1
+            if ($asset) {
+              Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\bepinex5"
+            }
+          }
+
+          # ── BepInEx 6 BE (IL2CPP) ──
+          Write-Host "Fetching BepInEx 6 BE..."
+          $buildsHtml = (Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing).Content
+          if ($buildsHtml -match 'href="[^"]*?/(\d+)/BepInEx-Unity\.IL2CPP-win-x64-6\.0\.0-be\.\d+%2B([a-f0-9]+)\.zip"') {
+            $buildNo = $Matches[1]
+            $commit  = $Matches[2]
+            Write-Host "  BepInEx 6 BE: build $buildNo ($commit)"
+            foreach ($arch in @('x64', 'x86')) {
+              $url  = "https://builds.bepinex.dev/projects/bepinex_be/$buildNo/BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo%2B$commit.zip"
+              $name = "BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo+$commit.zip"
+              Download-Asset -Url $url -DestDir "$BundledRoot\bepinex6" -FileName $name
+            }
+          } else {
+            throw "Failed to parse BepInEx 6 BE build info"
+          }
+
+          # ── XUnity.AutoTranslator ──
+          Write-Host "Fetching XUnity.AutoTranslator..."
+          $xureleases = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" `
+            -Headers $headers
+          $xurel = $xureleases | Select-Object -First 1
+          if (-not $xurel) { throw "XUnity release not found" }
+          Write-Host "  XUnity: $($xurel.tag_name)"
+          foreach ($asset in ($xurel.assets | Where-Object { $_.name -like 'XUnity.AutoTranslator-BepInEx*' })) {
+            Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\xunity"
+          }
+
+          # ── llama.cpp ──
+          Write-Host "Fetching llama.cpp..."
+          $llamareleases = Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" `
+            -Headers $headers
+          $llamarel = $llamareleases |
+            Where-Object { -not $_.prerelease } |
+            Select-Object -First 1
+          if (-not $llamarel) { throw "llama.cpp release not found" }
+          Write-Host "  llama.cpp: $($llamarel.tag_name)"
+          $llamaPatterns = @(
+            "llama-*-bin-win-cuda-12.4-x64.zip",
+            "cudart-llama-bin-win-cuda-12.4-x64.zip",
+            "llama-*-bin-win-vulkan-x64.zip",
+            "llama-*-bin-win-cpu-x64.zip"
+          )
+          foreach ($pattern in $llamaPatterns) {
+            $asset = $llamarel.assets |
+              Where-Object { $_.name -like $pattern } |
+              Select-Object -First 1
+            if ($asset) {
+              Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\llama"
+            } else {
+              Write-Host "  [skip] $pattern not found"
+            }
+          }
+
+          Write-Host "Bundled assets ready."
+
+      # ── Build frontend ──
+
+      - name: Install frontend dependencies
+        working-directory: XUnityToolkit-Vue
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: XUnityToolkit-Vue
+        run: npm run build
+
+      # ── Build TranslatorEndpoint ──
+
+      - name: Build TranslatorEndpoint (LLMTranslate.dll)
+        shell: pwsh
+        run: |
+          $hasLibs = (Test-Path "TranslatorEndpoint\libs\XUnity.AutoTranslator.Plugin.Core.dll") -and
+                     (Test-Path "TranslatorEndpoint\libs\XUnity.Common.dll")
+          if ($hasLibs) {
+            dotnet build TranslatorEndpoint\TranslatorEndpoint.csproj -c Release --nologo -v quiet
+            if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
+            Write-Host "LLMTranslate.dll built successfully."
+          } else {
+            Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
+          }
+
+      # ── Publish backend ──
+
+      - name: Publish ${{ matrix.rid }}
+        shell: pwsh
+        run: |
+          $v = '${{ steps.ver.outputs.build_version }}'
+          dotnet publish XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj `
+            -c Release `
+            -r ${{ matrix.rid }} `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=none `
+            -p:SkipFrontendBuild=true `
+            -p:InformationalVersion=$v `
+            -o "Release\${{ matrix.rid }}"
+
+          if ($LASTEXITCODE -ne 0) { throw "Publish failed for ${{ matrix.rid }}" }
+
+          # Cleanup unnecessary files
+          Get-ChildItem "Release\${{ matrix.rid }}" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+
+          # Copy bundled/ tree post-publish (PublishSingleFile drops files with '+' in names)
+          if (Test-Path "bundled") {
+            $dest = "Release\${{ matrix.rid }}\bundled"
+            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+            Copy-Item -Path "bundled" -Destination $dest -Recurse -Force
+            Write-Host "Copied bundled assets to output."
+          }
+
+          $exeFile = Get-Item "Release\${{ matrix.rid }}\XUnityToolkit-WebUI.exe"
+          $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
+          Write-Host "${{ matrix.rid }} done (exe: $sizeMB MB)"
+
+      # ── Package as ZIP ──
+
+      - name: Package as ZIP
+        shell: pwsh
+        run: |
+          $zipName = "XUnityToolkit-WebUI-${{ matrix.rid }}.zip"
+          Compress-Archive -Path "Release\${{ matrix.rid }}\*" -DestinationPath $zipName -CompressionLevel Optimal
+          $sizeMB = [math]::Round((Get-Item $zipName).Length / 1MB, 1)
+          Write-Host "Created $zipName ($sizeMB MB)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rid }}
+          path: XUnityToolkit-WebUI-${{ matrix.rid }}.zip
+          retention-days: 3
+
+  # ── Create GitHub Release after both RIDs succeed ──
+  release:
+    needs: build
+    if: ${{ inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Guard against duplicate releases (e.g. dep-check retry after partial failure)
+          if gh release view "${{ inputs.release_tag }}" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Release ${{ inputs.release_tag }} already exists, skipping."
+            exit 0
+          fi
+
+          PRERELEASE_FLAG=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          gh release create "${{ inputs.release_tag }}" \
+            XUnityToolkit-WebUI-win-x64.zip \
+            XUnityToolkit-WebUI-win-arm64.zip \
+            --title "${{ inputs.release_name }}" \
+            --notes "${{ inputs.release_body }}" \
+            $PRERELEASE_FLAG \
+            --repo "${{ github.repository }}"
+
+          echo "Release created: ${{ inputs.release_tag }}"
