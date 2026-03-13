@@ -54,7 +54,7 @@ XUnityToolkit-Vue/src/
 ├── components/
 │   ├── layout/     # AppShell (sidebar + content layout)
 │   ├── config/     # ConfigPanel (translation settings form)
-│   ├── library/    # GameCard, CoverPickerModal, IconPickerModal, WebImageSearchTab, LibraryCustomizer
+│   ├── library/    # GameCard, CoverPickerModal, IconPickerModal, BackgroundPickerModal, WebImageSearchTab, LibraryCustomizer
 │   ├── progress/   # InstallProgressDrawer (SignalR progress)
 │   └── settings/   # Settings page components
 ├── composables/    # Reusable composition functions (useAddGameFlow)
@@ -73,7 +73,7 @@ XUnityToolkit-Vue/src/
 - **Game library:** Grid (default) + list view; 2:3 GameCard with covers; `LibraryCustomizer` controls card size/gap/labels/accent
 - **Cards:** `.section-card` with `.section-icon`/`.section-title` (base `--accent`; semantic `.danger`/`.warning` only); `.info-card` same pattern
 - **Page layouts:** Full-width; two-column grids collapse at 960px/768px; settings uses `flex-column` with `gap: 16px`
-- **Content padding:** `36px 40px` (desktop), `20px 16px` (tablet), `16px 12px` (phone)
+- **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match
 
 ## Code Conventions
 
@@ -91,6 +91,7 @@ XUnityToolkit-Vue/src/
 - **Install:** `POST /api/games/{id}/install`, `DELETE .../install` (uninstall), `GET .../status`, `POST .../cancel`
 - **Icon:** `GET /api/games/{id}/icon` (custom > exe icon), `POST .../icon/upload`, `DELETE .../icon/custom`, `POST .../icon/{search,grids,select}` (SteamGridDB), `POST .../icon/web-search`, `POST .../icon/web-select`
 - **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../cover`
+- **Background:** `GET .../background`, `POST .../background/upload` (10MB), `POST .../background/{search,heroes,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../background`
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
 - **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`
 - **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
@@ -150,6 +151,7 @@ XUnityToolkit-Vue/src/
 - `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks
 - **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
 - `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
+- **Stats counters unit:** `_queued`, `_translating`, `_totalReceived`, `_totalTranslated` must ALL count individual texts (not batches/HTTP requests) — pipeline flow displays them side by side
 - **RecordError:** `LlmTranslationService.RecordError` is sole site — endpoint catch must NOT double-count
 - `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
 - **Plugin concurrency:** DLL 10×10 = 100 texts; Mono >15 connections deadlocks — batch instead
@@ -180,6 +182,7 @@ XUnityToolkit-Vue/src/
 - **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
 - **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
 - Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
+- **Language detection strategy:** Non-Latin scripts (kana, CJK, hangul, cyrillic) are prioritized over Latin because Unity engine internals always contribute English text; only classify as English when non-Latin char count < 10; `IsGameText` is a heuristic exclusion filter (paths, GUIDs, code, identifiers) — no positive classification
 - XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
 - **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
 
@@ -247,15 +250,26 @@ XUnityToolkit-Vue/src/
 - **`WebImageSearchService`:** Scrapes Bing (`/images/async` endpoint) and Google (`AF_initDataCallback` regex) for image results; no API key needed
 - **Bing parsing:** `<a class="iusc" m='JSON'>` → extract `murl` (full URL) + `turl` (thumbnail); SafeSearch off via Cookie `SRCHHPGUSR=ADLT=OFF`
 - **Google parsing:** regex `AF_initDataCallback` blocks → `["url", width, height]` tuples; SafeSearch off via `safe=off`; consent cookie `CONSENT=YES+...`
-- **Size filters (Bing `qft`):** `+filterui:imagesize-{large,medium,small}`, `+filterui:aspect-{tall,square}`; auto mode: cover→large+tall, icon→small+square
+- **Size filters (Bing `qft`):** `+filterui:imagesize-{large,medium,small}`, `+filterui:aspect-{tall,square,wide}`; auto mode: cover→large+tall, icon→small+square, background→wallpaper+wide
+- **`WebImageSearchTab` modes:** `'cover'` | `'icon'` | `'background'` — each with distinct search suffix, size filter, and grid aspect ratio
 - **SSRF protection:** `ValidateImageUrl` rejects non-http(s), loopback, private IPs before server-side download
 - **Content-Type validation:** Must check `IsAllowedContentType` before saving downloaded images
 - Named `HttpClient`: `"WebImageSearch"` (15s timeout, browser UA, no base address)
 - **CoverPickerModal:** 4 tabs (Steam, SteamGridDB, 网络搜索, 自定义上传); `WebImageSearchTab` with `mode="cover"`
 - **IconPickerModal:** 3 tabs (SteamGridDB, 网络搜索, 本地上传); SteamGridDB tab uses `icons/game/{id}` API (vs cover's `grids/game/{id}`); `WebImageSearchTab` with `mode="icon"`; opened from GameDetailView title-icon left-click or right-click "搜索图标"
-- **GameDetailView title-icon:** left-click → IconPickerModal; right-click → context menu (更换封面/搜索图标/上传图标/删除图标)
+- **BackgroundPickerModal:** 4 tabs (Steam, SteamGridDB, 网络搜索, 本地上传); SteamGridDB tab uses `heroes/game/{id}` API; Steam tab downloads `library_hero.jpg` from CDN; `WebImageSearchTab` with `mode="background"`; landscape 16:9 images
+- **GameDetailView title-icon:** left-click → IconPickerModal; right-click → context menu (更换封面/更换背景/搜索图标/上传图标/删除图标/删除背景图)
 - **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
 - **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
+
+### Game Detail Background Image
+
+- **Storage:** `{programDir}/data/cache/backgrounds/{gameId}.img` + `.meta` (same `CoverMeta` model); `AppDataPaths.BackgroundsDirectory`
+- **Service methods:** `GameImageService.{GetBackground,SaveBackgroundFromUpload,SaveBackgroundFromWebSearch,SaveBackgroundFromUrl,SaveBackgroundFromSteam,GetHeroes,DeleteBackground}Async`; `WebImageSearchService.SelectAsBackgroundAsync`
+- **Hero backdrop:** `GameDetailView.vue` — absolute-positioned behind content; NO blur on image (`filter: brightness(0.65) saturate(1.1)` only); gradient + vignette overlays fade to `--bg-root`
+- **Acrylic cards:** `.section-card` uses `backdrop-filter: blur(20px)` with semi-transparent `--bg-card` — cards blur the background, not the image itself
+- **Parallax:** scroll listener on `.main-content` (parent); `translateY(scrollTop * 0.3)` on hero img; `passive: true`
+- **bgTimestamp:** separate `ref(Date.now())` for cache-busting background URL independently of `game.updatedAt`
 
 ### Sync Points
 
@@ -270,6 +284,7 @@ XUnityToolkit-Vue/src/
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: downloads bundled assets (`-SkipDownload` to skip) → frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/` → copies `bundled/` to output; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- **Versioning:** `build.ps1` auto-generates `1.0.{YYYYMMDDHHmm}` and passes `-p:InformationalVersion=$BuildVersion` to `dotnet publish`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 per segment, max 65535) which overflows with timestamp; `GET /api/settings/version` reads `AssemblyInformationalVersionAttribute`; AppShell sidebar + SettingsView both dynamically fetch version from API
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API (BepInEx 5/XUnity/llama.cpp from GitHub Releases, BepInEx 6 BE from builds.bepinex.dev); no hardcoded version pins; llama.cpp prefers CUDA 12.4 when multiple CUDA versions available; `Download-IfMissing` caches by filename (old versions retained, `BundledAssetPaths` glob picks latest); copied post-publish (NOT via csproj Content Include — `PublishSingleFile` silently drops files with `+` in names)
 - **TMP fonts:** live in `bundled/fonts/`; csproj `Content Include` copies to `bundled/fonts/` in output during dev build; release build uses `build.ps1` post-publish `Copy-Item` of entire `bundled/` tree
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`

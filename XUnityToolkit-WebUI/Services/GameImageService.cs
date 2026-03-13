@@ -472,6 +472,254 @@ public sealed class GameImageService(
         return true;
     }
 
+    // ===== SteamGridDB Heroes (for backgrounds) =====
+
+    public async Task<List<SteamGridDbImage>> GetHeroesAsync(int steamGridDbGameId, CancellationToken ct = default)
+    {
+        var apiKey = await GetApiKeyAsync(ct);
+        var client = httpClientFactory.CreateClient("SteamGridDB");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get,
+            $"heroes/game/{steamGridDbGameId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var response = await client.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        return await ParseSteamGridDbResponse<List<SteamGridDbImage>>(response, ct);
+    }
+
+    public async Task SaveBackgroundFromUrlAsync(string gameId, string imageUrl, int? steamGridDbGameId, CancellationToken ct = default)
+    {
+        var client = httpClientFactory.CreateClient("SteamGridDB");
+        var response = await client.GetAsync(imageUrl, ct);
+        response.EnsureSuccessStatusCode();
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(paths.BackgroundsDirectory);
+
+            var bgPath = paths.BackgroundFile(gameId);
+            var tmpPath = bgPath + ".tmp";
+            await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+            File.Move(tmpPath, bgPath, overwrite: true);
+
+            var meta = new CoverMeta
+            {
+                ContentType = contentType,
+                Source = "steamgriddb",
+                SourceUrl = imageUrl,
+                SteamGridDbGameId = steamGridDbGameId,
+                SavedAt = DateTime.UtcNow
+            };
+            var metaJson = JsonSerializer.Serialize(meta, JsonOptions);
+            var metaTmpPath = paths.BackgroundMetaFile(gameId) + ".tmp";
+            await File.WriteAllTextAsync(metaTmpPath, metaJson, ct);
+            File.Move(metaTmpPath, paths.BackgroundMetaFile(gameId), overwrite: true);
+
+            logger.LogInformation("已保存游戏 {GameId} 的背景图 (来源: steamgriddb)", gameId);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<bool> SaveBackgroundFromSteamAsync(string gameId, int steamAppId, CancellationToken ct = default)
+    {
+        var client = httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(15);
+
+        // Try library hero image first (1920x620, ideal for backgrounds)
+        var heroUrl = $"https://cdn.akamai.steamstatic.com/steam/apps/{steamAppId}/library_hero.jpg";
+        var response = await client.GetAsync(heroUrl, ct);
+
+        string imageUrl;
+        if (response.IsSuccessStatusCode)
+        {
+            imageUrl = heroUrl;
+        }
+        else
+        {
+            // Fall back to header image (460x215)
+            response.Dispose();
+            var headerUrl = $"https://cdn.akamai.steamstatic.com/steam/apps/{steamAppId}/header.jpg";
+            response = await client.GetAsync(headerUrl, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                response.Dispose();
+                return false;
+            }
+            imageUrl = headerUrl;
+        }
+
+        using (response)
+        {
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+
+            await _lock.WaitAsync(ct);
+            try
+            {
+                Directory.CreateDirectory(paths.BackgroundsDirectory);
+
+                var bgPath = paths.BackgroundFile(gameId);
+                var tmpPath = bgPath + ".tmp";
+                await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+                File.Move(tmpPath, bgPath, overwrite: true);
+
+                var meta = new CoverMeta
+                {
+                    ContentType = contentType,
+                    Source = "steam",
+                    SourceUrl = imageUrl,
+                    SavedAt = DateTime.UtcNow
+                };
+                var metaJson = JsonSerializer.Serialize(meta, JsonOptions);
+                var metaTmpPath = paths.BackgroundMetaFile(gameId) + ".tmp";
+                await File.WriteAllTextAsync(metaTmpPath, metaJson, ct);
+                File.Move(metaTmpPath, paths.BackgroundMetaFile(gameId), overwrite: true);
+
+                logger.LogInformation("已保存游戏 {GameId} 的背景图 (来源: Steam CDN, AppID: {SteamAppId})", gameId, steamAppId);
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+
+        return true;
+    }
+
+    // ===== Background Image Management =====
+
+    public bool HasBackground(string gameId) => File.Exists(paths.BackgroundFile(gameId));
+
+    public async Task<(byte[] Bytes, string ContentType)?> GetBackgroundAsync(string gameId, CancellationToken ct = default)
+    {
+        var bgPath = paths.BackgroundFile(gameId);
+        if (!File.Exists(bgPath))
+            return null;
+
+        var metaPath = paths.BackgroundMetaFile(gameId);
+        var contentType = "image/jpeg";
+        if (File.Exists(metaPath))
+        {
+            try
+            {
+                var metaJson = await File.ReadAllTextAsync(metaPath, ct);
+                var meta = JsonSerializer.Deserialize<CoverMeta>(metaJson, JsonOptions);
+                if (meta is not null)
+                    contentType = meta.ContentType;
+            }
+            catch { /* use default content type */ }
+        }
+
+        var bytes = await File.ReadAllBytesAsync(bgPath, ct);
+        return (bytes, contentType);
+    }
+
+    public async Task SaveBackgroundFromUploadAsync(string gameId, Stream imageStream, string contentType, CancellationToken ct = default)
+    {
+        using var ms = new MemoryStream();
+        await imageStream.CopyToAsync(ms, ct);
+        var bytes = ms.ToArray();
+
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(paths.BackgroundsDirectory);
+
+            var bgPath = paths.BackgroundFile(gameId);
+            var tmpPath = bgPath + ".tmp";
+            await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+            File.Move(tmpPath, bgPath, overwrite: true);
+
+            var meta = new CoverMeta
+            {
+                ContentType = contentType,
+                Source = "upload",
+                SavedAt = DateTime.UtcNow
+            };
+            var metaJson = JsonSerializer.Serialize(meta, JsonOptions);
+            var metaTmpPath = paths.BackgroundMetaFile(gameId) + ".tmp";
+            await File.WriteAllTextAsync(metaTmpPath, metaJson, ct);
+            File.Move(metaTmpPath, paths.BackgroundMetaFile(gameId), overwrite: true);
+
+            logger.LogInformation("已保存游戏 {GameId} 的背景图 (来源: 上传)", gameId);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task SaveBackgroundFromWebSearchAsync(
+        string gameId, byte[] bytes, string contentType,
+        string sourceUrl, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            Directory.CreateDirectory(paths.BackgroundsDirectory);
+
+            var bgPath = paths.BackgroundFile(gameId);
+            var tmpPath = bgPath + ".tmp";
+            await File.WriteAllBytesAsync(tmpPath, bytes, ct);
+            File.Move(tmpPath, bgPath, overwrite: true);
+
+            var meta = new CoverMeta
+            {
+                ContentType = contentType,
+                Source = "web",
+                SourceUrl = sourceUrl,
+                SavedAt = DateTime.UtcNow
+            };
+            var metaJson = JsonSerializer.Serialize(meta, JsonOptions);
+            var metaTmpPath = paths.BackgroundMetaFile(gameId) + ".tmp";
+            await File.WriteAllTextAsync(metaTmpPath, metaJson, ct);
+            File.Move(metaTmpPath, paths.BackgroundMetaFile(gameId), overwrite: true);
+
+            logger.LogInformation("已保存游戏 {GameId} 的背景图 (来源: 网络搜索)", gameId);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public async Task<bool> DeleteBackgroundAsync(string gameId, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var bgPath = paths.BackgroundFile(gameId);
+            var metaPath = paths.BackgroundMetaFile(gameId);
+            var deleted = false;
+
+            if (File.Exists(bgPath))
+            {
+                File.Delete(bgPath);
+                deleted = true;
+            }
+            if (File.Exists(metaPath))
+                File.Delete(metaPath);
+
+            if (deleted)
+                logger.LogInformation("已删除游戏 {GameId} 的背景图", gameId);
+
+            return deleted;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public static bool IsAllowedContentType(string contentType) =>
         AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
 

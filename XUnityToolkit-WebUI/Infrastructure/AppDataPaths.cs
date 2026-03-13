@@ -14,6 +14,7 @@ public sealed class AppDataPaths(IConfiguration config)
 
     public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
     public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
+    public string BackgroundsDirectory => Path.Combine(CacheDirectory, "backgrounds");
     public string LogsDirectory => Path.Combine(_root, "logs");
     public string ExtractedTextsDirectory => Path.Combine(CacheDirectory, "extracted-texts");
     public string LlamaDirectory => Path.Combine(_root, "llama");
@@ -39,6 +40,12 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CustomIconFile(string gameId) =>
         Path.Combine(IconsDirectory, $"{gameId}.custom.png");
 
+    public string BackgroundFile(string gameId) =>
+        Path.Combine(BackgroundsDirectory, $"{gameId}.img");
+
+    public string BackgroundMetaFile(string gameId) =>
+        Path.Combine(BackgroundsDirectory, $"{gameId}.meta");
+
     public void EnsureDirectoriesExist()
     {
         Directory.CreateDirectory(_root);
@@ -46,6 +53,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CacheDirectory);
         Directory.CreateDirectory(CoversDirectory);
         Directory.CreateDirectory(IconsDirectory);
+        Directory.CreateDirectory(BackgroundsDirectory);
         Directory.CreateDirectory(GlossariesDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(ExtractedTextsDirectory);

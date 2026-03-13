@@ -7,7 +7,7 @@ import type { Game, WebImageResult } from '@/api/types'
 
 const props = defineProps<{
   game: Game
-  mode: 'cover' | 'icon'
+  mode: 'cover' | 'icon' | 'background'
 }>()
 
 const emit = defineEmits<{
@@ -50,6 +50,9 @@ async function doSearch() {
     if (props.mode === 'cover') {
       results.value = await gamesApi.searchWebImages(
         props.game.id, query.value.trim(), engine.value, sizeFilter.value)
+    } else if (props.mode === 'background') {
+      results.value = await gamesApi.searchWebBackgroundImages(
+        props.game.id, query.value.trim(), engine.value, sizeFilter.value)
     } else {
       results.value = await gamesApi.searchWebIconImages(
         props.game.id, query.value.trim(), engine.value, sizeFilter.value)
@@ -67,10 +70,13 @@ async function selectImage(result: WebImageResult) {
   try {
     if (props.mode === 'cover') {
       await gamesApi.selectWebCover(props.game.id, result.fullUrl)
+    } else if (props.mode === 'background') {
+      await gamesApi.selectWebBackground(props.game.id, result.fullUrl)
     } else {
       await gamesApi.selectWebIcon(props.game.id, result.fullUrl)
     }
-    message.success(props.mode === 'cover' ? '封面已更新' : '图标已更新')
+    const labels = { cover: '封面已更新', icon: '图标已更新', background: '背景已更新' }
+    message.success(labels[props.mode])
     emit('saved')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '保存失败')
@@ -187,6 +193,10 @@ async function selectImage(result: WebImageResult) {
   grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
 }
 
+.image-grid.background {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
 .image-item {
   position: relative;
   border-radius: var(--radius-sm);
@@ -202,6 +212,10 @@ async function selectImage(result: WebImageResult) {
 
 .image-grid.icon .image-item {
   aspect-ratio: 1 / 1;
+}
+
+.image-grid.background .image-item {
+  aspect-ratio: 16 / 9;
 }
 
 .image-item:hover {

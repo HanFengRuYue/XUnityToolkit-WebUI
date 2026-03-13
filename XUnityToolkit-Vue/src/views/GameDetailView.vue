@@ -34,6 +34,7 @@ import {
   InventoryOutlined,
   FileUploadOutlined,
   ImageSearchOutlined,
+  WallpaperOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -48,6 +49,9 @@ const CoverPickerModal = defineAsyncComponent(
 )
 const IconPickerModal = defineAsyncComponent(
   () => import('@/components/library/IconPickerModal.vue')
+)
+const BackgroundPickerModal = defineAsyncComponent(
+  () => import('@/components/library/BackgroundPickerModal.vue')
 )
 
 const route = useRoute()
@@ -66,6 +70,7 @@ const aiEndpointLoading = ref(false)
 const aiDescription = ref('')
 const showCoverPicker = ref(false)
 const showIconPicker = ref(false)
+const showBackgroundPicker = ref(false)
 const packageExporting = ref(false)
 const packageImporting = ref(false)
 
@@ -79,12 +84,51 @@ const iconContextMenuX = ref(0)
 const iconContextMenuY = ref(0)
 const iconContextMenuOptions = [
   { label: '更换封面', key: 'cover', icon: () => h(NIcon, { size: 16 }, { default: () => h(PhotoCameraOutlined) }) },
+  { label: '更换背景', key: 'background', icon: () => h(NIcon, { size: 16 }, { default: () => h(WallpaperOutlined) }) },
   { label: '搜索图标', key: 'web-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(ImageSearchOutlined) }) },
   { label: '上传自定义图标', key: 'upload-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(CloudUploadOutlined) }) },
   { label: '删除自定义图标', key: 'delete-icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(DeleteOutlineOutlined) }) },
+  { label: '删除背景图', key: 'delete-background', icon: () => h(NIcon, { size: 16 }, { default: () => h(DeleteOutlineOutlined) }) },
 ]
 
 const iconUrl = computed(() => game.value ? `/api/games/${gameId}/icon?t=${game.value.updatedAt}` : '')
+const bgTimestamp = ref(Date.now())
+const backgroundUrl = computed(() => game.value ? `${gamesApi.getBackgroundUrl(gameId)}?t=${bgTimestamp.value}` : '')
+const heroBgLoaded = ref(false)
+const heroScrollY = ref(0)
+
+function onHeroBgLoad() {
+  heroBgLoaded.value = true
+}
+
+function onHeroBgError() {
+  heroBgLoaded.value = false
+}
+
+// Parallax scroll for hero background
+const scrollContainer = ref<HTMLElement | null>(null)
+function onScroll() {
+  if (scrollContainer.value) {
+    heroScrollY.value = scrollContainer.value.scrollTop
+  }
+}
+
+onMounted(() => {
+  // Find the scroll container (parent .main-content)
+  nextTick(() => {
+    const el = document.querySelector('.main-content')
+    if (el) {
+      scrollContainer.value = el as HTMLElement
+      el.addEventListener('scroll', onScroll, { passive: true })
+    }
+  })
+})
+
+onUnmounted(() => {
+  if (scrollContainer.value) {
+    scrollContainer.value.removeEventListener('scroll', onScroll)
+  }
+})
 
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
@@ -259,6 +303,17 @@ async function handleIconContextMenuSelect(key: string) {
     } catch {
       message.error('删除图标失败')
     }
+  } else if (key === 'background') {
+    showBackgroundPicker.value = true
+  } else if (key === 'delete-background') {
+    try {
+      await gamesApi.deleteBackground(gameId)
+      heroBgLoaded.value = false
+      bgTimestamp.value = Date.now()
+      message.success('背景图已删除')
+    } catch {
+      message.error('删除背景图失败')
+    }
   }
 }
 
@@ -267,6 +322,11 @@ const iconFileInput = ref<HTMLInputElement | null>(null)
 async function handleIconSaved() {
   await gamesStore.refreshGame(gameId)
   if (game.value) game.value = await gamesApi.get(gameId)
+}
+
+function handleBackgroundSaved() {
+  bgTimestamp.value = Date.now()
+  heroBgLoaded.value = false
 }
 
 async function handleIconFileSelect(e: Event) {
@@ -413,23 +473,40 @@ onUnmounted(() => stopWatch())
   </div>
 
   <div v-else-if="game" class="detail-page">
-    <!-- Back Navigation & Title -->
-    <div class="detail-header" style="animation-delay: 0s">
-      <button class="back-button" @click="router.push('/')">
+    <!-- Hero Background -->
+    <div class="hero-backdrop" :class="{ 'hero-visible': heroBgLoaded }">
+      <img
+        :src="backgroundUrl"
+        class="hero-bg-img"
+        alt=""
+        :style="{ transform: `translateY(${heroScrollY * 0.3}px) scale(1.05)` }"
+        @load="onHeroBgLoad"
+        @error="onHeroBgError"
+      />
+      <div class="hero-gradient-overlay"></div>
+      <div class="hero-vignette"></div>
+    </div>
+
+    <!-- Hero Header (nav bar over the background) -->
+    <div class="hero-nav" style="animation-delay: 0s">
+      <button class="back-button" :class="{ 'on-hero': heroBgLoaded }" @click="router.push('/')">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <path d="M12 5L7 10L12 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <span>返回</span>
       </button>
-      <div class="header-actions">
-        <NButton tertiary type="error" size="small" @click="handleRemoveGame">
-          从库中移除
-        </NButton>
+      <div class="hero-nav-actions">
+        <button class="hero-action-btn" :title="heroBgLoaded ? '更换背景' : '设置背景'" @click="showBackgroundPicker = true">
+          <NIcon :size="16"><WallpaperOutlined /></NIcon>
+        </button>
+        <button class="hero-action-btn" title="从库中移除" @click="handleRemoveGame">
+          <NIcon :size="16"><DeleteOutlineOutlined /></NIcon>
+        </button>
       </div>
     </div>
 
-    <!-- Game Title -->
-    <div class="game-title-section" style="animation-delay: 0.05s">
+    <!-- Hero Title Banner -->
+    <div class="hero-title-banner" :class="{ 'has-hero': heroBgLoaded }" style="animation-delay: 0.05s">
       <div class="title-icon" @click="showIconPicker = true" @contextmenu="handleIconContextMenu" title="左键更换图标 / 右键更多操作">
         <img
           :src="iconUrl"
@@ -438,46 +515,52 @@ onUnmounted(() => stopWatch())
           @error="($event.target as HTMLImageElement).style.display = 'none'; ($event.target as HTMLImageElement).nextElementSibling?.classList.add('visible')"
         />
         <div class="title-icon-fallback">
-          <NIcon :size="28" color="var(--text-3)">
+          <NIcon :size="36" color="var(--text-3)">
             <GamepadFilled />
           </NIcon>
         </div>
         <div class="title-icon-edit">
-          <NIcon :size="14" color="#fff">
+          <NIcon :size="16" color="#fff">
             <PhotoCameraOutlined />
           </NIcon>
         </div>
       </div>
-      <h1 v-if="!editingName" class="game-title" @dblclick="startEditName">{{ game.name }}</h1>
-      <NInput
-        v-else
-        v-model:value="editNameValue"
-        class="game-title-input"
-        size="large"
-        autofocus
-        @keyup.enter="saveEditName"
-        @keyup.escape="cancelEditName"
-        @blur="saveEditName"
-      />
-      <button v-if="!editingName" class="edit-name-btn" title="重命名" @click="startEditName">
-        <NIcon :size="16" color="var(--text-3)">
-          <DriveFileRenameOutlineOutlined />
-        </NIcon>
-      </button>
-      <div class="title-status">
-        <template v-if="game.isUnityGame">
-          <span class="status-indicator" :class="{
-            'status-installed': isInstalled,
-            'status-partial': hasBepInEx && !isInstalled,
-            'status-none': !hasBepInEx,
-          }"></span>
-          <span class="status-text">
-            {{ isInstalled ? '已安装' : hasBepInEx ? '仅 BepInEx' : '未安装' }}
-          </span>
-        </template>
-        <template v-else>
-          <span class="status-text" style="color: var(--text-3)">非 Unity</span>
-        </template>
+      <div class="title-text-group">
+        <div class="title-name-row">
+          <h1 v-if="!editingName" class="game-title" @dblclick="startEditName">{{ game.name }}</h1>
+          <NInput
+            v-else
+            v-model:value="editNameValue"
+            class="game-title-input"
+            size="large"
+            autofocus
+            @keyup.enter="saveEditName"
+            @keyup.escape="cancelEditName"
+            @blur="saveEditName"
+          />
+          <button v-if="!editingName" class="edit-name-btn" title="重命名" @click="startEditName">
+            <NIcon :size="16" color="currentColor">
+              <DriveFileRenameOutlineOutlined />
+            </NIcon>
+          </button>
+        </div>
+        <div class="title-meta-row">
+          <div class="title-status" :class="{ 'on-hero': heroBgLoaded }">
+            <template v-if="game.isUnityGame">
+              <span class="status-indicator" :class="{
+                'status-installed': isInstalled,
+                'status-partial': hasBepInEx && !isInstalled,
+                'status-none': !hasBepInEx,
+              }"></span>
+              <span class="status-text">
+                {{ isInstalled ? '已安装' : hasBepInEx ? '仅 BepInEx' : '未安装' }}
+              </span>
+            </template>
+            <template v-else>
+              <span class="status-text" style="color: var(--text-3)">非 Unity</span>
+            </template>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -893,12 +976,85 @@ onUnmounted(() => stopWatch())
       @update:show="showIconPicker = $event"
       @saved="handleIconSaved"
     />
+
+    <!-- Background Picker Modal -->
+    <BackgroundPickerModal
+      v-if="showBackgroundPicker && game"
+      :show="showBackgroundPicker"
+      :game="game"
+      @update:show="showBackgroundPicker = $event"
+      @saved="handleBackgroundSaved"
+    />
   </div>
 </template>
 
 <style scoped>
 .detail-page {
-  /* Full width - no max-width restriction */
+  position: relative;
+}
+
+/* ===== Hero Background ===== */
+.hero-backdrop {
+  position: absolute;
+  top: -24px;
+  left: -28px;
+  right: -28px;
+  height: 420px;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hero-backdrop.hero-visible {
+  opacity: 1;
+}
+
+.hero-bg-img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 25%;
+  filter: brightness(0.65) saturate(1.1);
+  will-change: transform;
+}
+
+.hero-gradient-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      transparent 30%,
+      color-mix(in srgb, var(--bg-root) 50%, transparent) 65%,
+      var(--bg-root) 100%
+    );
+}
+
+.hero-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 100px 30px color-mix(in srgb, var(--bg-root) 35%, transparent);
+}
+
+/* Ensure all content floats above the hero */
+.hero-nav,
+.hero-title-banner,
+.section-card {
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== Section Card Acrylic ===== */
+.section-card {
+  background: color-mix(in srgb, var(--bg-card) 82%, transparent);
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
 }
 
 .detail-loading {
@@ -921,13 +1077,42 @@ onUnmounted(() => stopWatch())
   to { transform: rotate(360deg); }
 }
 
-/* ===== Header ===== */
-.detail-header {
+/* ===== Hero Nav ===== */
+.hero-nav {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 0;
   animation: slideUp 0.4s var(--ease-out) backwards;
+}
+
+.hero-nav-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.hero-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hero-action-btn:hover {
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  transform: scale(1.08);
 }
 
 .back-button {
@@ -945,9 +1130,18 @@ onUnmounted(() => stopWatch())
   transition: all 0.2s ease;
 }
 
+.back-button.on-hero {
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
 .back-button:hover {
-  background: var(--bg-muted);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text-1);
+}
+
+.back-button.on-hero:hover {
+  color: #fff;
 }
 
 .back-button:hover svg {
@@ -958,20 +1152,48 @@ onUnmounted(() => stopWatch())
   transition: transform 0.2s ease;
 }
 
-/* ===== Game Title ===== */
-.game-title-section {
+/* ===== Hero Title Banner ===== */
+.hero-title-banner {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 28px;
+  align-items: flex-end;
+  gap: 20px;
+  padding-top: 60px;
+  padding-bottom: 24px;
+  margin-bottom: 20px;
   animation: slideUp 0.4s var(--ease-out) backwards;
 }
 
+.hero-title-banner.has-hero {
+  padding-top: 100px;
+  padding-bottom: 28px;
+  margin-bottom: 24px;
+}
+
+.title-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.title-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.title-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .title-icon {
-  width: 56px;
-  height: 56px;
+  width: 80px;
+  height: 80px;
   flex-shrink: 0;
-  border-radius: 14px;
+  border-radius: 18px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   display: flex;
@@ -981,11 +1203,17 @@ onUnmounted(() => stopWatch())
   position: relative;
   box-shadow: var(--shadow-card);
   cursor: pointer;
-  transition: border-color 0.2s ease;
+  transition: all 0.25s ease;
+}
+
+.hero-title-banner.has-hero .title-icon {
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .title-icon:hover {
   border-color: var(--accent-border);
+  transform: scale(1.04);
 }
 
 .title-icon-edit {
@@ -997,7 +1225,7 @@ onUnmounted(() => stopWatch())
   background: rgba(0, 0, 0, 0.5);
   opacity: 0;
   transition: opacity 0.2s ease;
-  border-radius: 13px;
+  border-radius: 17px;
 }
 
 .title-icon:hover .title-icon-edit {
@@ -1009,7 +1237,7 @@ onUnmounted(() => stopWatch())
   height: 100%;
   object-fit: cover;
   image-rendering: -webkit-optimize-contrast;
-  border-radius: 13px;
+  border-radius: 17px;
 }
 
 .title-icon-fallback {
@@ -1027,12 +1255,18 @@ onUnmounted(() => stopWatch())
 
 .game-title {
   font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
+  font-size: 28px;
+  font-weight: 700;
   color: var(--text-1);
   margin: 0;
   letter-spacing: -0.03em;
   cursor: default;
+  line-height: 1.2;
+}
+
+.hero-title-banner.has-hero .game-title {
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .game-title-input {
@@ -1052,25 +1286,37 @@ onUnmounted(() => stopWatch())
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  color: var(--text-3);
 }
 
-.game-title-section:hover .edit-name-btn {
+.hero-title-banner.has-hero .edit-name-btn {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.title-name-row:hover .edit-name-btn {
   opacity: 1;
 }
 
 .edit-name-btn:hover {
-  background: var(--bg-muted);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .title-status {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 14px;
+  padding: 4px 12px;
   border-radius: 20px;
   background: var(--bg-subtle-hover);
   border: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+.title-status.on-hero {
+  background: rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .status-indicator {
@@ -1095,9 +1341,13 @@ onUnmounted(() => stopWatch())
 }
 
 .status-text {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
+}
+
+.hero-title-banner.has-hero .status-text {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* ===== Section Card ===== */
@@ -1474,20 +1724,31 @@ onUnmounted(() => stopWatch())
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .game-title-section {
-    flex-wrap: wrap;
-    gap: 12px;
+  .hero-backdrop {
+    top: -20px;
+    left: -20px;
+    right: -20px;
+    height: 320px;
+  }
+
+  .hero-title-banner {
+    padding-top: 40px;
+    gap: 14px;
+  }
+
+  .hero-title-banner.has-hero {
+    padding-top: 70px;
+  }
+
+  .title-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 14px;
   }
 
   .game-title {
     font-size: 22px;
-    flex: 1;
-    min-width: 0;
     word-break: break-word;
-  }
-
-  .title-status {
-    flex-shrink: 0;
   }
 
   .section-card {
@@ -1530,9 +1791,32 @@ onUnmounted(() => stopWatch())
     align-items: stretch;
     text-align: center;
   }
+
 }
 
 @media (max-width: 480px) {
+  .hero-backdrop {
+    top: -16px;
+    left: -12px;
+    right: -12px;
+    height: 250px;
+  }
+
+  .hero-title-banner {
+    padding-top: 30px;
+    gap: 12px;
+  }
+
+  .hero-title-banner.has-hero {
+    padding-top: 50px;
+  }
+
+  .title-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+  }
+
   .section-header {
     flex-wrap: wrap;
     gap: 10px;
@@ -1541,16 +1825,6 @@ onUnmounted(() => stopWatch())
   .header-btn-group {
     gap: 6px;
     width: 100%;
-  }
-
-  .game-title-section {
-    gap: 10px;
-  }
-
-  .title-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
   }
 
   .game-title {

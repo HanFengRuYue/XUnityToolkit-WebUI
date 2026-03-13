@@ -1,13 +1,25 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
+import { settingsApi } from '@/api/games'
 
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
+const appVersion = ref('')
+
+onMounted(async () => {
+  try {
+    const info = await settingsApi.getVersion()
+    const match = info.version.match(/^(\d+\.\d+\.\d+)/)
+    appVersion.value = match?.[1] ?? info.version
+  } catch {
+    appVersion.value = '1.0.0'
+  }
+})
 
 const navItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
@@ -82,7 +94,7 @@ watch(() => route.path, () => {
       <div class="sidebar-spacer"></div>
 
       <div class="sidebar-footer">
-        <span class="footer-version">v1.0.0</span>
+        <span class="footer-version">v{{ appVersion }}</span>
       </div>
     </aside>
 

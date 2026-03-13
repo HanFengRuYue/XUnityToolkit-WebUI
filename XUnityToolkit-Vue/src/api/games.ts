@@ -125,6 +125,38 @@ export const gamesApi = {
     api.post<WebImageResult[]>(`/api/games/${id}/icon/web-search`, { query, engine, sizeFilter }),
   selectWebIcon: (id: string, imageUrl: string) =>
     api.post<void>(`/api/games/${id}/icon/web-select`, { imageUrl }),
+
+  // Background image
+  getBackgroundUrl: (id: string) => `/api/games/${id}/background`,
+  searchBackgroundGames: (id: string, query: string) =>
+    api.post<SteamGridDbSearchResult[]>(`/api/games/${id}/background/search`, { query }),
+  getBackgroundHeroes: (id: string, steamGridDbGameId: number) =>
+    api.post<SteamGridDbImage[]>(`/api/games/${id}/background/heroes`, { steamGridDbGameId }),
+  selectBackground: (id: string, imageUrl: string, steamGridDbGameId: number) =>
+    api.post<void>(`/api/games/${id}/background/select`, { imageUrl, steamGridDbGameId }),
+  searchSteamBackgrounds: (id: string, query: string) =>
+    api.post<SteamStoreSearchResult[]>(`/api/games/${id}/background/steam-search`, { query }),
+  selectSteamBackground: (id: string, steamAppId: number) =>
+    api.post<void>(`/api/games/${id}/background/steam-select`, { steamAppId }),
+  uploadBackground: async (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('background', file)
+    const resp = await fetch(`/api/games/${id}/background/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+  },
+  deleteBackground: (id: string) => api.del<void>(`/api/games/${id}/background`),
+  searchWebBackgroundImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
+    api.post<WebImageResult[]>(`/api/games/${id}/background/web-search`, { query, engine, sizeFilter }),
+  selectWebBackground: (id: string, imageUrl: string) =>
+    api.post<void>(`/api/games/${id}/background/web-select`, { imageUrl }),
 }
 
 export const assetApi = {

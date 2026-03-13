@@ -407,6 +407,8 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     /// <summary>
     /// Detect game language using Unicode range heuristics.
+    /// Unity engine internals always contribute English text, so non-Latin scripts
+    /// are prioritized as more reliable indicators of the game's true language.
     /// </summary>
     public static string DetectLanguage(IList<string> texts)
     {
@@ -431,7 +433,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                     japanese++;
                 // CJK Unified Ideographs (4E00-9FFF) — shared by Chinese/Japanese/Korean
                 else if (ch is >= '\u4E00' and <= '\u9FFF')
-                    chinese++; // Will be re-attributed below
+                    chinese++;
                 // Hangul (AC00-D7AF) or Hangul Jamo (1100-11FF)
                 else if (ch is >= '\uAC00' and <= '\uD7AF' or >= '\u1100' and <= '\u11FF')
                     korean++;
@@ -446,23 +448,32 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
         if (totalChars == 0) return "ja";
 
-        // If Japanese kana found, it's Japanese (CJK chars are kanji)
-        if (japanese > 0 && japanese >= totalChars * 0.01)
-            return "ja";
+        // Non-Latin characters are strong indicators of the game's actual language,
+        // since Unity engine internals (component names, event names, animation states, etc.)
+        // always contribute English/Latin text that can outnumber real game text.
+        // When non-Latin scripts are present, prioritize them over Latin.
+        int nonLatin = japanese + chinese + korean + cyrillic;
 
-        // If Korean characters found
-        if (korean > 0 && korean >= totalChars * 0.01)
-            return "ko";
+        if (nonLatin >= 10)
+        {
+            // Hiragana/Katakana are exclusive to Japanese
+            if (japanese > 0)
+                return "ja";
 
-        // CJK without kana or hangul → Chinese
-        if (chinese > 0 && chinese >= totalChars * 0.05)
-            return "zh";
+            // Hangul is exclusive to Korean
+            if (korean > 0)
+                return "ko";
 
-        // Cyrillic → Russian
-        if (cyrillic > latin && cyrillic >= totalChars * 0.1)
-            return "ru";
+            // CJK ideographs without kana or hangul → Chinese
+            if (chinese > 0)
+                return "zh";
 
-        // Default to English for Latin-dominant text
+            // Cyrillic → Russian
+            if (cyrillic > 0)
+                return "ru";
+        }
+
+        // No meaningful non-Latin scripts found → English
         if (latin >= totalChars * 0.3)
             return "en";
 

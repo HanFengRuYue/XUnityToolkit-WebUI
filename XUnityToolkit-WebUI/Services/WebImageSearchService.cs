@@ -29,13 +29,23 @@ public sealed partial class WebImageSearchService(
         string query, string engine, string sizeFilter, string mode,
         CancellationToken ct = default)
     {
-        var suffix = mode == "icon" ? " game icon" : " game cover art";
+        var suffix = mode switch
+        {
+            "icon" => " game icon",
+            "background" => " game screenshot wallpaper",
+            _ => " game cover art"
+        };
         var fullQuery = query.Trim() + suffix;
 
         // Resolve "auto" filter based on mode
         var resolvedFilter = sizeFilter;
         if (string.IsNullOrEmpty(resolvedFilter) || resolvedFilter == "auto")
-            resolvedFilter = mode == "icon" ? "icon-auto" : "cover-auto";
+            resolvedFilter = mode switch
+            {
+                "icon" => "icon-auto",
+                "background" => "bg-auto",
+                _ => "cover-auto"
+            };
 
         try
         {
@@ -63,6 +73,22 @@ public sealed partial class WebImageSearchService(
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
         await imageService.SaveCoverFromWebSearchAsync(gameId, bytes, contentType, imageUrl, ct);
+    }
+
+    public async Task SelectAsBackgroundAsync(string gameId, string imageUrl, CancellationToken ct = default)
+    {
+        ValidateImageUrl(imageUrl);
+
+        var client = httpClientFactory.CreateClient("WebImageSearch");
+        var response = await client.GetAsync(imageUrl, ct);
+        response.EnsureSuccessStatusCode();
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+        if (!GameImageService.IsAllowedContentType(contentType))
+            throw new HttpRequestException($"不支持的图片格式: {contentType}");
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        await imageService.SaveBackgroundFromWebSearchAsync(gameId, bytes, contentType, imageUrl, ct);
     }
 
     public async Task SelectAsIconAsync(string gameId, string imageUrl, CancellationToken ct = default)
@@ -118,6 +144,7 @@ public sealed partial class WebImageSearchService(
     {
         "cover-auto" => "+filterui:imagesize-large+filterui:aspect-tall",
         "icon-auto" => "+filterui:imagesize-small+filterui:aspect-square",
+        "bg-auto" => "+filterui:imagesize-wallpaper+filterui:aspect-wide",
         "large" => "+filterui:imagesize-large",
         "medium" => "+filterui:imagesize-medium",
         "small" => "+filterui:imagesize-small",
@@ -194,6 +221,7 @@ public sealed partial class WebImageSearchService(
     {
         "cover-auto" => "isz:l",
         "icon-auto" => "isz:s",
+        "bg-auto" => "isz:lt,islt:2mp",
         "large" => "isz:l",
         "medium" => "isz:m",
         "small" => "isz:s",

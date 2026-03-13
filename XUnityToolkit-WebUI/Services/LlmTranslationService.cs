@@ -53,8 +53,8 @@ public sealed class LlmTranslationService(
     private long _totalTranslated;
     private long _totalReceived; // total incoming translation requests
     private long _totalErrors;   // total failed translations
-    private long _translating;   // actively calling LLM API (inside semaphore)
-    private long _queued;        // waiting for semaphore slot
+    private long _translating;   // text count actively calling LLM API (inside semaphore)
+    private long _queued;        // text count waiting for semaphore slot
     private long _lastRequestTicks; // 0 = never
     private long _totalTokensUsed;
     private long _totalResponseTimeMs;
@@ -246,7 +246,8 @@ public sealed class LlmTranslationService(
         IList<TranslationMemoryEntry>? memoryContext,
         SemaphoreSlim semaphore, CancellationToken ct)
     {
-        Interlocked.Increment(ref _queued);
+        var textCount = texts.Count;
+        Interlocked.Add(ref _queued, textCount);
         _ = BroadcastStats();
 
         bool semaphoreAcquired = false;
@@ -262,14 +263,14 @@ public sealed class LlmTranslationService(
         catch
         {
             // Semaphore not acquired (timeout or cancellation): only decrement queued
-            Interlocked.Decrement(ref _queued);
+            Interlocked.Add(ref _queued, -textCount);
             _ = BroadcastStats();
             throw;
         }
 
         // Acquired semaphore: transition from queued to translating
-        Interlocked.Decrement(ref _queued);
-        Interlocked.Increment(ref _translating);
+        Interlocked.Add(ref _queued, -textCount);
+        Interlocked.Add(ref _translating, textCount);
         _ = BroadcastStats();
 
         ApiEndpointConfig? chosenEndpoint = null;
@@ -319,7 +320,7 @@ public sealed class LlmTranslationService(
         finally
         {
             // Only release semaphore and decrement translating if we actually acquired it
-            Interlocked.Decrement(ref _translating);
+            Interlocked.Add(ref _translating, -textCount);
             semaphore.Release();
             _ = BroadcastStats();
         }

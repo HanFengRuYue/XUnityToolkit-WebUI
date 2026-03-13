@@ -12,8 +12,10 @@ $ErrorActionPreference = 'Stop'
 function Wait-Exit {
     param([int]$ExitCode = 0)
     Write-Host ""
-    Write-Host "Press any key to exit..." -ForegroundColor DarkGray
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    Write-Host "Press 0 to exit..." -ForegroundColor DarkGray
+    do {
+        $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+    } while ($key.Character -ne '0')
     exit $ExitCode
 }
 
@@ -29,6 +31,9 @@ $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint
 $Runtimes = if ($Runtime -eq 'all') { @('win-x64', 'win-arm64') } else { @($Runtime) }
 $hasEndpoint = Test-Path $EndpointProject
 
+# Generate version: 1.0.{YYYYMMDDHHmm}
+$BuildVersion = "1.0.$(Get-Date -Format 'yyyyMMddHHmm')"
+
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
 $BepInEx5Repo = "BepInEx"
@@ -39,6 +44,7 @@ $stepCount = 3 + $Runtimes.Count + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if 
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
+Write-Host "    Version: $BuildVersion" -ForegroundColor DarkGray
 Write-Host "    Target: $($Runtimes -join ', ')" -ForegroundColor DarkGray
 Write-Host ""
 
@@ -249,6 +255,7 @@ foreach ($rid in $Runtimes) {
         -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:DebugType=none `
         -p:SkipFrontendBuild=true `
+        -p:InformationalVersion=$BuildVersion `
         -o $OutputDir
 
     if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
