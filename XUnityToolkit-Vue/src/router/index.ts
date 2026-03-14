@@ -47,6 +47,12 @@ const router = createRouter({
       meta: { depth: 3 },
     },
     {
+      path: '/games/:id/bepinex-log',
+      name: 'bepinex-log',
+      component: () => import('@/views/BepInExLogView.vue'),
+      meta: { depth: 3 },
+    },
+    {
       path: '/ai-translation',
       name: 'ai-translation',
       component: () => import('@/views/AiTranslationView.vue'),

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -257,4 +257,10 @@ export const logsApi = {
   getRecent: (count = 200) => api.get<LogEntry[]>(`/api/logs?count=${count}`),
   getHistory: (lines = 500) => api.get<LogEntry[]>(`/api/logs/history?lines=${lines}`),
   getDownloadUrl: () => '/api/logs/download',
+}
+
+export const bepinexLogApi = {
+  get: (id: string) => api.get<BepInExLogResponse>(`/api/games/${id}/bepinex-log`),
+  analyze: (id: string) => api.post<BepInExLogAnalysis>(`/api/games/${id}/bepinex-log/analyze`, {}),
+  getDownloadUrl: (id: string) => `/api/games/${id}/bepinex-log/download`,
 }
