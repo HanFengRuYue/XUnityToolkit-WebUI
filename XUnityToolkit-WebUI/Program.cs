@@ -121,6 +121,7 @@ builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<GlossaryService>();
+builder.Services.AddSingleton<DoNotTranslateService>();
 builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddSingleton<GlossaryExtractionService>();
 builder.Services.AddSingleton<AssetExtractionService>();
