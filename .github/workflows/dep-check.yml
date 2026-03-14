@@ -163,11 +163,40 @@ jobs:
           echo '${{ needs.check.outputs.new_deps_json }}' | jq '.' > .github/deps.json
           cat .github/deps.json
 
+      - name: Download and update classdata.tpk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching latest classdata.tpk from AssetRipper/Tpk..."
+          TPK_DIR=$(mktemp -d)
+          trap 'rm -rf "$TPK_DIR"' EXIT
+          if gh run download -R AssetRipper/Tpk -n lz4_file -D "$TPK_DIR"; then
+            DOWNLOADED="$TPK_DIR/lz4.tpk"
+            TARGET="XUnityToolkit-WebUI/Resources/classdata.tpk"
+            if [ ! -f "$DOWNLOADED" ]; then
+              echo "::warning::lz4.tpk not found in artifact"
+              exit 0
+            fi
+            NEW_HASH=$(sha256sum "$DOWNLOADED" | cut -d' ' -f1)
+            OLD_HASH=""
+            if [ -f "$TARGET" ]; then
+              OLD_HASH=$(sha256sum "$TARGET" | cut -d' ' -f1)
+            fi
+            if [ "$NEW_HASH" != "$OLD_HASH" ]; then
+              cp "$DOWNLOADED" "$TARGET"
+              echo "classdata.tpk updated"
+            else
+              echo "classdata.tpk is up to date"
+            fi
+          else
+            echo "::warning::Failed to download tpk artifact (may have expired)"
+          fi
+
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .github/deps.json
+          git add .github/deps.json XUnityToolkit-WebUI/Resources/classdata.tpk
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
