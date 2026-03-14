@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using FreeTypeSharp;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -61,7 +62,8 @@ public static class FontGenerationEndpoints
                 body.UnityVersion,
                 body.SamplingSize,
                 body.AtlasWidth,
-                body.AtlasHeight
+                body.AtlasHeight,
+                body.CharacterSet
             );
 
             // Fire-and-forget
@@ -95,45 +97,154 @@ public static class FontGenerationEndpoints
             return Results.File(path, "application/octet-stream", safeName);
         });
 
-        group.MapGet("/history", (AppDataPaths appDataPaths) =>
+        group.MapGet("/history", async (AppDataPaths appDataPaths) =>
         {
             var dir = appDataPaths.GeneratedFontsDirectory;
             if (!Directory.Exists(dir))
                 return Results.Ok(ApiResult<List<GeneratedFontInfo>>.Ok([]));
 
-            var files = Directory.GetFiles(dir, "*.bundle")
-                .Select(f =>
+            var bundleFiles = Directory.GetFiles(dir, "*.bundle");
+            var infos = new List<GeneratedFontInfo>(bundleFiles.Length);
+
+            foreach (var f in bundleFiles)
+            {
+                var fi = new FileInfo(f);
+                var name = Path.GetFileNameWithoutExtension(fi.Name);
+                // Parse font name from filename pattern: {fontName}_U{version}
+                var lastU = name.LastIndexOf("_U", StringComparison.Ordinal);
+                var fontName = lastU > 0 ? name[..lastU] : name;
+
+                var glyphCount = 0;
+                var hasReport = false;
+                var reportPath = Path.ChangeExtension(f, ".report.json");
+                if (File.Exists(reportPath))
                 {
-                    var fi = new FileInfo(f);
-                    var name = Path.GetFileNameWithoutExtension(fi.Name);
-                    // Parse font name from filename pattern: {fontName}_U{version}
-                    var lastU = name.LastIndexOf("_U", StringComparison.Ordinal);
-                    var fontName = lastU > 0 ? name[..lastU] : name;
-
-                    return new GeneratedFontInfo
+                    hasReport = true;
+                    try
                     {
-                        FileName = fi.Name,
-                        FontName = fontName,
-                        GlyphCount = 0, // Not stored in filename
-                        FileSize = fi.Length,
-                        GeneratedAt = fi.CreationTimeUtc,
-                    };
-                })
-                .OrderByDescending(f => f.GeneratedAt)
-                .ToList();
+                        var reportJson = File.ReadAllText(reportPath);
+                        var report = JsonSerializer.Deserialize<FontGenerationReport>(reportJson);
+                        if (report != null)
+                            glyphCount = report.SuccessfulGlyphs;
+                    }
+                    catch
+                    {
+                        // Ignore malformed report files
+                    }
+                }
 
-            return Results.Ok(ApiResult<List<GeneratedFontInfo>>.Ok(files));
+                infos.Add(new GeneratedFontInfo
+                {
+                    FileName = fi.Name,
+                    FontName = fontName,
+                    GlyphCount = glyphCount,
+                    FileSize = fi.Length,
+                    GeneratedAt = fi.CreationTimeUtc,
+                    HasReport = hasReport,
+                });
+            }
+
+            infos.Sort((a, b) => b.GeneratedAt.CompareTo(a.GeneratedAt));
+            return Results.Ok(ApiResult<List<GeneratedFontInfo>>.Ok(infos));
         });
 
         group.MapDelete("/{fileName}", (string fileName, AppDataPaths appDataPaths) =>
         {
             var safeName = Path.GetFileName(fileName);
-            var path = Path.Combine(appDataPaths.GeneratedFontsDirectory, safeName);
-            if (!File.Exists(path))
+            var fullPath = Path.Combine(appDataPaths.GeneratedFontsDirectory, safeName);
+            if (!File.Exists(fullPath))
                 return Results.NotFound(ApiResult.Fail("文件不存在"));
 
-            File.Delete(path);
+            File.Delete(fullPath);
+
+            var reportPath = Path.ChangeExtension(fullPath, ".report.json");
+            if (File.Exists(reportPath))
+                File.Delete(reportPath);
+
             return Results.Ok(ApiResult.Ok());
+        });
+
+        // GET /charsets — list available built-in charsets
+        group.MapGet("/charsets", (CharacterSetService charsetService) =>
+            Results.Ok(ApiResult<List<CharsetInfo>>.Ok(charsetService.GetBuiltinCharsets())));
+
+        // POST /charset/preview — preview merged charset stats
+        group.MapPost("/charset/preview", async (CharacterSetPreviewRequest body, CharacterSetService charsetService) =>
+        {
+            var (_, preview) = await charsetService.ResolveCharactersAsync(
+                body.CharacterSet, body.AtlasWidth, body.AtlasHeight, body.SamplingSize);
+            return Results.Ok(ApiResult<CharacterSetPreview>.Ok(preview));
+        });
+
+        // POST /charset/upload-custom — upload custom charset TXT file
+        group.MapPost("/charset/upload-custom", async (HttpRequest request, AppDataPaths appDataPaths) =>
+        {
+            if (!request.HasFormContentType)
+                return Results.BadRequest(ApiResult.Fail("请求必须是 multipart/form-data 格式"));
+
+            var form = await request.ReadFormAsync();
+            var file = form.Files.FirstOrDefault();
+            if (file == null || file.Length == 0)
+                return Results.BadRequest(ApiResult.Fail("请上传字符集文件"));
+
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (ext != ".txt")
+                return Results.BadRequest(ApiResult.Fail("仅支持 .txt 格式"));
+
+            var safeName = $"{Guid.NewGuid():N}{ext}";
+            var savePath = Path.Combine(appDataPaths.FontGenerationCharsetUploadsDirectory, safeName);
+            await using (var fs = new FileStream(savePath, FileMode.Create))
+                await file.CopyToAsync(fs);
+
+            // Count unique characters
+            var text = await File.ReadAllTextAsync(savePath);
+            var charCount = new HashSet<int>();
+            var enumerator = System.Globalization.StringInfo.GetTextElementEnumerator(text);
+            while (enumerator.MoveNext())
+            {
+                var cp = char.ConvertToUtf32(enumerator.GetTextElement(), 0);
+                if (cp > 0xFFFF || !char.IsWhiteSpace((char)cp))
+                    charCount.Add(cp);
+            }
+
+            return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = charCount.Count }));
+        });
+
+        // POST /charset/upload-translation — upload translation file
+        group.MapPost("/charset/upload-translation", async (HttpRequest request, AppDataPaths appDataPaths) =>
+        {
+            if (!request.HasFormContentType)
+                return Results.BadRequest(ApiResult.Fail("请求必须是 multipart/form-data 格式"));
+
+            var form = await request.ReadFormAsync();
+            var file = form.Files.FirstOrDefault();
+            if (file == null || file.Length == 0)
+                return Results.BadRequest(ApiResult.Fail("请上传翻译文件"));
+
+            var safeName = $"{Guid.NewGuid():N}.txt";
+            var savePath = Path.Combine(appDataPaths.FontGenerationTranslationUploadsDirectory, safeName);
+            await using (var fs = new FileStream(savePath, FileMode.Create))
+                await file.CopyToAsync(fs);
+
+            var charsetService = request.HttpContext.RequestServices.GetRequiredService<CharacterSetService>();
+            var chars = charsetService.ExtractFromTranslationFile(savePath);
+
+            return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = chars.Count }));
+        });
+
+        // GET /report/{fileName} — get historical generation report
+        group.MapGet("/report/{fileName}", async (string fileName, AppDataPaths appDataPaths) =>
+        {
+            var safeName = Path.GetFileName(fileName);
+            var reportPath = Path.Combine(appDataPaths.GeneratedFontsDirectory,
+                Path.ChangeExtension(safeName, ".report.json"));
+
+            if (!File.Exists(reportPath))
+                return Results.NotFound(ApiResult.Fail("报告不存在"));
+
+            var json = await File.ReadAllTextAsync(reportPath);
+            var report = JsonSerializer.Deserialize<FontGenerationReport>(json);
+            return Results.Ok(ApiResult<FontGenerationReport>.Ok(report!));
         });
 
         group.MapPost("/use-as-custom/{gameId}", (string gameId, UseAsCustomRequest body,
@@ -195,8 +306,16 @@ public static class FontGenerationEndpoints
         string UnityVersion,
         int SamplingSize = 64,
         int AtlasWidth = 4096,
-        int AtlasHeight = 4096
+        int AtlasHeight = 4096,
+        CharacterSetConfig? CharacterSet = null
     );
 
     private record UseAsCustomRequest(string FileName);
+
+    private record CharacterSetPreviewRequest(
+        CharacterSetConfig CharacterSet,
+        int AtlasWidth = 4096,
+        int AtlasHeight = 4096,
+        int SamplingSize = 64
+    );
 }
