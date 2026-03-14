@@ -37,6 +37,7 @@ import {
   ImageSearchOutlined,
   WallpaperOutlined,
   FontDownloadOutlined,
+  ArticleOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -157,7 +158,8 @@ const installStepLabel = computed(() => {
 const hasBepInEx = computed(
   () =>
     game.value?.installState === 'BepInExOnly' ||
-    game.value?.installState === 'FullyInstalled',
+    game.value?.installState === 'FullyInstalled' ||
+    game.value?.installState === 'PartiallyInstalled',
 )
 
 const otherFrameworks = computed(() =>
@@ -947,8 +949,26 @@ onUnmounted(() => stopWatch())
       </p>
     </div>
 
+    <!-- BepInEx Log Card -->
+    <div v-if="hasBepInEx" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><ArticleOutlined /></NIcon>
+          </span>
+          BepInEx 日志
+        </h2>
+        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/bepinex-log`)">
+          打开
+        </NButton>
+      </div>
+      <p class="asset-extraction-desc">
+        查看 BepInEx 运行日志，检查插件加载状态和翻译引擎工作情况。支持日志搜索、过滤、导出和 AI 智能分析。
+      </p>
+    </div>
+
     <!-- AI Description Card (available for all Unity games, even before install) -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.6s' : '0.55s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -969,7 +989,7 @@ onUnmounted(() => stopWatch())
     </div>
 
     <!-- Plugin Package Card -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.6s' : '0.55s' }">
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.65s' : '0.6s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">

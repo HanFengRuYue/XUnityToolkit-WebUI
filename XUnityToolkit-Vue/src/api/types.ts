@@ -558,3 +558,17 @@ export interface CharsetInfo {
   description: string
   characterCount: number
 }
+
+// ── BepInEx Log ──
+
+export interface BepInExLogResponse {
+  content: string
+  fileSize: number
+  lastModified: string
+}
+
+export interface BepInExLogAnalysis {
+  report: string
+  endpointName: string
+  analyzedAt: string
+}
