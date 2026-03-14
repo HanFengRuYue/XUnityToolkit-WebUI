@@ -23,6 +23,8 @@ public sealed class AppDataPaths(IConfiguration config)
     public string LocalLlmSettingsFile => Path.Combine(_root, "local-llm-settings.json");
     public string FontBackupsDirectory => Path.Combine(_root, "font-backups");
     public string CustomFontsDirectory => Path.Combine(_root, "custom-fonts");
+    public string FontGenerationUploadsDirectory => Path.Combine(_root, "font-generation", "uploads");
+    public string GeneratedFontsDirectory => Path.Combine(_root, "generated-fonts");
 
     public string GetFontBackupDirectory(string gameId) =>
         Path.Combine(FontBackupsDirectory, gameId);
@@ -69,5 +71,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(LlamaDirectory);
         Directory.CreateDirectory(FontBackupsDirectory);
         Directory.CreateDirectory(CustomFontsDirectory);
+        Directory.CreateDirectory(FontGenerationUploadsDirectory);
+        Directory.CreateDirectory(GeneratedFontsDirectory);
     }
 }

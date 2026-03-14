@@ -53,6 +53,12 @@ const router = createRouter({
       meta: { depth: 1 },
     },
     {
+      path: '/font-generator',
+      name: 'font-generator',
+      component: () => import('@/views/FontGeneratorView.vue'),
+      meta: { depth: 1 },
+    },
+    {
       path: '/logs',
       name: 'logs',
       component: () => import('@/views/LogView.vue'),

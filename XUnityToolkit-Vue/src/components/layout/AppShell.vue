@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
-import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined } from '@vicons/material'
+import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
 import { settingsApi } from '@/api/games'
 
@@ -22,11 +22,12 @@ onMounted(async () => {
 })
 
 // Cache top-level pages to avoid full re-renders on navigation
-const cachedPages = ['LibraryView', 'AiTranslationView', 'LogView', 'SettingsView']
+const cachedPages = ['LibraryView', 'AiTranslationView', 'FontGeneratorView', 'LogView', 'SettingsView']
 
 const navItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
   { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
+  { label: '字体生成', key: '/font-generator', icon: FontDownloadOutlined },
   { label: '运行日志', key: '/logs', icon: ArticleOutlined },
   { label: '设置', key: '/settings', icon: SettingsOutlined },
 ]

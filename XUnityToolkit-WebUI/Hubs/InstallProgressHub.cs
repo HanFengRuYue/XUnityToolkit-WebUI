@@ -39,4 +39,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveFontReplacementGroup(string gameId) =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, $"font-replacement-{gameId}");
+
+    public Task JoinFontGenerationGroup() =>
+        Groups.AddToGroupAsync(Context.ConnectionId, "font-generation");
+
+    public Task LeaveFontGenerationGroup() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, "font-generation");
 }

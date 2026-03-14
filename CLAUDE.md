@@ -36,7 +36,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`)
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`)
 - **Persistence:** JSON files in `{programDir}/data/` (`library.json`, `settings.json`) — portable app pattern; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **Console hiding:** `OutputType=WinExe` — no console window on startup (works with both conhost and Windows Terminal/ConPTY); "Show Console" tray menu uses `AllocConsole()` + stream redirect on demand; close button removed via `DeleteMenu(SC_CLOSE)` to prevent accidental app termination; do NOT revert to `Exe` + `ShowWindow(SW_HIDE)` (fails under ConPTY)
@@ -46,6 +46,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
 - **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/data/backups/{gameId}.json`
 - **Font Replacement:** `FontReplacementService` uses AssetsTools.NET to scan and replace TMP_FontAsset in game `.assets` and bundle files; field-level replacement preserves PPtr references; automatic Addressables CRC clearing; backups at `{programDir}/data/font-backups/{gameId}/`; custom fonts at `{programDir}/data/custom-fonts/{gameId}/`
+- **Font Generation:** `TmpFontGeneratorService` uses FreeTypeSharp for SDF rendering + RectpackSharp for atlas packing; injects generated data into version-matched SourceHanSans template AssetBundle via AssetsTools.NET; GB2312 + ASCII character set; outputs at `{programDir}/data/generated-fonts/`
 
 ### Frontend Design System
 
@@ -86,6 +87,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
 - **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`
+- **Font Generation:** `POST /api/font-generation/upload` (multipart, 50MB), `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}` (**not ApiResult**), `GET .../history`, `DELETE .../{fileName}`, `POST .../use-as-custom/{gameId}`
 - **Plugin Package:** `POST .../plugin-package/export` (ZIP, **not ApiResult**), `POST .../import`
 - **Logs:** `GET /api/logs?count=`, `GET .../history?lines=`, `GET .../download` (**not ApiResult**)
 - **ApiResult pattern:** `ApiResult<T>.Ok(data)` / `ApiResult.Ok()`; request records at bottom of Endpoints files
