@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
@@ -10,6 +11,7 @@ using RectpackSharp;
 using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
+using XUnityToolkit_WebUI.Services.CharacterSets;
 using static FreeTypeSharp.FT;
 using static FreeTypeSharp.FT_Render_Mode_;
 
@@ -17,6 +19,7 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class TmpFontGeneratorService(
     TmpFontService tmpFontService,
+    CharacterSetService characterSetService,
     AppDataPaths appDataPaths,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<TmpFontGeneratorService> logger)
@@ -71,9 +74,39 @@ public sealed class TmpFontGeneratorService(
         _current = 0;
         _total = 0;
 
+        // Resolve characters BEFORE Task.Run (async, not unsafe)
+        List<int> chars;
+        Dictionary<string, int>? sourceBreakdown = null;
         try
         {
-            return await Task.Run(() => GenerateCore(request, ct), CancellationToken.None);
+            if (request.CharacterSet != null)
+            {
+                var (resolved, preview) = await characterSetService.ResolveCharactersAsync(
+                    request.CharacterSet, request.AtlasWidth, request.AtlasHeight, request.SamplingSize);
+                chars = resolved.OrderBy(c => c).ToList();
+                sourceBreakdown = preview.SourceBreakdown;
+            }
+            else
+            {
+                var set = BuiltinCharsets.GB2312();
+                set.UnionWith(BuiltinCharsets.Ascii());
+                chars = set.OrderBy(c => c).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Clean up on charset resolution failure
+            _isGenerating = false;
+            _phase = null;
+            _cts?.Dispose();
+            _cts = null;
+            _generationSemaphore.Release();
+            return new FontGenerationResult(false, null, null, 0, 0, 0, $"字符集解析失败: {ex.Message}");
+        }
+
+        try
+        {
+            return await Task.Run(() => GenerateCore(request, chars, sourceBreakdown, ct), CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
@@ -97,8 +130,17 @@ public sealed class TmpFontGeneratorService(
         }
     }
 
-    private unsafe FontGenerationResult GenerateCore(FontGenerationRequest request, CancellationToken ct)
+    private unsafe FontGenerationResult GenerateCore(
+        FontGenerationRequest request, List<int> chars, Dictionary<string, int>? sourceBreakdown,
+        CancellationToken ct)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // Create temp directory for SDF bitmaps (disk-backed to reduce memory pressure)
+        var sessionId = Guid.NewGuid().ToString("N");
+        var tempDir = Path.Combine(appDataPaths.FontGenerationTempDirectory, sessionId);
+        Directory.CreateDirectory(tempDir);
+
         // === Phase 1: Parse font ===
         BroadcastProgress("parsing", 0, 1, "正在解析字体...", force: true);
 
@@ -136,7 +178,8 @@ public sealed class TmpFontGeneratorService(
 
                 // Extract font name
                 var fontName = Marshal.PtrToStringAnsi((IntPtr)face->family_name) ?? "Unknown";
-                logger.LogInformation("字体已加载: {FontName}, 采样大小: {Size}px", fontName, request.SamplingSize);
+                logger.LogInformation("字体已加载: {FontName}, 采样大小: {Size}px, 字符数: {Count}",
+                    fontName, request.SamplingSize, chars.Count);
 
                 // Extract face metrics (26.6 fixed-point → float)
                 var sizeMetrics = face->size->metrics;
@@ -145,18 +188,25 @@ public sealed class TmpFontGeneratorService(
                 float lineHeight = (int)sizeMetrics.height / 64f;
 
                 // === Phase 2: Generate SDF bitmaps ===
-                var chars = EnumerateCharacterSet();
                 _total = chars.Count;
                 BroadcastProgress("sdf", 0, chars.Count, "正在生成 SDF 位图...", force: true);
 
                 var glyphs = new List<GlyphData>();
+                var missingChars = new List<int>();
+
                 for (int i = 0; i < chars.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
 
                     var charCode = (uint)chars[i];
                     var glyphIndex = FT_Get_Char_Index(face, (UIntPtr)charCode);
-                    if (glyphIndex == 0) continue; // Missing glyph
+                    if (glyphIndex == 0)
+                    {
+                        missingChars.Add(chars[i]);
+                        _current = i + 1;
+                        BroadcastProgress("sdf", i + 1, chars.Count, $"正在生成 SDF 位图 ({i + 1}/{chars.Count})...");
+                        continue;
+                    }
 
                     error = FT_Load_Glyph(face, glyphIndex, FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING);
                     if (error != FT_Error.FT_Err_Ok) continue;
@@ -167,20 +217,22 @@ public sealed class TmpFontGeneratorService(
                     ref var bitmap = ref face->glyph->bitmap;
                     ref var metrics = ref face->glyph->metrics;
 
-                    // Copy bitmap data
-                    byte[]? bitmapData = null;
                     int bmpWidth = (int)bitmap.width;
                     int bmpHeight = (int)bitmap.rows;
 
                     if (bmpWidth > 0 && bmpHeight > 0 && bitmap.buffer != null)
                     {
-                        bitmapData = new byte[bmpWidth * bmpHeight];
+                        var bitmapData = new byte[bmpWidth * bmpHeight];
                         int pitch = bitmap.pitch;
                         for (int row = 0; row < bmpHeight; row++)
                         {
                             var src = new ReadOnlySpan<byte>(bitmap.buffer + row * pitch, bmpWidth);
                             src.CopyTo(bitmapData.AsSpan(row * bmpWidth));
                         }
+
+                        // Save bitmap to disk to reduce memory pressure
+                        var tempPath = Path.Combine(tempDir, $"{charCode}.bin");
+                        File.WriteAllBytes(tempPath, bitmapData);
                     }
 
                     glyphs.Add(new GlyphData
@@ -192,7 +244,7 @@ public sealed class TmpFontGeneratorService(
                         BearingX = (int)metrics.horiBearingX / 64f,
                         BearingY = (int)metrics.horiBearingY / 64f,
                         Advance = (int)metrics.horiAdvance / 64f,
-                        BitmapData = bitmapData,
+                        BitmapData = null, // Stored on disk
                         BitmapWidth = bmpWidth,
                         BitmapHeight = bmpHeight,
                     });
@@ -201,80 +253,55 @@ public sealed class TmpFontGeneratorService(
                     BroadcastProgress("sdf", i + 1, chars.Count, $"正在生成 SDF 位图 ({i + 1}/{chars.Count})...");
                 }
 
-                logger.LogInformation("SDF 生成完成: {Count}/{Total} 个字形", glyphs.Count, chars.Count);
+                logger.LogInformation("SDF 生成完成: {Count}/{Total} 个字形, {Missing} 个缺失",
+                    glyphs.Count, chars.Count, missingChars.Count);
 
-                // === Phase 3: Pack atlas ===
-                BroadcastProgress("packing", 0, 1, "正在打包 Atlas...", force: true);
+                // === Phase 3: Pack atlas (multi-page) ===
+                _phase = "packing";
+                BroadcastProgress("packing", 0, 1, "正在排列字形...", force: true);
 
-                var rects = new PackingRectangle[glyphs.Count];
-                for (int i = 0; i < glyphs.Count; i++)
+                var glyphsToLayout = glyphs.Where(g => g.BitmapWidth > 0 && g.BitmapHeight > 0).ToList();
+                var pages = PackGlyphs(glyphsToLayout, request.AtlasWidth, request.AtlasHeight);
+
+                for (int pageIdx = 0; pageIdx < pages.Count; pageIdx++)
+                    foreach (var g in pages[pageIdx])
+                        g.AtlasIndex = pageIdx;
+
+                BroadcastProgress("packing", 1, 1, $"排列完成，共 {pages.Count} 页", force: true);
+
+                // === Phase 4: Composite atlas textures ===
+                _phase = "compositing";
+                var atlasPages = new List<byte[]>();
+
+                for (int pageIdx = 0; pageIdx < pages.Count; pageIdx++)
                 {
-                    // Include padding around each glyph
-                    rects[i] = new PackingRectangle(0, 0,
-                        (uint)(glyphs[i].BitmapWidth + DefaultPadding * 2),
-                        (uint)(glyphs[i].BitmapHeight + DefaultPadding * 2),
-                        i);
-                }
+                    ct.ThrowIfCancellationRequested();
+                    BroadcastProgress("compositing", pageIdx + 1, pages.Count,
+                        $"正在合成纹理 {pageIdx + 1}/{pages.Count}...", force: pageIdx == 0);
 
-                RectanglePacker.Pack(rects, out var bounds,
-                    PackingHints.FindBest,
-                    (uint)request.AtlasWidth,
-                    (uint)request.AtlasHeight);
-
-                // Check if everything fits
-                if (bounds.Width > (uint)request.AtlasWidth || bounds.Height > (uint)request.AtlasHeight)
-                {
-                    return new FontGenerationResult(false, null, fontName, 0,
-                        request.AtlasWidth, request.AtlasHeight,
-                        $"Atlas 尺寸 {request.AtlasWidth}x{request.AtlasHeight} 不足以容纳所有字形。" +
-                        $"需要至少 {bounds.Width}x{bounds.Height}，请增大 Atlas 尺寸。");
-                }
-
-                // === Phase 4: Composite atlas texture ===
-                int atlasWidth = request.AtlasWidth;
-                int atlasHeight = request.AtlasHeight;
-                var atlasBytes = new byte[atlasWidth * atlasHeight];
-
-                for (int i = 0; i < rects.Length; i++)
-                {
-                    var rect = rects[i];
-                    var glyph = glyphs[(int)rect.Id];
-
-                    if (glyph.BitmapData == null) continue;
-
-                    // Blit glyph bitmap into atlas (offset by padding)
-                    int dstX = (int)rect.X + DefaultPadding;
-                    int dstY = (int)rect.Y + DefaultPadding;
-
-                    for (int row = 0; row < glyph.BitmapHeight; row++)
+                    var atlasBytes = new byte[request.AtlasWidth * request.AtlasHeight];
+                    foreach (var g in pages[pageIdx])
                     {
-                        int srcOffset = row * glyph.BitmapWidth;
-                        int dstOffset = (dstY + row) * atlasWidth + dstX;
+                        var bitmapTempPath = Path.Combine(tempDir, $"{g.Unicode}.bin");
+                        if (!File.Exists(bitmapTempPath)) continue;
+                        var bitmapData = File.ReadAllBytes(bitmapTempPath);
 
-                        if (dstOffset + glyph.BitmapWidth <= atlasBytes.Length)
+                        for (int row = 0; row < g.BitmapHeight; row++)
                         {
-                            Array.Copy(glyph.BitmapData, srcOffset, atlasBytes, dstOffset, glyph.BitmapWidth);
+                            var srcOffset = row * g.BitmapWidth;
+                            var dstOffset = (g.AtlasY + row) * request.AtlasWidth + g.AtlasX;
+                            Buffer.BlockCopy(bitmapData, srcOffset, atlasBytes, dstOffset, g.BitmapWidth);
                         }
                     }
 
-                    // Record atlas coordinates for this glyph (glyph rect without padding)
-                    glyph.AtlasX = dstX;
-                    glyph.AtlasY = dstY;
-                }
+                    FlipAtlasY(atlasBytes, request.AtlasWidth, request.AtlasHeight);
 
-                // Flip atlas vertically (FreeType top-down → Unity bottom-up)
-                var flippedAtlas = new byte[atlasWidth * atlasHeight];
-                for (int row = 0; row < atlasHeight; row++)
-                {
-                    var srcOffset = row * atlasWidth;
-                    var dstOffset = (atlasHeight - 1 - row) * atlasWidth;
-                    Array.Copy(atlasBytes, srcOffset, flippedAtlas, dstOffset, atlasWidth);
-                }
-                atlasBytes = flippedAtlas;
+                    // Convert glyph AtlasY from top-down to bottom-up for this page
+                    foreach (var g in pages[pageIdx])
+                        g.AtlasY = request.AtlasHeight - g.AtlasY - g.BitmapHeight;
 
-                // Convert glyph AtlasY from top-down to bottom-up
-                foreach (var g in glyphs)
-                    g.AtlasY = atlasHeight - g.AtlasY - g.BitmapHeight;
+                    atlasPages.Add(atlasBytes);
+                }
 
                 // === Phase 5: Serialize to AssetBundle ===
                 BroadcastProgress("serializing", 0, 1, "正在序列化 AssetBundle...", force: true);
@@ -282,28 +309,59 @@ public sealed class TmpFontGeneratorService(
                 var outputFileName = $"{SanitizeFileName(fontName)}_U{request.UnityVersion}.bundle";
                 var outputPath = Path.Combine(appDataPaths.GeneratedFontsDirectory, outputFileName);
 
-                InjectIntoTemplate(request, fontName, glyphs, rects, atlasBytes,
-                    atlasWidth, atlasHeight, ascender, descender, lineHeight, outputPath);
+                // Collect all glyphs across all pages (for injection)
+                var allGlyphs = pages.SelectMany(p => p).ToList();
+                // Also include zero-size glyphs (no bitmap but valid metrics)
+                var zeroSizeGlyphs = glyphs.Where(g => g.BitmapWidth == 0 || g.BitmapHeight == 0).ToList();
+                allGlyphs.AddRange(zeroSizeGlyphs);
+
+                InjectIntoTemplate(request, fontName, allGlyphs, atlasPages,
+                    request.AtlasWidth, request.AtlasHeight, ascender, descender, lineHeight, outputPath);
 
                 // Clean up uploaded TTF
                 try { File.Delete(request.FontFilePath); }
                 catch { /* ignore cleanup errors */ }
 
+                // Generate report
+                stopwatch.Stop();
+                var report = new FontGenerationReport
+                {
+                    FontName = fontName,
+                    TotalCharacters = chars.Count,
+                    SuccessfulGlyphs = allGlyphs.Count,
+                    MissingGlyphs = missingChars.Count,
+                    MissingCharacters = missingChars.Take(500).Select(c => char.ConvertFromUtf32(c)).ToList(),
+                    TotalMissingCount = missingChars.Count,
+                    AtlasCount = atlasPages.Count,
+                    AtlasWidth = request.AtlasWidth,
+                    AtlasHeight = request.AtlasHeight,
+                    SamplingSize = request.SamplingSize,
+                    SourceBreakdown = sourceBreakdown ?? new(),
+                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
+                };
+
+                var reportPath = Path.ChangeExtension(outputPath, ".report.json");
+                File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+
                 var result = new FontGenerationResult(true, outputPath, fontName,
-                    glyphs.Count, atlasWidth, atlasHeight, null);
+                    allGlyphs.Count, request.AtlasWidth, request.AtlasHeight, null, report);
 
                 // Broadcast completion
-                var complete = new FontGenerationComplete(true, fontName, glyphs.Count, null);
                 hubContext.Clients.Group("font-generation")
-                    .SendAsync("FontGenerationComplete", complete).Wait();
+                    .SendAsync("FontGenerationComplete",
+                        new FontGenerationComplete(true, fontName, allGlyphs.Count, null, report)).Wait();
 
-                logger.LogInformation("字体生成完成: {FontName}, {Count} 个字形, 输出: {Path}",
-                    fontName, glyphs.Count, outputPath);
+                logger.LogInformation("字体生成完成: {FontName}, {Count} 个字形, {Pages} 页 Atlas, 耗时 {Ms}ms, 输出: {Path}",
+                    fontName, allGlyphs.Count, atlasPages.Count, stopwatch.ElapsedMilliseconds, outputPath);
 
                 return result;
             }
             finally
             {
+                // Clean up temp directory
+                try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true); }
+                catch (Exception ex) { logger.LogWarning(ex, "Failed to clean up temp dir: {Dir}", tempDir); }
+
                 FT_Done_Face(face);
             }
         }
@@ -315,8 +373,8 @@ public sealed class TmpFontGeneratorService(
 
     private void InjectIntoTemplate(
         FontGenerationRequest request, string fontName,
-        List<GlyphData> glyphs, PackingRectangle[] rects,
-        byte[] atlasBytes, int atlasWidth, int atlasHeight,
+        List<GlyphData> allGlyphs, List<byte[]> atlasPages,
+        int atlasWidth, int atlasHeight,
         float ascender, float descender, float lineHeight,
         string outputPath)
     {
@@ -373,20 +431,19 @@ public sealed class TmpFontGeneratorService(
 
         // Build a glyph index map for character table
         var glyphIndexMap = new Dictionary<uint, uint>(); // ftGlyphIndex → sequential index
-        for (int i = 0; i < glyphs.Count; i++)
-            glyphIndexMap[glyphs[i].Index] = (uint)i;
+        for (int i = 0; i < allGlyphs.Count; i++)
+            glyphIndexMap[allGlyphs[i].Index] = (uint)i;
 
         // === Inject GlyphTable ===
         var glyphArray = fontBase["m_GlyphTable"]["Array"];
         if (glyphArray.Children.Count > 0)
         {
             var prototype = glyphArray.Children[0];
-            var newGlyphs = new List<AssetTypeValueField>(glyphs.Count);
+            var newGlyphs = new List<AssetTypeValueField>(allGlyphs.Count);
 
-            for (int i = 0; i < glyphs.Count; i++)
+            for (int i = 0; i < allGlyphs.Count; i++)
             {
-                var g = glyphs[i];
-                var rect = FindRectForGlyph(rects, i);
+                var g = allGlyphs[i];
 
                 var entry = ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField);
                 entry["m_Index"].AsUInt = (uint)i;
@@ -405,7 +462,7 @@ public sealed class TmpFontGeneratorService(
                 gr["m_Height"].AsInt = g.BitmapHeight;
 
                 entry["m_Scale"].AsFloat = 1.0f;
-                entry["m_AtlasIndex"].AsInt = 0;
+                entry["m_AtlasIndex"].AsInt = g.AtlasIndex;
 
                 newGlyphs.Add(entry);
             }
@@ -417,9 +474,9 @@ public sealed class TmpFontGeneratorService(
         if (charArray.Children.Count > 0)
         {
             var charProto = charArray.Children[0];
-            var newChars = new List<AssetTypeValueField>(glyphs.Count);
+            var newChars = new List<AssetTypeValueField>(allGlyphs.Count);
 
-            foreach (var g in glyphs)
+            foreach (var g in allGlyphs)
             {
                 var entry = ValueBuilder.DefaultValueFieldFromTemplate(charProto.TemplateField);
                 entry["m_ElementType"].AsInt = 1;
@@ -431,19 +488,19 @@ public sealed class TmpFontGeneratorService(
             charArray.Children = newChars;
         }
 
-        // === Inject UsedGlyphRects ===
+        // === Inject UsedGlyphRects (all pages combined) ===
         var usedRectsArray = fontBase["m_UsedGlyphRects"];
         if (!usedRectsArray.IsDummy && usedRectsArray["Array"].Children.Count > 0)
         {
             var rectProto = usedRectsArray["Array"].Children[0];
-            var newRects = new List<AssetTypeValueField>(rects.Length);
-            foreach (var r in rects)
+            var newRects = new List<AssetTypeValueField>();
+            foreach (var g in allGlyphs.Where(g => g.BitmapWidth > 0 && g.BitmapHeight > 0))
             {
                 var entry = ValueBuilder.DefaultValueFieldFromTemplate(rectProto.TemplateField);
-                entry["m_X"].AsInt = (int)r.X;
-                entry["m_Y"].AsInt = (int)r.Y;
-                entry["m_Width"].AsInt = (int)r.Width;
-                entry["m_Height"].AsInt = (int)r.Height;
+                entry["m_X"].AsInt = g.AtlasX - DefaultPadding;
+                entry["m_Y"].AsInt = g.AtlasY - DefaultPadding; // Already bottom-up at this point
+                entry["m_Width"].AsInt = g.BitmapWidth + DefaultPadding * 2;
+                entry["m_Height"].AsInt = g.BitmapHeight + DefaultPadding * 2;
                 newRects.Add(entry);
             }
             usedRectsArray["Array"].Children = newRects;
@@ -465,7 +522,7 @@ public sealed class TmpFontGeneratorService(
             faceInfo["m_Baseline"].AsFloat = 0;
             faceInfo["m_UnderlineOffset"].AsFloat = descender * 0.5f;
             faceInfo["m_StrikethroughOffset"].AsFloat = ascender * 0.4f;
-            faceInfo["m_TabWidth"].AsFloat = glyphs.Count > 0 ? glyphs[0].Advance * 4 : request.SamplingSize * 2;
+            faceInfo["m_TabWidth"].AsFloat = allGlyphs.Count > 0 ? allGlyphs[0].Advance * 4 : request.SamplingSize * 2;
         }
 
         // === Set scalar fields ===
@@ -477,30 +534,111 @@ public sealed class TmpFontGeneratorService(
         fontBase["m_Version"].AsString = "1.1.0";
         fontBase["m_Name"].AsString = fontName;
 
-        // === Replace atlas Texture2D ===
+        // === Replace atlas Texture2D(s) ===
         var atlasTextures = fontBase["m_AtlasTextures"];
         if (!atlasTextures.IsDummy && atlasTextures["Array"].Children.Count > 0)
         {
-            var atlasPathId = atlasTextures["Array"][0]["m_PathID"].AsLong;
+            var existingTexCount = atlasTextures["Array"].Children.Count;
 
+            // Replace page 0 texture (always exists in template)
+            var page0PathId = atlasTextures["Array"][0]["m_PathID"].AsLong;
             foreach (var texInfo in afileInst.file.GetAssetsOfType(AssetClassID.Texture2D))
             {
-                if (texInfo.PathId == atlasPathId)
+                if (texInfo.PathId == page0PathId)
                 {
-                    var texBase = manager.GetBaseField(afileInst, texInfo);
-                    var texFile = TextureFile.ReadTextureFile(texBase);
-                    texFile.m_TextureFormat = 1; // Alpha8
-                    texFile.SetPictureData(atlasBytes, atlasWidth, atlasHeight);
-                    texFile.WriteTo(texBase);
-
-                    // Clear m_StreamData
-                    texBase["m_StreamData"]["path"].AsString = "";
-                    texBase["m_StreamData"]["offset"].AsULong = 0;
-                    texBase["m_StreamData"]["size"].AsULong = 0;
-
-                    texBase["m_Name"].AsString = $"{fontName} Atlas";
-                    texInfo.SetNewData(texBase);
+                    ReplaceTexture(manager, afileInst, texInfo, atlasPages[0],
+                        atlasWidth, atlasHeight, $"{fontName} Atlas");
                     break;
+                }
+            }
+
+            // Handle additional pages
+            if (atlasPages.Count > 1)
+            {
+                if (existingTexCount >= atlasPages.Count)
+                {
+                    // Template has enough texture slots — replace them
+                    for (int pageIdx = 1; pageIdx < atlasPages.Count; pageIdx++)
+                    {
+                        var pagePathId = atlasTextures["Array"][pageIdx]["m_PathID"].AsLong;
+                        foreach (var texInfo in afileInst.file.GetAssetsOfType(AssetClassID.Texture2D))
+                        {
+                            if (texInfo.PathId == pagePathId)
+                            {
+                                ReplaceTexture(manager, afileInst, texInfo, atlasPages[pageIdx],
+                                    atlasWidth, atlasHeight, $"{fontName} Atlas {pageIdx}");
+                                break;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Create additional Texture2D assets for pages beyond what the template has
+                    // Find existing texture to use as a structural template
+                    AssetTypeValueField? texTemplate = null;
+                    var templateTexInfo = afileInst.file.GetAssetsOfType(AssetClassID.Texture2D).FirstOrDefault();
+                    if (templateTexInfo != null)
+                        texTemplate = manager.GetBaseField(afileInst, templateTexInfo);
+
+                    if (texTemplate != null)
+                    {
+                        // Replace existing texture slots (pages 1..existingTexCount-1)
+                        for (int pageIdx = 1; pageIdx < existingTexCount && pageIdx < atlasPages.Count; pageIdx++)
+                        {
+                            var pagePathId = atlasTextures["Array"][pageIdx]["m_PathID"].AsLong;
+                            foreach (var texInfo in afileInst.file.GetAssetsOfType(AssetClassID.Texture2D))
+                            {
+                                if (texInfo.PathId == pagePathId)
+                                {
+                                    ReplaceTexture(manager, afileInst, texInfo, atlasPages[pageIdx],
+                                        atlasWidth, atlasHeight, $"{fontName} Atlas {pageIdx}");
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Create new Texture2D assets for remaining pages
+                        var ptrProto = atlasTextures["Array"].Children[0];
+                        var newPtrList = new List<AssetTypeValueField>(atlasTextures["Array"].Children);
+
+                        for (int pageIdx = existingTexCount; pageIdx < atlasPages.Count; pageIdx++)
+                        {
+                            var newTexBase = ValueBuilder.DefaultValueFieldFromTemplate(texTemplate.TemplateField);
+                            var texFile = TextureFile.ReadTextureFile(newTexBase);
+                            texFile.m_TextureFormat = 1; // Alpha8
+                            texFile.SetPictureData(atlasPages[pageIdx], atlasWidth, atlasHeight);
+                            texFile.WriteTo(newTexBase);
+
+                            newTexBase["m_StreamData"]["path"].AsString = "";
+                            newTexBase["m_StreamData"]["offset"].AsULong = 0;
+                            newTexBase["m_StreamData"]["size"].AsULong = 0;
+                            newTexBase["m_Name"].AsString = $"{fontName} Atlas {pageIdx}";
+
+                            // Add as new asset
+                            var newInfo = AssetFileInfo.Create(
+                                afileInst.file,
+                                afileInst.file.GetAssetsOfType(AssetClassID.Texture2D).Max(a => a.PathId) + pageIdx,
+                                (int)AssetClassID.Texture2D, null);
+                            newInfo.SetNewData(newTexBase);
+                            afileInst.file.Metadata.AssetInfos.Add(newInfo);
+
+                            // Add PPtr to atlas textures array
+                            var newPtr = ValueBuilder.DefaultValueFieldFromTemplate(ptrProto.TemplateField);
+                            newPtr["m_FileID"].AsInt = 0;
+                            newPtr["m_PathID"].AsLong = newInfo.PathId;
+                            newPtrList.Add(newPtr);
+                        }
+
+                        atlasTextures["Array"].Children = newPtrList;
+                    }
+                    else
+                    {
+                        // Cannot create additional textures — graceful degradation
+                        logger.LogWarning(
+                            "模板中只有 {Existing} 个纹理槽，但需要 {Needed} 页 Atlas。多余的字形将被忽略",
+                            existingTexCount, atlasPages.Count);
+                    }
                 }
             }
         }
@@ -540,14 +678,105 @@ public sealed class TmpFontGeneratorService(
         logger.LogInformation("AssetBundle 已写入: {Path}", outputPath);
     }
 
-    private static PackingRectangle FindRectForGlyph(PackingRectangle[] rects, int glyphIndex)
+    private static void ReplaceTexture(
+        AssetsManager manager, AssetsFileInstance afileInst, AssetFileInfo texInfo,
+        byte[] atlasData, int atlasWidth, int atlasHeight, string textureName)
+    {
+        var texBase = manager.GetBaseField(afileInst, texInfo);
+        var texFile = TextureFile.ReadTextureFile(texBase);
+        texFile.m_TextureFormat = 1; // Alpha8
+        texFile.SetPictureData(atlasData, atlasWidth, atlasHeight);
+        texFile.WriteTo(texBase);
+
+        texBase["m_StreamData"]["path"].AsString = "";
+        texBase["m_StreamData"]["offset"].AsULong = 0;
+        texBase["m_StreamData"]["size"].AsULong = 0;
+        texBase["m_Name"].AsString = textureName;
+        texInfo.SetNewData(texBase);
+    }
+
+    private List<List<GlyphData>> PackGlyphs(List<GlyphData> glyphs, int atlasWidth, int atlasHeight)
+    {
+        if (glyphs.Count == 0)
+            return [[]];
+
+        var rects = CreatePackingRects(glyphs);
+        RectanglePacker.Pack(rects, out var bounds, PackingHints.FindBest, (uint)atlasWidth, (uint)atlasHeight);
+
+        if (bounds.Width <= (uint)atlasWidth && bounds.Height <= (uint)atlasHeight)
+        {
+            ApplyPackedPositions(glyphs, rects);
+            return [glyphs];
+        }
+
+        // Binary search for max glyphs per page
+        int lo = 1, hi = glyphs.Count, maxPerPage = 1;
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) / 2;
+            var testRects = CreatePackingRects(glyphs.Take(mid).ToList());
+            RectanglePacker.Pack(testRects, out var testBounds, PackingHints.FindBest, (uint)atlasWidth, (uint)atlasHeight);
+            if (testBounds.Width <= (uint)atlasWidth && testBounds.Height <= (uint)atlasHeight)
+            { maxPerPage = mid; lo = mid + 1; }
+            else
+            { hi = mid - 1; }
+        }
+
+        maxPerPage = Math.Max(1, (int)(maxPerPage * 0.9)); // Safety margin
+
+        var pages = new List<List<GlyphData>>();
+        for (int i = 0; i < glyphs.Count;)
+        {
+            var batchSize = Math.Min(maxPerPage, glyphs.Count - i);
+            var page = glyphs.Skip(i).Take(batchSize).ToList();
+            var pageRects = CreatePackingRects(page);
+            RectanglePacker.Pack(pageRects, out var pageBounds, PackingHints.FindBest, (uint)atlasWidth, (uint)atlasHeight);
+
+            while (batchSize > 1 && (pageBounds.Width > (uint)atlasWidth || pageBounds.Height > (uint)atlasHeight))
+            {
+                batchSize = (int)(batchSize * 0.9);
+                page = glyphs.Skip(i).Take(batchSize).ToList();
+                pageRects = CreatePackingRects(page);
+                RectanglePacker.Pack(pageRects, out pageBounds, PackingHints.FindBest, (uint)atlasWidth, (uint)atlasHeight);
+            }
+
+            ApplyPackedPositions(page, pageRects);
+            pages.Add(page);
+            i += batchSize;
+        }
+        return pages;
+    }
+
+    private static PackingRectangle[] CreatePackingRects(IList<GlyphData> glyphs)
+    {
+        var rects = new PackingRectangle[glyphs.Count];
+        for (int i = 0; i < glyphs.Count; i++)
+            rects[i] = new PackingRectangle(0, 0,
+                (uint)(glyphs[i].BitmapWidth + DefaultPadding * 2),
+                (uint)(glyphs[i].BitmapHeight + DefaultPadding * 2), i);
+        return rects;
+    }
+
+    private static void ApplyPackedPositions(IList<GlyphData> glyphs, PackingRectangle[] rects)
     {
         foreach (var r in rects)
         {
-            if (r.Id == (uint)glyphIndex)
-                return r;
+            glyphs[(int)r.Id].AtlasX = (int)r.X + DefaultPadding;
+            glyphs[(int)r.Id].AtlasY = (int)r.Y + DefaultPadding;
         }
-        return rects[0]; // fallback
+    }
+
+    private static void FlipAtlasY(byte[] atlas, int width, int height)
+    {
+        var rowBuf = new byte[width];
+        for (int y = 0; y < height / 2; y++)
+        {
+            var topOff = y * width;
+            var botOff = (height - 1 - y) * width;
+            Buffer.BlockCopy(atlas, topOff, rowBuf, 0, width);
+            Buffer.BlockCopy(atlas, botOff, atlas, topOff, width);
+            Buffer.BlockCopy(rowBuf, 0, atlas, botOff, width);
+        }
     }
 
     private void BroadcastProgress(string phase, int current, int total, string message, bool force = false)
@@ -566,31 +795,6 @@ public sealed class TmpFontGeneratorService(
         var progress = new FontGenerationProgress(phase, current, total, message);
         hubContext.Clients.Group("font-generation")
             .SendAsync("FontGenerationProgress", progress).Wait();
-    }
-
-    internal static List<char> EnumerateCharacterSet()
-    {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var gb2312 = Encoding.GetEncoding("gb2312");
-        var chars = new List<char>(8000);
-
-        // GB2312 characters
-        for (int hi = 0xA1; hi <= 0xF7; hi++)
-        {
-            for (int lo = 0xA1; lo <= 0xFE; lo++)
-            {
-                byte[] bytes = [(byte)hi, (byte)lo];
-                var decoded = gb2312.GetString(bytes);
-                if (decoded.Length == 1 && decoded[0] != '\uFFFD')
-                    chars.Add(decoded[0]);
-            }
-        }
-
-        // ASCII printable (0x20-0x7E)
-        for (char c = ' '; c <= '~'; c++)
-            chars.Add(c);
-
-        return chars;
     }
 
     private static string SanitizeFileName(string name)
@@ -616,5 +820,6 @@ public sealed class TmpFontGeneratorService(
         public int BitmapHeight;
         public int AtlasX;
         public int AtlasY;
+        public int AtlasIndex;
     }
 }
