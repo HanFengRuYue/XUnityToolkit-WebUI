@@ -25,6 +25,12 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CustomFontsDirectory => Path.Combine(_root, "custom-fonts");
     public string FontGenerationUploadsDirectory => Path.Combine(_root, "font-generation", "uploads");
     public string GeneratedFontsDirectory => Path.Combine(_root, "generated-fonts");
+    public string FontGenerationCharsetUploadsDirectory =>
+        Path.Combine(_root, "font-generation", "uploads", "charset");
+    public string FontGenerationTranslationUploadsDirectory =>
+        Path.Combine(_root, "font-generation", "uploads", "translation");
+    public string FontGenerationTempDirectory =>
+        Path.Combine(_root, "font-generation", "temp");
 
     public string GetFontBackupDirectory(string gameId) =>
         Path.Combine(FontBackupsDirectory, gameId);
@@ -73,5 +79,8 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CustomFontsDirectory);
         Directory.CreateDirectory(FontGenerationUploadsDirectory);
         Directory.CreateDirectory(GeneratedFontsDirectory);
+        Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);
+        Directory.CreateDirectory(FontGenerationTranslationUploadsDirectory);
+        Directory.CreateDirectory(FontGenerationTempDirectory);
     }
 }
