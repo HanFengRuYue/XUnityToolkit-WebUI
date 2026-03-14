@@ -33,6 +33,9 @@ llama-bin/
 # Playwright MCP
 .playwright-mcp/
 
+# Superpowers docs
+docs/
+
 # OS
 Thumbs.db
 .DS_Store
