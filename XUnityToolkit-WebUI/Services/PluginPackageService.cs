@@ -4,7 +4,7 @@ using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
 
-public sealed class PluginPackageService(ILogger<PluginPackageService> logger)
+public sealed class PluginPackageService(ILogger<PluginPackageService> logger, AppDataPaths appDataPaths)
 {
     private const string ConfigRelativePath = "BepInEx/config/AutoTranslatorConfig.ini";
 
@@ -66,6 +66,49 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger)
 
                 // Add BepInEx directory
                 fileCount += AddDirectoryToZip(archive, gamePath, "BepInEx", ct);
+
+                // Add font-replaced asset files if present
+                var fontManifestPath = Path.Combine(appDataPaths.GetFontBackupDirectory(game.Id), "manifest.json");
+                if (File.Exists(fontManifestPath))
+                {
+                    var fontManifest = System.Text.Json.JsonSerializer.Deserialize<FontBackupManifest>(
+                        File.ReadAllText(fontManifestPath));
+                    if (fontManifest is not null)
+                    {
+                        foreach (var entry in fontManifest.ReplacedFiles)
+                        {
+                            if (File.Exists(entry.OriginalPath))
+                            {
+                                var relativePath = Path.GetRelativePath(gamePath, entry.OriginalPath);
+                                var entryName = relativePath.Replace('\\', '/');
+                                var zipEntry = archive.CreateEntry(entryName, CompressionLevel.SmallestSize);
+                                using var src = File.OpenRead(entry.OriginalPath);
+                                using var dst = zipEntry.Open();
+                                src.CopyTo(dst);
+                                fileCount++;
+                            }
+                        }
+                        foreach (var entry in fontManifest.CatalogFiles)
+                        {
+                            if (File.Exists(entry.OriginalPath))
+                            {
+                                var relativePath = Path.GetRelativePath(gamePath, entry.OriginalPath);
+                                var entryName = relativePath.Replace('\\', '/');
+                                var zipEntry = archive.CreateEntry(entryName, CompressionLevel.SmallestSize);
+                                using var src = File.OpenRead(entry.OriginalPath);
+                                using var dst = zipEntry.Open();
+                                src.CopyTo(dst);
+                                fileCount++;
+                            }
+                        }
+                        // Add manifest for import identification
+                        var manifestEntry = archive.CreateEntry("_font_replacement_manifest.json", CompressionLevel.SmallestSize);
+                        using var manifestSrc = File.OpenRead(fontManifestPath);
+                        using var manifestDst = manifestEntry.Open();
+                        manifestSrc.CopyTo(manifestDst);
+                        fileCount++;
+                    }
+                }
             }
 
             memStream.Position = 0;
@@ -91,19 +134,66 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger)
         logger.LogInformation("正在导入汉化包: {ZipPath} → {GamePath}", zipFilePath, game.GamePath);
 
         using var archive = ZipFile.OpenRead(zipFilePath);
-        var fileCount = 0;
 
+        // Phase 1: Check for font replacement manifest and backup originals FIRST
+        var fontManifestEntry = archive.GetEntry("_font_replacement_manifest.json");
+        if (fontManifestEntry is not null)
+        {
+            using var manifestStream = fontManifestEntry.Open();
+            using var reader = new StreamReader(manifestStream);
+            var manifestJson = reader.ReadToEnd();
+            var fontManifest = System.Text.Json.JsonSerializer.Deserialize<FontBackupManifest>(manifestJson);
+
+            if (fontManifest is not null)
+            {
+                var backupDir = appDataPaths.GetFontBackupDirectory(game.Id);
+                Directory.CreateDirectory(backupDir);
+
+                // Collect all asset file paths from the manifest that will be overwritten
+                var filesToBackup = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in fontManifest.ReplacedFiles)
+                    filesToBackup.Add(entry.BackupFileName);
+                foreach (var entry in fontManifest.CatalogFiles)
+                    filesToBackup.Add(entry.BackupFileName);
+
+                // Backup originals before they get overwritten
+                foreach (var zipEntry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(zipEntry.Name)) continue;
+                    var destPath = PathSecurity.SafeJoin(game.GamePath, zipEntry.FullName);
+                    if (!File.Exists(destPath)) continue;
+
+                    var relativePath = Path.GetRelativePath(game.GamePath, destPath);
+                    var backupFileName = relativePath
+                        .Replace(Path.DirectorySeparatorChar, '_')
+                        .Replace(Path.AltDirectorySeparatorChar, '_');
+
+                    if (filesToBackup.Contains(backupFileName))
+                    {
+                        var backupPath = Path.Combine(backupDir, backupFileName);
+                        if (!File.Exists(backupPath))
+                            File.Copy(destPath, backupPath);
+                    }
+                }
+
+                // Save manifest with updated GameId
+                var newManifest = fontManifest with { GameId = game.Id };
+                var newManifestJson = System.Text.Json.JsonSerializer.Serialize(newManifest);
+                File.WriteAllText(Path.Combine(backupDir, "manifest.json"), newManifestJson);
+            }
+        }
+
+        // Phase 2: Extract all files
+        var fileCount = 0;
         foreach (var entry in archive.Entries)
         {
             ct.ThrowIfCancellationRequested();
-
-            if (string.IsNullOrEmpty(entry.Name))
-                continue; // Skip directories
+            if (string.IsNullOrEmpty(entry.Name)) continue;
+            if (entry.FullName == "_font_replacement_manifest.json") continue;
 
             var destPath = PathSecurity.SafeJoin(game.GamePath, entry.FullName);
             var destDir = Path.GetDirectoryName(destPath)!;
             Directory.CreateDirectory(destDir);
-
             entry.ExtractToFile(destPath, overwrite: true);
             fileCount++;
         }
