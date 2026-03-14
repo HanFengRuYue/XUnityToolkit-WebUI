@@ -201,6 +201,68 @@ if (-not $SkipDownload) {
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'xunity') -ExpectedFiles $expectedXUnity
 
+    # ── Extract XUnity reference DLLs for TranslatorEndpoint ──
+    $xunityZip = Get-ChildItem -Path (Join-Path $BundledRoot 'xunity') -Filter '*.zip' |
+        Where-Object { $_.Name -notlike '*IL2CPP*' } |
+        Select-Object -First 1
+    if ($xunityZip) {
+        Write-Host "  Extracting XUnity reference DLLs..." -ForegroundColor DarkGray
+        $libsDir = Join-Path $ProjectRoot 'TranslatorEndpoint\libs'
+        if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
+        try {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [System.IO.Compression.ZipFile]::OpenRead($xunityZip.FullName)
+            try {
+                $dllMappings = @(
+                    @{ Entry = 'BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll'; Target = 'XUnity.AutoTranslator.Plugin.Core.dll' },
+                    @{ Entry = 'BepInEx/core/XUnity.Common.dll'; Target = 'XUnity.Common.dll' }
+                )
+                foreach ($mapping in $dllMappings) {
+                    $entry = $zip.GetEntry($mapping.Entry)
+                    if (-not $entry) {
+                        Write-Host "  [warn] Entry '$($mapping.Entry)' not found in ZIP" -ForegroundColor DarkYellow
+                        continue
+                    }
+                    $targetPath = Join-Path $libsDir $mapping.Target
+                    # Compare SHA256 to detect changes
+                    $entryStream = $entry.Open()
+                    $memStream = New-Object System.IO.MemoryStream
+                    try {
+                        $entryStream.CopyTo($memStream)
+                        $newBytes = $memStream.ToArray()
+                        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+                        try {
+                            $newHash = [BitConverter]::ToString($sha256.ComputeHash($newBytes)).Replace('-','')
+                        } finally {
+                            $sha256.Dispose()
+                        }
+                    } finally {
+                        $entryStream.Dispose()
+                        $memStream.Dispose()
+                    }
+                    $changed = $true
+                    if (Test-Path $targetPath) {
+                        $oldHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash
+                        if ($oldHash -eq $newHash) { $changed = $false }
+                    }
+                    if ($changed) {
+                        [System.IO.File]::WriteAllBytes($targetPath, $newBytes)
+                        Write-Host "  [updated] $($mapping.Target)" -ForegroundColor Green
+                    } else {
+                        Write-Host "  [unchanged] $($mapping.Target)" -ForegroundColor DarkGray
+                    }
+                }
+            } finally {
+                $zip.Dispose()
+            }
+        } catch {
+            Write-Host "  [warn] Failed to extract XUnity DLLs: $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host "         Using committed DLLs as fallback." -ForegroundColor DarkGray
+        }
+    } else {
+        Write-Host "  [skip] XUnity ZIP not found, using committed DLLs" -ForegroundColor DarkGray
+    }
+
     # ── llama.cpp binaries from GitHub Releases ──
     Write-Host "  Fetching llama.cpp latest release..." -ForegroundColor DarkGray
     $llamaReleases = Invoke-WithRetry -Operation "Fetch llama.cpp releases" -ScriptBlock {
@@ -230,6 +292,38 @@ if (-not $SkipDownload) {
         }
     }
     Remove-OldVersions -Dir $llamaDir -ExpectedFiles $expectedLlama
+
+    # ── Update classdata.tpk from AssetRipper/Tpk CI ──
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        Write-Host "  Fetching latest classdata.tpk from AssetRipper/Tpk..." -ForegroundColor DarkGray
+        $tpkTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "tpk_$(Get-Random)"
+        try {
+            $ghOutput = & gh run download -R AssetRipper/Tpk -n lz4_file -D $tpkTempDir 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "gh run download failed: $ghOutput" }
+            $downloadedTpk = Join-Path $tpkTempDir 'lz4.tpk'
+            if (-not (Test-Path $downloadedTpk)) { throw "lz4.tpk not found in downloaded artifact" }
+            $targetTpk = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\Resources\classdata.tpk'
+            $newHash = (Get-FileHash -Path $downloadedTpk -Algorithm SHA256).Hash
+            $changed = $true
+            if (Test-Path $targetTpk) {
+                $oldHash = (Get-FileHash -Path $targetTpk -Algorithm SHA256).Hash
+                if ($oldHash -eq $newHash) { $changed = $false }
+            }
+            if ($changed) {
+                Copy-Item -Path $downloadedTpk -Destination $targetTpk -Force
+                Write-Host "  [updated] classdata.tpk" -ForegroundColor Green
+            } else {
+                Write-Host "  [unchanged] classdata.tpk is up to date" -ForegroundColor DarkGray
+            }
+        } catch {
+            Write-Host "  [warn] Failed to update classdata.tpk: $($_.Exception.Message)" -ForegroundColor DarkYellow
+            Write-Host "         Artifacts may have expired (90-day retention). Using committed version." -ForegroundColor DarkGray
+        } finally {
+            if (Test-Path $tpkTempDir) { Remove-Item $tpkTempDir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    } else {
+        Write-Host "  [skip] gh CLI not found, using committed classdata.tpk" -ForegroundColor DarkGray
+    }
 
     Write-Host "  Bundled assets ready." -ForegroundColor Green
 }
