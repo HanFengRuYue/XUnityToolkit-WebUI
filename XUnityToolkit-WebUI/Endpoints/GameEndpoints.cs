@@ -432,7 +432,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -441,6 +441,15 @@ public static class GameEndpoints
             // Clean up cover image and custom icon
             await imageService.DeleteCoverAsync(id, ct);
             await imageService.DeleteCustomIconAsync(id, ct);
+
+            // Clean up font replacement data
+            var fontBackupDir = appDataPaths.GetFontBackupDirectory(id);
+            if (Directory.Exists(fontBackupDir))
+                Directory.Delete(fontBackupDir, recursive: true);
+            var customFontDir = appDataPaths.GetCustomFontDirectory(id);
+            if (Directory.Exists(customFontDir))
+                Directory.Delete(customFontDir, recursive: true);
+
             return Results.Ok(ApiResult.Ok());
         });
 

@@ -33,4 +33,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveLocalLlmGroup() =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, "local-llm");
+
+    public Task JoinFontReplacementGroup(string gameId) =>
+        Groups.AddToGroupAsync(Context.ConnectionId, $"font-replacement-{gameId}");
+
+    public Task LeaveFontReplacementGroup(string gameId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, $"font-replacement-{gameId}");
 }
