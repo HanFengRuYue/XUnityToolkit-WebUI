@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -57,6 +57,10 @@ export const gamesApi = {
   getGlossary: (id: string) => api.get<GlossaryEntry[]>(`/api/games/${id}/glossary`),
   saveGlossary: (id: string, entries: GlossaryEntry[]) =>
     api.put<GlossaryEntry[]>(`/api/games/${id}/glossary`, entries),
+
+  getDoNotTranslate: (id: string) => api.get<DoNotTranslateEntry[]>(`/api/games/${id}/do-not-translate`),
+  saveDoNotTranslate: (id: string, entries: DoNotTranslateEntry[]) =>
+    api.put<DoNotTranslateEntry[]>(`/api/games/${id}/do-not-translate`, entries),
 
   getDescription: (id: string) => api.get<string | null>(`/api/games/${id}/description`),
   saveDescription: (id: string, description: string | null) =>

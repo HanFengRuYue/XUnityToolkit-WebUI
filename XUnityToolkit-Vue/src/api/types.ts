@@ -293,6 +293,11 @@ export interface GlossaryEntry {
   description?: string
 }
 
+export interface DoNotTranslateEntry {
+  original: string
+  caseSensitive: boolean
+}
+
 export interface GlossaryExtractionStats {
   enabled: boolean
   totalExtracted: number
