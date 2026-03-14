@@ -39,7 +39,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`)
 - **Persistence:** JSON files in `{programDir}/data/` (`library.json`, `settings.json`) — portable app pattern; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
-- **Console hiding:** `OutputType=WinExe` — no console window on startup (works with both conhost and Windows Terminal/ConPTY); "Show Console" tray menu uses `AllocConsole()` + stream redirect on demand; close button removed via `DeleteMenu(SC_CLOSE)` to prevent accidental app termination; do NOT revert to `Exe` + `ShowWindow(SW_HIDE)` (fails under ConPTY)
+- **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description, do-not-translate list; real-time stats via SignalR
 - **Do-Not-Translate:** `DoNotTranslateService` stores per-game lists at `data/do-not-translate/{gameId}.json`; `LlmTranslationService` replaces matched words with `{{DNT_x}}` placeholders before LLM calls, restores after; prompt hint tells LLM to preserve placeholders; entries sorted longest-first; per-entry case sensitivity
@@ -111,7 +111,6 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
 - P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
 - **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
-- **Console P/Invoke:** `AllocConsole`/`FreeConsole` (kernel32), `GetSystemMenu`/`DeleteMenu` (user32); `OutputType=WinExe` in csproj is critical — do NOT revert to `Exe`
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
 - **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache`
 
@@ -177,7 +176,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Font Replacement (AssetsTools.NET)
 
 - **TMP_FontAsset detection:** MonoBehaviour with `m_Version` + `m_GlyphTable` fields = v1.1.0 (supported); `m_fontInfo` + `m_glyphInfoList` = v1.0.0 (unsupported)
-- **Field-level copy:** Swap `Children` lists for array/struct fields (`m_GlyphTable`, `m_CharacterTable`, `m_FaceInfo`, etc.); DO NOT touch PPtr fields (`m_AtlasTextures`, `material`, `m_SourceFontFile`, `m_FallbackFontAssetTable`)
+- **Field-level copy:** Swap `Children` lists for array/struct fields (`m_GlyphTable`, `m_CharacterTable`, `m_FaceInfo`, etc.); DO NOT touch PPtr fields (`material`, `m_SourceFontFile`, `m_FallbackFontAssetTable`); `m_AtlasTextures` is handled separately by multi-atlas logic
+- **Multi-atlas replacement:** `ReplaceSingleFont` reads ALL source atlas pages via `List<SourceAtlasPage>`; replaces existing destination textures; creates new Texture2D assets for extra pages (globally unique PathId via `AssetInfos.Max(PathId) + 1`); updates `m_AtlasTextures` PPtr array
 - **Texture replacement:** `AssetsTools.NET.Texture` v3.0.2 (latest); API uses `TextureFile.ReadTextureFile()` → `SetPictureData()`/`FillPictureData()` → `WriteTo()`; clear `m_StreamData` (path/offset/size) after replacing embedded texture
 - **Bundle write pattern:** modify assets → `DirectoryInfos[i].SetNewData(afile)` → write uncompressed `.tmp` → re-read → `Pack(writer, LZ4)` → delete tmp → move to original
 - **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
@@ -281,6 +281,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
 - **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
 - **Adding DoNotTranslateEntry fields:** Sync 2 places: `Models/DoNotTranslateEntry.cs`, `src/api/types.ts`
+- **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
 - Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`
 - Install store `operationType` tracks install vs uninstall
 - **`[LLMTranslate]` INI config:** Written in 3 places — `POST /ai-endpoint`, `InstallOrchestrator`, DLL `Initialize`
