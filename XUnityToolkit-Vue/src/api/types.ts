@@ -504,10 +504,11 @@ export interface GeneratedFontInfo {
   glyphCount: number
   fileSize: number
   generatedAt: string
+  hasReport: boolean
 }
 
 export interface FontGenerationProgress {
-  phase: 'parsing' | 'sdf' | 'packing' | 'serializing'
+  phase: 'parsing' | 'sdf' | 'packing' | 'compositing' | 'serializing'
   current: number
   total: number
   message: string
@@ -518,4 +519,42 @@ export interface FontGenerationComplete {
   fontName?: string
   glyphCount: number
   error?: string
+  report?: FontGenerationReport
+}
+
+export interface CharacterSetConfig {
+  builtinSets: string[]
+  customCharsetFileName?: string
+  translationGameId?: string
+  translationFileName?: string
+}
+
+export interface CharacterSetPreview {
+  totalCharacters: number
+  sourceBreakdown: Record<string, number>
+  estimatedAtlasCount: number
+  exceedsSingleAtlas: boolean
+  warnings: string[]
+}
+
+export interface FontGenerationReport {
+  fontName: string
+  totalCharacters: number
+  successfulGlyphs: number
+  missingGlyphs: number
+  missingCharacters: string[]
+  totalMissingCount: number
+  atlasCount: number
+  atlasWidth: number
+  atlasHeight: number
+  samplingSize: number
+  sourceBreakdown: Record<string, number>
+  elapsedMilliseconds: number
+}
+
+export interface CharsetInfo {
+  id: string
+  name: string
+  description: string
+  characterCount: number
 }
