@@ -34,6 +34,20 @@ public record FontReplacementStatus
     public bool IsExternallyRestored { get; init; }
     public DateTime? ReplacedAt { get; init; }
     public string? FontSource { get; init; }
+    public string? CustomFontFileName { get; init; }
+}
+
+public record FontReplacementResult
+{
+    public int SuccessCount { get; init; }
+    public List<FailedFontEntry> FailedFonts { get; init; } = [];
+}
+
+public record FailedFontEntry
+{
+    public required long PathId { get; init; }
+    public required string AssetFile { get; init; }
+    public required string Error { get; init; }
 }
 
 public record FontBackupManifest

@@ -292,12 +292,24 @@ public sealed class FontReplacementService(
         }
     }
 
-    public async Task ReplaceFontsAsync(
+    public async Task<FontReplacementResult> ReplaceFontsAsync(
         string gamePath, string gameId, UnityGameInfo gameInfo,
         FontTarget[] fonts, string? customFontPath,
         IProgress<FontReplacementProgress>? progress, CancellationToken ct = default)
     {
-        var fontFile = customFontPath ?? tmpFontService.ResolveFontFile(gameInfo.UnityVersion);
+        // Auto-resolve custom font if not explicitly provided
+        var fontFile = customFontPath;
+        if (fontFile is null)
+        {
+            var customDir = appDataPaths.GetCustomFontDirectory(gameId);
+            if (Directory.Exists(customDir))
+            {
+                var customFiles = Directory.GetFiles(customDir);
+                if (customFiles.Length > 0)
+                    fontFile = customFiles[0];
+            }
+        }
+        fontFile ??= tmpFontService.ResolveFontFile(gameInfo.UnityVersion);
         if (fontFile is null || !File.Exists(fontFile))
             throw new FileNotFoundException($"Font file not found: {fontFile ?? "(none)"}");
 
@@ -308,6 +320,7 @@ public sealed class FontReplacementService(
 
         var replacedFiles = new List<ReplacedFileEntry>();
         var catalogFiles = new List<CatalogFileEntry>();
+        var failedFonts = new List<FailedFontEntry>();
 
         logger.LogInformation("字体替换开始: {Count} 个字体, 源字体: {Font}", fonts.Length, Path.GetFileName(fontFile));
 
@@ -445,15 +458,15 @@ public sealed class FontReplacementService(
                         {
                             ProcessBundleFile(dstManager, srcFontBase, srcEncodedData, srcWidth, srcHeight, srcTextureFormat,
                                 gamePath, gameId, dataPath, assetFileName, fontsInFile,
-                                gameInfo.UnityVersion, replacedFiles, catalogFiles, ref processedFonts, totalFonts,
-                                progress, ct);
+                                gameInfo.UnityVersion, replacedFiles, catalogFiles, failedFonts,
+                                ref processedFonts, totalFonts, progress, ct);
                         }
                         else
                         {
                             ProcessLooseFile(dstManager, srcFontBase, srcEncodedData, srcWidth, srcHeight, srcTextureFormat,
                                 gamePath, gameId, dataPath, assetFileName, fontsInFile,
-                                gameInfo.UnityVersion, replacedFiles, ref processedFonts, totalFonts,
-                                progress, ct);
+                                gameInfo.UnityVersion, replacedFiles, failedFonts,
+                                ref processedFonts, totalFonts, progress, ct);
                         }
                     }
                 }
@@ -514,8 +527,12 @@ public sealed class FontReplacementService(
         var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(Path.Combine(backupDir, "manifest.json"), json, ct);
 
-        logger.LogInformation("字体替换完成: 替换了 {Count} 个字体, 修改了 {Files} 个文件",
-            fonts.Length, replacedFiles.Count);
+        var successCount = fonts.Length - failedFonts.Count;
+        logger.LogInformation("字体替换完成: 成功 {Success}/{Total} 个字体, 修改了 {Files} 个文件",
+            successCount, fonts.Length, replacedFiles.Count);
+
+        if (failedFonts.Count > 0)
+            logger.LogWarning("字体替换部分失败: {Count} 个字体替换失败", failedFonts.Count);
 
         progress?.Report(new FontReplacementProgress
         {
@@ -523,6 +540,12 @@ public sealed class FontReplacementService(
             Current = fonts.Length,
             Total = fonts.Length
         });
+
+        return new FontReplacementResult
+        {
+            SuccessCount = successCount,
+            FailedFonts = failedFonts
+        };
     }
 
     private void ProcessLooseFile(
@@ -530,7 +553,7 @@ public sealed class FontReplacementService(
         byte[] srcEncodedData, int srcWidth, int srcHeight, int srcTextureFormat,
         string gamePath, string gameId, string dataPath, string assetFileName,
         List<FontTarget> fontsInFile, string unityVersion,
-        List<ReplacedFileEntry> replacedFiles,
+        List<ReplacedFileEntry> replacedFiles, List<FailedFontEntry> failedFonts,
         ref int processedFonts, int totalFonts,
         IProgress<FontReplacementProgress>? progress, CancellationToken ct)
     {
@@ -577,6 +600,20 @@ public sealed class FontReplacementService(
                 catch (Exception ex)
                 {
                     logger.LogWarning(ex, "替换字体失败: PathId={PathId} in {File}", font.PathId, assetFileName);
+                    failedFonts.Add(new FailedFontEntry
+                    {
+                        PathId = font.PathId,
+                        AssetFile = assetFileName,
+                        Error = ex.Message
+                    });
+                    processedFonts++;
+                    progress?.Report(new FontReplacementProgress
+                    {
+                        Phase = "replacing",
+                        Current = processedFonts,
+                        Total = totalFonts,
+                        CurrentFile = assetFileName
+                    });
                 }
             }
 
@@ -614,6 +651,7 @@ public sealed class FontReplacementService(
         string gamePath, string gameId, string dataPath, string assetFileName,
         List<FontTarget> fontsInFile, string unityVersion,
         List<ReplacedFileEntry> replacedFiles, List<CatalogFileEntry> catalogFiles,
+        List<FailedFontEntry> failedFonts,
         ref int processedFonts, int totalFonts,
         IProgress<FontReplacementProgress>? progress, CancellationToken ct)
     {
@@ -700,6 +738,20 @@ public sealed class FontReplacementService(
                     catch (Exception ex)
                     {
                         logger.LogWarning(ex, "替换字体失败: PathId={PathId} in {File}", font.PathId, assetFileName);
+                        failedFonts.Add(new FailedFontEntry
+                        {
+                            PathId = font.PathId,
+                            AssetFile = assetFileName,
+                            Error = ex.Message
+                        });
+                        processedFonts++;
+                        progress?.Report(new FontReplacementProgress
+                        {
+                            Phase = "replacing",
+                            Current = processedFonts,
+                            Total = totalFonts,
+                            CurrentFile = assetFileName
+                        });
                     }
                 }
 
@@ -1218,13 +1270,22 @@ public sealed class FontReplacementService(
         logger.LogInformation("字体还原完成: GameId={GameId}", gameId);
     }
 
+    private string? GetCustomFontFileName(string gameId)
+    {
+        var customDir = appDataPaths.GetCustomFontDirectory(gameId);
+        if (!Directory.Exists(customDir)) return null;
+        var files = Directory.GetFiles(customDir);
+        return files.Length > 0 ? Path.GetFileName(files[0]) : null;
+    }
+
     public async Task<FontReplacementStatus> GetStatusAsync(string gamePath, string gameId)
     {
         var backupDir = appDataPaths.GetFontBackupDirectory(gameId);
         var manifestPath = Path.Combine(backupDir, "manifest.json");
+        var customFontFileName = GetCustomFontFileName(gameId);
 
         if (!File.Exists(manifestPath))
-            return new FontReplacementStatus();
+            return new FontReplacementStatus { CustomFontFileName = customFontFileName };
 
         try
         {
@@ -1284,7 +1345,8 @@ public sealed class FontReplacementService(
                 ReplacedAt = manifest.ReplacedAt,
                 FontSource = manifest.FontSource,
                 ReplacedFonts = replacedFonts,
-                IsExternallyRestored = externallyRestored
+                IsExternallyRestored = externallyRestored,
+                CustomFontFileName = customFontFileName
             };
         }
         catch (Exception ex)

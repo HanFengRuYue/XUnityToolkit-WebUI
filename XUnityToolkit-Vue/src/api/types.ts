@@ -256,6 +256,18 @@ export interface FontReplacementStatus {
   isExternallyRestored: boolean
   replacedAt?: string
   fontSource?: string
+  customFontFileName?: string
+}
+
+export interface FontReplacementResult {
+  successCount: number
+  failedFonts: FailedFontEntry[]
+}
+
+export interface FailedFontEntry {
+  pathId: number
+  assetFile: string
+  error: string
 }
 
 export interface FontReplacementProgress {
