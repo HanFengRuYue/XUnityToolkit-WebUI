@@ -114,10 +114,8 @@ public sealed partial class TmpFontService(BundledAssetPaths bundledPaths, ILogg
     private static int? ParseMajorVersion(string unityVersion)
     {
         var dotIndex = unityVersion.IndexOf('.');
-        if (dotIndex <= 0)
-            return null;
-
-        return int.TryParse(unityVersion[..dotIndex], out var major) ? major : null;
+        var segment = dotIndex > 0 ? unityVersion[..dotIndex] : unityVersion;
+        return int.TryParse(segment, out var major) ? major : null;
     }
 
     [GeneratedRegex(@"_U(\d+)$")]
