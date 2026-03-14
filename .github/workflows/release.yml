@@ -10,7 +10,6 @@ jobs:
   release:
     uses: ./.github/workflows/build.yml
     with:
-      build_version: ${{ github.ref_name }}
       release_tag: ${{ github.ref_name }}
       release_name: "XUnityToolkit-WebUI ${{ github.ref_name }}"
       release_body: |
