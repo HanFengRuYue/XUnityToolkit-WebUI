@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
@@ -487,7 +488,21 @@ public sealed class FontReplacementService(
             }
         }, ct);
 
-        // === Step 4: Save manifest ===
+        // === Step 4: Clear Addressables CRC checksums ===
+        if (replacedFiles.Count > 0)
+        {
+            var gameName2 = Path.GetFileNameWithoutExtension(gameInfo.DetectedExecutable);
+            var modifiedBundles = replacedFiles
+                .Where(f => f.OriginalPath.EndsWith(".bundle", StringComparison.OrdinalIgnoreCase))
+                .Select(f => Path.GetFileName(f.OriginalPath))
+                .ToList();
+
+            var clearedCatalogs = await ClearAddressablesCrcAsync(
+                gamePath, gameName2, modifiedBundles, gameId, ct);
+            catalogFiles.AddRange(clearedCatalogs);
+        }
+
+        // === Step 5: Save manifest ===
         var manifest = new FontBackupManifest
         {
             GameId = gameId,
@@ -883,5 +898,388 @@ public sealed class FontReplacementService(
         using var sha = SHA256.Create();
         using var stream = File.OpenRead(filePath);
         return Convert.ToHexString(sha.ComputeHash(stream));
+    }
+
+    public async Task<List<CatalogFileEntry>> ClearAddressablesCrcAsync(
+        string gamePath, string gameName, List<string> modifiedBundles,
+        string gameId, CancellationToken ct = default)
+    {
+        var catalogFiles = new List<CatalogFileEntry>();
+        var aaPath = Path.Combine(gamePath, $"{gameName}_Data", "StreamingAssets", "aa");
+
+        if (!Directory.Exists(aaPath))
+        {
+            logger.LogDebug("Addressables 目录不存在，跳过 CRC 清除: {Path}", aaPath);
+            return catalogFiles;
+        }
+
+        // Handle catalog.json
+        var catalogJson = Path.Combine(aaPath, "catalog.json");
+        if (File.Exists(catalogJson))
+        {
+            try
+            {
+                var backupFileName = BackupFile(gamePath, gameId, catalogJson);
+                var content = await File.ReadAllTextAsync(catalogJson, ct);
+
+                // Zero out all CRC entries — safer approach since we're modifying bundles
+                var modified = Regex.Replace(content, "\"Crc\"\\s*:\\s*\\d+", "\"Crc\":0");
+
+                await File.WriteAllTextAsync(catalogJson, modified, ct);
+                catalogFiles.Add(new CatalogFileEntry
+                {
+                    OriginalPath = catalogJson,
+                    BackupFileName = backupFileName
+                });
+                logger.LogInformation("已清除 catalog.json 中的 CRC 校验值");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "清除 catalog.json CRC 失败");
+            }
+
+            // Also handle catalog.hash if it exists
+            var catalogHash = Path.Combine(aaPath, "catalog.hash");
+            if (File.Exists(catalogHash))
+            {
+                try
+                {
+                    var hashBackup = BackupFile(gamePath, gameId, catalogHash);
+                    File.Delete(catalogHash);
+                    catalogFiles.Add(new CatalogFileEntry
+                    {
+                        OriginalPath = catalogHash,
+                        BackupFileName = hashBackup
+                    });
+                    logger.LogInformation("已备份并删除 catalog.hash");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "处理 catalog.hash 失败");
+                }
+            }
+        }
+
+        // Handle catalog.bundle (AssetBundle containing TextAsset with catalog JSON)
+        var catalogBundle = Path.Combine(aaPath, "catalog.bundle");
+        if (File.Exists(catalogBundle))
+        {
+            try
+            {
+                var backupFileName = BackupFile(gamePath, gameId, catalogBundle);
+
+                await Task.Run(() =>
+                {
+                    var manager = new AssetsManager();
+                    try
+                    {
+                        using var tpkStream = new MemoryStream(ClassDataTpk.Value);
+                        manager.LoadClassPackage(tpkStream);
+
+                        var bunInst = manager.LoadBundleFile(catalogBundle, true);
+                        var dirInfos = bunInst.file.BlockAndDirInfo.DirectoryInfos;
+
+                        bool modified = false;
+
+                        for (int i = 0; i < dirInfos.Count; i++)
+                        {
+                            var entryName = dirInfos[i].Name;
+                            if (entryName.EndsWith(".resource", StringComparison.OrdinalIgnoreCase) ||
+                                entryName.EndsWith(".resS", StringComparison.OrdinalIgnoreCase))
+                                continue;
+
+                            AssetsFileInstance? afileInst = null;
+                            try
+                            {
+                                afileInst = manager.LoadAssetsFileFromBundle(bunInst, i, false);
+                                var afile = afileInst.file;
+
+                                try { manager.LoadClassDatabaseFromPackage(afile.Metadata.UnityVersion); }
+                                catch { /* type tree embedded */ }
+
+                                foreach (var textInfo in afile.GetAssetsOfType(AssetClassID.TextAsset))
+                                {
+                                    var textBase = manager.GetBaseField(afileInst, textInfo);
+                                    if (textBase.IsDummy) continue;
+
+                                    var scriptField = textBase["m_Script"];
+                                    if (scriptField.IsDummy) continue;
+
+                                    var script = scriptField.AsString;
+                                    if (!script.Contains("\"Crc\"")) continue;
+
+                                    var newScript = Regex.Replace(script, "\"Crc\"\\s*:\\s*\\d+", "\"Crc\":0");
+                                    scriptField.AsString = newScript;
+                                    textInfo.SetNewData(textBase);
+                                    modified = true;
+                                }
+
+                                if (modified)
+                                    dirInfos[i].SetNewData(afile);
+                            }
+                            finally
+                            {
+                                if (afileInst != null)
+                                    manager.UnloadAssetsFile(afileInst);
+                            }
+                        }
+
+                        if (modified)
+                        {
+                            var tmpPath = catalogBundle + ".tmp";
+                            using (var writer = new AssetsFileWriter(tmpPath))
+                                bunInst.file.Write(writer);
+
+                            manager.UnloadBundleFile(bunInst);
+
+                            // Recompress with LZ4
+                            using var reReader = new AssetsFileReader(File.OpenRead(tmpPath));
+                            var newBun = new AssetBundleFile();
+                            newBun.Read(reReader);
+                            var compressedPath = catalogBundle + ".lz4.tmp";
+                            using (var writer = new AssetsFileWriter(compressedPath))
+                                newBun.Pack(writer, AssetBundleCompressionType.LZ4);
+                            newBun.Close();
+                            reReader.Close();
+                            File.Delete(tmpPath);
+                            File.Move(compressedPath, catalogBundle, overwrite: true);
+                        }
+                        else
+                        {
+                            manager.UnloadBundleFile(bunInst);
+                        }
+                    }
+                    finally
+                    {
+                        manager.UnloadAll();
+                    }
+                }, ct);
+
+                catalogFiles.Add(new CatalogFileEntry
+                {
+                    OriginalPath = catalogBundle,
+                    BackupFileName = backupFileName
+                });
+                logger.LogInformation("已清除 catalog.bundle 中的 CRC 校验值");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "清除 catalog.bundle CRC 失败，不影响字体替换");
+            }
+        }
+
+        if (catalogFiles.Count == 0)
+            logger.LogDebug("未找到 Addressables catalog 文件: {Path}", aaPath);
+
+        return catalogFiles;
+    }
+
+    public bool ValidateCustomFont(string fontPath)
+    {
+        try
+        {
+            var manager = new AssetsManager();
+            try
+            {
+                using var tpkStream = new MemoryStream(ClassDataTpk.Value);
+                manager.LoadClassPackage(tpkStream);
+
+                var bunInst = manager.LoadBundleFile(fontPath, true);
+                var dirInfos = bunInst.file.BlockAndDirInfo.DirectoryInfos;
+
+                for (int i = 0; i < dirInfos.Count; i++)
+                {
+                    var entryName = dirInfos[i].Name;
+                    if (entryName.EndsWith(".resource", StringComparison.OrdinalIgnoreCase) ||
+                        entryName.EndsWith(".resS", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    AssetsFileInstance? afileInst = null;
+                    try
+                    {
+                        afileInst = manager.LoadAssetsFileFromBundle(bunInst, i, false);
+                        var afile = afileInst.file;
+
+                        try { manager.LoadClassDatabaseFromPackage(afile.Metadata.UnityVersion); }
+                        catch { /* type tree embedded */ }
+
+                        foreach (var mbInfo in afile.GetAssetsOfType(AssetClassID.MonoBehaviour))
+                        {
+                            try
+                            {
+                                var mbBase = manager.GetBaseField(afileInst, mbInfo);
+                                if (mbBase.IsDummy) continue;
+
+                                if (!mbBase["m_GlyphTable"].IsDummy && !mbBase["m_Version"].IsDummy)
+                                    return true;
+                            }
+                            catch
+                            {
+                                // MonoBehaviour deserialization can fail — skip
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        if (afileInst != null)
+                            manager.UnloadAssetsFile(afileInst);
+                    }
+                }
+
+                return false;
+            }
+            finally
+            {
+                manager.UnloadAll();
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task RestoreFontsAsync(string gamePath, string gameId)
+    {
+        var backupDir = appDataPaths.GetFontBackupDirectory(gameId);
+        var manifestPath = Path.Combine(backupDir, "manifest.json");
+
+        if (!File.Exists(manifestPath))
+        {
+            logger.LogWarning("字体备份清单不存在: {Path}", manifestPath);
+            return;
+        }
+
+        var json = await File.ReadAllTextAsync(manifestPath);
+        var manifest = JsonSerializer.Deserialize<FontBackupManifest>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        if (manifest is null)
+        {
+            logger.LogWarning("字体备份清单解析失败: {Path}", manifestPath);
+            return;
+        }
+
+        // Restore replaced files
+        foreach (var entry in manifest.ReplacedFiles)
+        {
+            var backupPath = Path.Combine(backupDir, entry.BackupFileName);
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    File.Copy(backupPath, entry.OriginalPath, overwrite: true);
+                    logger.LogInformation("已还原: {Path}", entry.OriginalPath);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "还原文件失败: {Path}", entry.OriginalPath);
+                }
+            }
+            else
+            {
+                logger.LogWarning("备份文件不存在: {Path}", backupPath);
+            }
+        }
+
+        // Restore catalog files
+        foreach (var entry in manifest.CatalogFiles)
+        {
+            var backupPath = Path.Combine(backupDir, entry.BackupFileName);
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    File.Copy(backupPath, entry.OriginalPath, overwrite: true);
+                    logger.LogInformation("已还原: {Path}", entry.OriginalPath);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "还原 catalog 文件失败: {Path}", entry.OriginalPath);
+                }
+            }
+            else
+            {
+                logger.LogWarning("catalog 备份文件不存在: {Path}", backupPath);
+            }
+        }
+
+        // Delete backup directory
+        try
+        {
+            Directory.Delete(backupDir, recursive: true);
+            logger.LogInformation("已删除备份目录: {Path}", backupDir);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "删除备份目录失败: {Path}", backupDir);
+        }
+
+        logger.LogInformation("字体还原完成: GameId={GameId}", gameId);
+    }
+
+    public async Task<FontReplacementStatus> GetStatusAsync(string gamePath, string gameId)
+    {
+        var backupDir = appDataPaths.GetFontBackupDirectory(gameId);
+        var manifestPath = Path.Combine(backupDir, "manifest.json");
+
+        if (!File.Exists(manifestPath))
+            return new FontReplacementStatus();
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(manifestPath);
+            var manifest = JsonSerializer.Deserialize<FontBackupManifest>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (manifest is null)
+                return new FontReplacementStatus();
+
+            // Check if files have been externally restored (e.g., Steam verify)
+            var isExternallyRestored = false;
+            foreach (var entry in manifest.ReplacedFiles)
+            {
+                if (!File.Exists(entry.OriginalPath))
+                {
+                    isExternallyRestored = true;
+                    break;
+                }
+
+                var currentHash = ComputeFileHash(entry.OriginalPath);
+                if (!string.Equals(currentHash, entry.ModifiedFileHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    isExternallyRestored = true;
+                    break;
+                }
+            }
+
+            // Collect replaced font info
+            var replacedFonts = manifest.ReplacedFiles
+                .SelectMany(f => f.ReplacedFonts)
+                .Select(rf => new TmpFontInfo
+                {
+                    Name = rf.Name,
+                    PathId = rf.PathId,
+                    AssetFile = "",
+                    IsInBundle = false,
+                    IsSupported = true
+                })
+                .ToList();
+
+            return new FontReplacementStatus
+            {
+                IsReplaced = true,
+                BackupExists = Directory.Exists(backupDir),
+                ReplacedAt = manifest.ReplacedAt,
+                FontSource = manifest.FontSource,
+                ReplacedFonts = replacedFonts,
+                IsExternallyRestored = isExternallyRestored
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "读取字体替换状态失败: {GameId}", gameId);
+            return new FontReplacementStatus();
+        }
     }
 }
