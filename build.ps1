@@ -84,6 +84,21 @@ Write-Host ""
 
 $currentStep = 0
 
+# ── Resolve GitHub auth token for API rate limits (60/h unauthenticated → 5000/h authenticated) ──
+$GitHubHeaders = @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' }
+if ($env:GITHUB_TOKEN) {
+    $GitHubHeaders['Authorization'] = "Bearer $env:GITHUB_TOKEN"
+    Write-Host "  GitHub auth: using GITHUB_TOKEN env var" -ForegroundColor DarkGray
+} elseif (Get-Command gh -ErrorAction SilentlyContinue) {
+    try {
+        $ghToken = & gh auth token 2>$null
+        if ($LASTEXITCODE -eq 0 -and $ghToken) {
+            $GitHubHeaders['Authorization'] = "Bearer $($ghToken.Trim())"
+            Write-Host "  GitHub auth: using gh CLI token" -ForegroundColor DarkGray
+        }
+    } catch { }
+}
+
 # ── Step: Download bundled assets ──
 if (-not $SkipDownload) {
     $currentStep++
@@ -140,7 +155,7 @@ if (-not $SkipDownload) {
     # ── BepInEx 5 (Mono) from GitHub Releases ──
     Write-Host "  Fetching BepInEx 5 latest stable release..." -ForegroundColor DarkGray
     $bepinex5Releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+        Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers $GitHubHeaders -TimeoutSec 30
     }.GetNewClosure()
     $bepinex5Release = $bepinex5Releases | Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } | Select-Object -First 1
     if (-not $bepinex5Release) { throw "BepInEx 5 stable release not found" }
@@ -186,7 +201,7 @@ if (-not $SkipDownload) {
     # ── XUnity.AutoTranslator from GitHub Releases ──
     Write-Host "  Fetching XUnity.AutoTranslator latest release..." -ForegroundColor DarkGray
     $xunityReleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+        Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers $GitHubHeaders -TimeoutSec 30
     }.GetNewClosure()
     $xunityRelease = $xunityReleases | Select-Object -First 1
     if (-not $xunityRelease) { throw "XUnity.AutoTranslator release not found" }
@@ -266,7 +281,7 @@ if (-not $SkipDownload) {
     # ── llama.cpp binaries from GitHub Releases ──
     Write-Host "  Fetching llama.cpp latest release..." -ForegroundColor DarkGray
     $llamaReleases = Invoke-WithRetry -Operation "Fetch llama.cpp releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" -Headers @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' } -TimeoutSec 30
+        Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" -Headers $GitHubHeaders -TimeoutSec 30
     }
     $llamaRelease = $llamaReleases | Where-Object { -not $_.prerelease } | Select-Object -First 1
     if (-not $llamaRelease) { throw "llama.cpp release not found" }

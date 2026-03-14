@@ -16,6 +16,8 @@ import {
 import { useLogStore } from '@/stores/log'
 import { logsApi } from '@/api/games'
 
+defineOptions({ name: 'LogView' })
+
 const logStore = useLogStore()
 
 const selectedLevels = ref<Set<string>>(new Set(['INF', 'WRN', 'ERR', 'CRI']))

@@ -32,6 +32,8 @@ import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 
+defineOptions({ name: 'AiTranslationView' })
+
 const aiStore = useAiTranslationStore()
 const gamesStore = useGamesStore()
 const message = useMessage()

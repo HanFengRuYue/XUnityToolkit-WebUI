@@ -29,6 +29,8 @@ import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 import { useAutoSave } from '@/composables/useAutoSave'
 
+defineOptions({ name: 'SettingsView' })
+
 const message = useMessage()
 const dialog = useDialog()
 const themeStore = useThemeStore()
@@ -307,7 +309,17 @@ onMounted(() => {
           </div>
           <div class="info-card-content">
             <span class="info-label">作者</span>
-            <span class="info-value">寒枫如玥</span>
+            <span class="info-value">
+              <a
+                href="https://github.com/HanFengRuYue"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="about-link"
+              >
+                寒枫如玥
+                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
+              </a>
+            </span>
           </div>
         </div>
         <div class="info-card">
@@ -318,7 +330,7 @@ onMounted(() => {
             <span class="info-label">源代码</span>
             <span class="info-value">
               <a
-                href="https://github.com/XUnityToolkit/XUnityToolkit-WebUI"
+                href="https://github.com/HanFengRuYue/XUnityToolkit-WebUI"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="about-link"

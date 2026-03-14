@@ -11,6 +11,8 @@ import GameCard from '@/components/library/GameCard.vue'
 import LibraryCustomizer from '@/components/library/LibraryCustomizer.vue'
 import type { Game } from '@/api/types'
 
+defineOptions({ name: 'LibraryView' })
+
 const gamesStore = useGamesStore()
 const router = useRouter()
 const message = useMessage()
