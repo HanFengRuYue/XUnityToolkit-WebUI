@@ -21,6 +21,14 @@ public sealed class AppDataPaths(IConfiguration config)
     public string LlamaDownloadsDirectory => Path.Combine(LlamaDirectory, ".downloads");
     public string ModelsDirectory => Path.Combine(_root, "models");
     public string LocalLlmSettingsFile => Path.Combine(_root, "local-llm-settings.json");
+    public string FontBackupsDirectory => Path.Combine(_root, "font-backups");
+    public string CustomFontsDirectory => Path.Combine(_root, "custom-fonts");
+
+    public string GetFontBackupDirectory(string gameId) =>
+        Path.Combine(FontBackupsDirectory, gameId);
+
+    public string GetCustomFontDirectory(string gameId) =>
+        Path.Combine(CustomFontsDirectory, gameId);
 
     public string GlossaryFile(string gameId) =>
         Path.Combine(GlossariesDirectory, $"{gameId}.json");
@@ -59,5 +67,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(ExtractedTextsDirectory);
         Directory.CreateDirectory(ModelsDirectory);
         Directory.CreateDirectory(LlamaDirectory);
+        Directory.CreateDirectory(FontBackupsDirectory);
+        Directory.CreateDirectory(CustomFontsDirectory);
     }
 }
