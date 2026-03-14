@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "1.0.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "1.1.$(Get-Date -Format 'yyyyMMddHHmm')" }
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Build version: $v"
 
