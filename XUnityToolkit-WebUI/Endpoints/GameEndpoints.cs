@@ -432,7 +432,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -449,6 +449,12 @@ public static class GameEndpoints
             var customFontDir = appDataPaths.GetCustomFontDirectory(id);
             if (Directory.Exists(customFontDir))
                 Directory.Delete(customFontDir, recursive: true);
+
+            // Clean up do-not-translate list
+            var dntFile = appDataPaths.DoNotTranslateFile(id);
+            if (File.Exists(dntFile))
+                File.Delete(dntFile);
+            dntService.RemoveCache(id);
 
             return Results.Ok(ApiResult.Ok());
         });
@@ -649,6 +655,37 @@ public static class GameEndpoints
 
             await glossaryService.SaveAsync(id, entries, ct);
             return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
+        });
+
+        // Do-not-translate list management
+        group.MapGet("/{id}/do-not-translate", async (
+            string id,
+            GameLibraryService library,
+            DoNotTranslateService dntService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var entries = await dntService.GetAsync(id, ct);
+            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(entries));
+        });
+
+        group.MapPut("/{id}/do-not-translate", async (
+            string id,
+            List<DoNotTranslateEntry> entries,
+            GameLibraryService library,
+            DoNotTranslateService dntService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            await dntService.SaveAsync(id, entries, ct);
+            var saved = await dntService.GetAsync(id, ct);
+            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(saved));
         });
 
         // Game AI description (per-game context for translation)
