@@ -10,6 +10,8 @@ import {
   NTag,
   NSpin,
   NEmpty,
+  NTabs,
+  NTabPane,
   useMessage,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -24,7 +26,7 @@ import {
   MenuBookOutlined,
 } from '@vicons/material'
 import { gamesApi } from '@/api/games'
-import type { Game, GlossaryEntry } from '@/api/types'
+import type { Game, GlossaryEntry, DoNotTranslateEntry } from '@/api/types'
 import { useAutoSave } from '@/composables/useAutoSave'
 
 interface GlossaryRow extends GlossaryEntry {
@@ -53,6 +55,97 @@ const newTranslation = ref('')
 
 // Search
 const searchKeyword = ref('')
+
+// ── Do-Not-Translate state ──
+interface DntRow extends DoNotTranslateEntry {
+  _id: number
+}
+
+let dntNextId = 1
+const dntEntries = ref<DntRow[]>([])
+const dntNewOriginal = ref('')
+const dntNewCaseSensitive = ref(true)
+const dntSearchKeyword = ref('')
+const dntManualSaving = ref(false)
+const dntImportFileInput = ref<HTMLInputElement | null>(null)
+
+function toDntRows(items: DoNotTranslateEntry[]): DntRow[] {
+  return items.map(e => ({ ...e, _id: dntNextId++ }))
+}
+
+function getValidDntEntries(): DoNotTranslateEntry[] {
+  return dntEntries.value
+    .filter(e => e.original.trim())
+    .map(({ original, caseSensitive }) => ({ original, caseSensitive }))
+}
+
+const { saving: dntAutoSaving, enable: enableDntAutoSave, disable: disableDntAutoSave } = useAutoSave(
+  () => dntEntries.value,
+  async () => {
+    try {
+      const valid = getValidDntEntries()
+      await gamesApi.saveDoNotTranslate(gameId, valid)
+    } catch {
+      message.error('自动保存禁翻表失败')
+    }
+  },
+  { debounceMs: 2000, deep: true },
+)
+
+const filteredDntEntries = computed(() => {
+  const kw = dntSearchKeyword.value.toLowerCase()
+  if (!kw) return dntEntries.value
+  return dntEntries.value.filter(e => e.original.toLowerCase().includes(kw))
+})
+
+const dntTableColumns = computed<DataTableColumns<DntRow>>(() => [
+  {
+    title: '原文',
+    key: 'original',
+    resizable: true,
+    minWidth: 200,
+    render(row) {
+      return h(NInput, {
+        value: row.original,
+        size: 'small',
+        type: 'text',
+        placeholder: '不翻译的文本',
+        'onUpdate:value': (v: string) => { row.original = v },
+      })
+    },
+  },
+  {
+    title: '大小写敏感',
+    key: 'caseSensitive',
+    width: 100,
+    align: 'center',
+    render(row) {
+      return h(NSwitch, {
+        value: row.caseSensitive,
+        size: 'small',
+        'onUpdate:value': (v: boolean) => { row.caseSensitive = v },
+      })
+    },
+  },
+  {
+    title: '',
+    key: 'actions',
+    width: 50,
+    render(row) {
+      return h(NButton, {
+        size: 'tiny',
+        quaternary: true,
+        type: 'error',
+        onClick: () => {
+          const idx = dntEntries.value.findIndex(e => e._id === row._id)
+          if (idx >= 0) dntEntries.value.splice(idx, 1)
+        },
+      }, {
+        icon: () => h(NIcon, { size: 16 }, () => h(DeleteOutlined)),
+      })
+    },
+  },
+])
 
 function toRows(items: GlossaryEntry[]): GlossaryRow[] {
   return items.map(e => ({ ...e, _id: nextId++ }))
@@ -177,13 +270,16 @@ const tableColumns = computed<DataTableColumns<GlossaryRow>>(() => [
 
 onMounted(async () => {
   disableAutoSave()
+  disableDntAutoSave()
   try {
-    const [gameData, glossaryData] = await Promise.all([
+    const [gameData, glossaryData, dntData] = await Promise.all([
       gamesApi.get(gameId),
       gamesApi.getGlossary(gameId),
+      gamesApi.getDoNotTranslate(gameId),
     ])
     game.value = gameData
     entries.value = toRows(glossaryData)
+    dntEntries.value = toDntRows(dntData)
   } catch {
     message.error('加载失败')
   } finally {
@@ -191,6 +287,7 @@ onMounted(async () => {
   }
   await nextTick()
   enableAutoSave()
+  enableDntAutoSave()
 })
 
 // ── Actions ──
@@ -306,6 +403,109 @@ function handleExport() {
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
+
+// ── Do-Not-Translate Actions ──
+
+function handleAddDntEntry() {
+  if (!dntNewOriginal.value.trim()) {
+    message.warning('请输入禁翻文本')
+    return
+  }
+  if (dntEntries.value.some(e => e.original === dntNewOriginal.value)) {
+    message.warning('该文本已存在')
+    return
+  }
+  dntEntries.value.unshift({
+    _id: dntNextId++,
+    original: dntNewOriginal.value,
+    caseSensitive: dntNewCaseSensitive.value,
+  })
+  dntNewOriginal.value = ''
+  dntNewCaseSensitive.value = true
+}
+
+async function handleDntManualSave() {
+  dntManualSaving.value = true
+  disableDntAutoSave()
+  try {
+    const valid = getValidDntEntries()
+    await gamesApi.saveDoNotTranslate(gameId, valid)
+    dntEntries.value = toDntRows(valid)
+    await nextTick()
+    message.success('保存成功')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '保存失败')
+  } finally {
+    dntManualSaving.value = false
+    enableDntAutoSave()
+  }
+}
+
+function handleDntImportClick() {
+  dntImportFileInput.value?.click()
+}
+
+async function handleDntImportFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+
+  try {
+    const text = await file.text()
+    let imported: DoNotTranslateEntry[]
+    try {
+      imported = JSON.parse(text)
+    } catch {
+      message.error('文件格式错误：不是有效的 JSON')
+      return
+    }
+
+    if (!Array.isArray(imported)) {
+      message.error('文件格式错误：应为 JSON 数组')
+      return
+    }
+
+    const valid: DoNotTranslateEntry[] = []
+    for (const item of imported) {
+      if (typeof item.original === 'string' && item.original.trim()) {
+        valid.push({
+          original: item.original,
+          caseSensitive: typeof item.caseSensitive === 'boolean' ? item.caseSensitive : true,
+        })
+      }
+    }
+
+    const existingOriginals = new Set(dntEntries.value.map(e => e.original))
+    let added = 0
+    for (const entry of valid) {
+      if (!existingOriginals.has(entry.original)) {
+        dntEntries.value.push({ ...entry, _id: dntNextId++ })
+        existingOriginals.add(entry.original)
+        added++
+      }
+    }
+    message.success(`导入完成: 新增 ${added} 条，跳过 ${valid.length - added} 条重复`)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '导入失败')
+  } finally {
+    if (dntImportFileInput.value) dntImportFileInput.value.value = ''
+  }
+}
+
+function handleDntExport() {
+  const data = getValidDntEntries()
+  if (data.length === 0) {
+    message.warning('禁翻表为空，无法导出')
+    return
+  }
+  const json = JSON.stringify(data, null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  const gameName = game.value?.name?.replace(/[\\/:*?"<>|]/g, '_') ?? 'dnt'
+  a.download = `${gameName}_禁翻表.json`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
 </script>
 
 <template>
@@ -326,119 +526,119 @@ function handleExport() {
       <span class="page-title-icon">
         <NIcon :size="24"><MenuBookOutlined /></NIcon>
       </span>
-      AI 翻译术语库
-      <span v-if="autoSaving" class="auto-save-badge">保存中...</span>
+      AI 翻译词库
+      <span v-if="autoSaving || dntAutoSaving" class="auto-save-badge">保存中...</span>
     </h1>
 
-    <!-- Stats & Actions Card -->
-    <div class="section-card" style="animation-delay: 0.1s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><MenuBookOutlined /></NIcon>
-          </span>
-          术语管理
-          <NTag size="small" :bordered="false" style="margin-left: 8px">
-            {{ entries.length }} 条
-          </NTag>
-        </h2>
-        <div class="header-btn-group">
-          <NButton
-            size="small"
-            @click="handleImportClick"
-          >
-            <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
-            导入
-          </NButton>
-          <NButton
-            size="small"
-            :disabled="entries.length === 0"
-            @click="handleExport"
-          >
-            <template #icon><NIcon :size="16"><FileDownloadOutlined /></NIcon></template>
-            导出
-          </NButton>
-          <NButton
-            size="small"
-            type="primary"
-            :loading="manualSaving"
-            @click="handleManualSave"
-          >
-            <template #icon><NIcon :size="16"><SaveOutlined /></NIcon></template>
-            保存
-          </NButton>
+    <!-- Tabbed content -->
+    <NTabs type="segment" animated class="editor-tabs" style="animation-delay: 0.1s">
+      <!-- Tab 1: Glossary -->
+      <NTabPane name="glossary" tab="术语表">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><MenuBookOutlined /></NIcon>
+              </span>
+              术语管理
+              <NTag size="small" :bordered="false" style="margin-left: 8px">
+                {{ entries.length }} 条
+              </NTag>
+            </h2>
+            <div class="header-btn-group">
+              <NButton size="small" @click="handleImportClick">
+                <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
+                导入
+              </NButton>
+              <NButton size="small" :disabled="entries.length === 0" @click="handleExport">
+                <template #icon><NIcon :size="16"><FileDownloadOutlined /></NIcon></template>
+                导出
+              </NButton>
+              <NButton size="small" type="primary" :loading="manualSaving" @click="handleManualSave">
+                <template #icon><NIcon :size="16"><SaveOutlined /></NIcon></template>
+                保存
+              </NButton>
+            </div>
+          </div>
+
+          <div class="add-entry-row">
+            <NInput v-model:value="newOriginal" placeholder="原文" size="small" style="flex: 1" @keyup.enter="handleAddEntry" />
+            <NInput v-model:value="newTranslation" placeholder="译文" size="small" style="flex: 1" @keyup.enter="handleAddEntry" />
+            <NButton size="small" type="primary" :disabled="!newOriginal.trim()" @click="handleAddEntry">
+              <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
+              添加
+            </NButton>
+          </div>
+
+          <NInput v-model:value="searchKeyword" placeholder="搜索原文、译文或描述..." clearable size="small" style="margin-bottom: 12px">
+            <template #prefix><NIcon :size="16"><SearchOutlined /></NIcon></template>
+          </NInput>
+
+          <div v-if="filteredEntries.length > 0" class="table-container">
+            <NDataTable :columns="tableColumns" :data="filteredEntries" :max-height="560" :item-size="40" :row-key="(row: GlossaryRow) => row._id" virtual-scroll size="small" striped />
+          </div>
+          <NEmpty v-else-if="entries.length > 0" description="没有匹配的术语" style="padding: 40px 0" />
+          <NEmpty v-else description="暂无术语条目，点击添加或导入" style="padding: 40px 0" />
         </div>
-      </div>
+      </NTabPane>
 
-      <!-- Add Entry Form -->
-      <div class="add-entry-row">
-        <NInput
-          v-model:value="newOriginal"
-          placeholder="原文"
-          size="small"
-          style="flex: 1"
-          @keyup.enter="handleAddEntry"
-        />
-        <NInput
-          v-model:value="newTranslation"
-          placeholder="译文"
-          size="small"
-          style="flex: 1"
-          @keyup.enter="handleAddEntry"
-        />
-        <NButton
-          size="small"
-          type="primary"
-          :disabled="!newOriginal.trim()"
-          @click="handleAddEntry"
-        >
-          <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
-          添加
-        </NButton>
-      </div>
+      <!-- Tab 2: Do-Not-Translate -->
+      <NTabPane name="do-not-translate" tab="禁翻表">
+        <div class="section-card">
+          <div class="section-header">
+            <h2 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><MenuBookOutlined /></NIcon>
+              </span>
+              禁翻管理
+              <NTag size="small" :bordered="false" style="margin-left: 8px">
+                {{ dntEntries.length }} 条
+              </NTag>
+            </h2>
+            <div class="header-btn-group">
+              <NButton size="small" @click="handleDntImportClick">
+                <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
+                导入
+              </NButton>
+              <NButton size="small" :disabled="dntEntries.length === 0" @click="handleDntExport">
+                <template #icon><NIcon :size="16"><FileDownloadOutlined /></NIcon></template>
+                导出
+              </NButton>
+              <NButton size="small" type="primary" :loading="dntManualSaving" @click="handleDntManualSave">
+                <template #icon><NIcon :size="16"><SaveOutlined /></NIcon></template>
+                保存
+              </NButton>
+            </div>
+          </div>
 
-      <!-- Search -->
-      <NInput
-        v-model:value="searchKeyword"
-        placeholder="搜索原文、译文或描述..."
-        clearable
-        size="small"
-        style="margin-bottom: 12px"
-      >
-        <template #prefix>
-          <NIcon :size="16"><SearchOutlined /></NIcon>
-        </template>
-      </NInput>
+          <div class="add-entry-row">
+            <NInput v-model:value="dntNewOriginal" placeholder="不翻译的文本" size="small" style="flex: 1" @keyup.enter="handleAddDntEntry" />
+            <div class="case-sensitive-toggle">
+              <span class="toggle-label">大小写敏感</span>
+              <NSwitch v-model:value="dntNewCaseSensitive" size="small" />
+            </div>
+            <NButton size="small" type="primary" :disabled="!dntNewOriginal.trim()" @click="handleAddDntEntry">
+              <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
+              添加
+            </NButton>
+          </div>
 
-      <!-- Table -->
-      <div v-if="filteredEntries.length > 0" class="table-container">
-        <NDataTable
-          :columns="tableColumns"
-          :data="filteredEntries"
-          :max-height="560"
-          :item-size="40"
-          :row-key="(row: GlossaryRow) => row._id"
-          virtual-scroll
-          size="small"
-          striped
-        />
-      </div>
-      <NEmpty
-        v-else-if="entries.length > 0"
-        description="没有匹配的术语"
-        style="padding: 40px 0"
-      />
-      <NEmpty v-else description="暂无术语条目，点击添加或导入" style="padding: 40px 0" />
-    </div>
+          <NInput v-model:value="dntSearchKeyword" placeholder="搜索禁翻文本..." clearable size="small" style="margin-bottom: 12px">
+            <template #prefix><NIcon :size="16"><SearchOutlined /></NIcon></template>
+          </NInput>
 
-    <!-- Hidden file input for import -->
-    <input
-      ref="importFileInput"
-      type="file"
-      accept=".json"
-      style="display: none"
-      @change="handleImportFile"
-    />
+          <div v-if="filteredDntEntries.length > 0" class="table-container">
+            <NDataTable :columns="dntTableColumns" :data="filteredDntEntries" :max-height="560" :item-size="40" :row-key="(row: DntRow) => row._id" virtual-scroll size="small" striped />
+          </div>
+          <NEmpty v-else-if="dntEntries.length > 0" description="没有匹配的禁翻条目" style="padding: 40px 0" />
+          <NEmpty v-else description="暂无禁翻条目，点击添加或导入" style="padding: 40px 0" />
+        </div>
+      </NTabPane>
+    </NTabs>
+
+    <!-- Hidden file inputs for import -->
+    <input ref="importFileInput" type="file" accept=".json" style="display: none" @change="handleImportFile" />
+    <input ref="dntImportFileInput" type="file" accept=".json" style="display: none" @change="handleDntImportFile" />
   </div>
 </template>
 
@@ -578,6 +778,20 @@ function handleExport() {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+.case-sensitive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.toggle-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.editor-tabs {
+  animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
 @keyframes slideUp {
