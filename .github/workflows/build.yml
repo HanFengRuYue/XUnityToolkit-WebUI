@@ -363,6 +363,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Download artifacts
         uses: actions/download-artifact@v5
@@ -373,7 +375,24 @@ jobs:
       - name: Write release notes to file
         env:
           RELEASE_BODY: ${{ inputs.release_body }}
-        run: printf '%s' "$RELEASE_BODY" > release_notes.md
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          printf '%s' "$RELEASE_BODY" > release_notes.md
+
+          # Append changelog from previous tag to current
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${RELEASE_TAG}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (\`%h\`)" --no-merges)
+            if [ -n "$CHANGELOG" ]; then
+              printf '\n\n### Changelog\n%s\n' "$CHANGELOG" >> release_notes.md
+            fi
+          else
+            # No previous tag — include all commits
+            CHANGELOG=$(git log --pretty=format:"- %s (\`%h\`)" --no-merges -20)
+            if [ -n "$CHANGELOG" ]; then
+              printf '\n\n### Changelog\n%s\n' "$CHANGELOG" >> release_notes.md
+            fi
+          fi
 
       - name: Create GitHub Release
         env:

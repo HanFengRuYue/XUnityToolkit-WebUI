@@ -220,6 +220,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 ### Frontend Patterns
 
+- **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232
+- **KeepAlive:** Top-level views (Library, AiTranslation, Log, Settings) are cached via `<KeepAlive :include>` in AppShell; each MUST have `defineOptions({ name: 'XxxView' })` after imports
+- **Install state recovery:** `startInstall`/`startUninstall` must query backend `GET /api/games/{id}/status` as fallback — Pinia store state is lost on page reload while backend install continues running
 - Use composables (`src/composables/`) for complex multi-step UI flows
 - **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
 - **ConfigPanel** auto-saves internally (2s), no `save` event

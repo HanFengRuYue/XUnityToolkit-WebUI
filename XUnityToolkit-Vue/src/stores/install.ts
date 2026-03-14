@@ -6,6 +6,13 @@ import type { InstallationStatus, XUnityConfig } from '@/api/types'
 
 export type OperationType = 'install' | 'uninstall'
 
+/** Check if an InstallationStatus indicates an active operation */
+function statusIsInProgress(s: InstallationStatus | null): boolean {
+  if (!s) return false
+  const step = s.step
+  return step !== 'Idle' && step !== 'Complete' && step !== 'Failed'
+}
+
 export const useInstallStore = defineStore('install', () => {
   const status = ref<InstallationStatus | null>(null)
   const isDrawerOpen = ref(false)
@@ -26,9 +33,6 @@ export const useInstallStore = defineStore('install', () => {
 
     connection.on('progressUpdate', (update: InstallationStatus) => {
       status.value = update
-      if (update.step === 'Complete' || update.step === 'Failed') {
-        // Keep drawer open so user can see result
-      }
     })
 
     await connection.start()
@@ -49,7 +53,36 @@ export const useInstallStore = defineStore('install', () => {
     }
   }
 
+  /**
+   * Resume watching an already-running install.
+   * Fetches current status from backend, connects SignalR, and opens drawer.
+   */
+  async function resumeInstall(gameId: string, backendStatus: InstallationStatus) {
+    activeGameId.value = gameId
+    operationType.value = 'install'
+    status.value = backendStatus
+    isDrawerOpen.value = true
+    await connectHub(gameId)
+  }
+
   async function startInstall(gameId: string, config?: XUnityConfig) {
+    // Fast path: frontend state says this game is already installing → reopen drawer
+    if (activeGameId.value === gameId && statusIsInProgress(status.value)) {
+      isDrawerOpen.value = true
+      return
+    }
+
+    // Fallback: query backend for current status (handles page reload, state loss, etc.)
+    try {
+      const backendStatus = await gamesApi.getStatus(gameId)
+      if (statusIsInProgress(backendStatus)) {
+        await resumeInstall(gameId, backendStatus)
+        return
+      }
+    } catch {
+      // Status endpoint failed — proceed with normal install attempt
+    }
+
     activeGameId.value = gameId
     operationType.value = 'install'
     isDrawerOpen.value = true
@@ -66,6 +99,23 @@ export const useInstallStore = defineStore('install', () => {
   }
 
   async function startUninstall(gameId: string) {
+    // Fast path: frontend state says this game is already operating → reopen drawer
+    if (activeGameId.value === gameId && statusIsInProgress(status.value)) {
+      isDrawerOpen.value = true
+      return
+    }
+
+    // Fallback: query backend for current status
+    try {
+      const backendStatus = await gamesApi.getStatus(gameId)
+      if (statusIsInProgress(backendStatus)) {
+        await resumeInstall(gameId, backendStatus)
+        return
+      }
+    } catch {
+      // Proceed with normal uninstall
+    }
+
     activeGameId.value = gameId
     operationType.value = 'uninstall'
     isDrawerOpen.value = true
@@ -89,9 +139,12 @@ export const useInstallStore = defineStore('install', () => {
 
   async function closeDrawer() {
     isDrawerOpen.value = false
-    await disconnectHub()
-    activeGameId.value = null
-    status.value = null
+    // Only fully reset state when the operation is complete or failed
+    if (!statusIsInProgress(status.value)) {
+      await disconnectHub()
+      activeGameId.value = null
+      status.value = null
+    }
   }
 
   return {

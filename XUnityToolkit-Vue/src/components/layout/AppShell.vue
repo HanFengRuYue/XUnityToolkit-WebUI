@@ -21,6 +21,9 @@ onMounted(async () => {
   }
 })
 
+// Cache top-level pages to avoid full re-renders on navigation
+const cachedPages = ['LibraryView', 'AiTranslationView', 'LogView', 'SettingsView']
+
 const navItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
   { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
@@ -121,7 +124,9 @@ watch(() => route.path, () => {
     <main class="main-content">
       <RouterView v-slot="{ Component }">
         <Transition :name="transitionName" mode="out-in">
-          <component :is="Component" :key="route.path" />
+          <KeepAlive :include="cachedPages">
+            <component :is="Component" :key="route.path" />
+          </KeepAlive>
         </Transition>
       </RouterView>
     </main>

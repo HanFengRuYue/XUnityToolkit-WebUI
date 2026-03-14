@@ -135,6 +135,25 @@ onUnmounted(() => {
 const isInstalled = computed(
   () => game.value?.installState === 'FullyInstalled',
 )
+const isInstalling = computed(() => {
+  if (!installStore.status) return false
+  if (installStore.activeGameId !== gameId) return false
+  const step = installStore.status.step
+  return step !== 'Idle' && step !== 'Complete' && step !== 'Failed'
+})
+const installStepLabel = computed(() => {
+  const labels: Record<string, string> = {
+    DetectingGame: '检测游戏',
+    InstallingBepInEx: '安装 BepInEx',
+    InstallingXUnity: '安装 XUnity',
+    InstallingTmpFont: '安装 TMP 字体',
+    InstallingAiTranslation: '部署 AI 翻译引擎',
+    GeneratingConfig: '生成配置',
+    ApplyingConfig: '应用最佳配置',
+    ExtractingAssets: '提取游戏资产',
+  }
+  return labels[installStore.status?.step ?? ''] ?? '安装中'
+})
 const hasBepInEx = computed(
   () =>
     game.value?.installState === 'BepInExOnly' ||
@@ -707,8 +726,32 @@ onUnmounted(() => stopWatch())
         检测到 IL2CPP 游戏，将使用 BepInEx 6 (预发布版)。首次启动游戏可能需要 30-90 秒生成互操作程序集。
       </NAlert>
 
+      <!-- Installing State -->
+      <div v-if="!isInstalled && isInstalling" class="install-cta-horizontal installing">
+        <div class="cta-left">
+          <div class="cta-visual installing">
+            <svg class="cta-icon-spin" width="28" height="28" viewBox="0 0 28 28" fill="none">
+              <circle cx="14" cy="14" r="11" stroke="currentColor" stroke-width="2.5" opacity="0.2"/>
+              <path d="M14 3A11 11 0 0 1 25 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="cta-text">
+            <span class="cta-title">正在安装翻译插件</span>
+            <span class="cta-desc">{{ installStepLabel }}... · 关闭此面板不会中断安装</span>
+          </div>
+        </div>
+        <NButton
+          type="primary"
+          size="large"
+          @click="installStore.isDrawerOpen = true"
+          class="install-button"
+        >
+          查看进度
+        </NButton>
+      </div>
+
       <!-- Uninstalled State -->
-      <div v-if="!isInstalled" class="install-cta-horizontal">
+      <div v-else-if="!isInstalled" class="install-cta-horizontal">
         <div class="cta-left">
           <div class="cta-visual">
             <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
@@ -1618,6 +1661,23 @@ onUnmounted(() => stopWatch())
 .install-button {
   position: relative;
   flex-shrink: 0;
+}
+
+/* Installing state */
+.cta-visual.installing {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent-border);
+  animation: none;
+}
+
+.cta-icon-spin {
+  color: var(--accent);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .version-card {

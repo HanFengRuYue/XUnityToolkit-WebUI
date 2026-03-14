@@ -5,7 +5,7 @@ import {
   NButton, NDataTable, NIcon, NProgress, NSpace, NTag,
   NUpload, useMessage, useDialog, type DataTableColumns, type UploadFileInfo
 } from 'naive-ui'
-import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined } from '@vicons/material'
+import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined, CloudUploadOutlined, DeleteOutlineOutlined } from '@vicons/material'
 import { api } from '@/api/client'
 import type {
   Game, TmpFontInfo, FontReplacementRequest, FontReplacementStatus,
@@ -192,10 +192,6 @@ async function deleteCustomFont() {
   }
 }
 
-function handleBack() {
-  router.push(`/games/${gameId.value}`)
-}
-
 onMounted(async () => {
   await loadGame()
   await loadStatus()
@@ -222,22 +218,61 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="font-replacement-view">
-    <!-- Header -->
-    <div class="page-header">
-      <NButton text @click="handleBack" class="back-btn">
-        <template #icon>
-          <NIcon :size="20"><ArrowBackOutlined /></NIcon>
-        </template>
-      </NButton>
-      <div class="page-title-area">
-        <h1 class="page-title">字体替换</h1>
-        <span v-if="game" class="game-name">{{ game.name }}</span>
+  <div v-if="game" class="font-page">
+    <!-- Back Button -->
+    <div class="page-header" style="animation-delay: 0s">
+      <button class="back-button" @click="router.push(`/games/${gameId}`)">
+        <NIcon :size="20"><ArrowBackOutlined /></NIcon>
+        <span>{{ game.name }}</span>
+      </button>
+    </div>
+
+    <!-- Page Title -->
+    <h1 class="page-title" style="animation-delay: 0.05s">
+      <span class="page-title-icon">
+        <NIcon :size="24"><FontDownloadOutlined /></NIcon>
+      </span>
+      字体替换
+    </h1>
+
+    <!-- Status & Custom Font Card -->
+    <div v-if="status?.isReplaced || status?.isExternallyRestored || status?.customFontFileName" class="section-card" style="animation-delay: 0.1s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><FontDownloadOutlined /></NIcon>
+          </span>
+          当前状态
+        </h2>
+      </div>
+      <div class="status-list">
+        <div v-if="status?.isReplaced" class="status-row">
+          <NTag type="success" size="small">已替换</NTag>
+          <span class="status-text">
+            {{ status.replacedFonts.length }} 个字体已替换
+            <template v-if="status.fontSource">（{{ status.fontSource }}）</template>
+            <template v-if="status.replacedAt">
+              · {{ new Date(status.replacedAt).toLocaleDateString() }}
+            </template>
+          </span>
+        </div>
+        <div v-else-if="status?.isExternallyRestored" class="status-row">
+          <NTag type="warning" size="small">已被外部还原</NTag>
+          <span class="status-text">字体可能已通过 Steam 验证文件完整性还原，备份数据仍保留</span>
+        </div>
+        <div v-if="status?.customFontFileName" class="status-row">
+          <NTag type="info" size="small">自定义字体</NTag>
+          <span class="status-text">{{ status.customFontFileName }}</span>
+          <NButton text size="small" type="error" @click="deleteCustomFont" :disabled="replacing">
+            <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
+            删除
+          </NButton>
+        </div>
       </div>
     </div>
 
-    <!-- Operation Bar -->
-    <div class="section-card">
+    <!-- Scan & Replace Card -->
+    <div class="section-card" :style="{ animationDelay: (status?.isReplaced || status?.isExternallyRestored || status?.customFontFileName) ? '0.15s' : '0.1s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -245,10 +280,7 @@ onBeforeUnmount(async () => {
           </span>
           扫描与替换
         </h2>
-        <NSpace>
-          <NButton type="primary" :loading="scanning" :disabled="replacing" @click="scanFonts">
-            扫描字体
-          </NButton>
+        <div class="header-btn-group">
           <NUpload
             :action="`/api/games/${gameId}/font-replacement/upload`"
             :show-file-list="false"
@@ -256,40 +288,20 @@ onBeforeUnmount(async () => {
             @error="handleUploadError"
             accept="*"
           >
-            <NButton :disabled="replacing">
+            <NButton size="small" :disabled="replacing">
+              <template #icon><NIcon :size="16"><CloudUploadOutlined /></NIcon></template>
               上传自定义字体
             </NButton>
           </NUpload>
-        </NSpace>
-      </div>
-
-      <!-- Status -->
-      <div v-if="status?.isReplaced" class="status-bar">
-        <NTag type="success">已替换</NTag>
-        <span class="status-text">
-          {{ status.replacedFonts.length }} 个字体已替换
-          <template v-if="status.fontSource">（{{ status.fontSource }}）</template>
-          <template v-if="status.replacedAt">
-            · {{ new Date(status.replacedAt).toLocaleDateString() }}
-          </template>
-        </span>
-      </div>
-      <div v-else-if="status?.isExternallyRestored" class="status-bar">
-        <NTag type="warning">已被外部还原</NTag>
-        <span class="status-text">字体可能已通过 Steam 验证文件完整性还原，备份数据仍保留</span>
-      </div>
-
-      <!-- Custom Font -->
-      <div v-if="status?.customFontFileName" class="status-bar">
-        <NTag type="info">自定义字体</NTag>
-        <span class="status-text">{{ status.customFontFileName }}</span>
-        <NButton text size="small" type="error" @click="deleteCustomFont" :disabled="replacing">
-          删除
-        </NButton>
+          <NButton size="small" type="primary" :loading="scanning" :disabled="replacing" @click="scanFonts">
+            <template #icon><NIcon :size="16"><SearchOutlined /></NIcon></template>
+            扫描字体
+          </NButton>
+        </div>
       </div>
 
       <!-- Progress -->
-      <div v-if="progress" class="progress-bar">
+      <div v-if="progress" class="progress-section">
         <NProgress
           type="line"
           :percentage="progress.total > 0 ? Math.round(progress.current / progress.total * 100) : 0"
@@ -301,101 +313,151 @@ onBeforeUnmount(async () => {
           ({{ progress.current }}/{{ progress.total }})
         </span>
       </div>
+
+      <!-- Empty state when no fonts scanned yet -->
+      <div v-if="fonts.length === 0 && !progress" class="empty-hint">
+        点击"扫描字体"按钮检测游戏中的 TMP 字体资源
+      </div>
     </div>
 
-    <!-- Font Table -->
-    <div v-if="fonts.length > 0" class="section-card">
-      <NDataTable
-        :columns="columns"
-        :data="fonts"
-        :row-key="(row: TmpFontInfo) => `${row.assetFile}:${row.pathId}`"
-        v-model:checked-row-keys="checkedRowKeys"
-        :row-class-name="rowClassName"
-        :max-height="500"
-        :bordered="false"
-        size="small"
-      />
-    </div>
-
-    <!-- Bottom Actions -->
-    <div v-if="fonts.length > 0 || status?.backupExists" class="section-card action-bar">
-      <NSpace align="center" justify="space-between" style="width: 100%">
-        <span v-if="fonts.length > 0" class="selected-info">
-          已选择 {{ selectedCount }} 个字体
-        </span>
-        <span v-else />
-        <NSpace>
+    <!-- Font Table Card -->
+    <div v-if="fonts.length > 0" class="section-card" style="animation-delay: 0.2s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><FontDownloadOutlined /></NIcon>
+          </span>
+          字体列表
+          <NTag size="small" :bordered="false">{{ fonts.length }} 个</NTag>
+        </h2>
+        <div class="header-btn-group">
           <NButton
-            v-if="fonts.length > 0"
+            size="small"
             type="primary"
             :loading="replacing"
             :disabled="selectedCount === 0 || scanning"
             @click="replaceFonts"
           >
-            替换选中字体
+            替换选中 ({{ selectedCount }})
           </NButton>
           <NButton
             v-if="status?.backupExists"
+            size="small"
             :loading="restoring"
             :disabled="replacing"
             @click="restoreFonts"
           >
-            <template #icon>
-              <NIcon><RestoreOutlined /></NIcon>
-            </template>
+            <template #icon><NIcon :size="16"><RestoreOutlined /></NIcon></template>
             还原所有
           </NButton>
-        </NSpace>
-      </NSpace>
+        </div>
+      </div>
+      <div class="table-container">
+        <NDataTable
+          :columns="columns"
+          :data="fonts"
+          :row-key="(row: TmpFontInfo) => `${row.assetFile}:${row.pathId}`"
+          v-model:checked-row-keys="checkedRowKeys"
+          :row-class-name="rowClassName"
+          :max-height="500"
+          :bordered="false"
+          size="small"
+        />
+      </div>
+    </div>
+
+    <!-- Restore-only Card (when no scan but backup exists) -->
+    <div v-else-if="status?.backupExists" class="section-card" style="animation-delay: 0.2s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><RestoreOutlined /></NIcon>
+          </span>
+          备份还原
+        </h2>
+        <NButton
+          size="small"
+          :loading="restoring"
+          :disabled="replacing"
+          @click="restoreFonts"
+        >
+          <template #icon><NIcon :size="16"><RestoreOutlined /></NIcon></template>
+          还原所有
+        </NButton>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.font-replacement-view {
-  padding: 24px 28px;
-  max-width: 1200px;
+.font-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .page-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  margin-bottom: -8px;
+  animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
-.back-btn {
-  color: var(--text-2);
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: color 0.2s, background 0.2s;
 }
-.back-btn:hover {
-  color: var(--accent);
-}
-
-.page-title-area {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
+.back-button:hover {
+  color: var(--text-1);
+  background: var(--bg-subtle);
 }
 
 .page-title {
-  font-size: 1.5rem;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
   color: var(--text-1);
   margin: 0;
+  letter-spacing: -0.03em;
+  animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
-.game-name {
-  font-size: 0.9rem;
-  color: var(--text-3);
+.page-title-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
+/* ===== Section Card ===== */
 .section-card {
   background: var(--bg-card);
-  border-radius: var(--radius-lg);
-  padding: 20px 24px;
-  margin-bottom: 16px;
-  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  animation: slideUp 0.5s var(--ease-out) backwards;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: var(--shadow-card-rest);
+}
+.section-card:hover {
+  border-color: var(--border-hover);
 }
 
 .section-header {
@@ -408,65 +470,126 @@ onBeforeUnmount(async () => {
 .section-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 1rem;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-1);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .section-icon {
-  color: var(--accent);
   display: flex;
   align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
-.status-bar {
+.header-btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* ===== Status ===== */
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
 }
 
 .status-text {
-  font-size: 0.85rem;
+  font-size: 13px;
   color: var(--text-2);
+  flex: 1;
 }
 
-.progress-bar {
-  margin-top: 12px;
+/* ===== Progress ===== */
+.progress-section {
+  margin-top: 4px;
 }
 
 .progress-text {
-  font-size: 0.8rem;
+  font-size: 12px;
   color: var(--text-3);
   margin-top: 4px;
   display: block;
 }
 
-.action-bar {
-  display: flex;
-  align-items: center;
+/* ===== Empty ===== */
+.empty-hint {
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
+  padding: 24px 0;
 }
 
-.selected-info {
-  font-size: 0.85rem;
-  color: var(--text-2);
+/* ===== Table ===== */
+.table-container {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
 :deep(.font-unsupported) {
   opacity: 0.45;
 }
 
+/* ===== Animations ===== */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .font-replacement-view {
-    padding: 20px 20px;
+  .section-card {
+    padding: 16px;
+  }
+  .header-btn-group {
+    flex-wrap: wrap;
+  }
+  .section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
   }
 }
 
 @media (max-width: 480px) {
-  .font-replacement-view {
-    padding: 16px 12px;
+  .section-card {
+    padding: 14px;
+    border-radius: var(--radius-md);
+  }
+  .page-title {
+    font-size: 20px;
+    gap: 8px;
+  }
+  .page-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
   }
 }
 </style>
