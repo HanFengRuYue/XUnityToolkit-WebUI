@@ -25,6 +25,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CustomFontsDirectory => Path.Combine(_root, "custom-fonts");
     public string FontGenerationUploadsDirectory => Path.Combine(_root, "font-generation", "uploads");
     public string GeneratedFontsDirectory => Path.Combine(_root, "generated-fonts");
+    public string DoNotTranslateDirectory => Path.Combine(_root, "do-not-translate");
     public string FontGenerationCharsetUploadsDirectory =>
         Path.Combine(_root, "font-generation", "uploads", "charset");
     public string FontGenerationTranslationUploadsDirectory =>
@@ -40,6 +41,9 @@ public sealed class AppDataPaths(IConfiguration config)
 
     public string GlossaryFile(string gameId) =>
         Path.Combine(GlossariesDirectory, $"{gameId}.json");
+
+    public string DoNotTranslateFile(string gameId) =>
+        Path.Combine(DoNotTranslateDirectory, $"{gameId}.json");
 
     public string ExtractedTextsFile(string gameId) =>
         Path.Combine(ExtractedTextsDirectory, $"{gameId}.json");
@@ -79,6 +83,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CustomFontsDirectory);
         Directory.CreateDirectory(FontGenerationUploadsDirectory);
         Directory.CreateDirectory(GeneratedFontsDirectory);
+        Directory.CreateDirectory(DoNotTranslateDirectory);
         Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTranslationUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTempDirectory);
