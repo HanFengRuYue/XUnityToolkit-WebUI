@@ -901,7 +901,9 @@ public sealed class FontReplacementService(
                     var page = srcAtlasPages[pageIdx];
 
                     var newTexBase = ValueBuilder.DefaultValueFieldFromTemplate(texTemplate.TemplateField);
-                    var texFile = TextureFile.ReadTextureFile(newTexBase);
+                    // Read metadata from existing texture (m_MipCount, m_TextureSettings, etc.)
+                    // NOT from newTexBase which has all zeros — Unity won't render mip=0 textures
+                    var texFile = TextureFile.ReadTextureFile(texTemplate);
                     texFile.m_TextureFormat = page.TextureFormat;
                     texFile.SetPictureData(page.EncodedData, page.Width, page.Height);
                     texFile.WriteTo(newTexBase);

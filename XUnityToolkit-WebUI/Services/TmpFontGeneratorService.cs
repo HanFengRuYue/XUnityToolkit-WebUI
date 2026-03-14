@@ -605,7 +605,9 @@ public sealed class TmpFontGeneratorService(
                         for (int pageIdx = existingTexCount; pageIdx < atlasPages.Count; pageIdx++)
                         {
                             var newTexBase = ValueBuilder.DefaultValueFieldFromTemplate(texTemplate.TemplateField);
-                            var texFile = TextureFile.ReadTextureFile(newTexBase);
+                            // Read metadata from existing texture (m_MipCount, m_TextureSettings, etc.)
+                            // NOT from newTexBase which has all zeros — Unity won't render mip=0 textures
+                            var texFile = TextureFile.ReadTextureFile(texTemplate);
                             texFile.m_TextureFormat = 1; // Alpha8
                             texFile.SetPictureData(atlasPages[pageIdx], atlasWidth, atlasHeight);
                             texFile.WriteTo(newTexBase);
