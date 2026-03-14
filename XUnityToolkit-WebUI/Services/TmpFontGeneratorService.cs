@@ -262,6 +262,20 @@ public sealed class TmpFontGeneratorService(
                     glyph.AtlasY = dstY;
                 }
 
+                // Flip atlas vertically (FreeType top-down → Unity bottom-up)
+                var flippedAtlas = new byte[atlasWidth * atlasHeight];
+                for (int row = 0; row < atlasHeight; row++)
+                {
+                    var srcOffset = row * atlasWidth;
+                    var dstOffset = (atlasHeight - 1 - row) * atlasWidth;
+                    Array.Copy(atlasBytes, srcOffset, flippedAtlas, dstOffset, atlasWidth);
+                }
+                atlasBytes = flippedAtlas;
+
+                // Convert glyph AtlasY from top-down to bottom-up
+                foreach (var g in glyphs)
+                    g.AtlasY = atlasHeight - g.AtlasY - g.BitmapHeight;
+
                 // === Phase 5: Serialize to AssetBundle ===
                 BroadcastProgress("serializing", 0, 1, "正在序列化 AssetBundle...", force: true);
 
