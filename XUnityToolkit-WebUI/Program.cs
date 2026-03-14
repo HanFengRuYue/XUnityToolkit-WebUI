@@ -141,7 +141,22 @@ builder.Services.AddSignalR()
 var app = builder.Build();
 
 // Ensure app data directories exist
-app.Services.GetRequiredService<AppDataPaths>().EnsureDirectoriesExist();
+var appDataPaths = app.Services.GetRequiredService<AppDataPaths>();
+appDataPaths.EnsureDirectoriesExist();
+
+// Clean up orphaned font generation temp directories
+try
+{
+    if (Directory.Exists(appDataPaths.FontGenerationTempDirectory))
+    {
+        foreach (var dir in Directory.GetDirectories(appDataPaths.FontGenerationTempDirectory))
+        {
+            try { Directory.Delete(dir, true); }
+            catch { /* ignore cleanup failures */ }
+        }
+    }
+}
+catch { /* ignore */ }
 
 // Log incoming API requests for diagnostics (especially /api/translate from game plugin)
 app.Use(async (context, next) =>
