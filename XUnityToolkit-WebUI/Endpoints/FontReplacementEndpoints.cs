@@ -100,7 +100,7 @@ public static class FontReplacementEndpoints
             foreach (var existing in Directory.GetFiles(customDir))
                 File.Delete(existing);
 
-            var destPath = Path.Combine(customDir, file.FileName);
+            var destPath = Path.Combine(customDir, Path.GetFileName(file.FileName));
             await using var stream = File.Create(destPath);
             await file.CopyToAsync(stream);
             stream.Close();

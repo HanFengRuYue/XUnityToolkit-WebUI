@@ -259,7 +259,7 @@ export interface FontReplacementStatus {
 }
 
 export interface FontReplacementProgress {
-  phase: 'scanning' | 'replacing' | 'clearing-crc'
+  phase: 'scanning' | 'replacing' | 'clearing-crc' | 'completed'
   current: number
   total: number
   currentFile?: string

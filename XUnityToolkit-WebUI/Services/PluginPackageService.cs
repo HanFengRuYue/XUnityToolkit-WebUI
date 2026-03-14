@@ -178,6 +178,52 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
 
                 // Save manifest with updated GameId
                 var newManifest = fontManifest with { GameId = game.Id };
+
+                // Update OriginalPath values to point to the importing game's directory
+                var updatedReplacedFiles = newManifest.ReplacedFiles.Select(f =>
+                {
+                    // Reconstruct path from backup filename: replace _ back to directory separator
+                    // BackupFileName format: "GameName_Data_sharedassets0.assets"
+                    // We need to find the matching ZIP entry to get the correct relative path
+                    var relativePath = f.BackupFileName.Replace('_', Path.DirectorySeparatorChar);
+                    // Try to find a better path from ZIP entries
+                    foreach (var ze in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(ze.Name)) continue;
+                        var zePath = ze.FullName.Replace('/', Path.DirectorySeparatorChar);
+                        var zeBackupName = zePath.Replace(Path.DirectorySeparatorChar, '_');
+                        if (zeBackupName == f.BackupFileName)
+                        {
+                            relativePath = zePath;
+                            break;
+                        }
+                    }
+                    return f with { OriginalPath = Path.Combine(game.GamePath, relativePath) };
+                }).ToList();
+
+                var updatedCatalogFiles = newManifest.CatalogFiles.Select(c =>
+                {
+                    var relativePath = c.BackupFileName.Replace('_', Path.DirectorySeparatorChar);
+                    foreach (var ze in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(ze.Name)) continue;
+                        var zePath = ze.FullName.Replace('/', Path.DirectorySeparatorChar);
+                        var zeBackupName = zePath.Replace(Path.DirectorySeparatorChar, '_');
+                        if (zeBackupName == c.BackupFileName)
+                        {
+                            relativePath = zePath;
+                            break;
+                        }
+                    }
+                    return c with { OriginalPath = Path.Combine(game.GamePath, relativePath) };
+                }).ToList();
+
+                newManifest = newManifest with
+                {
+                    ReplacedFiles = updatedReplacedFiles,
+                    CatalogFiles = updatedCatalogFiles
+                };
+
                 var newManifestJson = System.Text.Json.JsonSerializer.Serialize(newManifest);
                 File.WriteAllText(Path.Combine(backupDir, "manifest.json"), newManifestJson);
             }
