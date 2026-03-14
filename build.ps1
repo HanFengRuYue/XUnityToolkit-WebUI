@@ -65,8 +65,8 @@ $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint
 $Runtimes = if ($Runtime -eq 'all') { @('win-x64', 'win-arm64') } else { @($Runtime) }
 $hasEndpoint = Test-Path $EndpointProject
 
-# Generate version: 1.1.{YYYYMMDDHHmm}
-$BuildVersion = "1.1.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 1.2.{YYYYMMDDHHmm}
+$BuildVersion = "1.2.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
