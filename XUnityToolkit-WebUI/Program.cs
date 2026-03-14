@@ -129,6 +129,7 @@ builder.Services.AddSingleton<PreTranslationService>();
 builder.Services.AddSingleton<PluginPackageService>();
 builder.Services.AddSingleton<FontReplacementService>();
 builder.Services.AddSingleton<TmpFontGeneratorService>();
+builder.Services.AddSingleton<CharacterSetService>();
 builder.Services.AddSingleton<SystemTrayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemTrayService>());
 
