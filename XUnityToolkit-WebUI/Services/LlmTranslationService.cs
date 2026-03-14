@@ -225,19 +225,49 @@ public sealed class LlmTranslationService(
                 }
             }
 
+            // Apply glossary placeholder substitution for non-regex entries
+            // This guarantees glossary translations are used regardless of LLM compliance
+            Dictionary<string, string>? glossaryMapping = null;
+            List<GlossaryEntry>? promptGlossary = glossary;
+            if (glossary is not null)
+            {
+                var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrEmpty(e.Original)).ToList();
+                if (nonRegexEntries.Count > 0)
+                {
+                    var (replaced, mapping) = ApplyGlossaryReplacements(textsToTranslate, nonRegexEntries);
+                    if (mapping.Count > 0)
+                    {
+                        textsToTranslate = replaced;
+                        glossaryMapping = mapping;
+
+                        // Only show regex entries in prompt (non-regex handled by placeholders)
+                        var regexEntries = glossary.Where(e => e.IsRegex).ToList();
+                        promptGlossary = regexEntries.Count > 0 ? regexEntries : null;
+
+                        // Tell LLM to preserve glossary placeholders
+                        dntHint = (dntHint ?? "") +
+                            "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+                    }
+                }
+            }
+
             // Batch translation: send entire batch as one LLM call
             var (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
-                textsToTranslate, from, to, ai, enabledEndpoints, glossary,
+                textsToTranslate, from, to, ai, enabledEndpoints, promptGlossary,
                 gameDescription, memoryContext, dntHint, semaphore, ct);
 
             // Copy to mutable list for post-processing
             var translations = new List<string>(batchResult);
 
-            // Restore do-not-translate placeholders (before glossary post-processing)
+            // Restore glossary placeholders (replace {{G_x}} with glossary translations)
+            if (glossaryMapping is not null)
+                translations = RestoreGlossaryPlaceholders(translations, glossaryMapping);
+
+            // Restore do-not-translate placeholders
             if (dntMapping is not null)
                 translations = RestoreDoNotTranslatePlaceholders(translations, dntMapping);
 
-            // Apply glossary post-processing
+            // Apply glossary post-processing (safety net: catches regex entries + any remaining originals)
             for (int i = 0; i < translations.Count; i++)
             {
                 if (glossary is not null)
@@ -645,6 +675,10 @@ public sealed class LlmTranslationService(
         @"\{{1,2}\s*DNT_(\d+)\s*\}{1,2}",
         RegexOptions.Compiled);
 
+    private static readonly Regex GlossaryRestoreRegex = new(
+        @"\{{1,2}\s*G_(\d+)\s*\}{1,2}",
+        RegexOptions.Compiled);
+
     private static (List<string> replacedTexts, Dictionary<string, string> mapping)
         ApplyDoNotTranslateReplacements(IList<string> texts, List<DoNotTranslateEntry> entries)
     {
@@ -724,6 +758,67 @@ public sealed class LlmTranslationService(
         return result;
     }
 
+    // ── Glossary placeholder substitution ──
+
+    private static (List<string> replacedTexts, Dictionary<string, string> mapping)
+        ApplyGlossaryReplacements(IList<string> texts, List<GlossaryEntry> nonRegexEntries)
+    {
+        var sorted = nonRegexEntries
+            .OrderByDescending(e => e.Original.Length)
+            .ToList();
+
+        // mapping: placeholder → translation (for post-restoration)
+        var mapping = new Dictionary<string, string>();
+        var originalToPlaceholder = new Dictionary<string, string>(StringComparer.Ordinal);
+        int nextIndex = 0;
+
+        var result = new List<string>(texts.Count);
+        foreach (var text in texts)
+        {
+            var current = text;
+            foreach (var entry in sorted)
+            {
+                int searchStart = 0;
+                while (true)
+                {
+                    int idx = current.IndexOf(entry.Original, searchStart, StringComparison.Ordinal);
+                    if (idx < 0) break;
+
+                    if (!originalToPlaceholder.TryGetValue(entry.Original, out var placeholder))
+                    {
+                        placeholder = $"{{{{G_{nextIndex}}}}}";
+                        originalToPlaceholder[entry.Original] = placeholder;
+                        mapping[placeholder] = entry.Translation;
+                        nextIndex++;
+                    }
+
+                    current = current[..idx] + placeholder + current[(idx + entry.Original.Length)..];
+                    searchStart = idx + placeholder.Length;
+                }
+            }
+            result.Add(current);
+        }
+
+        return (result, mapping);
+    }
+
+    private static List<string> RestoreGlossaryPlaceholders(
+        IList<string> translations, Dictionary<string, string> mapping)
+    {
+        var result = new List<string>(translations.Count);
+        foreach (var text in translations)
+        {
+            var restored = GlossaryRestoreRegex.Replace(text, m =>
+            {
+                var index = m.Groups[1].Value;
+                var fullKey = $"{{{{G_{index}}}}}";
+                return mapping.TryGetValue(fullKey, out var translation) ? translation : m.Value;
+            });
+            result.Add(restored);
+        }
+        return result;
+    }
+
     // ── System prompt + glossary injection ──
 
     private static string BuildSystemPrompt(string template, string from, string to,
@@ -740,11 +835,11 @@ public sealed class LlmTranslationService(
 
         if (glossary is { Count: > 0 })
         {
-            sb.Append("\n\nGlossary (use these exact translations):\n");
+            sb.Append("\n\n术语表（翻译时必须严格使用以下译文，不得自行翻译）：\n");
             foreach (var entry in glossary)
             {
                 if (entry.IsRegex)
-                    sb.Append($"  Pattern: /{entry.Original}/ → {entry.Translation}");
+                    sb.Append($"  正则匹配: /{entry.Original}/ → {entry.Translation}");
                 else
                     sb.Append($"  {entry.Original} → {entry.Translation}");
 
