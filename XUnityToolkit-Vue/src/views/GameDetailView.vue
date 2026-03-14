@@ -36,6 +36,7 @@ import {
   FileUploadOutlined,
   ImageSearchOutlined,
   WallpaperOutlined,
+  FontDownloadOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -885,8 +886,26 @@ onUnmounted(() => stopWatch())
       </p>
     </div>
 
-    <!-- AI Description Card (available for all Unity games, even before install) -->
+    <!-- Font Replacement Card -->
     <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.5s' : '0.45s' }">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><FontDownloadOutlined /></NIcon>
+          </span>
+          字体替换
+        </h2>
+        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/font-replacement`)">
+          打开
+        </NButton>
+      </div>
+      <p class="asset-extraction-desc">
+        直接修改游戏资产文件中的 TMP 字体，适用于 XUnity 插件字体替换不生效的情况。支持扫描、选择性替换和一键还原。
+      </p>
+    </div>
+
+    <!-- AI Description Card (available for all Unity games, even before install) -->
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -907,7 +926,7 @@ onUnmounted(() => stopWatch())
     </div>
 
     <!-- Plugin Package Card -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.6s' : '0.55s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">

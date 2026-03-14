@@ -224,6 +224,47 @@ export interface TmpFontStatus {
   installed: boolean
 }
 
+// ── Font Replacement ──
+
+export interface TmpFontInfo {
+  name: string
+  pathId: number
+  assetFile: string
+  isInBundle: boolean
+  atlasCount: number
+  glyphCount: number
+  characterCount: number
+  atlasWidth: number
+  atlasHeight: number
+  isSupported: boolean
+}
+
+export interface FontTarget {
+  pathId: number
+  assetFile: string
+}
+
+export interface FontReplacementRequest {
+  fonts: FontTarget[]
+  customFontPath?: string
+}
+
+export interface FontReplacementStatus {
+  isReplaced: boolean
+  replacedFonts: TmpFontInfo[]
+  backupExists: boolean
+  isExternallyRestored: boolean
+  replacedAt?: string
+  fontSource?: string
+}
+
+export interface FontReplacementProgress {
+  phase: 'scanning' | 'replacing' | 'clearing-crc'
+  current: number
+  total: number
+  currentFile?: string
+}
+
 export interface EndpointTestResult {
   endpointId: string
   endpointName: string
