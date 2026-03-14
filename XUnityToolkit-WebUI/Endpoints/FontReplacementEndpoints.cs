@@ -47,10 +47,10 @@ public static class FontReplacementEndpoints
                     await hubContext.Clients.Group($"font-replacement-{id}")
                         .SendAsync("fontReplacementProgress", p, CancellationToken.None);
                 });
-                await fontReplacementService.ReplaceFontsAsync(
+                var result = await fontReplacementService.ReplaceFontsAsync(
                     game.GamePath, id, game.DetectedInfo,
                     request.Fonts, request.CustomFontPath, progress, cts.Token);
-                return Results.Ok(ApiResult.Ok());
+                return Results.Ok(ApiResult<FontReplacementResult>.Ok(result));
             }
             finally
             {
@@ -109,6 +109,18 @@ public static class FontReplacementEndpoints
             {
                 File.Delete(destPath);
                 return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
+            }
+            return Results.Ok(ApiResult.Ok());
+        });
+
+        // DELETE .../custom-font
+        group.MapDelete("/custom-font", (string id, AppDataPaths appDataPaths) =>
+        {
+            var customDir = appDataPaths.GetCustomFontDirectory(id);
+            if (Directory.Exists(customDir))
+            {
+                foreach (var file in Directory.GetFiles(customDir))
+                    File.Delete(file);
             }
             return Results.Ok(ApiResult.Ok());
         });

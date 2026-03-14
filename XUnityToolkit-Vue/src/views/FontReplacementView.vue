@@ -8,7 +8,8 @@ import {
 import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined } from '@vicons/material'
 import { api } from '@/api/client'
 import type {
-  Game, TmpFontInfo, FontReplacementRequest, FontReplacementStatus, FontReplacementProgress
+  Game, TmpFontInfo, FontReplacementRequest, FontReplacementStatus,
+  FontReplacementProgress, FontReplacementResult
 } from '@/api/types'
 import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
 
@@ -92,7 +93,39 @@ async function scanFonts() {
   }
 }
 
-async function replaceFonts() {
+async function doReplace() {
+  replacing.value = true
+  progress.value = null
+  try {
+    const request: FontReplacementRequest = {
+      fonts: fonts.value
+        .filter(f => checkedRowKeys.value.includes(`${f.assetFile}:${f.pathId}`))
+        .map(f => ({ pathId: f.pathId, assetFile: f.assetFile }))
+    }
+    const result = await api.post<FontReplacementResult>(
+      `/api/games/${gameId.value}/font-replacement/replace`, request)
+    if (result.failedFonts.length > 0) {
+      const failedNames = result.failedFonts
+        .map(f => `PathId=${f.pathId} (${f.assetFile}): ${f.error}`)
+        .join('\n')
+      message.warning(
+        `字体替换部分完成：成功 ${result.successCount} 个，失败 ${result.failedFonts.length} 个`,
+        { duration: 6000 }
+      )
+      console.warn('字体替换失败详情:\n' + failedNames)
+    } else {
+      message.success(`字体替换完成：已替换 ${result.successCount} 个字体`)
+    }
+    await loadStatus()
+  } catch (e: any) {
+    message.error(`替换失败: ${e.message}`)
+  } finally {
+    replacing.value = false
+    progress.value = null
+  }
+}
+
+function replaceFonts() {
   if (selectedCount.value === 0) {
     message.warning('请先选择要替换的字体')
     return
@@ -102,25 +135,7 @@ async function replaceFonts() {
     content: `此操作将修改游戏资产文件中的 ${selectedCount.value} 个字体，是否继续？`,
     positiveText: '替换',
     negativeText: '取消',
-    onPositiveClick: async () => {
-      replacing.value = true
-      progress.value = null
-      try {
-        const request: FontReplacementRequest = {
-          fonts: fonts.value
-            .filter(f => checkedRowKeys.value.includes(`${f.assetFile}:${f.pathId}`))
-            .map(f => ({ pathId: f.pathId, assetFile: f.assetFile }))
-        }
-        await api.post(`/api/games/${gameId.value}/font-replacement/replace`, request)
-        message.success('字体替换完成')
-        await loadStatus()
-      } catch (e: any) {
-        message.error(`替换失败: ${e.message}`)
-      } finally {
-        replacing.value = false
-        progress.value = null
-      }
-    }
+    onPositiveClick: () => { doReplace() }
   })
 }
 
@@ -153,16 +168,28 @@ function handleUploadFinish({ event }: { file: UploadFileInfo, event?: ProgressE
     const result = JSON.parse(response)
     if (result.success) {
       message.success('自定义字体上传成功')
+      loadStatus()
     } else {
       message.error(result.error || '上传失败')
     }
   } catch {
     message.success('自定义字体上传成功')
+    loadStatus()
   }
 }
 
 function handleUploadError() {
   message.error('字体上传失败')
+}
+
+async function deleteCustomFont() {
+  try {
+    await api.del(`/api/games/${gameId.value}/font-replacement/custom-font`)
+    message.success('已删除自定义字体')
+    await loadStatus()
+  } catch (e: any) {
+    message.error(`删除失败: ${e.message}`)
+  }
 }
 
 function handleBack() {
@@ -225,7 +252,6 @@ onBeforeUnmount(async () => {
           <NUpload
             :action="`/api/games/${gameId}/font-replacement/upload`"
             :show-file-list="false"
-            :max="1"
             @finish="handleUploadFinish"
             @error="handleUploadError"
             accept="*"
@@ -251,6 +277,15 @@ onBeforeUnmount(async () => {
       <div v-else-if="status?.isExternallyRestored" class="status-bar">
         <NTag type="warning">已被外部还原</NTag>
         <span class="status-text">字体可能已通过 Steam 验证文件完整性还原，备份数据仍保留</span>
+      </div>
+
+      <!-- Custom Font -->
+      <div v-if="status?.customFontFileName" class="status-bar">
+        <NTag type="info">自定义字体</NTag>
+        <span class="status-text">{{ status.customFontFileName }}</span>
+        <NButton text size="small" type="error" @click="deleteCustomFont" :disabled="replacing">
+          删除
+        </NButton>
       </div>
 
       <!-- Progress -->
