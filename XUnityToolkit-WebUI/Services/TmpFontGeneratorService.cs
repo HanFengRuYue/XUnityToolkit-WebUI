@@ -615,10 +615,10 @@ public sealed class TmpFontGeneratorService(
                             newTexBase["m_StreamData"]["size"].AsULong = 0;
                             newTexBase["m_Name"].AsString = $"{fontName} Atlas {pageIdx}";
 
-                            // Add as new asset
+                            // Add as new asset (global max PathId to avoid collisions across types)
                             var newInfo = AssetFileInfo.Create(
                                 afileInst.file,
-                                afileInst.file.GetAssetsOfType(AssetClassID.Texture2D).Max(a => a.PathId) + pageIdx,
+                                afileInst.file.Metadata.AssetInfos.Max(a => a.PathId) + 1,
                                 (int)AssetClassID.Texture2D, null);
                             newInfo.SetNewData(newTexBase);
                             afileInst.file.Metadata.AssetInfos.Add(newInfo);

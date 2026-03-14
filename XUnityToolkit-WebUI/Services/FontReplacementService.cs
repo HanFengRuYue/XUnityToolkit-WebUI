@@ -329,8 +329,8 @@ public sealed class FontReplacementService(
             // === Step 1: Load source font from bundled AssetBundle ===
             var srcManager = new AssetsManager();
             AssetTypeValueField srcFontBase;
-            AssetTypeValueField srcTexBase;
             AssetsFileInstance srcAfileInst;
+            List<SourceAtlasPage> srcAtlasPages;
 
             try
             {
@@ -383,40 +383,40 @@ public sealed class FontReplacementService(
                 srcFontBase = foundSrcFontBase;
                 srcAfileInst = foundSrcAfileInst;
 
-                // Find source atlas Texture2D via m_AtlasTextures[0] PPtr
-                var srcAtlasTextures = srcFontBase["m_AtlasTextures"];
-                if (srcAtlasTextures.IsDummy || srcAtlasTextures["Array"].Children.Count == 0)
+                // Find ALL source atlas Texture2D via m_AtlasTextures PPtrs
+                var srcAtlasTexturesField = srcFontBase["m_AtlasTextures"];
+                if (srcAtlasTexturesField.IsDummy || srcAtlasTexturesField["Array"].Children.Count == 0)
                     throw new InvalidOperationException("Source font has no atlas textures.");
 
-                var srcAtlasPPtr = srcAtlasTextures["Array"][0];
-                var srcAtlasPathId = srcAtlasPPtr["m_PathID"].AsLong;
-
-                AssetTypeValueField? foundSrcTex = null;
-                foreach (var texInfo in srcAfileInst.file.GetAssetsOfType(AssetClassID.Texture2D))
+                srcAtlasPages = new List<SourceAtlasPage>();
+                for (int pageIdx = 0; pageIdx < srcAtlasTexturesField["Array"].Children.Count; pageIdx++)
                 {
-                    if (texInfo.PathId == srcAtlasPathId)
+                    var srcAtlasPPtr = srcAtlasTexturesField["Array"][pageIdx];
+                    var srcAtlasPathId = srcAtlasPPtr["m_PathID"].AsLong;
+
+                    AssetTypeValueField? foundSrcTex = null;
+                    foreach (var texInfo in srcAfileInst.file.GetAssetsOfType(AssetClassID.Texture2D))
                     {
-                        foundSrcTex = srcManager.GetBaseField(srcAfileInst, texInfo);
-                        break;
+                        if (texInfo.PathId == srcAtlasPathId)
+                        {
+                            foundSrcTex = srcManager.GetBaseField(srcAfileInst, texInfo);
+                            break;
+                        }
                     }
+
+                    if (foundSrcTex is null)
+                        throw new InvalidOperationException($"Source atlas Texture2D not found for page {pageIdx} (PathId={srcAtlasPathId}).");
+
+                    var srcTexFile = TextureFile.ReadTextureFile(foundSrcTex);
+                    var srcEncodedData = srcTexFile.FillPictureData(srcAfileInst)
+                        ?? throw new InvalidOperationException($"Failed to read source atlas texture data for page {pageIdx}.");
+
+                    srcAtlasPages.Add(new SourceAtlasPage(srcEncodedData, srcTexFile.m_Width, srcTexFile.m_Height, srcTexFile.m_TextureFormat));
                 }
 
-                if (foundSrcTex is null)
-                    throw new InvalidOperationException($"Source atlas Texture2D not found (PathId={srcAtlasPathId}).");
-
-                srcTexBase = foundSrcTex;
-
-                // Read source texture raw data
-                var srcTexFile = TextureFile.ReadTextureFile(srcTexBase);
-                // FillPictureData loads encoded texture bytes (from inline or streaming)
-                var srcEncodedData = srcTexFile.FillPictureData(srcAfileInst)
-                    ?? throw new InvalidOperationException("Failed to read source atlas texture data.");
-                var srcWidth = srcTexFile.m_Width;
-                var srcHeight = srcTexFile.m_Height;
-                var srcTextureFormat = srcTexFile.m_TextureFormat;
-
-                logger.LogInformation("源字体已加载: {Glyphs} 个字形, 图集 {W}x{H}, 格式 {Fmt}",
-                    srcFontBase["m_GlyphTable"]["Array"].Children.Count, srcWidth, srcHeight, srcTextureFormat);
+                logger.LogInformation("源字体已加载: {Glyphs} 个字形, {Pages} 页图集, 图集 {W}x{H}",
+                    srcFontBase["m_GlyphTable"]["Array"].Children.Count, srcAtlasPages.Count,
+                    srcAtlasPages[0].Width, srcAtlasPages[0].Height);
 
                 // === Step 2: Group target fonts by asset file ===
                 var fontsByFile = fonts.GroupBy(f => f.AssetFile).ToList();
@@ -456,14 +456,14 @@ public sealed class FontReplacementService(
 
                         if (isBundle)
                         {
-                            ProcessBundleFile(dstManager, srcFontBase, srcEncodedData, srcWidth, srcHeight, srcTextureFormat,
+                            ProcessBundleFile(dstManager, srcFontBase, srcAtlasPages,
                                 gamePath, gameId, dataPath, assetFileName, fontsInFile,
                                 gameInfo.UnityVersion, replacedFiles, catalogFiles, failedFonts,
                                 ref processedFonts, totalFonts, progress, ct);
                         }
                         else
                         {
-                            ProcessLooseFile(dstManager, srcFontBase, srcEncodedData, srcWidth, srcHeight, srcTextureFormat,
+                            ProcessLooseFile(dstManager, srcFontBase, srcAtlasPages,
                                 gamePath, gameId, dataPath, assetFileName, fontsInFile,
                                 gameInfo.UnityVersion, replacedFiles, failedFonts,
                                 ref processedFonts, totalFonts, progress, ct);
@@ -550,7 +550,7 @@ public sealed class FontReplacementService(
 
     private void ProcessLooseFile(
         AssetsManager manager, AssetTypeValueField srcFontBase,
-        byte[] srcEncodedData, int srcWidth, int srcHeight, int srcTextureFormat,
+        List<SourceAtlasPage> srcAtlasPages,
         string gamePath, string gameId, string dataPath, string assetFileName,
         List<FontTarget> fontsInFile, string unityVersion,
         List<ReplacedFileEntry> replacedFiles, List<FailedFontEntry> failedFonts,
@@ -584,7 +584,7 @@ public sealed class FontReplacementService(
                 try
                 {
                     ReplaceSingleFont(manager, afileInst, srcFontBase,
-                        srcEncodedData, srcWidth, srcHeight, srcTextureFormat, font.PathId, out var fontName);
+                        srcAtlasPages, font.PathId, out var fontName);
 
                     replacedFonts.Add(new ReplacedFontEntry { Name = fontName, PathId = font.PathId });
 
@@ -647,7 +647,7 @@ public sealed class FontReplacementService(
 
     private void ProcessBundleFile(
         AssetsManager manager, AssetTypeValueField srcFontBase,
-        byte[] srcEncodedData, int srcWidth, int srcHeight, int srcTextureFormat,
+        List<SourceAtlasPage> srcAtlasPages,
         string gamePath, string gameId, string dataPath, string assetFileName,
         List<FontTarget> fontsInFile, string unityVersion,
         List<ReplacedFileEntry> replacedFiles, List<CatalogFileEntry> catalogFiles,
@@ -722,7 +722,7 @@ public sealed class FontReplacementService(
                     try
                     {
                         ReplaceSingleFont(manager, afileInst, srcFontBase,
-                            srcEncodedData, srcWidth, srcHeight, srcTextureFormat, font.PathId, out var fontName);
+                            srcAtlasPages, font.PathId, out var fontName);
 
                         replacedFonts.Add(new ReplacedFontEntry { Name = fontName, PathId = font.PathId });
 
@@ -809,7 +809,7 @@ public sealed class FontReplacementService(
     private static void ReplaceSingleFont(
         AssetsManager manager, AssetsFileInstance afileInst,
         AssetTypeValueField srcFontBase,
-        byte[] srcEncodedData, int srcWidth, int srcHeight, int srcTextureFormat,
+        List<SourceAtlasPage> srcAtlasPages,
         long targetPathId, out string fontName)
     {
         var afile = afileInst.file;
@@ -837,43 +837,102 @@ public sealed class FontReplacementService(
         // Copy font data fields from source to destination
         CopyFontFields(srcFontBase, dstFontBase);
 
-        // Find the target's atlas Texture2D via m_AtlasTextures[0] PPtr
+        // === Multi-atlas texture replacement ===
         var dstAtlasTextures = dstFontBase["m_AtlasTextures"];
         if (dstAtlasTextures.IsDummy || dstAtlasTextures["Array"].Children.Count == 0)
             throw new InvalidOperationException($"Target font '{fontName}' has no atlas textures.");
 
-        var dstAtlasPPtr = dstAtlasTextures["Array"][0];
-        var dstAtlasPathId = dstAtlasPPtr["m_PathID"].AsLong;
+        var existingDstTexCount = dstAtlasTextures["Array"].Children.Count;
 
-        AssetFileInfo? dstTexInfo = null;
-        foreach (var texInfo in afile.GetAssetsOfType(AssetClassID.Texture2D))
+        // Replace existing texture slots (min of source and destination count)
+        var replaceCount = Math.Min(srcAtlasPages.Count, existingDstTexCount);
+        for (int pageIdx = 0; pageIdx < replaceCount; pageIdx++)
         {
-            if (texInfo.PathId == dstAtlasPathId)
+            var dstAtlasPathId = dstAtlasTextures["Array"][pageIdx]["m_PathID"].AsLong;
+
+            AssetFileInfo? dstTexInfo = null;
+            foreach (var texInfo in afile.GetAssetsOfType(AssetClassID.Texture2D))
             {
-                dstTexInfo = texInfo;
-                break;
+                if (texInfo.PathId == dstAtlasPathId)
+                {
+                    dstTexInfo = texInfo;
+                    break;
+                }
+            }
+
+            if (dstTexInfo is null) continue;
+
+            var page = srcAtlasPages[pageIdx];
+            var dstTexBase = manager.GetBaseField(afileInst, dstTexInfo);
+            var dstTexFile = TextureFile.ReadTextureFile(dstTexBase);
+            dstTexFile.m_TextureFormat = page.TextureFormat;
+            dstTexFile.SetPictureData(page.EncodedData, page.Width, page.Height);
+            dstTexFile.WriteTo(dstTexBase);
+
+            dstTexBase["m_StreamData"]["path"].AsString = "";
+            dstTexBase["m_StreamData"]["offset"].AsULong = 0;
+            dstTexBase["m_StreamData"]["size"].AsULong = 0;
+
+            dstTexInfo.SetNewData(dstTexBase);
+        }
+
+        // Create new Texture2D assets for extra source pages
+        if (srcAtlasPages.Count > existingDstTexCount)
+        {
+            // Use existing texture as structural template
+            var templatePathId = dstAtlasTextures["Array"][0]["m_PathID"].AsLong;
+            AssetTypeValueField? texTemplate = null;
+            foreach (var texInfo in afile.GetAssetsOfType(AssetClassID.Texture2D))
+            {
+                if (texInfo.PathId == templatePathId)
+                {
+                    texTemplate = manager.GetBaseField(afileInst, texInfo);
+                    break;
+                }
+            }
+
+            if (texTemplate != null)
+            {
+                var ptrProto = dstAtlasTextures["Array"].Children[0];
+                var newPtrList = new List<AssetTypeValueField>(dstAtlasTextures["Array"].Children);
+
+                for (int pageIdx = existingDstTexCount; pageIdx < srcAtlasPages.Count; pageIdx++)
+                {
+                    var page = srcAtlasPages[pageIdx];
+
+                    var newTexBase = ValueBuilder.DefaultValueFieldFromTemplate(texTemplate.TemplateField);
+                    var texFile = TextureFile.ReadTextureFile(newTexBase);
+                    texFile.m_TextureFormat = page.TextureFormat;
+                    texFile.SetPictureData(page.EncodedData, page.Width, page.Height);
+                    texFile.WriteTo(newTexBase);
+
+                    newTexBase["m_StreamData"]["path"].AsString = "";
+                    newTexBase["m_StreamData"]["offset"].AsULong = 0;
+                    newTexBase["m_StreamData"]["size"].AsULong = 0;
+                    newTexBase["m_Name"].AsString = $"{fontName} Atlas {pageIdx}";
+
+                    // Generate globally unique PathId
+                    var newPathId = afile.Metadata.AssetInfos.Max(a => a.PathId) + 1;
+                    var newInfo = AssetFileInfo.Create(afile, newPathId, (int)AssetClassID.Texture2D, null);
+                    newInfo.SetNewData(newTexBase);
+                    afile.Metadata.AssetInfos.Add(newInfo);
+
+                    // Add PPtr to atlas textures array
+                    var newPtr = ValueBuilder.DefaultValueFieldFromTemplate(ptrProto.TemplateField);
+                    newPtr["m_FileID"].AsInt = 0;
+                    newPtr["m_PathID"].AsLong = newInfo.PathId;
+                    newPtrList.Add(newPtr);
+                }
+
+                dstAtlasTextures["Array"].Children = newPtrList;
             }
         }
 
-        if (dstTexInfo is null)
-            throw new InvalidOperationException($"Target atlas Texture2D not found (PathId={dstAtlasPathId}).");
-
-        // Replace texture data using raw encoded bytes
-        var dstTexBase = manager.GetBaseField(afileInst, dstTexInfo);
-        var dstTexFile = TextureFile.ReadTextureFile(dstTexBase);
-        dstTexFile.m_TextureFormat = srcTextureFormat;
-        dstTexFile.SetPictureData(srcEncodedData, srcWidth, srcHeight);
-        dstTexFile.WriteTo(dstTexBase);
-
-        // Clear streaming data to force inline texture
-        dstTexBase["m_StreamData"]["path"].AsString = "";
-        dstTexBase["m_StreamData"]["offset"].AsULong = 0;
-        dstTexBase["m_StreamData"]["size"].AsULong = 0;
-
         // Commit modified data
-        dstTexInfo.SetNewData(dstTexBase);
         targetMbInfo.SetNewData(dstFontBase);
     }
+
+    private record SourceAtlasPage(byte[] EncodedData, int Width, int Height, int TextureFormat);
 
     private static void CopyFontFields(AssetTypeValueField src, AssetTypeValueField dst)
     {
