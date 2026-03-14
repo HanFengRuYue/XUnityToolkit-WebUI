@@ -107,6 +107,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
 - **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
 - **Console P/Invoke:** `AllocConsole`/`FreeConsole` (kernel32), `GetSystemMenu`/`DeleteMenu` (user32); `OutputType=WinExe` in csproj is critical — do NOT revert to `Exe`
+- **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
+- **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`)
 
 ### INI Configuration
 
@@ -166,6 +168,16 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
 - **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
 
+### Font Replacement (AssetsTools.NET)
+
+- **TMP_FontAsset detection:** MonoBehaviour with `m_Version` + `m_GlyphTable` fields = v1.1.0 (supported); `m_fontInfo` + `m_glyphInfoList` = v1.0.0 (unsupported)
+- **Field-level copy:** Swap `Children` lists for array/struct fields (`m_GlyphTable`, `m_CharacterTable`, `m_FaceInfo`, etc.); DO NOT touch PPtr fields (`m_AtlasTextures`, `material`, `m_SourceFontFile`, `m_FallbackFontAssetTable`)
+- **Texture replacement:** `AssetsTools.NET.Texture` v3.0.2 (latest); API uses `TextureFile.ReadTextureFile()` → `SetPictureData()`/`FillPictureData()` → `WriteTo()`; clear `m_StreamData` (path/offset/size) after replacing embedded texture
+- **Bundle write pattern:** modify assets → `DirectoryInfos[i].SetNewData(afile)` → write uncompressed `.tmp` → re-read → `Pack(writer, LZ4)` → delete tmp → move to original
+- **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
+- **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
+- **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
+
 ### Local LLM
 
 - GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
@@ -188,6 +200,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - `PluginPackageService`: exports BepInEx + XUnity as ZIP (max compression)
 - **INI sanitization:** blanks sensitive section values; `[LLMTranslate]` only blanks `GameId`
 - **ZIP filename:** `{sanitized game name}_{target language}_{yyyy-MM-dd}.zip`
+- **Import with font replacement:** `_font_replacement_manifest.json` sentinel in ZIP; import MUST backup target asset files BEFORE extraction (ZIP overwrites originals); update `OriginalPath` in manifest to match importing game's directory
 
 ### DI & Provider Gotchas
 
@@ -209,7 +222,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
 - **ConfigPanel** auto-saves internally (2s), no `save` event
 - Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard
-- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`
+- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``
 - `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
 - `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
 - **RouterView key:** `:key="route.path"` ensures transitions fire for same-component different-route navigations
