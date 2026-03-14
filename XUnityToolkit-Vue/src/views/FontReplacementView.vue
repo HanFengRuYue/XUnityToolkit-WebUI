@@ -20,7 +20,7 @@ const dialog = useDialog()
 const gameId = computed(() => route.params.id as string)
 const game = ref<Game | null>(null)
 const fonts = ref<TmpFontInfo[]>([])
-const checkedRowKeys = ref<number[]>([])
+const checkedRowKeys = ref<string[]>([])
 const status = ref<FontReplacementStatus | null>(null)
 const scanning = ref(false)
 const replacing = ref(false)
@@ -79,7 +79,7 @@ async function scanFonts() {
       `/api/games/${gameId.value}/font-replacement/scan`)
     checkedRowKeys.value = fonts.value
       .filter(f => f.isSupported)
-      .map(f => f.pathId)
+      .map(f => `${f.assetFile}:${f.pathId}`)
     if (fonts.value.length === 0) {
       message.info('未在游戏资产中找到 TMP 字体')
     } else {
@@ -108,7 +108,7 @@ async function replaceFonts() {
       try {
         const request: FontReplacementRequest = {
           fonts: fonts.value
-            .filter(f => checkedRowKeys.value.includes(f.pathId))
+            .filter(f => checkedRowKeys.value.includes(`${f.assetFile}:${f.pathId}`))
             .map(f => ({ pathId: f.pathId, assetFile: f.assetFile }))
         }
         await api.post(`/api/games/${gameId.value}/font-replacement/replace`, request)
@@ -145,6 +145,24 @@ async function restoreFonts() {
       }
     }
   })
+}
+
+function handleUploadFinish({ event }: { file: UploadFileInfo, event?: ProgressEvent }) {
+  const response = (event?.target as XMLHttpRequest)?.response
+  try {
+    const result = JSON.parse(response)
+    if (result.success) {
+      message.success('自定义字体上传成功')
+    } else {
+      message.error(result.error || '上传失败')
+    }
+  } catch {
+    message.success('自定义字体上传成功')
+  }
+}
+
+function handleUploadError() {
+  message.error('字体上传失败')
 }
 
 function handleBack() {
@@ -200,9 +218,23 @@ onBeforeUnmount(async () => {
           </span>
           扫描与替换
         </h2>
-        <NButton type="primary" :loading="scanning" :disabled="replacing" @click="scanFonts">
-          扫描字体
-        </NButton>
+        <NSpace>
+          <NButton type="primary" :loading="scanning" :disabled="replacing" @click="scanFonts">
+            扫描字体
+          </NButton>
+          <NUpload
+            :action="`/api/games/${gameId}/font-replacement/upload`"
+            :show-file-list="false"
+            :max="1"
+            @finish="handleUploadFinish"
+            @error="handleUploadError"
+            accept="*"
+          >
+            <NButton :disabled="replacing">
+              上传自定义字体
+            </NButton>
+          </NUpload>
+        </NSpace>
       </div>
 
       <!-- Status -->
@@ -241,7 +273,7 @@ onBeforeUnmount(async () => {
       <NDataTable
         :columns="columns"
         :data="fonts"
-        :row-key="(row: TmpFontInfo) => row.pathId"
+        :row-key="(row: TmpFontInfo) => `${row.assetFile}:${row.pathId}`"
         v-model:checked-row-keys="checkedRowKeys"
         :row-class-name="rowClassName"
         :max-height="500"

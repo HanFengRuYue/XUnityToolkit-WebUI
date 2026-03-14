@@ -1235,23 +1235,34 @@ public sealed class FontReplacementService(
             if (manifest is null)
                 return new FontReplacementStatus();
 
-            // Check if files have been externally restored (e.g., Steam verify)
-            var isExternallyRestored = false;
-            foreach (var entry in manifest.ReplacedFiles)
+            // Quick external-restore detection: check if backup dir exists but files differ
+            var externallyRestored = false;
+            await Task.Run(() =>
             {
-                if (!File.Exists(entry.OriginalPath))
+                foreach (var entry in manifest.ReplacedFiles)
                 {
-                    isExternallyRestored = true;
-                    break;
+                    if (!File.Exists(entry.OriginalPath))
+                    {
+                        externallyRestored = true;
+                        break;
+                    }
+                    try
+                    {
+                        var currentHash = ComputeFileHash(entry.OriginalPath);
+                        if (currentHash != entry.ModifiedFileHash)
+                        {
+                            externallyRestored = true;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // File access error — treat as potentially restored
+                        externallyRestored = true;
+                        break;
+                    }
                 }
-
-                var currentHash = ComputeFileHash(entry.OriginalPath);
-                if (!string.Equals(currentHash, entry.ModifiedFileHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    isExternallyRestored = true;
-                    break;
-                }
-            }
+            });
 
             // Collect replaced font info
             var replacedFonts = manifest.ReplacedFiles
@@ -1273,7 +1284,7 @@ public sealed class FontReplacementService(
                 ReplacedAt = manifest.ReplacedAt,
                 FontSource = manifest.FontSource,
                 ReplacedFonts = replacedFonts,
-                IsExternallyRestored = isExternallyRestored
+                IsExternallyRestored = externallyRestored
             };
         }
         catch (Exception ex)
