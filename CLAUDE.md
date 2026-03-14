@@ -64,6 +64,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Frontend:** Vue 3 Composition API with `<script setup lang="ts">`
 - **Frontend styling:** Scoped `<style scoped>`; use CSS variables from `main.css`
 - **Frontend icons:** `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`
+- **Frontend API client:** `api.get`, `api.post`, `api.put`, `api.del` (NOT `.delete` — JS reserved word)
 
 ## API Endpoints
 
@@ -151,7 +152,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### TranslatorEndpoint
 
 - Targets net35 (C# 7.3); `Microsoft.NETFramework.ReferenceAssemblies.net35` NuGet
-- Dependencies in `TranslatorEndpoint/libs/` (tracked in git)
+- **Reference DLLs:** `TranslatorEndpoint/libs/` auto-extracted from bundled XUnity ZIP by `build.ps1`; committed files serve as fallback
 - `DisableSpamChecks()` removes stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
 - `GetOrCreateSetting` reads existing INI; changing DLL defaults won't affect installed games — use `PatchSectionAsync`
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
@@ -159,7 +160,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Asset Extraction (AssetsTools.NET)
 
 - `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` both in `AssetsTools.NET.Extra`; IL2CPP: fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
-- `classdata.tpk` embedded as resource
+- **`classdata.tpk`:** embedded as resource; auto-updated from [AssetRipper/Tpk](https://github.com/AssetRipper/Tpk) CI by `build.ps1` (requires `gh` CLI); committed file serves as fallback
 - `LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration
 - **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
 - **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
@@ -177,6 +178,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
 - **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
 - **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
+- **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomFontFileName` for frontend display; `DELETE .../custom-font` clears custom font
 
 ### Local LLM
 
@@ -221,7 +223,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - Use composables (`src/composables/`) for complex multi-step UI flows
 - **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
 - **ConfigPanel** auto-saves internally (2s), no `save` event
-- Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard
+- Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard; `NDialogOptions.onPositiveClick`: returning a `Promise` keeps dialog open until resolved — fire-and-forget long async work (e.g., `() => { doWork() }`) to close immediately
 - `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``
 - `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
 - `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
@@ -264,7 +266,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: downloads bundled assets (`-SkipDownload` to skip) → frontend → TranslatorEndpoint (if libs exist) → publish to `Release/{rid}/`; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/{rid}/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - **Versioning:** `build.ps1` auto-generates `1.0.{YYYYMMDDHHmm}` via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API; no hardcoded version pins; llama.cpp prefers CUDA 12.4; copied post-publish (NOT via csproj Content Include — `PublishSingleFile` silently drops files with `+` in names)
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
