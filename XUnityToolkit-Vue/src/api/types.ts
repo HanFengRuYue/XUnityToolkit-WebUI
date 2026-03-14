@@ -478,3 +478,39 @@ export interface LocalLlmDownloadProgress {
   paused?: boolean
   useMirror?: boolean
 }
+
+// Font Generation
+export interface FontUploadInfo {
+  fileName: string
+  fontName: string
+  fileSize: number
+}
+
+export interface FontGenerationStatus {
+  isGenerating: boolean
+  phase: string
+  current: number
+  total: number
+}
+
+export interface GeneratedFontInfo {
+  fileName: string
+  fontName: string
+  glyphCount: number
+  fileSize: number
+  generatedAt: string
+}
+
+export interface FontGenerationProgress {
+  phase: 'parsing' | 'sdf' | 'packing' | 'serializing'
+  current: number
+  total: number
+  message: string
+}
+
+export interface FontGenerationComplete {
+  success: boolean
+  fontName?: string
+  glyphCount: number
+  error?: string
+}

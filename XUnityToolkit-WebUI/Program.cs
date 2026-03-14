@@ -127,6 +127,7 @@ builder.Services.AddSingleton<AssetExtractionService>();
 builder.Services.AddSingleton<PreTranslationService>();
 builder.Services.AddSingleton<PluginPackageService>();
 builder.Services.AddSingleton<FontReplacementService>();
+builder.Services.AddSingleton<TmpFontGeneratorService>();
 builder.Services.AddSingleton<SystemTrayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemTrayService>());
 
@@ -173,6 +174,7 @@ app.MapAssetEndpoints();
 app.MapTranslationEditorEndpoints();
 app.MapPluginPackageEndpoints();
 app.MapFontReplacementEndpoints();
+app.MapFontGenerationEndpoints();
 app.MapLocalLlmEndpoints();
 
 // SignalR hub
