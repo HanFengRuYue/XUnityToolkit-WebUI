@@ -61,6 +61,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
 - **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 - **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
+- **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results must also skip `ApplyGlossaryPostProcess` (marked via `preComputed` dictionary)
+- **Prompt glossary:** ALL glossary entries (including non-regex) must remain in system prompt even when placeholders are used — do NOT filter `promptGlossary` to regex-only; removing non-regex entries from prompt eliminates the LLM's awareness of terminology AND breaks `ApplyGlossaryPostProcess` fallback
 
 ## Asset Extraction (AssetsTools.NET)
 
@@ -98,10 +100,16 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **TMP source filtering:** `ReplaceFontsAsync` custom font auto-resolve filters by extension (excludes `.ttf`/`.otf` from TMP source, excludes non-TTF from TTF source)
 - **Creating new array entries:** `ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField)` creates a new field instance from an existing entry's template; use first array child as prototype, clone per-entry, set values, then assign `array.Children = newList`
 
-## Font Generation (FreeTypeSharp)
+## Font Generation (FreeTypeSharp + Felzenszwalb EDT)
 
-- **FreeTypeSharp:** v3.1.0 raw unsafe P/Invoke (bundles FreeType 2.13.2); requires `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` in csproj; `FT_LOAD` is enum not int — use `FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING` directly (no cast); `FT_Property_Set` for SDF spread requires marshaled byte* module/property names
-- **Atlas Y-axis:** FreeType SDF bitmaps are top-down (Y=0 at top); Unity Texture2D/TMP GlyphRect are bottom-up (Y=0 at bottom); atlas bytes must be row-flipped and GlyphRect Y converted (`atlasHeight - y - height`) before injection
+- **SDF pipeline (Unity-faithful):** `FT_RENDER_MODE_NORMAL` → AA bitmap → `DistanceFieldGenerator.GenerateSdf()` (Felzenszwalb EDT) → SDF with padding; replicates Unity's FontEngine approach; do NOT use `FT_RENDER_MODE_SDF` (outline-based, produces different results from Unity)
+- **`DistanceFieldGenerator`:** static class; SDFAA uses sub-pixel distance seeding from AA values `(v/255)^2`; SDF8/16/32 uses binary initialization after binarization at threshold 128; Felzenszwalb 1D→2D parabola envelope decomposition; bilinear downsample for upsampled modes
+- **Render modes:** SDFAA (1x, default), SDF8 (8x), SDF16 (16x), SDF32 (32x upsampling); `AtlasRenderMode` enum: SDFAA=4165, SDF8=4168, SDF16=4169, SDF32=4170; constraint: `samplingSize × upsampling ≤ 16384`
+- **Padding:** dynamic calculation — percentage mode `(int)(samplingSize * percent / 100)` or pixel mode; minimum 1; `GradientScale = padding + 1` injected into Material `m_SavedProperties.m_Floats`; `m_AtlasPadding` must match
+- **SDF bitmap includes padding:** `BitmapWidth/Height` in GlyphData are padded dimensions; packing uses padded size directly (no double-padding); `GlyphRect` references inner glyph region (`AtlasX + padding`, unpadded width); `UsedGlyphRects` references full padded region
+- **Auto-sizing:** `AutoSizeSamplingSize` binary search (15 iterations); samples 200 glyphs to estimate area; initial max = `sqrt(atlasArea / count) × 3`; recalculates padding if percentage mode
+- **FreeTypeSharp:** v3.1.0 raw unsafe P/Invoke (bundles FreeType 2.13.2); requires `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` in csproj; `FT_LOAD` is enum not int — use `FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING` directly (no cast)
+- **Atlas Y-axis:** FreeType bitmaps are top-down (Y=0 at top); Unity Texture2D/TMP GlyphRect are bottom-up (Y=0 at bottom); atlas bytes must be row-flipped and GlyphRect Y converted (`atlasHeight - y - height`) before injection
 - **`TmpFontService.ResolveFontFile` callers:** game install passes full version (`"2022.3.62f3"`), font generation passes major-only (`"6000"`); `ParseMajorVersion` must handle both formats (with and without dots)
 - **Multi-atlas:** `PackGlyphs` tries single page first; binary search + 90% safety margin for max glyphs per page; `RectanglePacker.Pack` does NOT throw on overflow — must check returned `bounds` against atlas dimensions
 - **async/unsafe conflict:** `GenerateCore` is `unsafe` (FreeType pointers) — character resolution via `CharacterSetService.ResolveCharactersAsync` MUST happen in `GenerateAsync` before `Task.Run`, never inside `GenerateCore`
