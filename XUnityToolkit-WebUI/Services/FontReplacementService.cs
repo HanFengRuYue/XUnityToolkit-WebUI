@@ -25,7 +25,7 @@ public sealed class FontReplacementService(
         return ms.ToArray();
     });
 
-    public async Task<List<TmpFontInfo>> ScanFontsAsync(
+    public async Task<List<FontInfo>> ScanFontsAsync(
         string gamePath, UnityGameInfo gameInfo, CancellationToken ct = default)
     {
         var gameName = Path.GetFileNameWithoutExtension(gameInfo.DetectedExecutable);
@@ -62,7 +62,7 @@ public sealed class FontReplacementService(
 
         return await Task.Run(() =>
         {
-            var results = new List<TmpFontInfo>();
+            var results = new List<FontInfo>();
             var manager = new AssetsManager();
 
             try
@@ -158,16 +158,16 @@ public sealed class FontReplacementService(
                     disposable.Dispose();
             }
 
-            logger.LogInformation("字体扫描完成: 找到 {Count} 个 TMP 字体", results.Count);
+            logger.LogInformation("字体扫描完成: 找到 {Count} 个字体", results.Count);
             return results;
         }, ct);
     }
 
-    private List<TmpFontInfo> ScanAssetsInstance(
+    private List<FontInfo> ScanAssetsInstance(
         AssetsManager manager, AssetsFileInstance afileInst, string fileName,
         string unityVersion, bool isBundle)
     {
-        var results = new List<TmpFontInfo>();
+        var results = new List<FontInfo>();
         var afile = afileInst.file;
 
         // Load class database for this Unity version
@@ -203,12 +203,13 @@ public sealed class FontReplacementService(
                     var atlasTextures = mbBase["m_AtlasTextures"];
                     var charTable = mbBase["m_CharacterTable"];
 
-                    results.Add(new TmpFontInfo
+                    results.Add(new FontInfo
                     {
                         Name = name,
                         PathId = mbInfo.PathId,
                         AssetFile = fileName,
                         IsInBundle = isBundle,
+                        FontType = "TMP",
                         AtlasCount = atlasTextures.IsDummy ? 0 : atlasTextures["Array"].Children.Count,
                         GlyphCount = glyphTableField["Array"].Children.Count,
                         CharacterCount = charTable.IsDummy ? 0 : charTable["Array"].Children.Count,
@@ -225,12 +226,13 @@ public sealed class FontReplacementService(
                 if (!fontInfoField.IsDummy && !glyphInfoList.IsDummy)
                 {
                     var name = mbBase["m_Name"].IsDummy ? "(unnamed)" : mbBase["m_Name"].AsString;
-                    results.Add(new TmpFontInfo
+                    results.Add(new FontInfo
                     {
                         Name = name,
                         PathId = mbInfo.PathId,
                         AssetFile = fileName,
                         IsInBundle = isBundle,
+                        FontType = "TMP",
                         GlyphCount = glyphInfoList["Array"].Children.Count,
                         IsSupported = false // v1.0.0 not supported
                     });
@@ -239,6 +241,39 @@ public sealed class FontReplacementService(
             catch
             {
                 // MonoBehaviour deserialization can fail — skip silently
+            }
+        }
+
+        // Scan for Unity Font assets (TTF/OTF)
+        foreach (var fontAssetInfo in afile.GetAssetsOfType(AssetClassID.Font))
+        {
+            try
+            {
+                var fontBase = manager.GetBaseField(afileInst, fontAssetInfo);
+                if (fontBase.IsDummy) continue;
+
+                var fontData = fontBase["m_FontData"];
+                if (fontData.IsDummy) continue;
+
+                var dataBytes = fontData.AsByteArray;
+                if (dataBytes.Length < 1024) continue; // Skip placeholder/stub fonts
+
+                var name = fontBase["m_Name"].IsDummy ? "(unnamed)" : fontBase["m_Name"].AsString;
+
+                results.Add(new FontInfo
+                {
+                    Name = name,
+                    PathId = fontAssetInfo.PathId,
+                    AssetFile = fileName,
+                    IsInBundle = isBundle,
+                    FontType = "TTF",
+                    IsSupported = true,
+                    FontDataSize = dataBytes.Length
+                });
+            }
+            catch
+            {
+                // Font deserialization can fail — skip silently
             }
         }
 
@@ -1389,12 +1424,13 @@ public sealed class FontReplacementService(
             // Collect replaced font info
             var replacedFonts = manifest.ReplacedFiles
                 .SelectMany(f => f.ReplacedFonts)
-                .Select(rf => new TmpFontInfo
+                .Select(rf => new FontInfo
                 {
                     Name = rf.Name,
                     PathId = rf.PathId,
                     AssetFile = "",
                     IsInBundle = false,
+                    FontType = rf.FontType ?? "TMP",
                     IsSupported = true
                 })
                 .ToList();
