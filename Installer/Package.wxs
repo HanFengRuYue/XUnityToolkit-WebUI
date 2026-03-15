@@ -11,7 +11,7 @@
     <SummaryInformation Description="XUnityToolkit-WebUI Installer" />
 
     <MajorUpgrade AllowSameVersionUpgrades="yes"
-                  DowngradeErrorMessage="已安装更新版本的 XUnityToolkit-WebUI，无法降级安装。" />
+                  DowngradeErrorMessage="A newer version of XUnityToolkit-WebUI is already installed. Downgrade is not supported." />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
