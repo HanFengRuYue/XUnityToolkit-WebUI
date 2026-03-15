@@ -384,13 +384,12 @@ if (-not $SkipDownload) {
         Write-Host "  [skip] XUnity ZIP not found, using committed DLLs" -ForegroundColor DarkGray
     }
 
-    # ── llama.cpp binaries from GitHub Releases ──
-    Write-Host "  Fetching llama.cpp latest release..." -ForegroundColor DarkGray
-    $llamaReleases = Invoke-WithRetry -Operation "Fetch llama.cpp releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" -Headers $GitHubHeaders -TimeoutSec 30
-    }
-    $llamaRelease = $llamaReleases | Where-Object { -not $_.prerelease } | Select-Object -First 1
-    if (-not $llamaRelease) { throw "llama.cpp release not found" }
+    # ── llama.cpp binaries from GitHub Releases (pinned version) ──
+    $llamaTag = "b8354"
+    Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
+    $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
+        Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30
+    }.GetNewClosure()
     Write-Host "  llama.cpp: $($llamaRelease.tag_name)" -ForegroundColor DarkGray
 
     $llamaDir = Join-Path $BundledRoot 'llama'
