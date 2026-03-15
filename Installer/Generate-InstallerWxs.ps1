@@ -31,7 +31,7 @@ function Generate-InstallerWxs {
     $counter = 0
 
     foreach ($file in $files) {
-        $relativePath = $file.FullName.Substring($ReleaseDir.TrimEnd('\').Length + 1)
+        $relativePath = $file.FullName.Substring($ReleaseDir.TrimEnd('\', '/').Length + 1)
 
         # Skip data directory if present
         if ($relativePath -like "data\*") { continue }
