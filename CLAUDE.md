@@ -122,7 +122,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **Versioning:** `build.ps1` auto-generates `1.0.{YYYYMMDDHHmm}` via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
+- **Versioning:** `build.ps1` auto-generates `1.3.{YYYYMMDDHHmm}` (CI uses `1.1.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
 - **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
@@ -148,7 +148,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
 - **CI/CD:** GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
 - **CI version tracking:** `.github/deps.json` stores last-known versions; `dep-check.yml` compares upstream
-- **CI cannot call `build.ps1`** — `Wait-Exit` blocks in non-interactive; workflow replicates logic inline
+- **CI cannot call `build.ps1`** — `Wait-Exit` blocks in non-interactive; workflow replicates logic inline; changes must be manually synced between `build.ps1` and `build.yml`
+- **dep-check.yml** only tracks BepInEx 5/6 and XUnity versions — llama.cpp is pinned and not auto-checked
 - **.NET 10 preview in CI:** `setup-dotnet@v5` with `dotnet-quality: 'preview'`
 - **CI gotcha — `$GITHUB_OUTPUT`:** multiline values corrupt format; use heredoc (`key<<EOF`) or `jq -c` for JSON
 - **CI gotcha — `gh release create --notes`:** backticks in `${{ }}` become bash command substitution; use `--notes-file` instead
