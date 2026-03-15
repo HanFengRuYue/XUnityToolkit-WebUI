@@ -514,7 +514,7 @@ public sealed class UpdateService(
         var pid = Environment.ProcessId;
         var exeName = Path.GetFileName(Environment.ProcessPath ?? "XUnityToolkit-WebUI.exe");
         var deleteListPath = Path.Combine(stagingDir, "delete-list.txt");
-        var args = $"--pid {pid} --app-dir \"{appDir}\" --staging-dir \"{filesDir}\" --exe-name \"{exeName}\"";
+        var args = $"--pid {pid} --app-dir \"{appDir}\" --staging-dir \"{filesDir}\" --exe-name \"{exeName}\" --data-dir \"{paths.Root}\"";
         if (File.Exists(deleteListPath))
             args += $" --delete-list \"{deleteListPath}\"";
 
