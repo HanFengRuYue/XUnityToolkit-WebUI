@@ -4,7 +4,7 @@
 
 # XUnityToolkit-WebUI
 
-**Unity 游戏翻译工具箱** — 一键安装翻译框架，集成 AI 翻译、本地大模型、资产提取
+**Unity 游戏翻译工具箱** — 一键安装翻译框架，集成 AI 翻译、本地大模型、资产提取、字体替换
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
@@ -37,6 +37,9 @@
 ### 📦 资产提取 & 预翻译
 从 Unity `.assets` 和 AssetBundle 中提取文本，批量翻译并写入缓存，实现启动即汉化
 
+### 🔤 字体替换 & 生成
+扫描并替换游戏内 TextMesh Pro 字体，内置 SDF 字体生成器（支持 GB2312/GBK/CJK 等字符集），解决中文乱码/缺字问题
+
 </td>
 <td width="50%">
 
@@ -44,13 +47,16 @@
 添加、组织游戏，自动获取封面/图标/背景图（支持 Steam、SteamGridDB、网络搜索）
 
 ### 📖 术语表 & 翻译记忆
-自定义翻译术语，AI 自动提取专有名词，按游戏维护翻译上下文
+自定义翻译术语，AI 自动提取专有名词，按游戏维护翻译上下文；支持「禁翻列表」保护特定词汇不被翻译
 
 ### ✏️ 翻译编辑器
 手动编辑和校对翻译结果，支持导入/导出翻译文件
 
+### 📋 BepInEx 日志分析
+读取 BepInEx 运行日志，AI 智能诊断插件错误和兼容性问题
+
 ### ⚙️ 更多功能
-配置可视化编辑 · 插件包导出/导入 · 系统托盘 · 深色/浅色主题 · 镜像加速
+配置可视化编辑 · 插件包导出/导入 · 在线更新 · 系统托盘 · 深色/浅色主题 · 镜像加速
 
 </td>
 </tr>
@@ -60,22 +66,23 @@
 
 | 项目 | 要求 |
 |------|------|
-| **操作系统** | Windows 10 / 11（x64 或 ARM64） |
-| **运行时** | 无需额外安装（发布版为自包含单文件） |
-| **开发环境** | .NET 10 SDK、Node.js 20.19+ 或 22.12+ |
+| **操作系统** | Windows 10 / 11（x64） |
+| **运行时** | 无需额外安装（发布版为自包含应用） |
+| **开发环境** | .NET 10 SDK（Preview）、Node.js 20.19+ 或 22.12+ |
 
 ## 快速开始
 
-### 下载并运行
+### 安装方式
 
-```
-1. 从 Releases 下载对应架构的压缩包（win-x64 或 win-arm64）
-2. 解压到任意目录
-3. 运行 XUnityToolkit-WebUI.exe
-4. 浏览器自动打开 http://127.0.0.1:51821
-```
+**方式一：MSI 安装包（推荐）**
 
-> 应用采用便携式设计，所有数据保存在程序目录下的 `data/` 文件夹中，不写注册表，可随意移动。
+从 [Releases](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases) 下载 `.msi` 安装包，双击安装。程序安装到 `%LocalAppData%\Programs\`，数据存储在 `%AppData%\XUnityToolkit\`，支持在线增量更新。
+
+**方式二：便携版**
+
+从 [Releases](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases) 下载 ZIP 压缩包，解压到任意目录，运行 `XUnityToolkit-WebUI.exe`。所有数据保存在程序目录下的 `data/` 文件夹中，不写注册表，可随意移动。
+
+> 启动后浏览器自动打开 http://127.0.0.1:51821
 
 ### 从源码构建
 
@@ -85,10 +92,12 @@ git clone https://github.com/HanFengRuYue/XUnityToolkit-WebUI.git
 cd XUnityToolkit-WebUI
 
 # 一键发布（下载捆绑资产 + 构建前端 + 发布后端）
-.\build.ps1                    # 同时构建 win-x64 和 win-arm64
-.\build.ps1 -Runtime win-x64  # 仅构建 x64
+.\build.ps1
 
-# 构建产物位于 Release/win-x64/ 或 Release/win-arm64/
+# 跳过资产下载（使用已缓存的）
+.\build.ps1 -SkipDownload
+
+# 构建产物位于 Release/win-x64/
 ```
 
 ### 开发模式
@@ -134,9 +143,13 @@ cd XUnityToolkit-Vue && npm install && npm run dev
 
 如果希望启动游戏时就有完整的翻译，可以在游戏详情页使用 **「资产提取」** 提取游戏内文本，然后点击 **「预翻译」** 进行批量翻译。翻译结果会写入 XUnity 缓存文件，下次启动游戏时直接加载。
 
-### 7. 术语表优化
+### 7. 字体替换（按需）
 
-在游戏的 **「术语表」** 页面可以自定义翻译术语（如角色名、专有名词）。开启自动提取后，AI 会在翻译过程中自动识别和积累专有名词。
+部分游戏使用 TextMesh Pro 字体，可能不包含中文字符。在游戏详情页的 **「字体替换」** 中扫描游戏字体资产，选择替换为内置或自定义的中文 TMP 字体。也可以使用 **「字体生成器」** 从 TTF/OTF 字体生成包含所需字符集的 SDF 字体。
+
+### 8. 术语表优化
+
+在游戏的 **「术语表」** 页面可以自定义翻译术语（如角色名、专有名词）。开启自动提取后，AI 会在翻译过程中自动识别和积累专有名词。还可以设置 **「禁翻列表」**，保护特定词汇（如技能名、物品名）不被翻译。
 
 ## 支持的 AI 翻译服务
 
@@ -158,7 +171,7 @@ cd XUnityToolkit-Vue && npm install && npm run dev
 XUnityToolkit-WebUI/
 ├── XUnityToolkit-WebUI/          # ASP.NET Core 后端
 │   ├── Endpoints/                #   Minimal API 端点定义
-│   ├── Services/                 #   业务逻辑服务
+│   ├── Services/                 #   业务逻辑服务（30+ 个服务）
 │   ├── Models/                   #   数据模型
 │   ├── Hubs/                     #   SignalR Hub（实时通信）
 │   └── Resources/                #   嵌入资源（classdata.tpk）
@@ -168,15 +181,17 @@ XUnityToolkit-WebUI/
 │       ├── components/           #   UI 组件（按功能分组）
 │       ├── composables/          #   组合式函数
 │       ├── stores/               #   Pinia 状态管理
-│       ├── views/                #   页面视图
+│       ├── views/                #   页面视图（12 个页面）
 │       └── router/               #   路由配置
 ├── TranslatorEndpoint/           # XUnity 自定义翻译端点（net35 DLL）
+├── Updater/                      # 在线更新器（AOT 编译，无运行时依赖）
+├── Installer/                    # MSI 安装包（WiX v5）
 ├── bundled/                      # 捆绑资产（构建时下载）
 │   ├── bepinex5/                 #   BepInEx 5（Mono 游戏）
 │   ├── bepinex6/                 #   BepInEx 6 BE（IL2CPP 游戏）
 │   ├── xunity/                   #   XUnity.AutoTranslator
-│   ├── llama/                    #   llama.cpp 预编译二进制
-│   └── fonts/                    #   TextMesh Pro 字体
+│   ├── llama/                    #   llama.cpp 预编译二进制（CUDA / Vulkan / CPU）
+│   └── fonts/                    #   TextMesh Pro 预置字体
 └── build.ps1                     # 一键构建脚本
 ```
 
@@ -189,14 +204,19 @@ XUnityToolkit-WebUI/
 | **实时通信** | SignalR |
 | **构建工具** | Vite 7 |
 | **资产解析** | AssetsTools.NET 3.0.4 |
+| **字体生成** | FreeType（渲染）+ Felzenszwalb EDT（SDF 生成） |
 | **本地推理** | llama.cpp（CUDA / Vulkan / CPU） |
 | **翻译端点** | .NET Framework 3.5 DLL（LLMTranslate.dll） |
+| **安装包** | WiX Toolset v5（MSI） |
+| **在线更新** | 差分下载 + 原子替换（Updater.exe, AOT） |
 | **GPU 检测** | DXGI（主）+ WMI（备） |
 | **数据加密** | DPAPI（Windows 数据保护 API） |
 
 ## 数据存储
 
-应用采用便携式设计，所有运行时数据存储在程序目录下的 `data/` 文件夹中：
+应用支持两种运行模式：
+- **安装模式**（MSI 安装）：数据存储在 `%AppData%\XUnityToolkit\`
+- **便携模式**（ZIP 解压）：数据存储在程序目录下的 `data/`
 
 | 路径 | 说明 |
 |------|------|
@@ -205,9 +225,14 @@ XUnityToolkit-WebUI/
 | `data/local-llm-settings.json` | 本地大模型设置 |
 | `data/backups/` | 游戏备份清单（用于卸载还原） |
 | `data/cache/` | 封面、图标、背景图缓存 |
+| `data/do-not-translate/` | 按游戏维护的禁翻列表 |
+| `data/font-backups/` | 字体替换备份 |
+| `data/custom-fonts/` | 用户上传的自定义字体 |
+| `data/generated-fonts/` | SDF 字体生成器输出 |
 | `data/logs/` | 应用日志 |
 | `data/llama/` | llama.cpp 解压后的可执行文件 |
 | `data/models/` | 下载的本地模型文件 |
+| `data/update-staging/` | 在线更新暂存区 |
 
 ## 构建命令速查
 
@@ -224,10 +249,11 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 # 前端类型检查
 cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
-# 一键发布
-.\build.ps1                        # 完整构建（win-x64 + win-arm64）
-.\build.ps1 -Runtime win-x64      # 仅 x64
-.\build.ps1 -SkipDownload         # 跳过资产下载（使用已缓存的）
+# 一键发布（win-x64）
+.\build.ps1
+
+# 跳过资产下载
+.\build.ps1 -SkipDownload
 ```
 
 ## Star History
