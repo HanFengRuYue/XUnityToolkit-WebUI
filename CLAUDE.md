@@ -16,12 +16,9 @@ dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 # Run backend (serves the web UI on http://127.0.0.1:51821)
 dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
-# One-click release build (self-contained single-file, win-x64 + win-arm64)
-.\build.ps1                    # both architectures
-.\build.ps1 -Runtime win-x64  # x64 only
-
-# Quick local build (skips asset downloads)
-.\build-local.ps1
+# One-click release build (self-contained, win-x64)
+.\build.ps1
+.\build.ps1 -SkipDownload    # skip asset downloads
 
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
 cd XUnityToolkit-Vue && npm run build
@@ -124,11 +121,11 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/{rid}/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - **Versioning:** `build.ps1` auto-generates `1.0.{YYYYMMDDHHmm}` via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
-- **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); **win-x64 only** (ARM64 AOT requires C++ ARM64 build tools); x64 binary runs on ARM64 via emulation; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
+- **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
 - **MSI Installer:** `Installer/Installer.wixproj` (WixToolset.Sdk); per-user install to `%LocalAppData%\Programs\`; `build.ps1` auto-generates `Installer/Generated/HarvestedFiles.wxs` from publish output; MSI version: `{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}` (all segments within MSI limits: major<256, minor<256, build<65536)
 - **MSI + Updater coexistence:** Updater.exe syncs `DisplayVersion`/`InstallDate` in HKCU Uninstall key after delta update via P/Invoke (AOT-safe)
 - **Installed vs portable mode:** `Program.cs` checks `HKCU\Software\XUnityToolkit\DataPath` registry; present → installed mode (`%AppData%\XUnityToolkit\`); absent → portable mode (`{programDir}/data/`)
@@ -140,8 +137,11 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **WiX gotcha — path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
 - **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE38/ICE64/ICE91 false positives; suppress via `<SuppressIces>ICE38;ICE64;ICE91</SuppressIces>`
 - **WiX gotcha — MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
+- **WiX gotcha — v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
+- **WiX gotcha — DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI
+- **WiX UI extension:** `WixToolset.UI.wixext` ships with built-in `zh-CN` localization; only need custom `.wxl` for app-specific strings (launch checkbox text, license path); Chinese text in `.wxs` must use `!(loc.StringId)` to avoid codepage errors
 - **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled.zip`
-- **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API; no hardcoded version pins; llama.cpp prefers CUDA 12.4; copied post-publish
+- **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity auto-detect latest versions via API; llama.cpp pinned to b8354 (update `$llamaTag` in build.ps1/build.yml to change); CUDA 12.4; copied post-publish
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
 - **PowerShell ZIP:** Do NOT use `Compress-Archive` (broken on PowerShell 7.5.5 — module load error); use `[System.IO.Compression.ZipFile]` instead
 - **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
