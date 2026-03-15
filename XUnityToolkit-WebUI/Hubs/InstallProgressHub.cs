@@ -45,4 +45,10 @@ public sealed class InstallProgressHub : Hub
 
     public Task LeaveFontGenerationGroup() =>
         Groups.RemoveFromGroupAsync(Context.ConnectionId, "font-generation");
+
+    public Task JoinUpdateGroup() =>
+        Groups.AddToGroupAsync(Context.ConnectionId, "update");
+
+    public Task LeaveUpdateGroup() =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, "update");
 }
