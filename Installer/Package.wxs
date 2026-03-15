@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="XUnityToolkit-WebUI"
            Manufacturer="XUnityToolkit"
            Version="$(var.MsiVersion)"
@@ -25,6 +26,28 @@
       <ComponentGroupRef Id="HarvestedFiles" />
       <ComponentGroupRef Id="CleanupComponents" />
     </Feature>
+
+    <!-- Install wizard UI (Welcome -> License -> Directory -> Install -> Finish) -->
+    <ui:WixUI Id="WixUI_InstallDir" />
+
+    <!-- Bind directory chooser to INSTALLDIR -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />
+
+    <!-- Launch-after-install checkbox on ExitDialog (default checked) -->
+    <!-- Chinese text via !(loc.) to avoid MSI codepage 1252 WIX0311 error -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchCheckboxText)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[INSTALLDIR]XUnityToolkit-WebUI.exe" />
+    <CustomAction Id="LaunchApplication"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes"
+                  BinaryRef="Wix4UtilCA_X86" />
+
+    <!-- Wire ExitDialog Finish button to launch action when checkbox is checked -->
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
 
   </Package>
 </Wix>
