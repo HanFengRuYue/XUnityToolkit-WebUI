@@ -46,7 +46,7 @@ public sealed class LocalLlmService(
 
     // ── llama.cpp binary constants ──
 
-    public const string LlamaVersion = "b8272";
+    public const string LlamaVersion = "b8354";
 
     // ── Settings persistence ──
 
