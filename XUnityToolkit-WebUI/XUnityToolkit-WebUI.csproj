@@ -31,17 +31,6 @@
     <PackageReference Include="System.Management" Version="9.0.3" />
   </ItemGroup>
 
-  <!-- LibCpp2IL uses dynamic assembly loading (Assembly.Load) internally,
-       which fails when embedded in a single-file bundle. Exclude it so it
-       gets placed alongside the exe as a separate file. -->
-  <Target Name="ExcludeLibCpp2ILFromSingleFile" AfterTargets="ComputeResolvedFilesToPublishList">
-    <ItemGroup>
-      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Filename)' == 'LibCpp2IL'">
-        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-      </ResolvedFileToPublish>
-    </ItemGroup>
-  </Target>
-
   <!-- Copy TMP fonts to output directory during build -->
   <ItemGroup Condition="Exists('..\bundled\fonts')">
     <Content Include="..\bundled\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\fonts\%(Filename)%(Extension)" />
