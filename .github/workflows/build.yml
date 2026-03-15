@@ -592,11 +592,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # upload-artifact@v5 strips common path prefix (Release/)
+          # so files are at components/xxx, not components/Release/xxx
+          ls -la components/
           gh release upload "${{ inputs.release_tag }}" \
-            components/Release/manifest-win-x64.json \
-            components/Release/app-win-x64.zip \
-            components/Release/wwwroot.zip \
-            components/Release/bundled.zip \
+            components/manifest-win-x64.json \
+            components/app-win-x64.zip \
+            components/wwwroot.zip \
+            components/bundled.zip \
             --clobber \
             --repo "${{ github.repository }}"
 
@@ -604,7 +607,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MSI_FILE="components/Release/XUnityToolkit-WebUI-win-x64.msi"
+          MSI_FILE="components/XUnityToolkit-WebUI-win-x64.msi"
           if [ -f "$MSI_FILE" ]; then
             gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber --repo "${{ github.repository }}"
           fi

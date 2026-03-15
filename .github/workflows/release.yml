@@ -16,12 +16,14 @@ jobs:
         ## XUnityToolkit-WebUI ${{ github.ref_name }}
 
         ### Downloads
-        | File | Platform |
-        |------|----------|
-        | `XUnityToolkit-WebUI-win-x64.zip` | Windows x64 |
+        | File | Description |
+        |------|-------------|
+        | `XUnityToolkit-WebUI-win-x64.zip` | Portable (Windows x64) |
+        | `XUnityToolkit-WebUI-win-x64.msi` | MSI Installer (Windows x64) |
 
         ### Installation
-        Download the ZIP, extract, and run `XUnityToolkit-WebUI.exe`.
+        - **Portable:** Download the ZIP, extract, and run `XUnityToolkit-WebUI.exe`.
+        - **Installer:** Download the MSI and double-click to install.
       prerelease: false
     permissions:
       contents: write
