@@ -288,31 +288,6 @@ function formatTimestamp(ts: string) {
   height: calc(100vh - 48px);
 }
 
-/* ===== Header ===== */
-.page-title {
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin-bottom: 0;
-  letter-spacing: -0.03em;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.page-title-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
 /* ===== Stats / Level Pills ===== */
 .stats-row {
   display: flex;
@@ -780,17 +755,6 @@ function formatTimestamp(ts: string) {
 }
 
 @media (max-width: 480px) {
-  .page-title {
-    font-size: 20px;
-    gap: 8px;
-  }
-
-  .page-title-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-  }
-
   .stats-row {
     gap: 6px;
   }

@@ -7,9 +7,11 @@ import {
   RefreshOutlined,
   FileDownloadOutlined,
   AutoFixHighOutlined,
+  TerminalOutlined,
+  SearchOutlined,
 } from '@vicons/material'
-import { bepinexLogApi } from '@/api/games'
-import type { BepInExLogAnalysis } from '@/api/types'
+import { bepinexLogApi, gamesApi } from '@/api/games'
+import type { BepInExLogAnalysis, Game } from '@/api/types'
 import { marked } from 'marked'
 
 defineOptions({ name: 'BepInExLogView' })
@@ -19,6 +21,7 @@ const router = useRouter()
 const message = useMessage()
 
 const gameId = computed(() => route.params.id as string)
+const game = ref<Game | null>(null)
 
 // State
 const logContent = ref('')
@@ -175,148 +178,157 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    game.value = await gamesApi.get(gameId.value)
+  } catch { /* ignore */ }
   loadLog()
 })
 </script>
 
 <template>
-  <div class="log-viewer-page">
-    <!-- Header -->
-    <div class="page-header">
-      <NButton text @click="router.back()">
-        <template #icon><NIcon :size="20"><ArrowBackOutlined /></NIcon></template>
-      </NButton>
-      <h1 class="page-title">BepInEx 日志</h1>
+  <div class="sub-page">
+    <!-- Back navigation -->
+    <div class="sub-page-header" style="animation-delay: 0s">
+      <button class="back-button" @click="router.push(`/games/${gameId}`)">
+        <NIcon :size="20"><ArrowBackOutlined /></NIcon>
+        <span>{{ game?.name ?? '...' }}</span>
+      </button>
+    </div>
+
+    <h1 class="page-title" style="animation-delay: 0.05s">
+      <span class="page-title-icon">
+        <NIcon :size="24"><TerminalOutlined /></NIcon>
+      </span>
+      BepInEx 日志
       <span v-if="fileSize" class="file-meta">
         {{ formatFileSize(fileSize) }}
         <template v-if="lastModified"> · {{ new Date(lastModified).toLocaleString() }}</template>
       </span>
-    </div>
+    </h1>
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <NInput
-        v-model:value="searchQuery"
-        placeholder="搜索日志..."
-        clearable
-        size="small"
-        class="search-input"
-      />
-      <NSelect
-        v-model:value="levelFilter"
-        :options="levelOptions"
-        size="small"
-        class="level-select"
-      />
-      <NButton size="small" @click="loadLog" :loading="loading">
-        <template #icon><NIcon><RefreshOutlined /></NIcon></template>
-        刷新
-      </NButton>
-      <NButton size="small" @click="handleExport">
-        <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
-        导出
-      </NButton>
-      <NButton size="small" type="primary" @click="handleAnalyze" :loading="analyzing">
-        <template #icon><NIcon><AutoFixHighOutlined /></NIcon></template>
-        AI 分析
-      </NButton>
-    </div>
+    <!-- Log Viewer Card -->
+    <div class="section-card" style="animation-delay: 0.1s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><SearchOutlined /></NIcon>
+          </span>
+          日志查看
+        </h2>
+        <div class="header-actions">
+          <NButton size="small" @click="loadLog" :loading="loading">
+            <template #icon><NIcon><RefreshOutlined /></NIcon></template>
+            刷新
+          </NButton>
+          <NButton size="small" @click="handleExport" :disabled="!logContent">
+            <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
+            导出
+          </NButton>
+          <NButton size="small" type="primary" @click="handleAnalyze" :loading="analyzing" :disabled="!logContent">
+            <template #icon><NIcon><AutoFixHighOutlined /></NIcon></template>
+            AI 分析
+          </NButton>
+        </div>
+      </div>
 
-    <!-- Log Content -->
-    <div v-if="loading && !logContent" class="loading-container">
-      <NSpin size="large" />
-    </div>
-    <div v-else-if="!logContent && !loading" class="empty-state">
-      BepInEx 日志文件为空或不存在。请确认游戏已运行过至少一次。
-    </div>
-    <div v-else class="log-content">
-      <div class="log-lines">
-        <div
-          v-for="(line, idx) in filteredLines"
-          :key="idx"
-          class="log-line"
-          :class="levelClass(line.level)"
-          v-html="highlightText(line.text)"
+      <!-- Search & Filter -->
+      <div class="filter-row">
+        <NInput
+          v-model:value="searchQuery"
+          placeholder="搜索日志..."
+          clearable
+          size="small"
+          class="search-input"
+        >
+          <template #prefix><NIcon :size="16"><SearchOutlined /></NIcon></template>
+        </NInput>
+        <NSelect
+          v-model:value="levelFilter"
+          :options="levelOptions"
+          size="small"
+          class="level-select"
         />
       </div>
-      <div v-if="filteredLines.length === 0 && logContent" class="empty-filter">
-        没有匹配的日志条目
+
+      <!-- Log Content -->
+      <div v-if="loading && !logContent" class="log-loading">
+        <NSpin size="large" />
+      </div>
+      <div v-else-if="!logContent && !loading" class="log-empty">
+        BepInEx 日志文件为空或不存在。请确认游戏已运行过至少一次。
+      </div>
+      <div v-else class="log-content">
+        <div class="log-lines">
+          <div
+            v-for="(line, idx) in filteredLines"
+            :key="idx"
+            class="log-line"
+            :class="levelClass(line.level)"
+            v-html="highlightText(line.text)"
+          />
+        </div>
+        <div v-if="filteredLines.length === 0 && logContent" class="log-empty">
+          没有匹配的日志条目
+        </div>
       </div>
     </div>
 
-    <!-- AI Analysis Result -->
-    <div v-if="analyzing" class="analysis-section">
-      <div class="analysis-header">
-        <h2 class="section-title">AI 诊断分析</h2>
-      </div>
-      <div class="analysis-loading">
-        <NSpin size="medium" />
-        <span>正在分析日志...</span>
-      </div>
-    </div>
-    <div v-else-if="analysisResult" class="analysis-section">
-      <div class="analysis-header">
-        <h2 class="section-title">AI 诊断分析</h2>
-        <span class="analysis-meta">
+    <!-- AI Analysis Card -->
+    <div v-if="analyzing || analysisResult" class="section-card" style="animation-delay: 0.15s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
+          </span>
+          AI 诊断分析
+        </h2>
+        <span v-if="analysisResult" class="analysis-meta">
           由 {{ analysisResult.endpointName }} 生成 · {{ new Date(analysisResult.analyzedAt).toLocaleString() }}
         </span>
       </div>
-      <div class="analysis-content markdown-body" v-html="renderMarkdown(analysisResult.report)" />
+
+      <div v-if="analyzing" class="analysis-loading">
+        <NSpin size="medium" />
+        <span>正在分析日志...</span>
+      </div>
+      <div v-else-if="analysisResult" class="analysis-content markdown-body" v-html="renderMarkdown(analysisResult.report)" />
     </div>
   </div>
 </template>
 
 <style scoped>
-.log-viewer-page {
-  max-width: 1200px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-}
-
 .file-meta {
   font-size: 13px;
+  font-weight: 400;
   color: var(--text-3);
   margin-left: auto;
 }
 
-.toolbar {
+.filter-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
 
 .search-input {
-  width: 240px;
+  flex: 1;
+  max-width: 280px;
 }
 
 .level-select {
   width: 120px;
 }
 
-.loading-container {
+.log-loading {
   display: flex;
   justify-content: center;
   align-items: center;
   min-height: 200px;
 }
 
-.empty-state,
-.empty-filter {
+.log-empty {
   text-align: center;
   padding: 48px 24px;
   color: var(--text-3);
@@ -324,14 +336,14 @@ onMounted(() => {
 }
 
 .log-content {
-  background: var(--bg-card);
+  background: var(--bg-subtle);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: auto;
   max-height: 600px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .log-lines {
@@ -345,11 +357,11 @@ onMounted(() => {
 }
 
 .log-line.log-error {
-  color: #e74c3c;
+  color: var(--danger);
 }
 
 .log-line.log-warning {
-  color: #e6a23c;
+  color: var(--warning);
 }
 
 .log-line.log-info {
@@ -363,29 +375,7 @@ onMounted(() => {
   padding: 0 1px;
 }
 
-/* Analysis section */
-.analysis-section {
-  margin-top: 20px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 20px;
-}
-
-.analysis-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-}
-
+/* Analysis */
 .analysis-meta {
   font-size: 12px;
   color: var(--text-3);
@@ -439,6 +429,7 @@ onMounted(() => {
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
+  font-family: var(--font-mono);
 }
 
 .markdown-body :deep(pre) {
@@ -446,6 +437,11 @@ onMounted(() => {
   padding: 12px 16px;
   border-radius: 6px;
   overflow-x: auto;
+}
+
+.markdown-body :deep(pre) :deep(code) {
+  background: none;
+  padding: 0;
 }
 
 .markdown-body :deep(p) {
@@ -458,12 +454,15 @@ onMounted(() => {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .toolbar {
+  .filter-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .search-input,
+  .search-input {
+    max-width: none;
+  }
+
   .level-select {
     width: 100%;
   }

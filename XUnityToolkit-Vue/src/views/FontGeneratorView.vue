@@ -670,83 +670,11 @@ onBeforeUnmount(async () => {
   max-width: 900px;
 }
 
-.page-title {
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--text-1);
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-}
-
-.page-title-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
 .page-subtitle {
   font-size: 14px;
   color: var(--text-3);
   margin: -12px 0 0 0;
   animation: slideUp 0.5s var(--ease-out) backwards;
-}
-
-/* Section Card */
-.section-card {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
-  box-shadow: var(--shadow-card-rest);
-}
-
-.section-card:hover {
-  border-color: var(--border-hover);
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
 }
 
 /* Upload */

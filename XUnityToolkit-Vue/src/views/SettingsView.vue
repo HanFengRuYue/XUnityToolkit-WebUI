@@ -355,84 +355,6 @@ onMounted(() => {
   animation: fadeIn 0.3s ease;
 }
 
-.page-title {
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin-bottom: 0;
-  letter-spacing: -0.03em;
-  animation: slideUp 0.4s var(--ease-out) backwards;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.page-title-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-/* ===== Section Card ===== */
-.section-card {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
-  box-shadow: var(--shadow-card-rest);
-}
-
-.section-card:hover {
-  border-color: var(--border-hover);
-}
-
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.section-icon.danger {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--danger);
-}
-
 .about-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -626,10 +548,6 @@ onMounted(() => {
 
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .section-card {
-    padding: 16px;
-  }
-
   .danger-body {
     padding: 16px;
   }
@@ -641,22 +559,6 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
-  .page-title {
-    font-size: 20px;
-    gap: 8px;
-  }
-
-  .page-title-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-  }
-
-  .section-card {
-    padding: 14px;
-    border-radius: var(--radius-md);
-  }
-
   .about-grid {
     grid-template-columns: 1fr;
   }
