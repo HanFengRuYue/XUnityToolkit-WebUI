@@ -14,6 +14,7 @@ public sealed class UpdateService(
     IHttpClientFactory httpClientFactory,
     IHubContext<InstallProgressHub> hubContext,
     AppSettingsService settingsService,
+    SystemTrayService trayService,
     AppDataPaths paths,
     IHostApplicationLifetime lifetime,
     ILogger<UpdateService> logger)
@@ -288,6 +289,7 @@ public sealed class UpdateService(
                 }, ct);
                 logger.LogInformation("发现新版本 {Version}，需要下载 {Packages}",
                     remoteVersion, string.Join(", ", changedPackages));
+                trayService.ShowNotification("XUnityToolkit", $"发现新版本 v{remoteVersion} 可用");
             }
             else
             {
@@ -454,6 +456,7 @@ public sealed class UpdateService(
             await BroadcastStatus();
 
             logger.LogInformation("更新下载完成，等待应用");
+            trayService.ShowNotification("XUnityToolkit", "更新已就绪，请在设置中重启更新");
         }
         catch (OperationCanceledException)
         {
