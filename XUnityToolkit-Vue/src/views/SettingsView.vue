@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
   NSelect,
   NIcon,
+  NProgress,
+  NSpin,
+  NSwitch,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -21,6 +24,7 @@ import {
   WarningAmberOutlined,
   ImageOutlined,
   ColorLensOutlined,
+  SystemUpdateAltOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
@@ -28,12 +32,14 @@ import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 import { useAutoSave } from '@/composables/useAutoSave'
+import { useUpdateStore } from '@/stores/update'
 
 defineOptions({ name: 'SettingsView' })
 
 const message = useMessage()
 const dialog = useDialog()
 const themeStore = useThemeStore()
+const updateStore = useUpdateStore()
 
 // Settings
 const settings = ref<AppSettings>({
@@ -59,6 +65,7 @@ const settings = ref<AppSettings>({
   libraryCardSize: 'medium',
   libraryGap: 'normal',
   libraryShowLabels: true,
+  receivePreReleaseUpdates: false,
 })
 
 const themeOptions = [
@@ -152,6 +159,11 @@ function handleReset() {
 onMounted(() => {
   loadSettings()
   loadVersion()
+  updateStore.connectHub()
+})
+
+onUnmounted(() => {
+  updateStore.disconnectHub()
 })
 </script>
 
@@ -274,17 +286,19 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- About (full width) -->
+    <!-- Update -->
     <div class="section-card" style="animation-delay: 0.25s">
       <div class="section-header">
         <h2 class="section-title">
-          <span class="section-icon about">
-            <NIcon :size="16"><InfoOutlined /></NIcon>
+          <span class="section-icon">
+            <NIcon :size="16"><SystemUpdateAltOutlined /></NIcon>
           </span>
-          关于
+          更新
         </h2>
       </div>
-      <div class="about-grid">
+
+      <!-- Version & Check Button Row -->
+      <div class="info-row" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
         <div class="info-card">
           <div class="info-card-icon version">
             <NIcon :size="18"><LocalOfferOutlined /></NIcon>
@@ -294,6 +308,121 @@ onMounted(() => {
             <span class="info-value mono">v{{ shortVersion }}</span>
           </div>
         </div>
+
+        <div class="update-status">
+          <template v-if="updateStore.state === 'none'">
+            <span class="status-ok">&#10003; 已是最新版本</span>
+          </template>
+          <template v-else-if="updateStore.state === 'checking'">
+            <NSpin :size="14" />
+            <span>检查中...</span>
+          </template>
+          <template v-else-if="updateStore.isUpdateAvailable">
+            <span class="status-update">新版本 v{{ updateStore.availableInfo?.version }} 可用</span>
+          </template>
+          <template v-else-if="updateStore.isReady">
+            <span class="status-ready">更新已就绪</span>
+          </template>
+          <template v-else-if="updateStore.hasError">
+            <span class="status-error">更新出错</span>
+          </template>
+        </div>
+
+        <NButton
+          size="small"
+          :loading="updateStore.state === 'checking'"
+          :disabled="updateStore.isDownloading"
+          @click="updateStore.checkForUpdate()"
+        >
+          检查更新
+        </NButton>
+      </div>
+
+      <!-- Update Available Details -->
+      <template v-if="updateStore.isUpdateAvailable && updateStore.availableInfo">
+        <div class="update-details">
+          <div class="update-header">
+            <span class="update-title">更新可用: v{{ updateStore.availableInfo.version }}</span>
+          </div>
+
+          <div v-if="updateStore.availableInfo.changelog" class="update-changelog">
+            <div class="changelog-label">更新内容:</div>
+            <div class="changelog-content">{{ updateStore.availableInfo.changelog }}</div>
+          </div>
+
+          <div class="update-packages">
+            <div class="packages-label">需要下载:</div>
+            <div v-for="pkg in updateStore.availableInfo.changedPackages" :key="pkg" class="package-item">
+              &#9679; {{ pkg }}.zip
+            </div>
+            <div class="packages-total">
+              总计: {{ updateStore.formatBytes(updateStore.availableInfo.downloadSize) }}
+            </div>
+          </div>
+
+          <div class="update-actions">
+            <NButton type="primary" @click="updateStore.downloadUpdate()">开始更新</NButton>
+            <NButton @click="updateStore.dismissUpdate()">暂不更新</NButton>
+          </div>
+        </div>
+      </template>
+
+      <!-- Download Progress -->
+      <template v-if="updateStore.isDownloading">
+        <div class="update-progress">
+          <div class="progress-header">
+            正在下载更新
+            <span v-if="updateStore.currentPackage">: {{ updateStore.currentPackage }}</span>
+          </div>
+          <NProgress
+            type="line"
+            :percentage="Math.round(updateStore.progress)"
+            :show-indicator="true"
+          />
+          <div class="progress-detail">
+            {{ updateStore.formatBytes(updateStore.downloadedBytes) }} / {{ updateStore.formatBytes(updateStore.totalBytes) }}
+          </div>
+          <NButton size="small" @click="updateStore.cancelDownload()">取消</NButton>
+        </div>
+      </template>
+
+      <!-- Ready to Apply -->
+      <template v-if="updateStore.isReady">
+        <div class="update-ready">
+          <span>更新已下载完成，需要重启应用以完成更新</span>
+          <NButton type="primary" @click="updateStore.applyUpdate()">立即重启更新</NButton>
+        </div>
+      </template>
+
+      <!-- Error -->
+      <template v-if="updateStore.hasError">
+        <div class="update-error">
+          <span>{{ updateStore.error || '更新过程中出现错误' }}</span>
+          <NButton size="small" @click="updateStore.checkForUpdate()">重试</NButton>
+        </div>
+      </template>
+
+      <!-- Prerelease Toggle -->
+      <div class="setting-row" style="margin-top: 12px;">
+        <div class="setting-info">
+          <span class="setting-label">接收预发布更新</span>
+          <span class="setting-description">接收尚未正式发布的测试版本，可能包含新功能但稳定性较低</span>
+        </div>
+        <NSwitch v-model:value="settings.receivePreReleaseUpdates" />
+      </div>
+    </div>
+
+    <!-- About (full width) -->
+    <div class="section-card" style="animation-delay: 0.3s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon about">
+            <NIcon :size="16"><InfoOutlined /></NIcon>
+          </span>
+          关于
+        </h2>
+      </div>
+      <div class="about-grid">
         <div class="info-card">
           <div class="info-card-icon tech">
             <NIcon :size="18"><LayersOutlined /></NIcon>
@@ -357,7 +486,7 @@ onMounted(() => {
 
 .about-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
 }
 
@@ -534,6 +663,68 @@ onMounted(() => {
   font-size: 12px;
   color: var(--text-3);
 }
+
+/* ===== Update Section ===== */
+.update-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.status-ok { color: var(--success-color, #18a058); }
+.status-update { color: var(--accent); font-weight: 500; }
+.status-ready { color: var(--accent); font-weight: 500; }
+.status-error { color: var(--error-color, #d03050); }
+
+.update-details {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+.update-header { margin-bottom: 12px; }
+.update-title { font-weight: 600; font-size: 14px; }
+.update-changelog { margin-bottom: 12px; }
+.changelog-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.changelog-content { font-size: 13px; white-space: pre-line; }
+.packages-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.package-item { font-size: 13px; font-family: monospace; }
+.packages-total { font-size: 13px; font-weight: 500; margin-top: 4px; }
+.update-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+.update-progress {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+}
+.progress-header { font-size: 14px; margin-bottom: 8px; }
+.progress-detail { font-size: 12px; color: var(--text-secondary); margin-top: 4px; margin-bottom: 8px; }
+
+.update-ready, .update-error {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.update-error { border-color: var(--error-color, #d03050); }
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.setting-info { flex: 1; }
+.setting-label { font-size: 14px; font-weight: 500; display: block; }
+.setting-description { font-size: 12px; color: var(--text-secondary); display: block; margin-top: 2px; }
 
 /* ===== About Link ===== */
 .about-link {
