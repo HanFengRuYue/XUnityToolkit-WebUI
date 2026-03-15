@@ -305,9 +305,10 @@ jobs:
 
       # ── Build Updater ──
 
-      - name: Build Updater (AOT)
+      - name: Build Updater (AOT, win-x64 only)
+        if: matrix.rid == 'win-x64'
         run: |
-          dotnet publish Updater/Updater.csproj -c Release -r ${{ matrix.rid }} /p:PublishAot=true
+          dotnet publish Updater/Updater.csproj -c Release -r win-x64 /p:PublishAot=true
 
       # ── Publish backend ──
 
@@ -344,7 +345,7 @@ jobs:
 
       - name: Copy Updater.exe
         run: |
-          cp "Updater/bin/Release/net10.0/${{ matrix.rid }}/publish/Updater.exe" "Release/${{ matrix.rid }}/"
+          cp "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe" "Release/${{ matrix.rid }}/"
 
       - name: Generate update manifest
         shell: pwsh
