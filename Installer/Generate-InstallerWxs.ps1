@@ -4,6 +4,9 @@ function Generate-InstallerWxs {
         [string]$OutputFile
     )
 
+    # Resolve to absolute path so FullName.Substring works correctly
+    $ReleaseDir = (Resolve-Path $ReleaseDir).Path
+
     Write-Host "  Generating $OutputFile from $ReleaseDir..." -ForegroundColor DarkGray
 
     $outputDir = Split-Path $OutputFile -Parent

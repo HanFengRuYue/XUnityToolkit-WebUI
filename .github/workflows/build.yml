@@ -434,20 +434,19 @@ jobs:
 
           $wixPlatform = if ($rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
 
+          # Do NOT set OutputPath — it interferes with WiX file resolution
           dotnet build $installerProject `
             -c Release `
             -p:Platform=$wixPlatform `
             -p:InstallerPlatform=$wixPlatform `
-            -p:OutputPath="$outputDir/" `
-            -p:PublishDir="$outputDir/" `
+            -p:AppPublishDir="$outputDir/" `
             -p:MsiVersion="$msiVersion"
 
           if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
 
-          # Clean up WiX build artifacts from release directory
-          Remove-Item "$outputDir/*.wixpdb" -Force -ErrorAction SilentlyContinue
-
-          $msiFile = Get-ChildItem "$outputDir/*.msi" | Select-Object -First 1
+          # Find MSI in WiX default output location
+          $wixOutputDir = "Installer/bin/$wixPlatform/Release"
+          $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msiFile) {
             Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-$rid.msi" -Force
             Write-Host "MSI built: Release/XUnityToolkit-WebUI-$rid.msi"

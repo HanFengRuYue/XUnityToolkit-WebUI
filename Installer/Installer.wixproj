@@ -2,8 +2,15 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <InstallerPlatform Condition="'$(Platform)' == ''">x64</InstallerPlatform>
-    <!-- Pass MSBuild properties as WiX preprocessor variables -->
-    <DefineConstants>PublishDir=$(PublishDir);MsiVersion=$(MsiVersion)</DefineConstants>
+    <!-- Suppress per-user install ICE validations (valid pattern, overly strict checks) -->
+    <!-- ICE38: file KeyPath in user profile; ICE64: user profile dir not in RemoveFile; ICE91: per-user dir warning -->
+    <SuppressIces>ICE38;ICE64;ICE91</SuppressIces>
+    <!-- AppPublishDir: path to publish output (passed via -p:AppPublishDir=...) -->
+    <!-- Resolve relative paths against repo root (parent of .wixproj directory) -->
+    <AppPublishDirAbs Condition="'$(AppPublishDir)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\$(AppPublishDir)'))</AppPublishDirAbs>
+    <AppPublishDirAbs Condition="'$(AppPublishDir)' == ''">$(MSBuildThisFileDirectory)</AppPublishDirAbs>
+    <!-- Pass as WiX preprocessor variables -->
+    <DefineConstants>PublishDir=$(AppPublishDirAbs);MsiVersion=$(MsiVersion)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
