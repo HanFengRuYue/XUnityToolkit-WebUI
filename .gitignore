@@ -4,6 +4,7 @@ obj/
 *.user
 *.suo
 .vs/
+.superpowers/
 
 # Vue / Node
 XUnityToolkit-Vue/node_modules/

@@ -247,22 +247,34 @@ public static class FontGenerationEndpoints
             return Results.Ok(ApiResult<FontGenerationReport>.Ok(report!));
         });
 
-        group.MapPost("/use-as-custom/{gameId}", (string gameId, UseAsCustomRequest body,
-            AppDataPaths appDataPaths, GameLibraryService library) =>
+        group.MapPost("/install-tmp-font/{gameId}", async (string gameId, UseAsCustomRequest body,
+            AppDataPaths appDataPaths, GameLibraryService library, ConfigurationService configService,
+            CancellationToken ct) =>
         {
             var safeName = Path.GetFileName(body.FileName);
             var srcPath = Path.Combine(appDataPaths.GeneratedFontsDirectory, safeName);
             if (!File.Exists(srcPath))
                 return Results.NotFound(ApiResult.Fail("生成的字体文件不存在"));
 
-            var dstDir = appDataPaths.GetCustomFontDirectory(gameId);
-            Directory.CreateDirectory(dstDir);
+            var game = await library.GetByIdAsync(gameId);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
-            // Clear existing custom fonts
-            foreach (var existing in Directory.GetFiles(dstDir))
-                File.Delete(existing);
+            if (game.InstallState != InstallState.FullyInstalled)
+                return Results.BadRequest(ApiResult.Fail("请先安装 BepInEx 和 XUnity.AutoTranslator。"));
 
-            File.Copy(srcPath, Path.Combine(dstDir, safeName));
+            // Install to BepInEx/Font/SourceHanSans
+            var destPath = Path.Combine(game.GamePath, "BepInEx", "Font", TmpFontService.FontFileName);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+            File.Copy(srcPath, destPath, overwrite: true);
+
+            // Patch config
+            await configService.PatchSectionAsync(game.GamePath, "Behaviour",
+                new Dictionary<string, string>
+                {
+                    ["FallbackFontTextMeshPro"] = TmpFontService.ConfigValue
+                }, ct);
+
             return Results.Ok(ApiResult.Ok());
         });
     }

@@ -275,7 +275,7 @@ export interface FailedFontEntry {
 }
 
 export interface FontReplacementProgress {
-  phase: 'scanning' | 'replacing' | 'clearing-crc' | 'completed'
+  phase: 'loading' | 'scanning' | 'replacing' | 'saving' | 'clearing-crc' | 'completed'
   current: number
   total: number
   currentFile?: string

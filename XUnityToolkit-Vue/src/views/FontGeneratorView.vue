@@ -228,13 +228,17 @@ async function deleteFont(fileName: string) {
   }
 }
 
-async function useAsCustom(fileName: string, gameId: string) {
+async function installTmpFont(fileName: string, gameId: string) {
   try {
-    await api.post(`/api/font-generation/use-as-custom/${gameId}`, { fileName })
-    message.success('已设为自定义字体')
+    await api.post(`/api/font-generation/install-tmp-font/${gameId}`, { fileName })
+    message.success('已安装为 XUnity TMP 字体')
   } catch (e: any) {
-    message.error(e.message || '设置失败')
+    message.error(e.message || '安装失败')
   }
+}
+
+function clearUploadedFont() {
+  uploadedFont.value = null
 }
 
 async function loadHistory() {
@@ -359,58 +363,60 @@ onBeforeUnmount(async () => {
       将 TTF/OTF 字体转换为 Unity TextMeshPro 字体资产，无需安装 Unity 引擎
     </p>
 
-    <!-- Upload Card -->
+    <!-- Upload + Settings Card (merged) -->
     <div class="section-card" style="animation-delay: 0.05s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><UploadFileOutlined /></NIcon>
           </span>
-          字体上传
+          字体与设置
         </h2>
       </div>
-      <NUpload
-        accept=".ttf,.otf"
-        :max="1"
-        :custom-request="({ file }) => handleUpload({ file: file as any })"
-        :show-file-list="false"
-        :disabled="isGenerating"
-        directory-dnd
-      >
-        <div class="upload-area">
-          <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
-          <p class="upload-text">拖拽或点击上传 TTF / OTF 字体文件</p>
-          <p class="upload-hint">最大 50MB</p>
+      <div class="upload-settings-grid">
+        <div class="upload-column">
+          <NUpload
+            v-if="!uploadedFont"
+            accept=".ttf,.otf"
+            :max="1"
+            :custom-request="({ file }) => handleUpload({ file: file as any })"
+            :show-file-list="false"
+            :disabled="isGenerating"
+            directory-dnd
+          >
+            <div class="upload-area">
+              <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
+              <p class="upload-text">拖拽或点击上传</p>
+              <p class="upload-hint">TTF / OTF · 最大 50MB</p>
+            </div>
+          </NUpload>
+          <div v-else class="upload-result">
+            <div class="upload-result-info">
+              <NIcon :size="20" color="var(--accent)"><FontDownloadOutlined /></NIcon>
+              <div>
+                <div class="upload-font-name">{{ uploadedFont.fontName }}</div>
+                <div class="upload-file-size">{{ formatFileSize(uploadedFont.fileSize) }}</div>
+              </div>
+            </div>
+            <NButton size="small" quaternary type="error" @click="clearUploadedFont" :disabled="isGenerating">
+              <template #icon><NIcon :size="14"><DeleteOutlined /></NIcon></template>
+              删除
+            </NButton>
+          </div>
         </div>
-      </NUpload>
-      <div v-if="uploadedFont" class="upload-result">
-        <span class="upload-font-name">{{ uploadedFont.fontName }}</span>
-        <span class="upload-file-size">{{ formatFileSize(uploadedFont.fileSize) }}</span>
-      </div>
-    </div>
-
-    <!-- Settings Card -->
-    <div class="section-card" style="animation-delay: 0.1s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><SettingsOutlined /></NIcon>
-          </span>
-          生成设置
-        </h2>
-      </div>
-      <div class="settings-form">
-        <div class="form-row">
-          <label class="form-label">目标 Unity 版本</label>
-          <NSelect v-model:value="unityVersion" :options="versionOptions" :disabled="isGenerating" />
-        </div>
-        <div class="form-row">
-          <label class="form-label">采样大小</label>
-          <NSelect v-model:value="samplingSize" :options="samplingOptions" :disabled="isGenerating" />
-        </div>
-        <div class="form-row">
-          <label class="form-label">Atlas 尺寸</label>
-          <NSelect v-model:value="atlasSize" :options="atlasOptions" :disabled="isGenerating" />
+        <div class="settings-column">
+          <div class="form-row">
+            <label class="form-label">Unity 版本</label>
+            <NSelect v-model:value="unityVersion" :options="versionOptions" :disabled="isGenerating" size="small" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">采样大小</label>
+            <NSelect v-model:value="samplingSize" :options="samplingOptions" :disabled="isGenerating" size="small" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Atlas 尺寸</label>
+            <NSelect v-model:value="atlasSize" :options="atlasOptions" :disabled="isGenerating" size="small" />
+          </div>
         </div>
       </div>
     </div>
@@ -641,10 +647,10 @@ onBeforeUnmount(async () => {
             <NSelect
               v-if="games.length > 0"
               size="small"
-              placeholder="用于字体替换"
+              placeholder="安装 TMP 字体"
               :options="games.map(g => ({ label: g.name, value: g.id }))"
               style="width: 160px"
-              @update:value="(gameId: string) => useAsCustom(font.fileName, gameId)"
+              @update:value="(gameId: string) => installTmpFont(font.fileName, gameId)"
             />
             <NPopconfirm @positive-click="deleteFont(font.fileName)">
               <template #trigger>
@@ -677,13 +683,32 @@ onBeforeUnmount(async () => {
   animation: slideUp 0.5s var(--ease-out) backwards;
 }
 
+/* Upload + Settings Grid */
+.upload-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.upload-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* Upload */
 .upload-area {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px;
+  padding: 24px 16px;
   border: 2px dashed var(--border);
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -696,7 +721,7 @@ onBeforeUnmount(async () => {
 }
 
 .upload-text {
-  margin: 12px 0 4px;
+  margin: 8px 0 2px;
   font-size: 14px;
   color: var(--text-2);
 }
@@ -710,40 +735,40 @@ onBeforeUnmount(async () => {
 .upload-result {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-  padding: 10px 14px;
-  background: var(--bg-subtle);
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.upload-result-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .upload-font-name {
   font-weight: 600;
+  font-size: 14px;
   color: var(--text-1);
 }
 
 .upload-file-size {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-3);
 }
 
 /* Settings */
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
 .form-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .form-label {
-  min-width: 120px;
-  font-size: 14px;
+  min-width: 80px;
+  font-size: 13px;
   color: var(--text-2);
   flex-shrink: 0;
 }
@@ -887,6 +912,9 @@ onBeforeUnmount(async () => {
   .font-generator-page {
     padding: 20px 20px;
   }
+  .upload-settings-grid {
+    grid-template-columns: 1fr;
+  }
   .form-row {
     flex-direction: column;
     align-items: stretch;
@@ -908,6 +936,13 @@ onBeforeUnmount(async () => {
 @media (max-width: 480px) {
   .font-generator-page {
     padding: 16px 12px;
+    gap: 14px;
+  }
+  .upload-area {
+    padding: 16px 12px;
+  }
+  .font-item :deep(.n-space) {
+    flex-wrap: wrap;
   }
 }
 

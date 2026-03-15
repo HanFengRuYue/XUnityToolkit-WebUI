@@ -28,6 +28,15 @@ const replacing = ref(false)
 const restoring = ref(false)
 const progress = ref<FontReplacementProgress | null>(null)
 
+const phaseLabels: Record<string, string> = {
+  loading: '加载资源',
+  scanning: '扫描中',
+  replacing: '替换中',
+  saving: '写入文件',
+  'clearing-crc': '清除 CRC',
+  completed: '已完成'
+}
+
 // SignalR connection
 const connection = new HubConnectionBuilder()
   .withUrl('/hubs/install')
@@ -42,7 +51,7 @@ function formatSize(bytes: number): string {
 
 const columns = computed<DataTableColumns<FontInfo>>(() => [
   { type: 'selection', disabled: (row: FontInfo) => !row.isSupported },
-  { title: '字体名称', key: 'name', ellipsis: { tooltip: true } },
+  { title: '字体名称', key: 'name', minWidth: 150, ellipsis: { tooltip: true } },
   {
     title: '类型', key: 'fontType', width: 80,
     render: (row) => h(NTag, { size: 'small', bordered: false, type: row.fontType === 'TMP' ? 'info' : 'success' }, { default: () => row.fontType })
@@ -328,7 +337,7 @@ onBeforeUnmount(async () => {
           :status="'default'"
         />
         <span class="progress-text">
-          {{ progress.phase === 'scanning' ? '扫描中' : progress.phase === 'replacing' ? '替换中' : '清除 CRC' }}
+          {{ phaseLabels[progress.phase] || progress.phase }}
           {{ progress.currentFile ? `· ${progress.currentFile}` : '' }}
           ({{ progress.current }}/{{ progress.total }})
         </span>
@@ -455,6 +464,19 @@ onBeforeUnmount(async () => {
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+  }
+  .status-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .status-row {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  :deep(.n-data-table) {
+    font-size: 12px;
   }
 }
 </style>
