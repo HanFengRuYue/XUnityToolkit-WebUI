@@ -47,6 +47,73 @@ function Invoke-WithRetry {
     }
 }
 
+function Generate-Manifest {
+    param([string]$ReleaseDir, [string]$Rid, [string]$Version)
+
+    $manifest = @{
+        version = $Version
+        rid = $Rid
+        files = @{}
+    }
+
+    $basePath = (Resolve-Path $ReleaseDir).Path
+    Get-ChildItem -Path $ReleaseDir -Recurse -File | ForEach-Object {
+        $relativePath = $_.FullName.Substring($basePath.Length + 1).Replace('\', '/')
+
+        # Skip data/ and appsettings
+        if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
+
+        $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+        $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
+                   elseif ($relativePath -match '^bundled/') { "bundled" }
+                   else { "app" }
+
+        $manifest.files[$relativePath] = @{
+            hash = "sha256:$hash"
+            size = $_.Length
+            package = $package
+        }
+    }
+
+    $manifestPath = Join-Path (Split-Path $ReleaseDir) "manifest-$Rid.json"
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding utf8
+    Write-Host "  Generated manifest: $manifestPath" -ForegroundColor Green
+}
+
+function Create-ComponentZips {
+    param([string]$ReleaseDir, [string]$Rid)
+
+    $outputDir = Split-Path $ReleaseDir
+
+    # app.zip — root-level exe, dll (exclude bundled/, wwwroot/, data/, appsettings*)
+    $appFiles = Get-ChildItem -Path $ReleaseDir -File | Where-Object {
+        $_.Name -notmatch '^appsettings'
+    }
+    $appZip = Join-Path $outputDir "app-$Rid.zip"
+    if (Test-Path $appZip) { Remove-Item $appZip }
+    Compress-Archive -Path $appFiles.FullName -DestinationPath $appZip
+    Write-Host "  Created: $appZip" -ForegroundColor Green
+
+    # wwwroot.zip — use wildcard to include contents directly
+    $wwwrootDir = Join-Path $ReleaseDir "wwwroot"
+    if (Test-Path $wwwrootDir) {
+        $wwwrootZip = Join-Path $outputDir "wwwroot.zip"
+        if (Test-Path $wwwrootZip) { Remove-Item $wwwrootZip }
+        # Use Push-Location so wwwroot entries are wwwroot/...
+        Compress-Archive -Path $wwwrootDir -DestinationPath $wwwrootZip
+        Write-Host "  Created: $wwwrootZip" -ForegroundColor Green
+    }
+
+    # bundled.zip
+    $bundledDir = Join-Path $ReleaseDir "bundled"
+    if (Test-Path $bundledDir) {
+        $bundledZip = Join-Path $outputDir "bundled.zip"
+        if (Test-Path $bundledZip) { Remove-Item $bundledZip }
+        Compress-Archive -Path $bundledDir -DestinationPath $bundledZip
+        Write-Host "  Created: $bundledZip" -ForegroundColor Green
+    }
+}
+
 try {
 
 # Ensure TLS 1.2+ for all HTTPS requests (PowerShell 5.1 defaults to TLS 1.0)
@@ -380,6 +447,14 @@ if ($hasEndpoint) {
     }
 }
 
+# ── Step: Build Updater (AOT) ──
+Write-Host "`n=== Building Updater ===" -ForegroundColor Cyan
+foreach ($rid in $Runtimes) {
+    Write-Host "Building Updater for $rid..." -ForegroundColor Yellow
+    dotnet publish Updater/Updater.csproj -c Release -r $rid /p:PublishAot=true
+    if ($LASTEXITCODE -ne 0) { throw "Updater build failed for $rid" }
+}
+
 # Clean Release folder
 $currentStep++
 Write-Host ""
@@ -412,8 +487,6 @@ foreach ($rid in $Runtimes) {
         -c Release `
         -r $rid `
         --self-contained true `
-        -p:PublishSingleFile=true `
-        -p:IncludeNativeLibrariesForSelfExtract=true `
         -p:DebugType=none `
         -p:SkipFrontendBuild=true `
         -p:InformationalVersion=$BuildVersion `
@@ -436,9 +509,21 @@ foreach ($rid in $Runtimes) {
         Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
     }
 
+    # Copy Updater.exe
+    $updaterPath = "Updater/bin/Release/net10.0/$rid/publish/Updater.exe"
+    if (Test-Path $updaterPath) {
+        Copy-Item $updaterPath "$OutputDir/" -Force
+        Write-Host "  Copied Updater.exe" -ForegroundColor Green
+    }
+
     $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
     $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
     Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
+
+    # Generate manifest and component ZIPs
+    Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
+    Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
+    Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
 }
 
 # Summary
