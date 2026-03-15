@@ -596,7 +596,7 @@ onUnmounted(() => stopWatch())
           </span>
           游戏信息
         </h2>
-        <div class="header-btn-group">
+        <div class="header-actions">
           <NButton size="small" @click="handleOpenFolder">
             <template #icon><NIcon :size="16"><FolderOpenOutlined /></NIcon></template>
             打开目录
@@ -1449,48 +1449,12 @@ onUnmounted(() => stopWatch())
   border-color: var(--border-hover);
 }
 
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-  letter-spacing: -0.01em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
 .section-icon.warning {
   background: color-mix(in srgb, var(--warning) 10%, transparent);
   color: var(--warning);
 }
 
-.header-btn-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-}
+/* .header-actions is defined globally in main.css */
 
 /* ===== Info Grid (card-style items) ===== */
 .info-grid {
@@ -1922,7 +1886,7 @@ onUnmounted(() => stopWatch())
     gap: 10px;
   }
 
-  .header-btn-group {
+  .header-actions {
     gap: 6px;
     width: 100%;
   }

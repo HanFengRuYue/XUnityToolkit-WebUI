@@ -396,18 +396,6 @@ export default {
   gap: 12px;
 }
 
-.page-title-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
 .game-count {
   font-size: 13px;
   font-weight: 500;
@@ -419,8 +407,6 @@ export default {
 }
 
 .header-actions {
-  display: flex;
-  align-items: center;
   gap: 10px;
 }
 
@@ -741,12 +727,6 @@ export default {
     gap: 8px;
   }
 
-  .page-title-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-  }
-
   .games-grid {
     gap: 12px !important;
   }
@@ -779,12 +759,6 @@ export default {
   .library-title {
     font-size: 20px;
     gap: 8px;
-  }
-
-  .page-title-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
   }
 
   .games-grid {

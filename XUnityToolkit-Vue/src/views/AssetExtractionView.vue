@@ -172,9 +172,9 @@ function langLabel(code: string): string {
     <NSpin size="large" />
   </div>
 
-  <div v-else-if="game" class="extraction-page">
+  <div v-else-if="game" class="sub-page">
     <!-- Header -->
-    <div class="page-header" style="animation-delay: 0s">
+    <div class="sub-page-header" style="animation-delay: 0s">
       <button class="back-button" @click="router.push(`/games/${gameId}`)">
         <NIcon :size="20"><ArrowBackOutlined /></NIcon>
         <span>{{ game.name }}</span>
@@ -197,7 +197,7 @@ function langLabel(code: string): string {
           </span>
           资产提取
         </h2>
-        <div class="header-btn-group">
+        <div class="header-actions">
           <NButton
             v-if="store.extractionResult"
             size="small"
@@ -409,125 +409,6 @@ function langLabel(code: string): string {
 </template>
 
 <style scoped>
-.loading-state {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 300px;
-}
-
-.extraction-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: -8px;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-}
-
-.back-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  color: var(--text-3);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  transition: color 0.2s, background 0.2s;
-}
-.back-button:hover {
-  color: var(--text-1);
-  background: var(--bg-subtle);
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-family: var(--font-display);
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-  letter-spacing: -0.03em;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-}
-
-.page-title-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.section-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
-  box-shadow: var(--shadow-card-rest);
-}
-.section-card:hover {
-  border-color: var(--border-hover);
-}
-
-.section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.section-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  flex-shrink: 0;
-}
-
-.header-btn-group {
-  display: flex;
-  gap: 8px;
-}
-
-.section-desc {
-  color: var(--text-3);
-  font-size: 13px;
-  margin: 0 0 16px;
-  line-height: 1.5;
-}
-
 .result-summary {
   margin-top: 16px;
 }
@@ -631,21 +512,7 @@ function langLabel(code: string): string {
   color: var(--danger);
 }
 
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (max-width: 768px) {
-  .section-card {
-    padding: 16px;
-  }
   .stat-cards {
     flex-direction: column;
   }
@@ -658,22 +525,6 @@ function langLabel(code: string): string {
   }
   .lang-arrow {
     text-align: center;
-  }
-}
-
-@media (max-width: 480px) {
-  .section-card {
-    padding: 14px;
-    border-radius: var(--radius-md);
-  }
-  .page-title {
-    font-size: 20px;
-    gap: 8px;
-  }
-  .page-title-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
   }
 }
 </style>
