@@ -303,6 +303,12 @@ jobs:
             Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
           }
 
+      # ── Build Updater ──
+
+      - name: Build Updater (AOT)
+        run: |
+          dotnet publish Updater/Updater.csproj -c Release -r ${{ matrix.rid }} /p:PublishAot=true
+
       # ── Publish backend ──
 
       - name: Publish ${{ matrix.rid }}
@@ -313,8 +319,6 @@ jobs:
             -c Release `
             -r ${{ matrix.rid }} `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:DebugType=none `
             -p:SkipFrontendBuild=true `
             -p:InformationalVersion=$v `
@@ -326,7 +330,7 @@ jobs:
           Get-ChildItem "Release\${{ matrix.rid }}" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
             Remove-Item -Force -ErrorAction SilentlyContinue
 
-          # Copy bundled/ tree post-publish (PublishSingleFile drops files with '+' in names)
+          # Copy bundled/ tree post-publish
           if (Test-Path "bundled") {
             $dest = "Release\${{ matrix.rid }}\bundled"
             if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
@@ -337,6 +341,64 @@ jobs:
           $exeFile = Get-Item "Release\${{ matrix.rid }}\XUnityToolkit-WebUI.exe"
           $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
           Write-Host "${{ matrix.rid }} done (exe: $sizeMB MB)"
+
+      - name: Copy Updater.exe
+        run: |
+          cp "Updater/bin/Release/net10.0/${{ matrix.rid }}/publish/Updater.exe" "Release/${{ matrix.rid }}/"
+
+      - name: Generate update manifest
+        shell: pwsh
+        run: |
+          $rid = "${{ matrix.rid }}"
+          $version = "${{ steps.ver.outputs.build_version }}"
+          $releaseDir = "Release/$rid"
+
+          $manifest = @{
+              version = $version
+              rid = $rid
+              files = @{}
+          }
+
+          $basePath = (Resolve-Path $releaseDir).Path
+          Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
+              $relativePath = $_.FullName.Substring($basePath.Length + 1).Replace('\', '/')
+              if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
+              $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
+              $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
+                         elseif ($relativePath -match '^bundled/') { "bundled" }
+                         else { "app" }
+              $manifest.files[$relativePath] = @{
+                  hash = "sha256:$hash"
+                  size = $_.Length
+                  package = $package
+              }
+          }
+
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$rid.json" -Encoding utf8
+
+      - name: Create component ZIPs
+        shell: pwsh
+        run: |
+          $rid = "${{ matrix.rid }}"
+          $releaseDir = "Release/$rid"
+
+          # app ZIP - root level files (exclude appsettings*)
+          $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
+          if ($appFiles) {
+              Compress-Archive -Path $appFiles.FullName -DestinationPath "Release/app-$rid.zip"
+          }
+
+          # wwwroot ZIP (only first RID to avoid duplicate)
+          $wwwrootDir = Join-Path $releaseDir "wwwroot"
+          if ((Test-Path $wwwrootDir) -and "$rid" -eq "win-x64") {
+              Compress-Archive -Path $wwwrootDir -DestinationPath "Release/wwwroot.zip"
+          }
+
+          # bundled ZIP (only first RID to avoid duplicate)
+          $bundledDir = Join-Path $releaseDir "bundled"
+          if ((Test-Path $bundledDir) -and "$rid" -eq "win-x64") {
+              Compress-Archive -Path $bundledDir -DestinationPath "Release/bundled.zip"
+          }
 
       # ── Package as ZIP ──
 
@@ -354,6 +416,24 @@ jobs:
           name: release-${{ matrix.rid }}
           path: XUnityToolkit-WebUI-${{ matrix.rid }}.zip
           retention-days: 3
+
+      - name: Upload component packages
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            "Release/manifest-${{ matrix.rid }}.json" \
+            "Release/app-${{ matrix.rid }}.zip" \
+            --clobber
+
+          # Only upload arch-independent packages once
+          if [ "${{ matrix.rid }}" = "win-x64" ]; then
+            gh release upload "${{ inputs.release_tag }}" \
+              "Release/wwwroot.zip" \
+              "Release/bundled.zip" \
+              --clobber
+          fi
 
   # ── Create GitHub Release after both RIDs succeed ──
   release:
