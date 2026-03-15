@@ -80,6 +80,27 @@ function Generate-Manifest {
     Write-Host "  Generated manifest: $manifestPath" -ForegroundColor Green
 }
 
+function Create-ZipFromDirectory {
+    param([string]$SourceDir, [string]$ZipPath, [string]$EntryPrefix = "")
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path $ZipPath) { Remove-Item $ZipPath }
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($SourceDir, $ZipPath)
+}
+
+function Create-ZipFromFiles {
+    param([System.IO.FileInfo[]]$Files, [string]$ZipPath)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path $ZipPath) { Remove-Item $ZipPath }
+    $zip = [System.IO.Compression.ZipFile]::Open($ZipPath, 'Create')
+    try {
+        foreach ($f in $Files) {
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
 function Create-ComponentZips {
     param([string]$ReleaseDir, [string]$Rid)
 
@@ -90,17 +111,22 @@ function Create-ComponentZips {
         $_.Name -notmatch '^appsettings'
     }
     $appZip = Join-Path $outputDir "app-$Rid.zip"
-    if (Test-Path $appZip) { Remove-Item $appZip }
-    Compress-Archive -Path $appFiles.FullName -DestinationPath $appZip
+    Create-ZipFromFiles -Files $appFiles -ZipPath $appZip
     Write-Host "  Created: $appZip" -ForegroundColor Green
 
-    # wwwroot.zip — use wildcard to include contents directly
+    # wwwroot.zip
     $wwwrootDir = Join-Path $ReleaseDir "wwwroot"
     if (Test-Path $wwwrootDir) {
         $wwwrootZip = Join-Path $outputDir "wwwroot.zip"
-        if (Test-Path $wwwrootZip) { Remove-Item $wwwrootZip }
-        # Use Push-Location so wwwroot entries are wwwroot/...
-        Compress-Archive -Path $wwwrootDir -DestinationPath $wwwrootZip
+        # Zip the wwwroot directory itself so entries are at root (index.html, assets/, etc.)
+        # The UpdateService expects paths like "wwwroot/index.html" in manifest,
+        # so we create a temp wrapper dir to get the right structure
+        $tempDir = Join-Path $outputDir "_wwwroot_wrap"
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $tempDir | Out-Null
+        Copy-Item $wwwrootDir (Join-Path $tempDir "wwwroot") -Recurse
+        Create-ZipFromDirectory -SourceDir $tempDir -ZipPath $wwwrootZip
+        Remove-Item $tempDir -Recurse -Force
         Write-Host "  Created: $wwwrootZip" -ForegroundColor Green
     }
 
@@ -108,8 +134,12 @@ function Create-ComponentZips {
     $bundledDir = Join-Path $ReleaseDir "bundled"
     if (Test-Path $bundledDir) {
         $bundledZip = Join-Path $outputDir "bundled.zip"
-        if (Test-Path $bundledZip) { Remove-Item $bundledZip }
-        Compress-Archive -Path $bundledDir -DestinationPath $bundledZip
+        $tempDir = Join-Path $outputDir "_bundled_wrap"
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $tempDir | Out-Null
+        Copy-Item $bundledDir (Join-Path $tempDir "bundled") -Recurse
+        Create-ZipFromDirectory -SourceDir $tempDir -ZipPath $bundledZip
+        Remove-Item $tempDir -Recurse -Force
         Write-Host "  Created: $bundledZip" -ForegroundColor Green
     }
 }
