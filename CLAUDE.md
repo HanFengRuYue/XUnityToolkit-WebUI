@@ -136,6 +136,10 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **AppDataPaths config write-back:** After modifying `appDataRoot` source in `Program.cs`, **must** execute `builder.Configuration["AppData:Root"] = appDataRoot` — otherwise `AppDataPaths` (reads `IConfiguration` via DI) won't pick up the new value
 - **WiX build artifact cleanup:** WiX produces `.wixpdb` files in `OutputPath`; must clean up after moving MSI, otherwise they pollute release ZIPs
 - **CI shared PowerShell functions:** Extract to standalone `.ps1` files (e.g., `Installer/Generate-InstallerWxs.ps1`); both `build.ps1` and CI source via `. ./path/to/script.ps1`
+- **WiX gotcha — reserved properties:** `PublishDir` and `SourceDir` are reserved by MSBuild/WiX SDK and get silently overridden; use custom names (e.g., `AppPublishDir`) and pass via `-p:AppPublishDir=...`
+- **WiX gotcha — path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
+- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE38/ICE64/ICE91 false positives; suppress via `<SuppressIces>ICE38;ICE64;ICE91</SuppressIces>`
+- **WiX gotcha — MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
 - **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled.zip`
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API; no hardcoded version pins; llama.cpp prefers CUDA 12.4; copied post-publish
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
