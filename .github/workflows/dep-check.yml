@@ -127,7 +127,6 @@ jobs:
               echo "| File | Platform |"
               echo "|------|----------|"
               echo "| \`XUnityToolkit-WebUI-win-x64.zip\` | Windows x64 |"
-              echo "| \`XUnityToolkit-WebUI-win-arm64.zip\` | Windows ARM64 |"
               echo 'RELEASE_EOF'
             } >> "$GITHUB_OUTPUT"
 

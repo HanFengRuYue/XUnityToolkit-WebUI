@@ -19,10 +19,9 @@ jobs:
         | File | Platform |
         |------|----------|
         | `XUnityToolkit-WebUI-win-x64.zip` | Windows x64 |
-        | `XUnityToolkit-WebUI-win-arm64.zip` | Windows ARM64 |
 
         ### Installation
-        Download the ZIP for your architecture, extract, and run `XUnityToolkit-WebUI.exe`.
+        Download the ZIP, extract, and run `XUnityToolkit-WebUI.exe`.
       prerelease: false
     permissions:
       contents: write
