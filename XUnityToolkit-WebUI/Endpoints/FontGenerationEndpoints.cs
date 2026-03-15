@@ -63,7 +63,11 @@ public static class FontGenerationEndpoints
                 body.SamplingSize,
                 body.AtlasWidth,
                 body.AtlasHeight,
-                body.CharacterSet
+                body.CharacterSet,
+                body.RenderMode,
+                body.SamplingSizeMode,
+                body.PaddingMode,
+                body.PaddingValue
             );
 
             // Fire-and-forget
@@ -319,7 +323,11 @@ public static class FontGenerationEndpoints
         int SamplingSize = 64,
         int AtlasWidth = 4096,
         int AtlasHeight = 4096,
-        CharacterSetConfig? CharacterSet = null
+        CharacterSetConfig? CharacterSet = null,
+        string RenderMode = "SDFAA",
+        string SamplingSizeMode = "manual",
+        string PaddingMode = "percentage",
+        int PaddingValue = 10
     );
 
     private record UseAsCustomRequest(string FileName);

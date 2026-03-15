@@ -6,7 +6,11 @@ public record FontGenerationRequest(
     int SamplingSize = 64,
     int AtlasWidth = 4096,
     int AtlasHeight = 4096,
-    CharacterSetConfig? CharacterSet = null
+    CharacterSetConfig? CharacterSet = null,
+    string RenderMode = "SDFAA",
+    string SamplingSizeMode = "manual",
+    string PaddingMode = "percentage",
+    int PaddingValue = 10
 );
 
 public record FontGenerationResult(
@@ -91,6 +95,11 @@ public record FontGenerationReport
     public int SamplingSize { get; init; }
     public Dictionary<string, int> SourceBreakdown { get; init; } = new();
     public long ElapsedMilliseconds { get; init; }
+    public string RenderMode { get; init; } = "SDFAA";
+    public string SamplingSizeMode { get; init; } = "manual";
+    public int ActualSamplingSize { get; init; }
+    public int Padding { get; init; }
+    public int GradientScale { get; init; }
 }
 
 public record CharsetInfo
