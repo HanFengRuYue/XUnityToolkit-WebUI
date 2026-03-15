@@ -4,7 +4,9 @@
     <InstallerPlatform Condition="'$(Platform)' == ''">x64</InstallerPlatform>
     <!-- Suppress per-user install ICE validations (valid pattern, overly strict checks) -->
     <!-- ICE38: file KeyPath in user profile; ICE64: user profile dir not in RemoveFile; ICE91: per-user dir warning -->
-    <SuppressIces>ICE38;ICE64;ICE91</SuppressIces>
+    <SuppressIces>ICE38;ICE60;ICE61;ICE64;ICE91</SuppressIces>
+    <!-- WIX1077: [INSTALLDIR] in WixShellExecTarget is an intentional formatted reference -->
+    <NoWarn>1077</NoWarn>
     <DefaultLanguage>zh-CN</DefaultLanguage>
     <!-- AppPublishDir: path to publish output (passed via -p:AppPublishDir=...) -->
     <!-- If already absolute, use as-is; if relative, resolve against repo root -->
