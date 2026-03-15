@@ -6,7 +6,7 @@ on:
   workflow_call:
     inputs:
       build_version:
-        description: 'Version string (e.g. 1.1.202603130200); auto-generated if empty'
+        description: 'Version string (e.g. 1.4.202603130200); auto-generated if empty'
         required: false
         type: string
       release_tag:
@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "1.1.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "1.4.$(Get-Date -Format 'yyyyMMddHHmm')" }
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Build version: $v"
 
@@ -448,7 +448,7 @@ jobs:
           $installerProject = "Installer/Installer.wixproj"
 
           # Generate MSI version from build version
-          # Build version format: 1.1.YYYYMMDDHHmm
+          # Build version format: 1.4.YYYYMMDDHHmm
           # MSI constraints: major < 256, minor < 256, build < 65536
           $parts = "${{ steps.ver.outputs.build_version }}".Split('.')
           $timestamp = $parts[2]  # YYYYMMDDHHmm

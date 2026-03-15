@@ -23,6 +23,7 @@ import {
   ArrowRightAltOutlined,
   CloudOutlined,
   ComputerOutlined,
+  SportsEsportsOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
@@ -286,6 +287,13 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Current Game Indicator -->
+      <div v-if="aiStore.stats?.currentGameId" class="current-game-indicator">
+        <NIcon :size="14"><SportsEsportsOutlined /></NIcon>
+        <span class="current-game-label">当前翻译游戏</span>
+        <span class="current-game-name">{{ getGameName(aiStore.stats.currentGameId) }}</span>
+      </div>
+
       <!-- Pipeline Flow -->
       <div class="stats-group-label">处理进度</div>
       <div class="pipeline-flow">
@@ -385,6 +393,7 @@ onUnmounted(() => {
               <span class="recent-translated">{{ item.translated }}</span>
             </div>
             <div class="recent-meta">
+              <span v-if="item.gameId" class="meta-tag game">{{ getGameName(item.gameId) }}</span>
               <span class="meta-tag endpoint">{{ item.endpointName }}</span>
               <span class="meta-tag">{{ item.tokensUsed }} tok</span>
               <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
@@ -419,6 +428,7 @@ onUnmounted(() => {
         >
           <div class="error-message">{{ err.message }}</div>
           <div class="error-meta">
+            <span v-if="err.gameId" class="error-game-tag">{{ getGameName(err.gameId) }}</span>
             <span v-if="err.endpointName">{{ err.endpointName }}</span>
             <span>{{ formatRelativeTime(err.timestamp) }}</span>
           </div>
@@ -789,6 +799,30 @@ onUnmounted(() => {
   margin-left: 2px;
 }
 
+/* ===== Current Game Indicator ===== */
+.current-game-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.current-game-label {
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.current-game-name {
+  font-weight: 600;
+  color: var(--text-1);
+}
+
 /* ===== Stats Group Label ===== */
 .stats-group-label {
   font-size: 11px;
@@ -1094,6 +1128,12 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.meta-tag.game {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-muted));
+  font-weight: 500;
+}
+
 .meta-tag.endpoint {
   color: var(--accent);
   background: var(--accent-soft);
@@ -1148,6 +1188,11 @@ onUnmounted(() => {
   gap: 12px;
   font-size: 11px;
   color: var(--text-3);
+}
+
+.error-game-tag {
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* ===== AI Icon ===== */

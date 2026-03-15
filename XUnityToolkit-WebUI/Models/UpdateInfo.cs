@@ -1,5 +1,7 @@
 namespace XUnityToolkit_WebUI.Models;
 
+using System.Text.Json.Serialization;
+
 public sealed class ManifestFileEntry
 {
     public required string Hash { get; set; }
@@ -64,6 +66,7 @@ public sealed class UpdateCheckCache
 
 public sealed class GitHubRelease
 {
+    [JsonPropertyName("tag_name")]
     public required string TagName { get; set; }
     public string? Body { get; set; }
     public bool Prerelease { get; set; }
@@ -73,6 +76,7 @@ public sealed class GitHubRelease
 public sealed class GitHubAsset
 {
     public required string Name { get; set; }
+    [JsonPropertyName("browser_download_url")]
     public required string BrowserDownloadUrl { get; set; }
     public long Size { get; set; }
 }

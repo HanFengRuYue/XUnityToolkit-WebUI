@@ -57,7 +57,7 @@ public static class TranslateEndpoints
             catch (HttpRequestException ex)
             {
                 logger.LogError(ex, "AI 翻译 API 调用失败");
-                translationService.RecordError($"LLM API 调用失败: {ex.Message}");
+                translationService.RecordError($"LLM API 调用失败: {ex.Message}", gameId: request.GameId);
                 return Results.Json(ApiResult.Fail($"LLM API 调用失败: {ex.Message}"), statusCode: 502);
             }
             catch (OperationCanceledException)
@@ -69,7 +69,7 @@ public static class TranslateEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "翻译时发生未知错误");
-                translationService.RecordError($"未知错误: {ex.Message}");
+                translationService.RecordError($"未知错误: {ex.Message}", gameId: request.GameId);
                 return Results.Json(ApiResult.Fail($"内部错误: {ex.Message}"), statusCode: 500);
             }
         });
