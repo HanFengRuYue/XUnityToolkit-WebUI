@@ -509,29 +509,18 @@ jobs:
           path: XUnityToolkit-WebUI-win-x64.zip
           retention-days: 3
 
-      - name: Upload component packages
+      - name: Upload component packages artifact
         if: inputs.release_tag != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload "${{ inputs.release_tag }}" \
-            "Release/manifest-win-x64.json" \
-            "Release/app-win-x64.zip" \
-            "Release/wwwroot.zip" \
-            "Release/bundled.zip" \
-            --clobber
-
-      - name: Upload MSI
-        if: inputs.release_tag != ''
-        shell: bash
-        run: |
-          MSI_FILE="Release/XUnityToolkit-WebUI-win-x64.msi"
-          if [ -f "$MSI_FILE" ]; then
-            gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-components
+          path: |
+            Release/manifest-win-x64.json
+            Release/app-win-x64.zip
+            Release/wwwroot.zip
+            Release/bundled.zip
+            Release/XUnityToolkit-WebUI-win-x64.msi
+          retention-days: 3
 
   # ── Create GitHub Release ──
   release:
@@ -548,6 +537,12 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: release-win-x64
+
+      - name: Download component packages
+        uses: actions/download-artifact@v5
+        with:
+          name: release-components
+          path: components
 
       - name: Write release notes to file
         env:
@@ -594,3 +589,24 @@ jobs:
             --repo "${{ github.repository }}"
 
           echo "Release created: ${{ inputs.release_tag }}"
+
+      - name: Upload component packages to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ inputs.release_tag }}" \
+            components/Release/manifest-win-x64.json \
+            components/Release/app-win-x64.zip \
+            components/Release/wwwroot.zip \
+            components/Release/bundled.zip \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+      - name: Upload MSI to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MSI_FILE="components/Release/XUnityToolkit-WebUI-win-x64.msi"
+          if [ -f "$MSI_FILE" ]; then
+            gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber --repo "${{ github.repository }}"
+          fi
