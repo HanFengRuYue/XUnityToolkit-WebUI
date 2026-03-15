@@ -10,7 +10,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
 - **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `{baseDir}/data` before DI — must stay in sync with `AppDataPaths._root` formula
 - **App URL:** `http://127.0.0.1:{port}` default `51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`); port configurable via `settings.json` → `aiTranslation.port` (read pre-DI in `Program.cs`)
-- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA)
+- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA), `"GitHubUpdate"` (60s)
+- **Updater AOT constraints:** `Updater/` targets `net10.0` (not `-windows`), `PublishAot=true`, `InvariantGlobalization`; no `JsonSerializer` reflection — use manual string formatting for JSON; no WinForms or UI frameworks
+- **InformationalVersion gotcha:** .NET SDK appends `+commitHash` suffix; always `Split('+')[0]` before version comparison
 - **Mirror:** `AppSettings.HfMirrorUrl`; HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
 - **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
 - **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
@@ -103,7 +105,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 ## Font Generation (FreeTypeSharp + Felzenszwalb EDT)
 
 - **SDF pipeline (Unity-faithful):** `FT_RENDER_MODE_NORMAL` → AA bitmap → `DistanceFieldGenerator.GenerateSdf()` (Felzenszwalb EDT) → SDF with padding; replicates Unity's FontEngine approach; do NOT use `FT_RENDER_MODE_SDF` (outline-based, produces different results from Unity)
-- **`DistanceFieldGenerator`:** static class; SDFAA uses sub-pixel distance seeding from AA values `(v/255)^2`; SDF8/16/32 uses binary initialization after binarization at threshold 128; Felzenszwalb 1D→2D parabola envelope decomposition; bilinear downsample for upsampled modes
+- **`DistanceFieldGenerator`:** static class; **critical: `outside` field MUST init to 0 (not INF)** — padding area is outside the glyph; `inside` field inits to INF; v≥1 pixels must explicitly set `outside=INF`; SDFAA uses edge-centered sub-pixel seeding `(0.5-v)²`/`(v-0.5)²` (edge at v=0.5; do NOT use `v²`/`(1-v)²`); SDF8/16/32 uses binary initialization at threshold 128; Felzenszwalb 1D→2D parabola envelope; bilinear downsample for upsampled modes; **normalization must divide by `padding * upsampling`**; reference: TinySDF (`gridInner.fill(0)`, `gridOuter.fill(INF)`)
 - **Render modes:** SDFAA (1x, default), SDF8 (8x), SDF16 (16x), SDF32 (32x upsampling); `AtlasRenderMode` enum: SDFAA=4165, SDF8=4168, SDF16=4169, SDF32=4170; constraint: `samplingSize × upsampling ≤ 16384`
 - **Padding:** dynamic calculation — percentage mode `(int)(samplingSize * percent / 100)` or pixel mode; minimum 1; `GradientScale = padding + 1` injected into Material `m_SavedProperties.m_Floats`; `m_AtlasPadding` must match
 - **SDF bitmap includes padding:** `BitmapWidth/Height` in GlyphData are padded dimensions; packing uses padded size directly (no double-padding); `GlyphRect` references inner glyph region (`AtlasX + padding`, unpadded width); `UsedGlyphRects` references full padded region
