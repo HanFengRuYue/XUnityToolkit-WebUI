@@ -1,9 +1,7 @@
 # build.ps1 - XUnityToolkit-WebUI 一键构建脚本
-# 用法: .\build.ps1 [-Runtime win-x64|win-arm64|all] [-SkipDownload]
+# 用法: .\build.ps1 [-SkipDownload]
 
 param(
-    [ValidateSet('win-x64', 'win-arm64', 'all')]
-    [string]$Runtime = 'all',
     [switch]$SkipDownload
 )
 
@@ -162,7 +160,7 @@ $ReleaseRoot = Join-Path $ProjectRoot 'Release'
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
 $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
-$Runtimes = if ($Runtime -eq 'all') { @('win-x64', 'win-arm64') } else { @($Runtime) }
+$rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 
 # Generate version: 1.3.{YYYYMMDDHHmm}
@@ -182,12 +180,12 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + (2 * $Runtimes.Count) + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 5 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
 Write-Host "    Version: $BuildVersion" -ForegroundColor DarkGray
-Write-Host "    Target: $($Runtimes -join ', ')" -ForegroundColor DarkGray
+Write-Host "    Target: $rid" -ForegroundColor DarkGray
 Write-Host ""
 
 $currentStep = 0
@@ -515,93 +513,90 @@ if (Test-Path $ReleaseRoot) {
 }
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 
-# Publish for each runtime
-foreach ($rid in $Runtimes) {
-    $currentStep++
-    $OutputDir = Join-Path $ReleaseRoot $rid
-    Write-Host ""
-    Write-Host "[$currentStep/$stepCount] Publishing $rid..." -ForegroundColor Yellow
+# ── Publish win-x64 ──
+$currentStep++
+$OutputDir = Join-Path $ReleaseRoot $rid
+Write-Host ""
+Write-Host "[$currentStep/$stepCount] Publishing $rid..." -ForegroundColor Yellow
 
-    & dotnet publish $ProjectFile `
+& dotnet publish $ProjectFile `
+    -c Release `
+    -r $rid `
+    --self-contained true `
+    -p:DebugType=none `
+    -p:SkipFrontendBuild=true `
+    -p:InformationalVersion=$BuildVersion `
+    -o $OutputDir
+
+if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
+
+# Clean up unnecessary files
+@('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {
+    Get-ChildItem -Path $OutputDir -Filter $_ -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+}
+
+# Copy bundled assets (bypass MSBuild — PublishSingleFile drops files with '+' in names)
+$bundledSrc = Join-Path $ProjectRoot 'bundled'
+if (Test-Path $bundledSrc) {
+    $bundledDest = Join-Path $OutputDir 'bundled'
+    if (Test-Path $bundledDest) { Remove-Item $bundledDest -Recurse -Force }
+    Copy-Item -Path $bundledSrc -Destination $bundledDest -Recurse -Force
+    Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
+}
+
+# Copy Updater.exe
+$updaterPath = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
+if (Test-Path $updaterPath) {
+    Copy-Item $updaterPath "$OutputDir/" -Force
+    Write-Host "  Copied Updater.exe" -ForegroundColor Green
+}
+
+$exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
+$exeSize = [math]::Round($exeFile.Length / 1MB, 1)
+Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
+
+# Generate manifest and component ZIPs
+Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
+Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
+Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
+
+# Build MSI installer
+$currentStep++
+Write-Host ""
+Write-Host "[$currentStep/$stepCount] Building MSI for $rid..." -ForegroundColor Yellow
+
+$installerProject = Join-Path $ProjectRoot 'Installer\Installer.wixproj'
+if (Test-Path $installerProject) {
+    $generatedDir = Join-Path $ProjectRoot 'Installer\Generated'
+    $harvestedFile = Join-Path $generatedDir "HarvestedFiles.wxs"
+
+    # Generate file listing from publish output
+    Generate-InstallerWxs -ReleaseDir $OutputDir -OutputFile $harvestedFile
+
+    $wixPlatform = 'x64'
+
+    # Build MSI (do NOT set OutputPath — it interferes with WiX file resolution)
+    & dotnet build $installerProject `
         -c Release `
-        -r $rid `
-        --self-contained true `
-        -p:DebugType=none `
-        -p:SkipFrontendBuild=true `
-        -p:InformationalVersion=$BuildVersion `
-        -o $OutputDir
+        -p:Platform=$wixPlatform `
+        -p:InstallerPlatform=$wixPlatform `
+        -p:AppPublishDir="$OutputDir\" `
+        -p:MsiVersion="$MsiVersion"
 
-    if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
+    if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
 
-    # Clean up unnecessary files
-    @('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {
-        Get-ChildItem -Path $OutputDir -Filter $_ -ErrorAction SilentlyContinue |
-            Remove-Item -Force
+    # Find MSI in WiX default output location (may be in culture subfolder e.g. zh-CN/)
+    $wixOutputDir = Join-Path $ProjectRoot "Installer\bin\$wixPlatform\Release"
+    $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($msiSrc) {
+        $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-$rid.msi"
+        Move-Item $msiSrc.FullName $msiDst -Force
+        $msiSize = [math]::Round((Get-Item $msiDst).Length / 1MB, 1)
+        Write-Host "  MSI: $msiSize MB -> $msiDst" -ForegroundColor Green
     }
-
-    # Copy bundled assets (bypass MSBuild — PublishSingleFile drops files with '+' in names)
-    $bundledSrc = Join-Path $ProjectRoot 'bundled'
-    if (Test-Path $bundledSrc) {
-        $bundledDest = Join-Path $OutputDir 'bundled'
-        if (Test-Path $bundledDest) { Remove-Item $bundledDest -Recurse -Force }
-        Copy-Item -Path $bundledSrc -Destination $bundledDest -Recurse -Force
-        Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
-    }
-
-    # Copy Updater.exe (always use win-x64 build — ARM64 AOT requires C++ ARM64 build tools)
-    $updaterPath = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
-    if (Test-Path $updaterPath) {
-        Copy-Item $updaterPath "$OutputDir/" -Force
-        Write-Host "  Copied Updater.exe" -ForegroundColor Green
-    }
-
-    $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
-    $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
-    Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
-
-    # Generate manifest and component ZIPs
-    Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
-    Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
-    Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
-
-    # Build MSI installer
-    $currentStep++
-    Write-Host ""
-    Write-Host "[$currentStep/$stepCount] Building MSI for $rid..." -ForegroundColor Yellow
-
-    $installerProject = Join-Path $ProjectRoot 'Installer\Installer.wixproj'
-    if (Test-Path $installerProject) {
-        $generatedDir = Join-Path $ProjectRoot 'Installer\Generated'
-        $harvestedFile = Join-Path $generatedDir "HarvestedFiles.wxs"
-
-        # Generate file listing from publish output
-        Generate-InstallerWxs -ReleaseDir $OutputDir -OutputFile $harvestedFile
-
-        # Determine WiX platform
-        $wixPlatform = if ($rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
-
-        # Build MSI (do NOT set OutputPath — it interferes with WiX file resolution)
-        & dotnet build $installerProject `
-            -c Release `
-            -p:Platform=$wixPlatform `
-            -p:InstallerPlatform=$wixPlatform `
-            -p:AppPublishDir="$OutputDir\" `
-            -p:MsiVersion="$MsiVersion"
-
-        if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
-
-        # Find MSI in WiX default output location (may be in culture subfolder e.g. zh-CN/)
-        $wixOutputDir = Join-Path $ProjectRoot "Installer\bin\$wixPlatform\Release"
-        $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($msiSrc) {
-            $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-$rid.msi"
-            Move-Item $msiSrc.FullName $msiDst -Force
-            $msiSize = [math]::Round((Get-Item $msiDst).Length / 1MB, 1)
-            Write-Host "  MSI: $msiSize MB -> $msiDst" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  Skipped: Installer project not found" -ForegroundColor DarkYellow
-    }
+} else {
+    Write-Host "  Skipped: Installer project not found" -ForegroundColor DarkYellow
 }
 
 # Summary
@@ -609,20 +604,18 @@ Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Cyan
 Write-Host ""
 
-foreach ($rid in $Runtimes) {
-    $dir = Join-Path $ReleaseRoot $rid
-    Write-Host "$rid :" -ForegroundColor Yellow
-    Get-ChildItem $dir | ForEach-Object {
-        if ($_.PSIsContainer) {
-            $folderSize = [math]::Round(((Get-ChildItem $_.FullName -File -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
-            $size = "<DIR> $folderSize MB"
-        } else {
-            $size = "$([math]::Round($_.Length / 1MB, 1)) MB"
-        }
-        Write-Host "  $($_.Name.PadRight(35)) $size"
+$dir = Join-Path $ReleaseRoot $rid
+Write-Host "$rid :" -ForegroundColor Yellow
+Get-ChildItem $dir | ForEach-Object {
+    if ($_.PSIsContainer) {
+        $folderSize = [math]::Round(((Get-ChildItem $_.FullName -File -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+        $size = "<DIR> $folderSize MB"
+    } else {
+        $size = "$([math]::Round($_.Length / 1MB, 1)) MB"
     }
-    Write-Host ""
+    Write-Host "  $($_.Name.PadRight(35)) $size"
 }
+Write-Host ""
 
 Write-Host "Output: $ReleaseRoot" -ForegroundColor White
 
