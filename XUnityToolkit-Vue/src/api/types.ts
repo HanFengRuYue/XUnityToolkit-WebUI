@@ -180,6 +180,7 @@ export interface AppSettings {
   libraryCardSize: string
   libraryGap: string
   libraryShowLabels: boolean
+  receivePreReleaseUpdates: boolean
 }
 
 export interface VersionInfo {
@@ -193,12 +194,14 @@ export interface RecentTranslation {
   tokensUsed: number
   responseTimeMs: number
   endpointName: string
+  gameId?: string
 }
 
 export interface TranslationError {
   message: string
   timestamp: string
   endpointName?: string
+  gameId?: string
 }
 
 export interface TranslationStats {
@@ -214,6 +217,7 @@ export interface TranslationStats {
   totalReceived: number
   totalErrors: number
   recentErrors: TranslationError[]
+  currentGameId?: string
 }
 
 export interface AiEndpointStatus {
@@ -580,4 +584,34 @@ export interface BepInExLogAnalysis {
   report: string
   endpointName: string
   analyzedAt: string
+}
+
+// Online Update
+export type UpdateState = 'none' | 'checking' | 'available' | 'downloading' | 'ready' | 'applying' | 'error'
+
+export interface UpdateCheckResult {
+  updateAvailable: boolean
+  newVersion?: string
+  changelog?: string
+  downloadSize: number
+  changedPackages: string[]
+  changedFileCount: number
+  deletedFileCount: number
+}
+
+export interface UpdateStatusInfo {
+  state: UpdateState
+  progress: number
+  downloadedBytes: number
+  totalBytes: number
+  currentPackage?: string
+  message?: string
+  error?: string
+}
+
+export interface UpdateAvailableInfo {
+  version: string
+  changelog?: string
+  downloadSize: number
+  changedPackages: string[]
 }
