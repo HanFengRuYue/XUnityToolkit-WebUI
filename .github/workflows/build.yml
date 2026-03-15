@@ -39,11 +39,6 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        rid: [win-x64, win-arm64]
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -305,52 +300,51 @@ jobs:
 
       # ── Build Updater ──
 
-      - name: Build Updater (AOT, win-x64 only)
-        if: matrix.rid == 'win-x64'
+      - name: Build Updater (AOT)
         run: |
           dotnet publish Updater/Updater.csproj -c Release -r win-x64 /p:PublishAot=true
 
       # ── Publish backend ──
 
-      - name: Publish ${{ matrix.rid }}
+      - name: Publish win-x64
         shell: pwsh
         run: |
           $v = '${{ steps.ver.outputs.build_version }}'
           dotnet publish XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj `
             -c Release `
-            -r ${{ matrix.rid }} `
+            -r win-x64 `
             --self-contained true `
             -p:DebugType=none `
             -p:SkipFrontendBuild=true `
             -p:InformationalVersion=$v `
-            -o "Release\${{ matrix.rid }}"
+            -o "Release\win-x64"
 
-          if ($LASTEXITCODE -ne 0) { throw "Publish failed for ${{ matrix.rid }}" }
+          if ($LASTEXITCODE -ne 0) { throw "Publish failed for win-x64" }
 
           # Cleanup unnecessary files
-          Get-ChildItem "Release\${{ matrix.rid }}" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
+          Get-ChildItem "Release\win-x64" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
             Remove-Item -Force -ErrorAction SilentlyContinue
 
           # Copy bundled/ tree post-publish
           if (Test-Path "bundled") {
-            $dest = "Release\${{ matrix.rid }}\bundled"
+            $dest = "Release\win-x64\bundled"
             if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
             Copy-Item -Path "bundled" -Destination $dest -Recurse -Force
             Write-Host "Copied bundled assets to output."
           }
 
-          $exeFile = Get-Item "Release\${{ matrix.rid }}\XUnityToolkit-WebUI.exe"
+          $exeFile = Get-Item "Release\win-x64\XUnityToolkit-WebUI.exe"
           $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
-          Write-Host "${{ matrix.rid }} done (exe: $sizeMB MB)"
+          Write-Host "win-x64 done (exe: $sizeMB MB)"
 
       - name: Copy Updater.exe
         run: |
-          cp "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe" "Release/${{ matrix.rid }}/"
+          cp "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe" "Release/win-x64/"
 
       - name: Generate update manifest
         shell: pwsh
         run: |
-          $rid = "${{ matrix.rid }}"
+          $rid = "win-x64"
           $version = "${{ steps.ver.outputs.build_version }}"
           $releaseDir = "Release/$rid"
 
@@ -380,7 +374,7 @@ jobs:
       - name: Create component ZIPs
         shell: pwsh
         run: |
-          $rid = "${{ matrix.rid }}"
+          $rid = "win-x64"
           $releaseDir = "Release/$rid"
 
           # app ZIP - root level files (exclude appsettings*)
@@ -389,25 +383,25 @@ jobs:
               Compress-Archive -Path $appFiles.FullName -DestinationPath "Release/app-$rid.zip"
           }
 
-          # wwwroot ZIP (only first RID to avoid duplicate)
+          # wwwroot ZIP
           $wwwrootDir = Join-Path $releaseDir "wwwroot"
-          if ((Test-Path $wwwrootDir) -and "$rid" -eq "win-x64") {
+          if (Test-Path $wwwrootDir) {
               Compress-Archive -Path $wwwrootDir -DestinationPath "Release/wwwroot.zip"
           }
 
-          # bundled ZIP (only first RID to avoid duplicate)
+          # bundled ZIP
           $bundledDir = Join-Path $releaseDir "bundled"
-          if ((Test-Path $bundledDir) -and "$rid" -eq "win-x64") {
+          if (Test-Path $bundledDir) {
               Compress-Archive -Path $bundledDir -DestinationPath "Release/bundled.zip"
           }
 
       # ── Build MSI installer ──
 
-      - name: Build MSI (${{ matrix.rid }})
+      - name: Build MSI
         if: inputs.release_tag != ''
         shell: pwsh
         run: |
-          $rid = "${{ matrix.rid }}"
+          $rid = "win-x64"
           $outputDir = "Release/$rid"
           $installerProject = "Installer/Installer.wixproj"
 
@@ -432,7 +426,7 @@ jobs:
           New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
           Generate-InstallerWxs -ReleaseDir $outputDir -OutputFile "$generatedDir/HarvestedFiles.wxs"
 
-          $wixPlatform = if ($rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
+          $wixPlatform = 'x64'
 
           # Do NOT set OutputPath — it interferes with WiX file resolution
           dotnet build $installerProject `
@@ -457,16 +451,16 @@ jobs:
       - name: Package as ZIP
         shell: pwsh
         run: |
-          $zipName = "XUnityToolkit-WebUI-${{ matrix.rid }}.zip"
-          Compress-Archive -Path "Release\${{ matrix.rid }}\*" -DestinationPath $zipName -CompressionLevel Optimal
+          $zipName = "XUnityToolkit-WebUI-win-x64.zip"
+          Compress-Archive -Path "Release\win-x64\*" -DestinationPath $zipName -CompressionLevel Optimal
           $sizeMB = [math]::Round((Get-Item $zipName).Length / 1MB, 1)
           Write-Host "Created $zipName ($sizeMB MB)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: release-${{ matrix.rid }}
-          path: XUnityToolkit-WebUI-${{ matrix.rid }}.zip
+          name: release-win-x64
+          path: XUnityToolkit-WebUI-win-x64.zip
           retention-days: 3
 
       - name: Upload component packages
@@ -475,30 +469,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ inputs.release_tag }}" \
-            "Release/manifest-${{ matrix.rid }}.json" \
-            "Release/app-${{ matrix.rid }}.zip" \
+            "Release/manifest-win-x64.json" \
+            "Release/app-win-x64.zip" \
+            "Release/wwwroot.zip" \
+            "Release/bundled.zip" \
             --clobber
 
-          # Only upload arch-independent packages once
-          if [ "${{ matrix.rid }}" = "win-x64" ]; then
-            gh release upload "${{ inputs.release_tag }}" \
-              "Release/wwwroot.zip" \
-              "Release/bundled.zip" \
-              --clobber
-          fi
-
-      - name: Upload MSI (${{ matrix.rid }})
+      - name: Upload MSI
         if: inputs.release_tag != ''
         shell: bash
         run: |
-          MSI_FILE="Release/XUnityToolkit-WebUI-${{ matrix.rid }}.msi"
+          MSI_FILE="Release/XUnityToolkit-WebUI-win-x64.msi"
           if [ -f "$MSI_FILE" ]; then
             gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber
           fi
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # ── Create GitHub Release after both RIDs succeed ──
+  # ── Create GitHub Release ──
   release:
     needs: build
     if: ${{ inputs.release_tag != '' }}
@@ -512,8 +500,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v5
         with:
-          pattern: release-*
-          merge-multiple: true
+          name: release-win-x64
 
       - name: Write release notes to file
         env:
@@ -554,7 +541,6 @@ jobs:
 
           gh release create "${{ inputs.release_tag }}" \
             XUnityToolkit-WebUI-win-x64.zip \
-            XUnityToolkit-WebUI-win-arm64.zip \
             --title "${{ inputs.release_name }}" \
             --notes-file release_notes.md \
             $PRERELEASE_FLAG \
