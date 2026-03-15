@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Fragment>
+    <ComponentGroup Id="CleanupComponents" Directory="INSTALLDIR">
+      <Component Id="CleanupAppData" Guid="D4E5F6A7-B8C9-0123-DEF0-456789ABCDEF">
+        <RegistryValue Root="HKCU" Key="Software\XUnityToolkit"
+                       Name="CleanupMarker" Type="integer" Value="1" KeyPath="yes" />
+        <!-- RemoveFolderEx removes the folder and all contents on uninstall -->
+        <util:RemoveFolderEx On="uninstall"
+                             Property="APPDATAPATH" />
+      </Component>
+    </ComponentGroup>
+
+    <!-- Property to hold the AppData path for RemoveFolderEx -->
+    <Property Id="APPDATAPATH">
+      <RegistrySearch Id="FindAppDataPath"
+                      Root="HKCU"
+                      Key="Software\XUnityToolkit"
+                      Name="DataPath"
+                      Type="directory" />
+    </Property>
+  </Fragment>
+</Wix>

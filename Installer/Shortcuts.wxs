@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="ShortcutComponents">
+      <!-- Start menu shortcut -->
+      <Component Id="StartMenuShortcut" Guid="B2C3D4E5-F6A7-8901-BCDE-F23456789012"
+                 Directory="ProgramMenuDir">
+        <Shortcut Id="StartMenuAppShortcut"
+                  Name="XUnityToolkit-WebUI"
+                  Target="[INSTALLDIR]XUnityToolkit-WebUI.exe"
+                  WorkingDirectory="INSTALLDIR"
+                  Icon="AppIcon" />
+        <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\XUnityToolkit"
+                       Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <!-- Desktop shortcut -->
+      <Component Id="DesktopShortcut" Guid="C3D4E5F6-A7B8-9012-CDEF-345678901234"
+                 Directory="DesktopFolder">
+        <Shortcut Id="DesktopAppShortcut"
+                  Name="XUnityToolkit-WebUI"
+                  Target="[INSTALLDIR]XUnityToolkit-WebUI.exe"
+                  WorkingDirectory="INSTALLDIR"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\XUnityToolkit"
+                       Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

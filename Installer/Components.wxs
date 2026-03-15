@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <ComponentGroup Id="CoreComponents" Directory="INSTALLDIR">
+      <!-- Registry keys for installed mode detection -->
+      <Component Id="RegistryKeys" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890">
+        <RegistryKey Root="HKCU" Key="Software\XUnityToolkit" ForceDeleteOnUninstall="yes">
+          <RegistryValue Name="DataPath"
+                         Type="string"
+                         Value="[AppDataFolder]XUnityToolkit"
+                         KeyPath="yes" />
+          <RegistryValue Name="MsiProductCode"
+                         Type="string"
+                         Value="[ProductCode]" />
+          <RegistryValue Name="InstallDir"
+                         Type="string"
+                         Value="[INSTALLDIR]" />
+        </RegistryKey>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
