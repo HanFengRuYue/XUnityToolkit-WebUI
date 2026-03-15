@@ -194,6 +194,10 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
 - **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
 - **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomFontFileName` for frontend display; `DELETE .../custom-font` clears custom font
+- **TTF replacement:** `ReplaceSingleTtfFont` replaces `m_FontData` byte array in `AssetClassID.Font` assets; preserves all layout metadata (`m_FontSize`, `m_LineSpacing`, etc.)
+- **Bundled TTF:** `bundled/fonts/SourceHanSansCN-Regular.ttf` (~10MB) used as default replacement source for TTF fonts
+- **Custom font coexistence:** `data/custom-fonts/{gameId}/` can hold both an AssetBundle (for TMP) and a TTF/OTF (for TTF) simultaneously; files distinguished by extension; upload endpoint uses magic bytes (`00 01 00 00` TTF, `4F 54 54 4F` OTF) for format detection
+- **TMP source filtering:** `ReplaceFontsAsync` custom font auto-resolve filters by extension (excludes `.ttf`/`.otf` from TMP source, excludes non-TTF from TTF source)
 - **Creating new array entries:** `ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField)` creates a new field instance from an existing entry's template; use first array child as prototype, clone per-entry, set values, then assign `array.Children = newList`
 
 ### Font Generation (FreeTypeSharp)
@@ -296,6 +300,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
 - **Adding DoNotTranslateEntry fields:** Sync 2 places: `Models/DoNotTranslateEntry.cs`, `src/api/types.ts`
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
+- **Font replacement models:** Sync `FontInfo`/`FontReplacementStatus` between `Models/FontReplacement.cs` ↔ `src/api/types.ts` ↔ `FontReplacementView.vue`
 - **TMP font models:** Sync `TmpFontStatus` between `Models/` ↔ `src/api/types.ts`; API methods in `src/api/games.ts`
 - Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`
 - Install store `operationType` tracks install vs uninstall
