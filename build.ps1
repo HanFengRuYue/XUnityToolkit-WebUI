@@ -153,6 +153,9 @@ try {
 $ProgressPreference = 'SilentlyContinue'
 
 $ProjectRoot = $PSScriptRoot
+# Source MSI file harvesting function (shared with CI)
+. (Join-Path $ProjectRoot 'Installer/Generate-InstallerWxs.ps1')
+
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
 $ReleaseRoot = Join-Path $ProjectRoot 'Release'
@@ -165,13 +168,20 @@ $hasEndpoint = Test-Path $EndpointProject
 # Generate version: 1.3.{YYYYMMDDHHmm}
 $BuildVersion = "1.3.$(Get-Date -Format 'yyyyMMddHHmm')"
 
+# Generate MSI-compatible version: {YYYY-2024}.{MMDD}.{HHmm}
+$now = Get-Date
+$msiMajor = $now.Year - 2024
+$msiMinor = $now.ToString("MMdd")
+$msiBuild = $now.ToString("HHmm")
+$MsiVersion = "$msiMajor.$msiMinor.$msiBuild"
+
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
 $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + $Runtimes.Count + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 3 + (2 * $Runtimes.Count) + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -552,6 +562,45 @@ foreach ($rid in $Runtimes) {
     Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
     Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
     Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
+
+    # Build MSI installer
+    $currentStep++
+    Write-Host ""
+    Write-Host "[$currentStep/$stepCount] Building MSI for $rid..." -ForegroundColor Yellow
+
+    $installerProject = Join-Path $ProjectRoot 'Installer\Installer.wixproj'
+    if (Test-Path $installerProject) {
+        $generatedDir = Join-Path $ProjectRoot 'Installer\Generated'
+        $harvestedFile = Join-Path $generatedDir "HarvestedFiles.wxs"
+
+        # Generate file listing from publish output
+        Generate-InstallerWxs -ReleaseDir $OutputDir -OutputFile $harvestedFile
+
+        # Determine WiX platform
+        $wixPlatform = if ($rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
+
+        # Build MSI
+        & dotnet build $installerProject `
+            -c Release `
+            -p:Platform=$wixPlatform `
+            -p:InstallerPlatform=$wixPlatform `
+            -p:OutputPath="$OutputDir\" `
+            -p:PublishDir="$OutputDir\" `
+            -p:MsiVersion="$MsiVersion"
+
+        if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
+
+        # Rename output MSI
+        $msiSrc = Get-ChildItem "$OutputDir\*.msi" | Select-Object -First 1
+        if ($msiSrc) {
+            $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-$rid.msi"
+            Move-Item $msiSrc.FullName $msiDst -Force
+            $msiSize = [math]::Round((Get-Item $msiDst).Length / 1MB, 1)
+            Write-Host "  MSI: $msiSize MB -> $msiDst" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  Skipped: Installer project not found" -ForegroundColor DarkYellow
+    }
 }
 
 # Summary
