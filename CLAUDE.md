@@ -130,6 +130,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled.zip`
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — ALL auto-detect latest versions via API; no hardcoded version pins; llama.cpp prefers CUDA 12.4; copied post-publish
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
+- **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
 - **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
 - **CI/CD:** GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
 - **CI version tracking:** `.github/deps.json` stores last-known versions; `dep-check.yml` compares upstream
