@@ -51,7 +51,6 @@ public sealed class UpdateService(
         return arch switch
         {
             System.Runtime.InteropServices.Architecture.X64 => "win-x64",
-            System.Runtime.InteropServices.Architecture.Arm64 => "win-arm64",
             _ => throw new PlatformNotSupportedException($"Unsupported architecture: {arch}")
         };
     }
