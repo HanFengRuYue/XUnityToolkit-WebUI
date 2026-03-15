@@ -590,6 +590,9 @@ foreach ($rid in $Runtimes) {
 
         if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
 
+        # Clean up WiX build artifacts from release directory
+        Get-ChildItem "$OutputDir\*.wixpdb" -ErrorAction SilentlyContinue | Remove-Item -Force
+
         # Rename output MSI
         $msiSrc = Get-ChildItem "$OutputDir\*.msi" | Select-Object -First 1
         if ($msiSrc) {

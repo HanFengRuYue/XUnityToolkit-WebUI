@@ -436,6 +436,11 @@ jobs:
             -p:PublishDir="$outputDir/" `
             -p:MsiVersion="$msiVersion"
 
+          if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
+
+          # Clean up WiX build artifacts from release directory
+          Remove-Item "$outputDir/*.wixpdb" -Force -ErrorAction SilentlyContinue
+
           $msiFile = Get-ChildItem "$outputDir/*.msi" | Select-Object -First 1
           if ($msiFile) {
             Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-$rid.msi" -Force
@@ -486,7 +491,7 @@ jobs:
             gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
 
   # ── Create GitHub Release after both RIDs succeed ──
   release:
