@@ -226,17 +226,21 @@ export interface TmpFontStatus {
 
 // ── Font Replacement ──
 
-export interface TmpFontInfo {
+export interface FontInfo {
   name: string
   pathId: number
   assetFile: string
   isInBundle: boolean
+  fontType: 'TMP' | 'TTF'
+  isSupported: boolean
+  // TMP-specific
   atlasCount: number
   glyphCount: number
   characterCount: number
   atlasWidth: number
   atlasHeight: number
-  isSupported: boolean
+  // TTF-specific
+  fontDataSize: number
 }
 
 export interface FontTarget {
@@ -251,7 +255,7 @@ export interface FontReplacementRequest {
 
 export interface FontReplacementStatus {
   isReplaced: boolean
-  replacedFonts: TmpFontInfo[]
+  replacedFonts: FontInfo[]
   backupExists: boolean
   isExternallyRestored: boolean
   replacedAt?: string

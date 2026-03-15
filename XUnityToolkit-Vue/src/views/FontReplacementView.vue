@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NIcon, NProgress, NSpace, NTag,
@@ -8,7 +8,7 @@ import {
 import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined, CloudUploadOutlined, DeleteOutlineOutlined } from '@vicons/material'
 import { api } from '@/api/client'
 import type {
-  Game, TmpFontInfo, FontReplacementRequest, FontReplacementStatus,
+  Game, FontInfo, FontReplacementRequest, FontReplacementStatus,
   FontReplacementProgress, FontReplacementResult
 } from '@/api/types'
 import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
@@ -20,7 +20,7 @@ const dialog = useDialog()
 
 const gameId = computed(() => route.params.id as string)
 const game = ref<Game | null>(null)
-const fonts = ref<TmpFontInfo[]>([])
+const fonts = ref<FontInfo[]>([])
 const checkedRowKeys = ref<string[]>([])
 const status = ref<FontReplacementStatus | null>(null)
 const scanning = ref(false)
@@ -34,26 +34,46 @@ const connection = new HubConnectionBuilder()
   .withAutomaticReconnect()
   .build()
 
-const columns = computed<DataTableColumns<TmpFontInfo>>(() => [
-  { type: 'selection', disabled: (row: TmpFontInfo) => !row.isSupported },
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const columns = computed<DataTableColumns<FontInfo>>(() => [
+  { type: 'selection', disabled: (row: FontInfo) => !row.isSupported },
   { title: '字体名称', key: 'name', ellipsis: { tooltip: true } },
   {
-    title: '所在文件', key: 'assetFile', ellipsis: { tooltip: true }, width: 240,
+    title: '类型', key: 'fontType', width: 80,
+    render: (row) => h(NTag, { size: 'small', bordered: false, type: row.fontType === 'TMP' ? 'info' : 'success' }, { default: () => row.fontType })
+  },
+  {
+    title: '所在文件', key: 'assetFile', ellipsis: { tooltip: true }, width: 220,
     render: (row) => row.assetFile
   },
   {
     title: '图集', key: 'atlas', width: 120,
-    render: (row) => row.atlasWidth > 0 ? `${row.atlasWidth}×${row.atlasHeight}` : '-'
+    render: (row) => row.fontType === 'TMP' && row.atlasWidth > 0 ? `${row.atlasWidth}×${row.atlasHeight}` : '—'
   },
-  { title: '字形数', key: 'glyphCount', width: 80 },
-  { title: '字符数', key: 'characterCount', width: 80 },
+  {
+    title: '字形数', key: 'glyphCount', width: 80,
+    render: (row) => row.fontType === 'TMP' ? row.glyphCount : '—'
+  },
+  {
+    title: '字符数', key: 'characterCount', width: 80,
+    render: (row) => row.fontType === 'TMP' ? row.characterCount : '—'
+  },
+  {
+    title: '大小', key: 'fontDataSize', width: 100,
+    render: (row) => row.fontType === 'TTF' ? formatSize(row.fontDataSize) : '—'
+  },
   {
     title: '状态', key: 'isSupported', width: 100,
     render: (row) => row.isSupported ? '支持' : '不支持'
   }
 ])
 
-const rowClassName = (row: TmpFontInfo) => row.isSupported ? '' : 'font-unsupported'
+const rowClassName = (row: FontInfo) => row.isSupported ? '' : 'font-unsupported'
 const selectedCount = computed(() => checkedRowKeys.value.length)
 
 async function loadGame() {
@@ -76,15 +96,15 @@ async function scanFonts() {
   fonts.value = []
   checkedRowKeys.value = []
   try {
-    fonts.value = await api.post<TmpFontInfo[]>(
+    fonts.value = await api.post<FontInfo[]>(
       `/api/games/${gameId.value}/font-replacement/scan`)
     checkedRowKeys.value = fonts.value
       .filter(f => f.isSupported)
       .map(f => `${f.assetFile}:${f.pathId}`)
     if (fonts.value.length === 0) {
-      message.info('未在游戏资产中找到 TMP 字体')
+      message.info('未在游戏资产中找到字体')
     } else {
-      message.success(`找到 ${fonts.value.length} 个 TMP 字体`)
+      message.success(`找到 ${fonts.value.length} 个字体`)
     }
   } catch (e: any) {
     message.error(`扫描失败: ${e.message}`)
@@ -316,7 +336,7 @@ onBeforeUnmount(async () => {
 
       <!-- Empty state when no fonts scanned yet -->
       <div v-if="fonts.length === 0 && !progress" class="empty-hint">
-        点击"扫描字体"按钮检测游戏中的 TMP 字体资源
+        点击"扫描字体"按钮检测游戏中的字体资源
       </div>
     </div>
 
@@ -356,7 +376,7 @@ onBeforeUnmount(async () => {
         <NDataTable
           :columns="columns"
           :data="fonts"
-          :row-key="(row: TmpFontInfo) => `${row.assetFile}:${row.pathId}`"
+          :row-key="(row: FontInfo) => `${row.assetFile}:${row.pathId}`"
           v-model:checked-row-keys="checkedRowKeys"
           :row-class-name="rowClassName"
           :max-height="500"
