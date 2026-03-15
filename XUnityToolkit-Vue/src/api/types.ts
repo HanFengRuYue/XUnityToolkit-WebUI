@@ -554,6 +554,11 @@ export interface FontGenerationReport {
   samplingSize: number
   sourceBreakdown: Record<string, number>
   elapsedMilliseconds: number
+  renderMode: string
+  samplingSizeMode: string
+  actualSamplingSize: number
+  padding: number
+  gradientScale: number
 }
 
 export interface CharsetInfo {
