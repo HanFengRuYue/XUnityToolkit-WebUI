@@ -12,7 +12,8 @@ public sealed record TranslationStats(
     IList<RecentTranslation> RecentTranslations,
     long TotalReceived,
     long TotalErrors,
-    IList<TranslationError> RecentErrors
+    IList<TranslationError> RecentErrors,
+    string? CurrentGameId
 );
 
 public sealed record RecentTranslation(
@@ -21,13 +22,15 @@ public sealed record RecentTranslation(
     DateTime Timestamp,
     long TokensUsed,
     double ResponseTimeMs,
-    string EndpointName
+    string EndpointName,
+    string? GameId
 );
 
 public sealed record TranslationError(
     string Message,
     DateTime Timestamp,
-    string? EndpointName
+    string? EndpointName,
+    string? GameId
 );
 
 public sealed record EndpointTestResult(

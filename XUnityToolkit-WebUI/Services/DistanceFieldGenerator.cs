@@ -62,24 +62,33 @@ public static class DistanceFieldGenerator
         }
 
         // Normalize to 0-255 (128 = edge)
+        // After downsampling, distances are still in high-res pixel units.
+        // Divide by (padding * upsampling) to convert to target-space and normalize.
+        float spread = padding * upsampling;
         var result = new byte[sdfWidth * sdfHeight];
         for (int i = 0; i < result.Length; i++)
         {
-            float normalized = Math.Clamp(sdfFinal[i] / padding, -1f, 1f) * 127.5f + 128f;
+            float normalized = Math.Clamp(sdfFinal[i] / spread, -1f, 1f) * 127.5f + 128f;
             result[i] = (byte)Math.Clamp(MathF.Round(normalized), 0f, 255f);
         }
 
         return result;
     }
 
-    /// <summary>SDFAA: sub-pixel distance seeding from antialiased values.</summary>
+    /// <summary>
+    /// SDFAA: sub-pixel distance seeding from antialiased values.
+    /// Edge is at v=0.5; seeds use (0.5-v)² / (v-0.5)² for sub-pixel accuracy.
+    /// Fully inside (v=1) → inside=0, outside=INF (let EDT propagate).
+    /// Fully outside (v=0) → inside=INF, outside=0 (from initialization).
+    /// Padding area: inside=INF, outside=0 — correctly treated as outside the glyph.
+    /// </summary>
     private static void InitializeFromAntialiased(
         byte[] bitmap, int bmpW, int bmpH,
         int pad, int paddedW,
         float[] inside, float[] outside)
     {
         Array.Fill(inside, INF);
-        Array.Fill(outside, INF);
+        Array.Fill(outside, 0f);  // Padding area is outside the glyph (distance = 0)
 
         for (int y = 0; y < bmpH; y++)
         {
@@ -87,8 +96,21 @@ public static class DistanceFieldGenerator
             {
                 float v = bitmap[y * bmpW + x] / 255f;
                 int pi = (y + pad) * paddedW + (x + pad);
-                inside[pi] = v > 0 ? v * v : INF;
-                outside[pi] = v < 1f ? (1f - v) * (1f - v) : INF;
+
+                if (v >= 1f)
+                {
+                    inside[pi] = 0;
+                    outside[pi] = INF;  // Fully inside: let EDT compute outside distance
+                }
+                else if (v > 0f)
+                {
+                    // AA edge region: sub-pixel distance centered at v=0.5
+                    float di = MathF.Max(0, 0.5f - v);
+                    float do_ = MathF.Max(0, v - 0.5f);
+                    inside[pi] = di * di;
+                    outside[pi] = do_ * do_;
+                }
+                // v == 0: inside=INF, outside=0 — correct from initialization
             }
         }
     }
@@ -100,7 +122,7 @@ public static class DistanceFieldGenerator
         float[] inside, float[] outside)
     {
         Array.Fill(inside, INF);
-        Array.Fill(outside, INF);
+        Array.Fill(outside, 0f);  // Padding area is outside the glyph
 
         for (int y = 0; y < bmpH; y++)
         {
@@ -108,9 +130,11 @@ public static class DistanceFieldGenerator
             {
                 int pi = (y + pad) * paddedW + (x + pad);
                 if (bitmap[y * bmpW + x] >= 128)
+                {
                     inside[pi] = 0;
-                else
-                    outside[pi] = 0;
+                    outside[pi] = INF;  // Inside pixel: let EDT compute outside distance
+                }
+                // else: inside=INF, outside=0 — correct from initialization
             }
         }
     }
