@@ -25,7 +25,7 @@ public static class FontReplacementEndpoints
                 return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
 
             var fonts = await fontReplacementService.ScanFontsAsync(game.GamePath, game.DetectedInfo, ct);
-            return Results.Ok(ApiResult<List<TmpFontInfo>>.Ok(fonts));
+            return Results.Ok(ApiResult<List<FontInfo>>.Ok(fonts));
         });
 
         // POST .../replace
@@ -97,19 +97,52 @@ public static class FontReplacementEndpoints
 
             var customDir = appDataPaths.GetCustomFontDirectory(id);
             Directory.CreateDirectory(customDir);
-            foreach (var existing in Directory.GetFiles(customDir))
-                File.Delete(existing);
 
-            var destPath = Path.Combine(customDir, Path.GetFileName(file.FileName));
-            await using var stream = File.Create(destPath);
-            await file.CopyToAsync(stream);
-            stream.Close();
+            var safeFileName = Path.GetFileName(file.FileName);
+            var destPath = Path.Combine(customDir, safeFileName);
 
-            if (!fontReplacementService.ValidateCustomFont(destPath))
+            // Read first 4 bytes for magic detection
+            byte[] magic = new byte[4];
+            using (var peekStream = file.OpenReadStream())
+                await peekStream.ReadExactlyAsync(magic);
+
+            bool isTtfOrOtf = (magic[0] == 0x00 && magic[1] == 0x01 && magic[2] == 0x00 && magic[3] == 0x00) // TTF
+                            || (magic[0] == 0x4F && magic[1] == 0x54 && magic[2] == 0x54 && magic[3] == 0x4F); // OTF "OTTO"
+
+            if (isTtfOrOtf)
             {
-                File.Delete(destPath);
-                return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
+                // Delete existing TTF/OTF custom fonts only (preserve AssetBundle custom fonts)
+                foreach (var existing in Directory.GetFiles(customDir))
+                {
+                    var ext = Path.GetExtension(existing).ToLowerInvariant();
+                    if (ext is ".ttf" or ".otf")
+                        File.Delete(existing);
+                }
+
+                await using var stream = File.Create(destPath);
+                await file.CopyToAsync(stream);
             }
+            else
+            {
+                // AssetBundle: delete existing AssetBundle custom fonts only
+                foreach (var existing in Directory.GetFiles(customDir))
+                {
+                    var ext = Path.GetExtension(existing).ToLowerInvariant();
+                    if (ext is not ".ttf" and not ".otf")
+                        File.Delete(existing);
+                }
+
+                await using var stream = File.Create(destPath);
+                await file.CopyToAsync(stream);
+                stream.Close();
+
+                if (!fontReplacementService.ValidateCustomFont(destPath))
+                {
+                    File.Delete(destPath);
+                    return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
+                }
+            }
+
             return Results.Ok(ApiResult.Ok());
         });
 
