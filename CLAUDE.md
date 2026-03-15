@@ -112,13 +112,13 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
 - **Font replacement models:** Sync `FontInfo`/`FontReplacementStatus` between `Models/FontReplacement.cs` ↔ `src/api/types.ts` ↔ `FontReplacementView.vue`
-- **TMP font models:** Sync `TmpFontStatus` between `Models/` ↔ `src/api/types.ts`; API methods in `src/api/games.ts`
+- **TMP font models:** Sync `TmpFontStatus` between `Endpoints/GameEndpoints.cs` ↔ `src/api/types.ts`; API methods in `src/api/games.ts`
 - Frontend state lifecycle: `GameDetailView.loadGame()` resets state when `isInstalled=false`
 - Install store `operationType` tracks install vs uninstall
 - **`[LLMTranslate]` INI config:** Written in 3 places — `POST /ai-endpoint`, `InstallOrchestrator`, DLL `Initialize`
 - **Update status model:** `Models/UpdateInfo.cs` → `src/api/types.ts` → `src/stores/update.ts` → `SettingsView.vue`
 - **AppSettings.ReceivePreReleaseUpdates:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue` (settings default + NSwitch)
-- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Program.cs` (DataPath) and `Updater/Program.cs` (MsiProductCode); key path: `HKCU\Software\XUnityToolkit`
+- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Program.cs` (DataPath) and `Updater/Program.cs` (MsiProductCode, InstallDir); key path: `HKCU\Software\XUnityToolkit`
 
 ### Build & Deploy
 
@@ -137,7 +137,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **CI shared PowerShell functions:** Extract to standalone `.ps1` files (e.g., `Installer/Generate-InstallerWxs.ps1`); both `build.ps1` and CI source via `. ./path/to/script.ps1`
 - **WiX gotcha — reserved properties:** `PublishDir` and `SourceDir` are reserved by MSBuild/WiX SDK and get silently overridden; use custom names (e.g., `AppPublishDir`) and pass via `-p:AppPublishDir=...`
 - **WiX gotcha — path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
-- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE38/ICE64/ICE91 false positives; suppress via `<SuppressIces>ICE38;ICE64;ICE91</SuppressIces>`
+- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE false positives; suppress via `<SuppressIces>ICE38;ICE60;ICE61;ICE64;ICE91</SuppressIces>`
 - **WiX gotcha — MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
 - **WiX gotcha — v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
 - **WiX gotcha — DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI
