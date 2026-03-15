@@ -34,9 +34,37 @@ public sealed class TmpFontGeneratorService(
         return ms.ToArray();
     });
 
-    private const int DefaultPadding = 9;
-    private const int DefaultSpread = 4; // padding / 2
-    private const int SdfAtlasRenderMode = 4165; // GlyphRenderMode.SDF
+    private static int GetUpsampling(string renderMode) => renderMode switch
+    {
+        "SDF8" => 8,
+        "SDF16" => 16,
+        "SDF32" => 32,
+        _ => 1, // SDFAA
+    };
+
+    private static int GetAtlasRenderMode(string renderMode) => renderMode switch
+    {
+        "SDF8" => 4168,
+        "SDF16" => 4169,
+        "SDF32" => 4170,
+        _ => 4165, // SDFAA
+    };
+
+    private static int GetMaxSamplingSize(string renderMode) => renderMode switch
+    {
+        "SDF8" => 2048,
+        "SDF16" => 1024,
+        "SDF32" => 512,
+        _ => int.MaxValue,
+    };
+
+    private static int CalculatePadding(int samplingSize, string paddingMode, int paddingValue)
+    {
+        int padding = paddingMode == "pixel"
+            ? paddingValue
+            : (int)(samplingSize * paddingValue / 100f);
+        return Math.Max(1, padding);
+    }
 
     private readonly SemaphoreSlim _generationSemaphore = new(1, 1);
     private CancellationTokenSource? _cts;
@@ -163,36 +191,65 @@ public sealed class TmpFontGeneratorService(
 
             try
             {
-                // Set pixel size
-                FT_Set_Pixel_Sizes(face, 0, (uint)request.SamplingSize);
+                // Calculate parameters
+                int upsampling = GetUpsampling(request.RenderMode);
+                int actualSamplingSize = request.SamplingSize;
+                int padding = CalculatePadding(actualSamplingSize, request.PaddingMode, request.PaddingValue);
+                int renderSize = actualSamplingSize * upsampling;
 
-                // Set SDF spread
-                int spread = DefaultSpread;
-                var sdfBytes = Encoding.ASCII.GetBytes("sdf\0");
-                var spreadBytes = Encoding.ASCII.GetBytes("spread\0");
-                fixed (byte* sdfPtr = sdfBytes)
-                fixed (byte* spreadNamePtr = spreadBytes)
-                {
-                    FT_Property_Set(lib, sdfPtr, spreadNamePtr, &spread);
-                }
+                // Validate constraints
+                int maxSize = GetMaxSamplingSize(request.RenderMode);
+                if (request.SamplingSize > maxSize)
+                    throw new InvalidOperationException(
+                        $"渲染模式 {request.RenderMode} 最大采样大小为 {maxSize}，当前设置为 {request.SamplingSize}");
+                if (renderSize > 16384)
+                    throw new InvalidOperationException(
+                        $"采样大小 {request.SamplingSize} × 上采样 {upsampling} = {renderSize} 超过 16384 限制");
+
+                // Set pixel size (at upsampled resolution)
+                FT_Set_Pixel_Sizes(face, 0, (uint)renderSize);
 
                 // Extract font name
                 var fontName = Marshal.PtrToStringAnsi((IntPtr)face->family_name) ?? "Unknown";
-                logger.LogInformation("字体已加载: {FontName}, 采样大小: {Size}px, 字符数: {Count}",
-                    fontName, request.SamplingSize, chars.Count);
+                logger.LogInformation("字体已加载: {FontName}, 采样大小: {Size}px, 上采样: {Up}x, Padding: {Pad}, 字符数: {Count}",
+                    fontName, request.SamplingSize, upsampling, padding, chars.Count);
 
-                // Extract face metrics (26.6 fixed-point → float)
+                // Extract face metrics (26.6 fixed-point → float, scaled by upsampling)
                 var sizeMetrics = face->size->metrics;
-                float ascender = (int)sizeMetrics.ascender / 64f;
-                float descender = (int)sizeMetrics.descender / 64f;
-                float lineHeight = (int)sizeMetrics.height / 64f;
+                float ascender = (int)sizeMetrics.ascender / (64f * upsampling);
+                float descender = (int)sizeMetrics.descender / (64f * upsampling);
+                float lineHeight = (int)sizeMetrics.height / (64f * upsampling);
+
+                // Auto-sizing: binary search for optimal sampling size
+                if (request.SamplingSizeMode == "auto")
+                {
+                    BroadcastProgress("parsing", 0, 1, "正在自动计算最优采样大小...", force: true);
+                    actualSamplingSize = AutoSizeSamplingSize(face, chars,
+                        request.AtlasWidth, request.AtlasHeight, padding, upsampling);
+                    renderSize = actualSamplingSize * upsampling;
+                    FT_Set_Pixel_Sizes(face, 0, (uint)renderSize);
+
+                    // Recalculate padding if percentage mode
+                    if (request.PaddingMode == "percentage")
+                        padding = Math.Max(1, (int)(actualSamplingSize * request.PaddingValue / 100f));
+
+                    // Re-extract face metrics at new size
+                    sizeMetrics = face->size->metrics;
+                    ascender = (int)sizeMetrics.ascender / (64f * upsampling);
+                    descender = (int)sizeMetrics.descender / (64f * upsampling);
+                    lineHeight = (int)sizeMetrics.height / (64f * upsampling);
+
+                    logger.LogInformation("自动采样大小: {Size}px", actualSamplingSize);
+                }
 
                 // === Phase 2: Generate SDF bitmaps ===
                 _total = chars.Count;
-                BroadcastProgress("sdf", 0, chars.Count, "正在生成 SDF 位图...", force: true);
+                var modeLabel = upsampling > 1 ? $"{request.RenderMode} ({renderSize}px)" : "SDFAA";
+                BroadcastProgress("sdf", 0, chars.Count, $"正在生成 SDF 位图 [{modeLabel}]...", force: true);
 
                 var glyphs = new List<GlyphData>();
                 var missingChars = new List<int>();
+                float metricScale = 1f / upsampling;
 
                 for (int i = 0; i < chars.Count; i++)
                 {
@@ -204,14 +261,15 @@ public sealed class TmpFontGeneratorService(
                     {
                         missingChars.Add(chars[i]);
                         _current = i + 1;
-                        BroadcastProgress("sdf", i + 1, chars.Count, $"正在生成 SDF 位图 ({i + 1}/{chars.Count})...");
+                        BroadcastProgress("sdf", i + 1, chars.Count,
+                            $"正在生成 SDF 位图 [{modeLabel}] ({i + 1}/{chars.Count})...");
                         continue;
                     }
 
                     error = FT_Load_Glyph(face, glyphIndex, FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING);
                     if (error != FT_Error.FT_Err_Ok) continue;
 
-                    error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_SDF);
+                    error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
                     if (error != FT_Error.FT_Err_Ok) continue;
 
                     ref var bitmap = ref face->glyph->bitmap;
@@ -220,37 +278,47 @@ public sealed class TmpFontGeneratorService(
                     int bmpWidth = (int)bitmap.width;
                     int bmpHeight = (int)bitmap.rows;
 
+                    int sdfWidth = 0, sdfHeight = 0;
                     if (bmpWidth > 0 && bmpHeight > 0 && bitmap.buffer != null)
                     {
-                        var bitmapData = new byte[bmpWidth * bmpHeight];
+                        // Copy AA bitmap from FreeType
+                        var aaBitmap = new byte[bmpWidth * bmpHeight];
                         int pitch = bitmap.pitch;
                         for (int row = 0; row < bmpHeight; row++)
                         {
                             var src = new ReadOnlySpan<byte>(bitmap.buffer + row * pitch, bmpWidth);
-                            src.CopyTo(bitmapData.AsSpan(row * bmpWidth));
+                            src.CopyTo(aaBitmap.AsSpan(row * bmpWidth));
                         }
 
-                        // Save bitmap to disk to reduce memory pressure
+                        // Generate SDF via EDT
+                        var sdfBitmap = DistanceFieldGenerator.GenerateSdf(
+                            aaBitmap, bmpWidth, bmpHeight,
+                            padding, upsampling,
+                            out sdfWidth, out sdfHeight);
+
+                        // Save SDF (padded) to disk
                         var tempPath = Path.Combine(tempDir, $"{charCode}.bin");
-                        File.WriteAllBytes(tempPath, bitmapData);
+                        File.WriteAllBytes(tempPath, sdfBitmap);
                     }
 
+                    // Metrics: divide by upsampling to get target-space values
                     glyphs.Add(new GlyphData
                     {
                         Index = glyphIndex,
                         Unicode = charCode,
-                        Width = (int)metrics.width / 64f,
-                        Height = (int)metrics.height / 64f,
-                        BearingX = (int)metrics.horiBearingX / 64f,
-                        BearingY = (int)metrics.horiBearingY / 64f,
-                        Advance = (int)metrics.horiAdvance / 64f,
-                        BitmapData = null, // Stored on disk
-                        BitmapWidth = bmpWidth,
-                        BitmapHeight = bmpHeight,
+                        Width = (int)metrics.width / 64f * metricScale,
+                        Height = (int)metrics.height / 64f * metricScale,
+                        BearingX = (int)metrics.horiBearingX / 64f * metricScale,
+                        BearingY = (int)metrics.horiBearingY / 64f * metricScale,
+                        Advance = (int)metrics.horiAdvance / 64f * metricScale,
+                        BitmapData = null,
+                        BitmapWidth = sdfWidth,   // Padded dimensions
+                        BitmapHeight = sdfHeight,  // Padded dimensions
                     });
 
                     _current = i + 1;
-                    BroadcastProgress("sdf", i + 1, chars.Count, $"正在生成 SDF 位图 ({i + 1}/{chars.Count})...");
+                    BroadcastProgress("sdf", i + 1, chars.Count,
+                        $"正在生成 SDF 位图 [{modeLabel}] ({i + 1}/{chars.Count})...");
                 }
 
                 logger.LogInformation("SDF 生成完成: {Count}/{Total} 个字形, {Missing} 个缺失",
@@ -317,7 +385,8 @@ public sealed class TmpFontGeneratorService(
                 allGlyphs.AddRange(zeroSizeGlyphs);
 
                 InjectIntoTemplate(request, fontName, allGlyphs, atlasPages,
-                    request.AtlasWidth, request.AtlasHeight, ascender, descender, lineHeight, outputPath);
+                    request.AtlasWidth, request.AtlasHeight, ascender, descender, lineHeight,
+                    padding, actualSamplingSize, outputPath);
 
                 // Clean up uploaded TTF
                 try { File.Delete(request.FontFilePath); }
@@ -338,7 +407,12 @@ public sealed class TmpFontGeneratorService(
                     AtlasHeight = request.AtlasHeight,
                     SamplingSize = request.SamplingSize,
                     SourceBreakdown = sourceBreakdown ?? new(),
-                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
+                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds,
+                    RenderMode = request.RenderMode,
+                    SamplingSizeMode = request.SamplingSizeMode,
+                    ActualSamplingSize = actualSamplingSize,
+                    Padding = padding,
+                    GradientScale = padding + 1,
                 };
 
                 var reportPath = Path.ChangeExtension(outputPath, ".report.json");
@@ -377,7 +451,7 @@ public sealed class TmpFontGeneratorService(
         List<GlyphData> allGlyphs, List<byte[]> atlasPages,
         int atlasWidth, int atlasHeight,
         float ascender, float descender, float lineHeight,
-        string outputPath)
+        int padding, int actualSamplingSize, string outputPath)
     {
         var templatePath = tmpFontService.ResolveFontFile(request.UnityVersion)
             ?? throw new InvalidOperationException($"未找到 Unity {request.UnityVersion} 的模板字体");
@@ -457,10 +531,10 @@ public sealed class TmpFontGeneratorService(
                 m["m_HorizontalAdvance"].AsFloat = g.Advance;
 
                 var gr = entry["m_GlyphRect"];
-                gr["m_X"].AsInt = g.AtlasX;
-                gr["m_Y"].AsInt = g.AtlasY;
-                gr["m_Width"].AsInt = g.BitmapWidth;
-                gr["m_Height"].AsInt = g.BitmapHeight;
+                gr["m_X"].AsInt = g.AtlasX + padding;                  // Inner glyph position
+                gr["m_Y"].AsInt = g.AtlasY + padding;                  // Inner glyph position
+                gr["m_Width"].AsInt = g.BitmapWidth - 2 * padding;     // Unpadded glyph width
+                gr["m_Height"].AsInt = g.BitmapHeight - 2 * padding;   // Unpadded glyph height
 
                 entry["m_Scale"].AsFloat = 1.0f;
                 entry["m_AtlasIndex"].AsInt = g.AtlasIndex;
@@ -498,10 +572,10 @@ public sealed class TmpFontGeneratorService(
             foreach (var g in allGlyphs.Where(g => g.BitmapWidth > 0 && g.BitmapHeight > 0))
             {
                 var entry = ValueBuilder.DefaultValueFieldFromTemplate(rectProto.TemplateField);
-                entry["m_X"].AsInt = g.AtlasX - DefaultPadding;
-                entry["m_Y"].AsInt = g.AtlasY - DefaultPadding; // Already bottom-up at this point
-                entry["m_Width"].AsInt = g.BitmapWidth + DefaultPadding * 2;
-                entry["m_Height"].AsInt = g.BitmapHeight + DefaultPadding * 2;
+                entry["m_X"].AsInt = g.AtlasX;              // Full padded region
+                entry["m_Y"].AsInt = g.AtlasY;
+                entry["m_Width"].AsInt = g.BitmapWidth;      // Already includes padding
+                entry["m_Height"].AsInt = g.BitmapHeight;
                 newRects.Add(entry);
             }
             usedRectsArray["Array"].Children = newRects;
@@ -516,21 +590,21 @@ public sealed class TmpFontGeneratorService(
         var faceInfo = fontBase["m_FaceInfo"];
         if (!faceInfo.IsDummy)
         {
-            faceInfo["m_PointSize"].AsInt = request.SamplingSize;
+            faceInfo["m_PointSize"].AsInt = actualSamplingSize;
             faceInfo["m_LineHeight"].AsFloat = lineHeight;
             faceInfo["m_AscentLine"].AsFloat = ascender;
             faceInfo["m_DescentLine"].AsFloat = descender;
             faceInfo["m_Baseline"].AsFloat = 0;
             faceInfo["m_UnderlineOffset"].AsFloat = descender * 0.5f;
             faceInfo["m_StrikethroughOffset"].AsFloat = ascender * 0.4f;
-            faceInfo["m_TabWidth"].AsFloat = allGlyphs.Count > 0 ? allGlyphs[0].Advance * 4 : request.SamplingSize * 2;
+            faceInfo["m_TabWidth"].AsFloat = allGlyphs.Count > 0 ? allGlyphs[0].Advance * 4 : actualSamplingSize * 2;
         }
 
         // === Set scalar fields ===
         fontBase["m_AtlasWidth"].AsInt = atlasWidth;
         fontBase["m_AtlasHeight"].AsInt = atlasHeight;
-        fontBase["m_AtlasPadding"].AsInt = DefaultPadding;
-        fontBase["m_AtlasRenderMode"].AsInt = SdfAtlasRenderMode;
+        fontBase["m_AtlasPadding"].AsInt = padding;
+        fontBase["m_AtlasRenderMode"].AsInt = GetAtlasRenderMode(request.RenderMode);
         fontBase["m_AtlasTextureIndex"].AsInt = 0;
         fontBase["m_Version"].AsString = "1.1.0";
         fontBase["m_Name"].AsString = fontName;
@@ -653,6 +727,70 @@ public sealed class TmpFontGeneratorService(
         // Commit font MonoBehaviour changes
         fontMbInfo.SetNewData(fontBase);
 
+        // === Inject Material _GradientScale ===
+        var materialPPtr = fontBase["material"];
+        if (!materialPPtr.IsDummy)
+        {
+            var matPathId = materialPPtr["m_PathID"].AsLong;
+            foreach (var matInfo in afileInst.file.GetAssetsOfType(AssetClassID.Material))
+            {
+                if (matInfo.PathId != matPathId) continue;
+                try
+                {
+                    var matBase = manager.GetBaseField(afileInst, matInfo);
+                    var floats = matBase["m_SavedProperties"]["m_Floats"]["Array"];
+                    if (floats.IsDummy) break;
+
+                    int gradientScale = padding + 1;
+                    bool foundGS = false, foundTW = false, foundTH = false;
+                    foreach (var pair in floats.Children)
+                    {
+                        var key = pair["first"]["name"].AsString;
+                        if (key == "_GradientScale")
+                            { pair["second"].AsFloat = gradientScale; foundGS = true; }
+                        else if (key == "_TextureWidth")
+                            { pair["second"].AsFloat = atlasWidth; foundTW = true; }
+                        else if (key == "_TextureHeight")
+                            { pair["second"].AsFloat = atlasHeight; foundTH = true; }
+                    }
+
+                    // Add missing properties
+                    if (floats.Children.Count > 0)
+                    {
+                        var proto = floats.Children[0];
+                        if (!foundGS)
+                        {
+                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
+                            e["first"]["name"].AsString = "_GradientScale";
+                            e["second"].AsFloat = gradientScale;
+                            floats.Children.Add(e);
+                        }
+                        if (!foundTW)
+                        {
+                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
+                            e["first"]["name"].AsString = "_TextureWidth";
+                            e["second"].AsFloat = atlasWidth;
+                            floats.Children.Add(e);
+                        }
+                        if (!foundTH)
+                        {
+                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
+                            e["first"]["name"].AsString = "_TextureHeight";
+                            e["second"].AsFloat = atlasHeight;
+                            floats.Children.Add(e);
+                        }
+                    }
+
+                    matInfo.SetNewData(matBase);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "无法注入 Material 属性 _GradientScale");
+                }
+                break;
+            }
+        }
+
         // === Write bundle ===
         dirInfos[entryIndex].SetNewData(afileInst.file);
 
@@ -763,8 +901,9 @@ public sealed class TmpFontGeneratorService(
         var rects = new PackingRectangle[glyphs.Count];
         for (int i = 0; i < glyphs.Count; i++)
             rects[i] = new PackingRectangle(0, 0,
-                (uint)(glyphs[i].BitmapWidth + DefaultPadding * 2),
-                (uint)(glyphs[i].BitmapHeight + DefaultPadding * 2), i);
+                (uint)glyphs[i].BitmapWidth,   // Already includes padding
+                (uint)glyphs[i].BitmapHeight,  // Already includes padding
+                i);
         return rects;
     }
 
@@ -772,8 +911,8 @@ public sealed class TmpFontGeneratorService(
     {
         foreach (var r in rects)
         {
-            glyphs[(int)r.Id].AtlasX = (int)r.X + DefaultPadding;
-            glyphs[(int)r.Id].AtlasY = (int)r.Y + DefaultPadding;
+            glyphs[(int)r.Id].AtlasX = (int)r.X;  // Raw packed position (top-left of padded bitmap)
+            glyphs[(int)r.Id].AtlasY = (int)r.Y;
         }
     }
 
@@ -815,6 +954,70 @@ public sealed class TmpFontGeneratorService(
         foreach (var c in name)
             sb.Append(invalid.Contains(c) ? '_' : c);
         return sb.ToString().Trim();
+    }
+
+    private unsafe int AutoSizeSamplingSize(
+        FT_FaceRec_* face, List<int> chars,
+        int atlasWidth, int atlasHeight, int padding, int upsampling)
+    {
+        int glyphCount = chars.Count;
+        if (glyphCount == 0) return 64;
+
+        int maxSize = (int)(MathF.Sqrt((float)atlasWidth * atlasHeight / glyphCount) * 3);
+        if (upsampling > 1)
+            maxSize = Math.Min(maxSize, 16384 / upsampling);
+
+        int minSize = 4;
+        int bestSize = minSize;
+
+        for (int iter = 0; iter < 15; iter++)
+        {
+            int testSize = (minSize + maxSize) / 2;
+            if (testSize <= 0) break;
+
+            FT_Set_Pixel_Sizes(face, 0, (uint)(testSize * upsampling));
+
+            // Estimate glyph dimensions by sampling a few characters
+            var sampleGlyphs = new List<(int w, int h)>();
+            int sampleCount = Math.Min(chars.Count, 200);
+            int step = Math.Max(1, chars.Count / sampleCount);
+
+            for (int i = 0; i < chars.Count && sampleGlyphs.Count < sampleCount; i += step)
+            {
+                var glyphIndex = FT_Get_Char_Index(face, (UIntPtr)(uint)chars[i]);
+                if (glyphIndex == 0) continue;
+
+                if (FT_Load_Glyph(face, glyphIndex, FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING) != FT_Error.FT_Err_Ok)
+                    continue;
+
+                ref var metrics = ref face->glyph->metrics;
+                int w = (int)Math.Ceiling((int)metrics.width / 64.0 / upsampling) + 2 * padding;
+                int h = (int)Math.Ceiling((int)metrics.height / 64.0 / upsampling) + 2 * padding;
+                if (w > 0 && h > 0)
+                    sampleGlyphs.Add((w, h));
+            }
+
+            if (sampleGlyphs.Count == 0) { maxSize = testSize; continue; }
+
+            // Estimate total area
+            double avgArea = sampleGlyphs.Average(g => (double)g.w * g.h);
+            double totalArea = avgArea * glyphCount;
+            double atlasArea = (double)atlasWidth * atlasHeight * 0.85; // 85% utilization
+
+            if (totalArea <= atlasArea)
+            {
+                bestSize = testSize;
+                minSize = testSize;
+            }
+            else
+            {
+                maxSize = testSize;
+            }
+
+            if (maxSize - minSize <= 1) break;
+        }
+
+        return bestSize;
     }
 
     private class GlyphData
