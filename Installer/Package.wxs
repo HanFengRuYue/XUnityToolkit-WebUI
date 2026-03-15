@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="XUnityToolkit-WebUI"
+           Manufacturer="XUnityToolkit"
+           Version="$(var.MsiVersion)"
+           UpgradeCode="E8A3F4B2-7C1D-4E5A-9B6F-2D8C4A1E3F7B"
+           Compressed="yes"
+           InstallerVersion="500"
+           Scope="perUser">
+
+    <SummaryInformation Description="XUnityToolkit-WebUI Installer" />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="已安装更新版本的 XUnityToolkit-WebUI，无法降级安装。" />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\XUnityToolkit-WebUI.exe" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/XUnityToolkit/XUnityToolkit-WebUI" />
+
+    <Feature Id="ProductFeature" Title="XUnityToolkit-WebUI" Level="1">
+      <ComponentGroupRef Id="CoreComponents" />
+      <ComponentGroupRef Id="ShortcutComponents" />
+      <ComponentGroupRef Id="HarvestedFiles" />
+      <ComponentGroupRef Id="CleanupComponents" />
+    </Feature>
+
+  </Package>
+</Wix>

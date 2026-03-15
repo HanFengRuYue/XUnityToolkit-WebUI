@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- Per-user install: %LocalAppData%\Programs\XUnityToolkit-WebUI\ -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLDIR" Name="XUnityToolkit-WebUI" />
+      </Directory>
+    </StandardDirectory>
+
+    <!-- Start menu: per-user program group -->
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="XUnityToolkit-WebUI" />
+    </StandardDirectory>
+
+    <!-- Desktop: per-user -->
+    <StandardDirectory Id="DesktopFolder" />
+  </Fragment>
+</Wix>

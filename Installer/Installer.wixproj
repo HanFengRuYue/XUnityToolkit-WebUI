@@ -1,0 +1,12 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform Condition="'$(Platform)' == ''">x64</InstallerPlatform>
+    <!-- Pass MSBuild properties as WiX preprocessor variables -->
+    <DefineConstants>PublishDir=$(PublishDir);MsiVersion=$(MsiVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>
