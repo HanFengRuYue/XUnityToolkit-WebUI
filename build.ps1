@@ -447,13 +447,11 @@ if ($hasEndpoint) {
     }
 }
 
-# ── Step: Build Updater (AOT) ──
+# ── Step: Build Updater (AOT, win-x64 only) ──
 Write-Host "`n=== Building Updater ===" -ForegroundColor Cyan
-foreach ($rid in $Runtimes) {
-    Write-Host "Building Updater for $rid..." -ForegroundColor Yellow
-    dotnet publish Updater/Updater.csproj -c Release -r $rid /p:PublishAot=true
-    if ($LASTEXITCODE -ne 0) { throw "Updater build failed for $rid" }
-}
+Write-Host "Building Updater for win-x64..." -ForegroundColor Yellow
+dotnet publish Updater/Updater.csproj -c Release -r win-x64 /p:PublishAot=true
+if ($LASTEXITCODE -ne 0) { throw "Updater build failed for win-x64" }
 
 # Clean Release folder
 $currentStep++
@@ -509,8 +507,8 @@ foreach ($rid in $Runtimes) {
         Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
     }
 
-    # Copy Updater.exe
-    $updaterPath = "Updater/bin/Release/net10.0/$rid/publish/Updater.exe"
+    # Copy Updater.exe (always use win-x64 build — ARM64 AOT requires C++ ARM64 build tools)
+    $updaterPath = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
     if (Test-Path $updaterPath) {
         Copy-Item $updaterPath "$OutputDir/" -Force
         Write-Host "  Copied Updater.exe" -ForegroundColor Green
