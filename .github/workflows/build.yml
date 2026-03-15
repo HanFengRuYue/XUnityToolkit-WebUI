@@ -79,6 +79,29 @@ jobs:
             'User-Agent'    = 'XUnityToolkit-CI/1.0'
           }
 
+          function Invoke-WithRetry {
+            param(
+              [scriptblock]$ScriptBlock,
+              [int]$MaxRetries = 3,
+              [string]$Operation = "Operation"
+            )
+            $attempt = 0
+            while ($true) {
+              try {
+                $attempt++
+                return (& $ScriptBlock)
+              } catch {
+                if ($attempt -ge $MaxRetries) {
+                  throw "${Operation}: failed after $MaxRetries attempts. Last error: $($_.Exception.Message)"
+                }
+                $waitSec = [math]::Pow(2, $attempt)
+                Write-Host "  [retry] $Operation failed (attempt $attempt/$MaxRetries), retrying in ${waitSec}s..."
+                Write-Host "          $($_.Exception.Message)"
+                Start-Sleep -Seconds $waitSec
+              }
+            }
+          }
+
           function Download-Asset {
             param([string]$Url, [string]$DestDir, [string]$FileName = $null)
             if (-not $FileName) {
@@ -91,7 +114,9 @@ jobs:
             }
             Write-Host "  Downloading $FileName..."
             $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $Url -OutFile $destPath -UseBasicParsing
+            Invoke-WithRetry -Operation "Download $FileName" -ScriptBlock {
+              Invoke-WebRequest -Uri $Url -OutFile $destPath -UseBasicParsing -TimeoutSec 600
+            }.GetNewClosure()
           }
 
           $BundledRoot = "bundled"
@@ -106,9 +131,9 @@ jobs:
 
           # ── BepInEx 5 (Mono) ──
           Write-Host "Fetching BepInEx 5..."
-          $b5releases = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" `
-            -Headers $headers
+          $b5releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
+            Invoke-RestMethod -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" -Headers $headers -TimeoutSec 30
+          }.GetNewClosure()
           $b5rel = $b5releases |
             Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } |
             Select-Object -First 1
@@ -125,7 +150,9 @@ jobs:
 
           # ── BepInEx 6 BE (IL2CPP) ──
           Write-Host "Fetching BepInEx 6 BE..."
-          $buildsHtml = (Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing).Content
+          $buildsHtml = (Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
+            Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
+          }).Content
           if ($buildsHtml -match 'href="[^"]*?/(\d+)/BepInEx-Unity\.IL2CPP-win-x64-6\.0\.0-be\.\d+%2B([a-f0-9]+)\.zip"') {
             $buildNo = $Matches[1]
             $commit  = $Matches[2]
@@ -141,9 +168,9 @@ jobs:
 
           # ── XUnity.AutoTranslator ──
           Write-Host "Fetching XUnity.AutoTranslator..."
-          $xureleases = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" `
-            -Headers $headers
+          $xureleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
+            Invoke-RestMethod -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" -Headers $headers -TimeoutSec 30
+          }.GetNewClosure()
           $xurel = $xureleases | Select-Object -First 1
           if (-not $xurel) { throw "XUnity release not found" }
           Write-Host "  XUnity: $($xurel.tag_name)"
@@ -151,15 +178,12 @@ jobs:
             Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\xunity"
           }
 
-          # ── llama.cpp ──
-          Write-Host "Fetching llama.cpp..."
-          $llamareleases = Invoke-RestMethod `
-            -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=10" `
-            -Headers $headers
-          $llamarel = $llamareleases |
-            Where-Object { -not $_.prerelease } |
-            Select-Object -First 1
-          if (-not $llamarel) { throw "llama.cpp release not found" }
+          # ── llama.cpp (pinned version) ──
+          $llamaTag = "b8354"
+          Write-Host "Fetching llama.cpp $llamaTag..."
+          $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
+            Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30
+          }.GetNewClosure()
           Write-Host "  llama.cpp: $($llamarel.tag_name)"
           $llamaPatterns = @(
             "llama-*-bin-win-cuda-12.4-x64.zip",
@@ -376,23 +400,41 @@ jobs:
         run: |
           $rid = "win-x64"
           $releaseDir = "Release/$rid"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-          # app ZIP - root level files (exclude appsettings*)
+          # app ZIP — root-level files (exclude appsettings*)
           $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
           if ($appFiles) {
-              Compress-Archive -Path $appFiles.FullName -DestinationPath "Release/app-$rid.zip"
+            $appZip = "Release/app-$rid.zip"
+            if (Test-Path $appZip) { Remove-Item $appZip }
+            $zip = [System.IO.Compression.ZipFile]::Open($appZip, 'Create')
+            try {
+              foreach ($f in $appFiles) {
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
+              }
+            } finally { $zip.Dispose() }
           }
 
           # wwwroot ZIP
           $wwwrootDir = Join-Path $releaseDir "wwwroot"
           if (Test-Path $wwwrootDir) {
-              Compress-Archive -Path $wwwrootDir -DestinationPath "Release/wwwroot.zip"
+            $tempDir = "Release/_wwwroot_wrap"
+            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+            New-Item -ItemType Directory -Path $tempDir | Out-Null
+            Copy-Item $wwwrootDir (Join-Path $tempDir "wwwroot") -Recurse
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, "Release/wwwroot.zip")
+            Remove-Item $tempDir -Recurse -Force
           }
 
           # bundled ZIP
           $bundledDir = Join-Path $releaseDir "bundled"
           if (Test-Path $bundledDir) {
-              Compress-Archive -Path $bundledDir -DestinationPath "Release/bundled.zip"
+            $tempDir = "Release/_bundled_wrap"
+            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+            New-Item -ItemType Directory -Path $tempDir | Out-Null
+            Copy-Item $bundledDir (Join-Path $tempDir "bundled") -Recurse
+            [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, "Release/bundled.zip")
+            Remove-Item $tempDir -Recurse -Force
           }
 
       # ── Build MSI installer ──
@@ -440,7 +482,7 @@ jobs:
 
           # Find MSI in WiX default output location
           $wixOutputDir = "Installer/bin/$wixPlatform/Release"
-          $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msiFile) {
             Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-$rid.msi" -Force
             Write-Host "MSI built: Release/XUnityToolkit-WebUI-$rid.msi"
@@ -451,8 +493,10 @@ jobs:
       - name: Package as ZIP
         shell: pwsh
         run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zipName = "XUnityToolkit-WebUI-win-x64.zip"
-          Compress-Archive -Path "Release\win-x64\*" -DestinationPath $zipName -CompressionLevel Optimal
+          if (Test-Path $zipName) { Remove-Item $zipName }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory("Release\win-x64", $zipName)
           $sizeMB = [math]::Round((Get-Item $zipName).Length / 1MB, 1)
           Write-Host "Created $zipName ($sizeMB MB)"
 
