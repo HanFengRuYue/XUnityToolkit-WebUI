@@ -6,6 +6,7 @@ string? appDir = null;
 string? stagingDir = null;
 string? deleteListPath = null;
 string? exeName = null;
+string? dataDir = null;
 
 for (int i = 0; i < args.Length - 1; i++)
 {
@@ -16,6 +17,7 @@ for (int i = 0; i < args.Length - 1; i++)
         case "--staging-dir": stagingDir = args[++i]; break;
         case "--delete-list": deleteListPath = args[++i]; break;
         case "--exe-name":    exeName = args[++i]; break;
+        case "--data-dir":    dataDir = args[++i]; break;
     }
 }
 
@@ -25,8 +27,11 @@ if (appDir is null || stagingDir is null || exeName is null)
     return 1;
 }
 
+// Default data directory: --data-dir or {appDir}/data
+var effectiveDataDir = dataDir ?? Path.Combine(appDir!, "data");
+
 // Ensure log directory exists and open log file
-string logDir = Path.Combine(appDir, "data", "update-temp");
+string logDir = Path.Combine(effectiveDataDir, "update-temp");
 Directory.CreateDirectory(logDir);
 string logPath = Path.Combine(logDir, "updater.log");
 
@@ -44,6 +49,7 @@ Log($"  app-dir:      {appDir}");
 Log($"  staging-dir:  {stagingDir}");
 Log($"  delete-list:  {deleteListPath ?? "(none)"}");
 Log($"  exe-name:     {exeName}");
+Log($"  data-dir:     {effectiveDataDir}");
 
 // Wait for main process to exit
 if (pidArg is not null && int.TryParse(pidArg, out int pid))
@@ -94,7 +100,7 @@ var stagingFiles = Directory
 
 Log($"Staging contains {stagingFiles.Count} file(s).");
 
-string backupDir = Path.Combine(appDir, "data", "update-backup");
+string backupDir = Path.Combine(effectiveDataDir, "update-backup");
 
 // ── Phase 1: BACKUP ALL ──────────────────────────────────────────────────────
 Log("Phase 1: Backing up existing files...");
@@ -148,7 +154,7 @@ foreach (string rel in stagingFiles)
 if (replaceError is not null)
 {
     Log("Phase 2 failed — initiating rollback.");
-    Rollback(appDir, backupDir, stagingFiles, replaceError, "replace", replaced, stagingFiles.Count - replaced, exeName, log);
+    Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, replaceError, "replace", replaced, stagingFiles.Count - replaced, exeName, log);
     return 4;
 }
 Log("Phase 2 complete.");
@@ -190,7 +196,7 @@ if (deleteListPath is not null && File.Exists(deleteListPath))
     if (deleteError is not null)
     {
         Log("Phase 3 failed — initiating rollback.");
-        Rollback(appDir, backupDir, stagingFiles, deleteError, "delete", replaced, 0, exeName, log);
+        Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, deleteError, "delete", replaced, 0, exeName, log);
         return 5;
     }
 }
@@ -200,9 +206,20 @@ else
 }
 Log("Phase 3 complete.");
 
+// ── MSI Registry Sync ────────────────────────────────────────────────────────
+Log("Syncing MSI registry info...");
+try
+{
+    SyncMsiRegistryVersion(Log);
+}
+catch (Exception ex)
+{
+    Log($"Warning: MSI registry sync failed (non-critical): {ex.Message}");
+}
+
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 Log("Cleanup: removing staging, backup, and temp directories...");
-TryDeleteDirectory(Path.Combine(appDir, "data", "update-staging"), log);
+TryDeleteDirectory(Path.Combine(effectiveDataDir, "update-staging"), log);
 TryDeleteDirectory(backupDir, log);
 TryDeleteDirectory(logDir, log);  // This also removes the log dir; log writes after this are best-effort
 
@@ -225,6 +242,7 @@ return 0;
 
 static void Rollback(
     string appDir,
+    string dataDir,
     string backupDir,
     List<string> stagingFiles,
     string errorMessage,
@@ -271,10 +289,10 @@ static void Rollback(
         $"  \"filesRemaining\": {filesRemaining}\n" +
         $"}}";
 
-    string errorJsonPath = Path.Combine(appDir, "data", "update-error.json");
+    string errorJsonPath = Path.Combine(dataDir, "update-error.json");
     try
     {
-        Directory.CreateDirectory(Path.Combine(appDir, "data"));
+        Directory.CreateDirectory(dataDir);
         File.WriteAllText(errorJsonPath, errorJson);
         Log($"Error details written to: {errorJsonPath}");
     }
@@ -309,5 +327,119 @@ static void TryDeleteDirectory(string path, StreamWriter log)
     catch (Exception ex)
     {
         log.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}]   [CLEANUP WARN] Could not delete {path}: {ex.Message}");
+    }
+}
+
+// ── Win32 Registry P/Invoke (AOT-safe) ──────────────────────────────────────
+
+partial class Program
+{
+    static void SyncMsiRegistryVersion(Action<string> log)
+    {
+        nint hKey;
+        int result = RegOpenKeyEx(
+            HKEY_CURRENT_USER,
+            @"Software\XUnityToolkit",
+            0,
+            KEY_READ,
+            out hKey);
+
+        if (result != 0)
+        {
+            log("  No MSI registration found (portable mode). Skipping.");
+            return;
+        }
+
+        try
+        {
+            string? productCode = RegGetString(hKey, "MsiProductCode");
+            if (string.IsNullOrEmpty(productCode))
+            {
+                log("  MsiProductCode not found. Skipping.");
+                return;
+            }
+
+            string? installDir = RegGetString(hKey, "InstallDir");
+            if (string.IsNullOrEmpty(installDir))
+            {
+                log("  InstallDir not found. Skipping.");
+                return;
+            }
+
+            string exePath = Path.Combine(installDir, "XUnityToolkit-WebUI.exe");
+            string? newVersion = null;
+            if (File.Exists(exePath))
+            {
+                try
+                {
+                    var versionInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath);
+                    newVersion = versionInfo.ProductVersion?.Split('+')[0];
+                }
+                catch { /* ignore */ }
+            }
+
+            if (string.IsNullOrEmpty(newVersion))
+            {
+                log("  Could not determine new version. Skipping.");
+                return;
+            }
+
+            string uninstallKey = @$"Software\Microsoft\Windows\CurrentVersion\Uninstall\{productCode}";
+            nint hUninstall;
+            result = RegOpenKeyEx(HKEY_CURRENT_USER, uninstallKey, 0, KEY_WRITE, out hUninstall);
+            if (result != 0)
+            {
+                log($"  Could not open uninstall key: {uninstallKey}");
+                return;
+            }
+
+            try
+            {
+                RegSetString(hUninstall, "DisplayVersion", newVersion);
+                RegSetString(hUninstall, "InstallDate", DateTime.Now.ToString("yyyyMMdd"));
+                log($"  Updated DisplayVersion to {newVersion}");
+            }
+            finally
+            {
+                RegCloseKey(hUninstall);
+            }
+        }
+        finally
+        {
+            RegCloseKey(hKey);
+        }
+    }
+
+    static readonly nint HKEY_CURRENT_USER = unchecked((nint)0x80000001);
+    const int KEY_READ = 0x20019;
+    const int KEY_WRITE = 0x20006;
+    const int REG_SZ = 1;
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int RegOpenKeyEx(nint hKey, string subKey, int options, int samDesired, out nint phkResult);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll")]
+    static extern int RegCloseKey(nint hKey);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int RegQueryValueEx(nint hKey, string valueName, nint reserved, out int type, char[] data, ref int dataSize);
+
+    [System.Runtime.InteropServices.DllImport("advapi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern int RegSetValueEx(nint hKey, string valueName, int reserved, int type, string data, int dataSize);
+
+    static string? RegGetString(nint hKey, string name)
+    {
+        int type;
+        int size = 520;
+        char[] buffer = new char[260];
+        int result = RegQueryValueEx(hKey, name, nint.Zero, out type, buffer, ref size);
+        if (result != 0 || type != REG_SZ) return null;
+        return new string(buffer, 0, (size / 2) - 1);
+    }
+
+    static void RegSetString(nint hKey, string name, string value)
+    {
+        int dataSize = (value.Length + 1) * 2;
+        RegSetValueEx(hKey, name, 0, REG_SZ, value, dataSize);
     }
 }
