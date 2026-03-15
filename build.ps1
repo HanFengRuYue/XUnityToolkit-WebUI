@@ -168,11 +168,12 @@ $hasEndpoint = Test-Path $EndpointProject
 # Generate version: 1.3.{YYYYMMDDHHmm}
 $BuildVersion = "1.3.$(Get-Date -Format 'yyyyMMddHHmm')"
 
-# Generate MSI-compatible version: {YYYY-2024}.{MMDD}.{HHmm}
+# Generate MSI-compatible version: {(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}
+# Constraints: major < 256, minor < 256, build < 65536
 $now = Get-Date
-$msiMajor = $now.Year - 2024
-$msiMinor = $now.ToString("MMdd")
-$msiBuild = $now.ToString("HHmm")
+$msiMajor = ($now.Year - 2024) * 12 + $now.Month
+$msiMinor = $now.Day
+$msiBuild = $now.Hour * 60 + $now.Minute
 $MsiVersion = "$msiMajor.$msiMinor.$msiBuild"
 
 # ── GitHub repo owners ──

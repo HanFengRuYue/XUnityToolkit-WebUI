@@ -413,12 +413,18 @@ jobs:
 
           # Generate MSI version from build version
           # Build version format: 1.1.YYYYMMDDHHmm
+          # MSI constraints: major < 256, minor < 256, build < 65536
           $parts = "${{ steps.ver.outputs.build_version }}".Split('.')
           $timestamp = $parts[2]  # YYYYMMDDHHmm
-          $year = [int]$timestamp.Substring(0, 4) - 2024
-          $mmdd = $timestamp.Substring(4, 4)
-          $hhmm = $timestamp.Substring(8, 4)
-          $msiVersion = "$year.$mmdd.$hhmm"
+          $year = [int]$timestamp.Substring(0, 4)
+          $month = [int]$timestamp.Substring(4, 2)
+          $day = [int]$timestamp.Substring(6, 2)
+          $hour = [int]$timestamp.Substring(8, 2)
+          $minute = [int]$timestamp.Substring(10, 2)
+          $msiMajor = ($year - 2024) * 12 + $month
+          $msiMinor = $day
+          $msiBuild = $hour * 60 + $minute
+          $msiVersion = "$msiMajor.$msiMinor.$msiBuild"
 
           # Source the shared harvesting function and generate file listing
           . ./Installer/Generate-InstallerWxs.ps1
