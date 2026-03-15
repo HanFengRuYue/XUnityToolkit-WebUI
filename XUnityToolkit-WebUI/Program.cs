@@ -107,6 +107,14 @@ builder.Services.AddHttpClient("LocalLlmDownload", client =>
     client.Timeout = TimeSpan.FromHours(12);
 });
 
+// HTTP client for GitHub update checks
+builder.Services.AddHttpClient("GitHubUpdate", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI");
+    client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+});
+
 // Services
 builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
@@ -131,6 +139,7 @@ builder.Services.AddSingleton<FontReplacementService>();
 builder.Services.AddSingleton<TmpFontGeneratorService>();
 builder.Services.AddSingleton<CharacterSetService>();
 builder.Services.AddSingleton<BepInExLogService>();
+builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SystemTrayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemTrayService>());
 
@@ -195,6 +204,7 @@ app.MapFontReplacementEndpoints();
 app.MapFontGenerationEndpoints();
 app.MapLocalLlmEndpoints();
 app.MapBepInExLogEndpoints();
+app.MapUpdateEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");
@@ -218,5 +228,15 @@ catch
 {
     // Ignore — defaults to enabled
 }
+
+// Auto-check for updates after startup
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    _ = Task.Run(async () =>
+    {
+        var updateService = app.Services.GetRequiredService<UpdateService>();
+        await updateService.AutoCheckOnStartupAsync();
+    });
+});
 
 app.Run();
