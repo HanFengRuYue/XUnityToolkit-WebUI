@@ -39,6 +39,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -509,6 +511,7 @@ jobs:
 
       - name: Upload component packages
         if: inputs.release_tag != ''
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
