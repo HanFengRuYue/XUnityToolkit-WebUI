@@ -28,6 +28,8 @@ public sealed class PreTranslationService(
         public int Failed;
     }
 
+    public bool IsPreTranslating => _statuses.Values.Any(s => s.State == PreTranslationState.Running);
+
     public PreTranslationStatus GetStatus(string gameId)
     {
         return _statuses.GetOrAdd(gameId, id => new PreTranslationStatus { GameId = id });

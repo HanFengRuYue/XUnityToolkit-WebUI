@@ -80,8 +80,13 @@ public sealed class LlmTranslationService(
     private SemaphoreSlim? _semaphore; // Read via Volatile.Read at capture site for ARM safety
     private int _currentMaxConcurrency;
 
+    // ── Current game tracking ──
+    private string? _currentGameId;
+
     // ── BroadcastStats throttle ──
     private long _lastBroadcastTicks;
+
+    public bool HasPendingTranslations => Interlocked.Read(ref _translating) > 0 || Interlocked.Read(ref _queued) > 0;
 
     public bool Enabled
     {
@@ -115,17 +120,18 @@ public sealed class LlmTranslationService(
             RecentTranslations: _recentTranslations.ToArray(),
             TotalReceived: Interlocked.Read(ref _totalReceived),
             TotalErrors: Interlocked.Read(ref _totalErrors),
-            RecentErrors: _recentErrors.ToArray()
+            RecentErrors: _recentErrors.ToArray(),
+            CurrentGameId: Volatile.Read(ref _currentGameId)
         );
     }
 
     /// <summary>
     /// Record a translation error for display in the web UI.
     /// </summary>
-    public void RecordError(string message, string? endpointName = null)
+    public void RecordError(string message, string? endpointName = null, string? gameId = null)
     {
         Interlocked.Increment(ref _totalErrors);
-        _recentErrors.Enqueue(new TranslationError(message, DateTime.UtcNow, endpointName));
+        _recentErrors.Enqueue(new TranslationError(message, DateTime.UtcNow, endpointName, gameId));
         while (_recentErrors.Count > MaxRecentErrors)
             _recentErrors.TryDequeue(out _);
         _ = BroadcastStats(force: true);
@@ -139,11 +145,13 @@ public sealed class LlmTranslationService(
 
         Interlocked.Add(ref _totalReceived, texts.Count);
         Interlocked.Exchange(ref _lastRequestTicks, DateTime.UtcNow.Ticks);
+        if (!string.IsNullOrEmpty(gameId))
+            Volatile.Write(ref _currentGameId, gameId);
         _ = BroadcastStats();
 
         if (!_enabled)
         {
-            RecordError("AI 翻译功能已停用");
+            RecordError("AI 翻译功能已停用", gameId: gameId);
             throw new InvalidOperationException("AI 翻译功能已停用");
         }
 
@@ -158,7 +166,7 @@ public sealed class LlmTranslationService(
             var enabledEndpoints = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
             if (enabledEndpoints.Count == 0)
             {
-                RecordError("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
+                RecordError("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商", gameId: gameId);
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
 
@@ -177,6 +185,10 @@ public sealed class LlmTranslationService(
                 dntEntries = await doNotTranslateService.GetAsync(gameId, ct);
                 if (dntEntries.Count == 0) dntEntries = null;
             }
+
+            if (logger.IsEnabled(LogLevel.Debug))
+                logger.LogDebug("翻译上下文: gameId={GameId}, 术语表={GlossaryCount}条, 禁翻表={DntCount}条, 文本数={TextCount}",
+                    gameId ?? "(空)", glossary?.Count ?? 0, dntEntries?.Count ?? 0, texts.Count);
 
             // Load per-game description (cached in-memory, no disk I/O)
             string? gameDescription = null;
@@ -240,9 +252,9 @@ public sealed class LlmTranslationService(
                         textsToTranslate = replaced;
                         glossaryMapping = mapping;
 
-                        // Only show regex entries in prompt (non-regex handled by placeholders)
-                        var regexEntries = glossary.Where(e => e.IsRegex).ToList();
-                        promptGlossary = regexEntries.Count > 0 ? regexEntries : null;
+                        // Keep ALL glossary entries in the system prompt so the LLM
+                        // understands the terminology even when placeholders are used.
+                        // promptGlossary remains = glossary (set at line 231)
 
                         // Tell LLM to preserve glossary placeholders
                         dntHint = (dntHint ?? "") +
@@ -251,15 +263,80 @@ public sealed class LlmTranslationService(
                 }
             }
 
-            // Batch translation: send entire batch as one LLM call
-            var (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
-                textsToTranslate, from, to, ai, enabledEndpoints, promptGlossary,
-                gameDescription, memoryContext, dntHint, semaphore, ct);
+            // Pre-compute results for texts that are ENTIRELY a single placeholder.
+            // These don't need LLM — we already know the answer. Sending {{G_0}} to the
+            // LLM wastes tokens and risks the LLM "translating" the placeholder.
+            var preComputed = new Dictionary<int, string>();
+            var llmTexts = new List<string>();
+            var llmIndexMap = new List<int>(); // llmTexts index → original index
 
-            // Copy to mutable list for post-processing
-            var translations = new List<string>(batchResult);
+            for (int i = 0; i < textsToTranslate.Count; i++)
+            {
+                var text = textsToTranslate[i];
+                string? directResult = null;
 
-            // Restore glossary placeholders (replace {{G_x}} with glossary translations)
+                if (glossaryMapping is not null)
+                {
+                    var gm = FullGlossaryPlaceholderRegex.Match(text);
+                    if (gm.Success)
+                    {
+                        var key = $"{{{{G_{gm.Groups[1].Value}}}}}";
+                        if (glossaryMapping.TryGetValue(key, out var val))
+                            directResult = val;
+                    }
+                }
+
+                if (directResult is null && dntMapping is not null)
+                {
+                    var dm = FullDntPlaceholderRegex.Match(text);
+                    if (dm.Success)
+                    {
+                        var key = $"{{{{DNT_{dm.Groups[1].Value}}}}}";
+                        if (dntMapping.TryGetValue(key, out var val))
+                            directResult = val;
+                    }
+                }
+
+                if (directResult is not null)
+                {
+                    preComputed[i] = directResult;
+                }
+                else
+                {
+                    llmTexts.Add(text);
+                    llmIndexMap.Add(i);
+                }
+            }
+
+            // Call LLM only for texts that actually need translation
+            long tokens = 0;
+            double ms = 0;
+            string endpointName = "";
+            IList<string> batchResult;
+
+            if (llmTexts.Count > 0)
+            {
+                (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
+                    llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
+                    gameDescription, memoryContext, dntHint, semaphore, ct);
+            }
+            else
+            {
+                batchResult = [];
+            }
+
+            // Merge LLM results with pre-computed results
+            var translations = new List<string>(textsToTranslate.Count);
+            int llmIdx = 0;
+            for (int i = 0; i < textsToTranslate.Count; i++)
+            {
+                if (preComputed.TryGetValue(i, out var direct))
+                    translations.Add(direct);
+                else
+                    translations.Add(batchResult[llmIdx++]);
+            }
+
+            // Restore glossary placeholders (for partial-placeholder texts from LLM)
             if (glossaryMapping is not null)
                 translations = RestoreGlossaryPlaceholders(translations, glossaryMapping);
 
@@ -268,6 +345,7 @@ public sealed class LlmTranslationService(
             // replace restored DNT words with glossary translations, undoing the do-not-translate intent.
             for (int i = 0; i < translations.Count; i++)
             {
+                if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
                 if (glossary is not null)
                     translations[i] = ApplyGlossaryPostProcess(translations[i], glossary);
             }
@@ -280,7 +358,7 @@ public sealed class LlmTranslationService(
             {
                 // Record recent translation
                 var recent = new RecentTranslation(
-                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName);
+                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName, gameId);
                 _recentTranslations.Enqueue(recent);
                 while (_recentTranslations.Count > MaxRecentTranslations)
                     _recentTranslations.TryDequeue(out _);
@@ -682,6 +760,15 @@ public sealed class LlmTranslationService(
 
     private static readonly Regex GlossaryRestoreRegex = new(
         @"\{{1,2}\s*G_(\d+)\s*\}{1,2}",
+        RegexOptions.Compiled);
+
+    // Strict full-match patterns: detect texts that are ENTIRELY a single placeholder
+    private static readonly Regex FullDntPlaceholderRegex = new(
+        @"^\{{2}DNT_(\d+)\}{2}$",
+        RegexOptions.Compiled);
+
+    private static readonly Regex FullGlossaryPlaceholderRegex = new(
+        @"^\{{2}G_(\d+)\}{2}$",
         RegexOptions.Compiled);
 
     private static (List<string> replacedTexts, Dictionary<string, string> mapping)

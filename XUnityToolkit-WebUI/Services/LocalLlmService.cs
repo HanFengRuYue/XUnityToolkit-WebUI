@@ -24,6 +24,7 @@ public sealed class LocalLlmService(
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private Process? _process;
     private volatile LocalLlmServerState _state = LocalLlmServerState.Idle;
+    public bool IsRunning => _state == LocalLlmServerState.Running;
     private string? _error;
     private int _internalPort;
     private GpuBackend _activeBackend;

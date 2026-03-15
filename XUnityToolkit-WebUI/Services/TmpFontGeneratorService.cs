@@ -72,6 +72,7 @@ public sealed class TmpFontGeneratorService(
 
     // Progress state
     private volatile bool _isGenerating;
+    public bool IsGenerating => _isGenerating;
     private volatile string? _phase;
     private volatile int _current;
     private volatile int _total;

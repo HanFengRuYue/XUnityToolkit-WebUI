@@ -26,6 +26,9 @@ public sealed class InstallOrchestrator(
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellations = [];
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = [];
 
+    public bool HasActiveOperation => _statuses.Values.Any(s =>
+        s.Step is not (InstallStep.Idle or InstallStep.Complete or InstallStep.Failed));
+
     public InstallationStatus GetStatus(string gameId)
     {
         return _statuses.GetOrAdd(gameId, id => new InstallationStatus { GameId = id });
