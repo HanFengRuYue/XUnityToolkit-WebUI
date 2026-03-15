@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+See also: `XUnityToolkit-Vue/CLAUDE.md` (frontend) and `XUnityToolkit-WebUI/CLAUDE.md` (backend) for package-specific details.
 
 ## Project Overview
 
@@ -18,6 +19,9 @@ dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 # One-click release build (self-contained single-file, win-x64 + win-arm64)
 .\build.ps1                    # both architectures
 .\build.ps1 -Runtime win-x64  # x64 only
+
+# Quick local build (skips asset downloads)
+.\build-local.ps1
 
 # Build frontend (output to XUnityToolkit-WebUI/wwwroot/)
 cd XUnityToolkit-Vue && npm run build
@@ -43,6 +47,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description, do-not-translate list; real-time stats via SignalR
 - **Do-Not-Translate:** `DoNotTranslateService` stores per-game lists at `data/do-not-translate/{gameId}.json`; `LlmTranslationService` replaces matched words with `{{DNT_x}}` placeholders before LLM calls, restores after; prompt hint tells LLM to preserve placeholders; entries sorted longest-first; per-entry case sensitivity
+- **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
 - **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, disables glossary extraction
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
 - **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/data/backups/{gameId}.json`
@@ -50,27 +55,12 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Font Generation:** `TmpFontGeneratorService` uses FreeTypeSharp for SDF rendering + RectpackSharp for atlas packing; multi-atlas support (auto-pagination when chars exceed single atlas capacity); `CharacterSetService` resolves stackable character sets (built-in/custom TXT/XUnity translation file); `BuiltinCharsets` enumerates GB2312/GBK/CJK Common/CJK Full/Japanese; disk-temp SDF bitmaps for memory control; generation reports saved as `.report.json` sidecars; outputs at `{programDir}/data/generated-fonts/`
 - **BepInEx Log:** `BepInExLogService` reads `{GamePath}/BepInEx/LogOutput.log` with `FileShare.ReadWrite`; AI analysis via `LlmTranslationService.CallLlmRawAsync` (no semaphore contention); diagnostic prompt is predefined Chinese; log truncated to last 4000 lines for LLM context; `hasBepInEx` computed includes `PartiallyInstalled` state
 
-### Frontend Design System
-
-- **Theme:** Dark/light via `data-theme`; `useThemeStore` (localStorage + OS) is authoritative, not backend `AppSettings.Theme`; light mode auto-darkens accent 15%
-- **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, etc.); theme-aware: use `--bg-subtle`/`--bg-muted` — never hardcode `rgba(255,255,255,...)`
-- **Layout:** Sidebar (230px) + scrollable content; responsive at 768px (tablet drawer) and 480px (phone single-column)
-- **Cards:** `.section-card` with `.section-icon`/`.section-title` (base `--accent`; semantic `.danger`/`.warning` only); decorative colors → `--accent`; `color-mix()` for translucent backgrounds
-- **Shared CSS (main.css):** `.page-title`, `.page-title-icon`, `.section-card`, `.section-header`, `.section-title`, `.section-icon`, `.header-actions`, `.section-desc`, `.loading-state`, `.table-container`, `.add-entry-row`, `.unsaved-badge`, `.auto-save-badge`, `.empty-hint`, `.back-button` are global classes — do NOT redefine in scoped styles
-- **Sub-page layout:** Game sub-pages use `.sub-page` (24px title) + `.sub-page-header` + `.back-button`; top-level pages use `.page-title` directly (26px)
-- **Header actions:** Use `.header-actions` (NOT `.header-btn-group`) for button groups in section headers
-- **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match
-
 ## Code Conventions
 
 - **Git commit messages:** Titles and body MUST be written in Chinese (conventional commit prefixes like `feat:`/`fix:`/`ci:`/`docs:` may remain in English)
 - **Target Framework:** net10.0-windows
 - **Root Namespace:** XUnityToolkit_WebUI
 - **Nullable reference types:** Enabled; **Implicit usings:** Enabled
-- **Frontend:** Vue 3 Composition API with `<script setup lang="ts">`
-- **Frontend styling:** Scoped `<style scoped>`; use CSS variables from `main.css`
-- **Frontend icons:** `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`
-- **Frontend API client:** `api.get`, `api.post`, `api.put`, `api.del` (NOT `.delete` — JS reserved word); import from `@/api/client` (NOT `@/api` — it's a directory, Vite fails with EISDIR)
 
 ## API Endpoints
 
@@ -95,70 +85,12 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
 - **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`
 - **BepInEx Log:** `GET /api/games/{id}/bepinex-log`, `GET .../download` (**not ApiResult**), `POST .../analyze`
-- **Font Generation:** `POST /api/font-generation/upload` (multipart, 50MB), `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}` (**not ApiResult**), `GET .../history`, `DELETE .../{fileName}`, `POST .../use-as-custom/{gameId}`, `GET .../charsets`, `POST .../charset/preview`, `POST .../charset/upload-custom`, `POST .../charset/upload-translation`, `GET .../report/{fileName}`
+- **Font Generation:** `POST /api/font-generation/upload` (multipart, 50MB), `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}` (**not ApiResult**), `GET .../history`, `DELETE .../{fileName}`, `POST .../install-tmp-font/{gameId}` (installs to `BepInEx/Font/` + patches INI), `GET .../charsets`, `POST .../charset/preview`, `POST .../charset/upload-custom`, `POST .../charset/upload-translation`, `GET .../report/{fileName}`
 - **Plugin Package:** `POST .../plugin-package/export` (ZIP, **not ApiResult**), `POST .../import`
 - **Logs:** `GET /api/logs?count=`, `GET .../history?lines=`, `GET .../download` (**not ApiResult**)
 - **ApiResult pattern:** `ApiResult<T>.Ok(data)` / `ApiResult.Ok()`; request records at bottom of Endpoints files
 
 ## Development Notes
-
-### Backend Core
-
-- **No migration code:** Project is pre-stable — no backward-compat migrations or old-format converters
-- `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
-- **Data storage:** `{programDir}/data/` for all runtime data; `AppDataPaths` centralizes paths; shipped assets (`bundled/`, `wwwroot/`) stay at program root
-- **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
-- **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `{baseDir}/data` before DI — must stay in sync with `AppDataPaths._root` formula
-- **App URL:** `http://127.0.0.1:{port}` default `51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`); port configurable via `settings.json` → `aiTranslation.port` (read pre-DI in `Program.cs`)
-- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA)
-- **Mirror:** `AppSettings.HfMirrorUrl`; HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
-- **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
-- **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
-- `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
-- P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
-- **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
-- **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
-- **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache`
-
-### INI Configuration
-
-- **Never generate XUnity config from scratch** — always `PatchAsync` read-modify-write
-- Config filename: `AutoTranslatorConfig.ini` at `BepInEx/config/`
-- PatchAsync null semantics: `null` = skip, `""` = clear value
-- `ApplyOptimalDefaultsAsync` sets `[General] Language = zh`, `OverrideFont = Microsoft YaHei`, `Endpoint = LLMTranslate` with `FallbackEndpoint = GoogleTranslateV2`
-- **Sensitive sections** (sanitize for export): `GoogleLegitimate`, `BingLegitimate`, `Baidu`, `Yandex`, `DeepLLegitimate`, `PapagoTranslate`, `LingoCloud`, `Watson`, `Custom`, `LecPowerTranslator15`, `ezTrans`
-
-### Glossary Extraction
-
-- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → merge
-- **GlossaryEntry model:** `Original`, `Translation`, `IsRegex`, `Description` (nullable)
-- **Critical:** settings check (async) BEFORE buffer drain — otherwise pairs lost when disabled
-- `TryTriggerExtraction` is synchronous (hot-path); async work deferred to `DrainAndExtractAsync`
-- DLL must send `gameId` in `POST /api/translate` — requires `[LLMTranslate] GameId` in INI
-- **All translation paths** must call `BufferTranslation` + `TryTriggerExtraction`, guarded by `!string.IsNullOrEmpty(gameId)` AND `!isLocalMode`
-
-### Concurrency & Performance
-
-- **Hot-path:** `POST /api/translate` receives 100+ req/s; all I/O must use in-memory caches, never disk per request
-- `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks
-- **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
-- `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
-- **Stats counters unit:** `_queued`, `_translating`, `_totalReceived`, `_totalTranslated` must ALL count individual texts (not batches/HTTP requests)
-- **RecordError:** `LlmTranslationService.RecordError` is sole site — endpoint catch must NOT double-count
-- `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
-- **Plugin concurrency:** DLL 10x10 = 100 texts; Mono >15 connections deadlocks — batch instead
-- **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
-- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10; CAS-throttled 200ms progress
-
-### AI Translation Context
-
-- **Batch mode:** entire batch as one LLM call; JSON array I/O
-- **Translation memory:** per-game volatile; cloud `ContextSize` (10, max 100), local `LocalContextSize` (0, max 10)
-- **Game description:** `Game.AiDescription`; `_descriptionCache` invalidated by `PUT /description`; truncated to 500 chars
-- **SystemPrompt order:** template → description → glossary → memory → dntHint → [texts]
-- **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
-- **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
-- **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
 
 ### TranslatorEndpoint
 
@@ -167,132 +99,6 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - `DisableSpamChecks()` removes stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
 - `GetOrCreateSetting` reads existing INI; changing DLL defaults won't affect installed games — use `PatchSectionAsync`
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
-
-### Asset Extraction (AssetsTools.NET)
-
-- `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` both in `AssetsTools.NET.Extra`; IL2CPP: fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
-- **`classdata.tpk`:** embedded as resource; auto-updated from [AssetRipper/Tpk](https://github.com/AssetRipper/Tpk) CI by `build.ps1` (requires `gh` CLI); committed file serves as fallback
-- `LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration
-- **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
-- **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
-- Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
-- **Language detection:** Non-Latin scripts prioritized over Latin (Unity internals always contribute English); only classify as English when non-Latin count < 10; `IsGameText` is heuristic exclusion filter
-- XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
-- **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
-
-### Font Replacement (AssetsTools.NET)
-
-- **TMP_FontAsset detection:** MonoBehaviour with `m_Version` + `m_GlyphTable` fields = v1.1.0 (supported); `m_fontInfo` + `m_glyphInfoList` = v1.0.0 (unsupported)
-- **Field-level copy:** Swap `Children` lists for array/struct fields (`m_GlyphTable`, `m_CharacterTable`, `m_FaceInfo`, etc.); DO NOT touch PPtr fields (`material`, `m_SourceFontFile`, `m_FallbackFontAssetTable`); `m_AtlasTextures` is handled separately by multi-atlas logic
-- **Multi-atlas replacement:** `ReplaceSingleFont` reads ALL source atlas pages via `List<SourceAtlasPage>`; replaces existing destination textures; creates new Texture2D assets for extra pages (globally unique PathId via `AssetInfos.Max(PathId) + 1`); updates `m_AtlasTextures` PPtr array
-- **Texture replacement:** `AssetsTools.NET.Texture` v3.0.2 (latest); API uses `TextureFile.ReadTextureFile()` → `SetPictureData()`/`FillPictureData()` → `WriteTo()`; clear `m_StreamData` (path/offset/size) after replacing embedded texture
-- **New Texture2D pitfall:** `ValueBuilder.DefaultValueFieldFromTemplate` creates ZEROED fields; `TextureFile.ReadTextureFile(zeroedField)` → m_MipCount=0, m_TextureDimension=0 — Unity won't render; MUST `ReadTextureFile(existingTexture)` to inherit metadata, then override format/data/dimensions via `SetPictureData` + `WriteTo`
-- **`TextureFile` field coverage:** `WriteTo` writes ALL 31 texture fields; `SetPictureData` only sets 5 (width, height, data, completeImageSize, streamData) — other metadata (m_MipCount, m_TextureSettings, m_IsReadable, m_TextureDimension, m_ImageCount, m_ColorSpace) must come from `ReadTextureFile` source
-- **`AssetFileInfo.Create` (v>=16):** `TypeIdOrIndex` = raw classId (not index); does NOT add TypeTreeType — existing type tree entry for that classId must already exist in metadata
-- **Bundle write pattern:** modify assets → `DirectoryInfos[i].SetNewData(afile)` → write uncompressed `.tmp` → re-read → `Pack(writer, LZ4)` → delete tmp → move to original
-- **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
-- **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
-- **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
-- **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomFontFileName` for frontend display; `DELETE .../custom-font` clears custom font
-- **`FontReplacementService` DI:** depends on `TmpFontService`, `BundledAssetPaths`, `AppDataPaths`; `BundledAssetPaths` used for TTF bundled font path resolution (prefer over `Assembly.GetExecutingAssembly().Location` which fails in single-file publish)
-- **TTF replacement:** `ReplaceSingleTtfFont` replaces `m_FontData` byte array in `AssetClassID.Font` assets; preserves all layout metadata (`m_FontSize`, `m_LineSpacing`, etc.)
-- **Bundled TTF:** `bundled/fonts/SourceHanSansCN-Regular.ttf` (~10MB) used as default replacement source for TTF fonts
-- **Custom font coexistence:** `data/custom-fonts/{gameId}/` can hold both an AssetBundle (for TMP) and a TTF/OTF (for TTF) simultaneously; files distinguished by extension; upload endpoint uses magic bytes (`00 01 00 00` TTF, `4F 54 54 4F` OTF) for format detection
-- **TMP source filtering:** `ReplaceFontsAsync` custom font auto-resolve filters by extension (excludes `.ttf`/`.otf` from TMP source, excludes non-TTF from TTF source)
-- **Creating new array entries:** `ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField)` creates a new field instance from an existing entry's template; use first array child as prototype, clone per-entry, set values, then assign `array.Children = newList`
-
-### Font Generation (FreeTypeSharp)
-
-- **FreeTypeSharp:** v3.1.0 raw unsafe P/Invoke (bundles FreeType 2.13.2); requires `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` in csproj; `FT_LOAD` is enum not int — use `FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING` directly (no cast); `FT_Property_Set` for SDF spread requires marshaled byte* module/property names
-- **Atlas Y-axis:** FreeType SDF bitmaps are top-down (Y=0 at top); Unity Texture2D/TMP GlyphRect are bottom-up (Y=0 at bottom); atlas bytes must be row-flipped and GlyphRect Y converted (`atlasHeight - y - height`) before injection
-- **`TmpFontService.ResolveFontFile` callers:** game install passes full version (`"2022.3.62f3"`), font generation passes major-only (`"6000"`); `ParseMajorVersion` must handle both formats (with and without dots)
-- **Multi-atlas:** `PackGlyphs` tries single page first; binary search + 90% safety margin for max glyphs per page; `RectanglePacker.Pack` does NOT throw on overflow — must check returned `bounds` against atlas dimensions
-- **async/unsafe conflict:** `GenerateCore` is `unsafe` (FreeType pointers) — character resolution via `CharacterSetService.ResolveCharactersAsync` MUST happen in `GenerateAsync` before `Task.Run`, never inside `GenerateCore`
-- **`HashSet<int>` not `HashSet<char>`:** CJK Extension B (U+20000+) requires supplementary plane support; `char` is 16-bit; use `int` codepoints throughout pipeline; `StringInfo.GetTextElementEnumerator()` for surrogate pair handling
-- **Disk-temp SDF bitmaps:** For large charsets (70K+ chars), SDF bitmaps saved to `data/font-generation/temp/{sessionId}/` during rendering, read back per-page during compositing, cleaned up in `finally`
-- **CharacterSetService:** singleton; depends on `AppDataPaths`, `GameLibraryService`; `ResolveCharactersAsync` merges built-in + custom TXT + translation file sources; superset warnings from `BuiltinCharsets.SupersetOf`; translation file path resolved from game INI `[Files] OutputFile` + `[General] Language`
-
-### Local LLM
-
-- GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
-- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/data/llama/{cuda,vulkan,cpu}/`
-- **Bundled binaries:** ZIPs in `bundled/llama/`; lazy-extracted on first `POST /start` via `ExtractLlamaZipAsync`
-- **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel
-- **GPU monitoring:** nvidia-smi polled every 3s when CUDA running
-- **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
-- Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
-- Settings: `data/local-llm-settings.json`; mirror settings unified in `AppSettings`
-
-### BepInEx Installation (Bundled)
-
-- **Mono games:** BepInEx 5 from `bundled/bepinex5/` (x64 + x86)
-- **IL2CPP games:** BepInEx 6 BE from `bundled/bepinex6/` (x64 + x86); supports IL2CPP metadata v31+
-- `BepInExInstallerService.InstallAsync` is plain ZIP extraction; version parsed from filename
-
-### Plugin Package (Export/Import)
-
-- `PluginPackageService`: exports BepInEx + XUnity as ZIP (max compression)
-- **INI sanitization:** blanks sensitive section values; `[LLMTranslate]` only blanks `GameId`
-- **ZIP filename:** `{sanitized game name}_{target language}_{yyyy-MM-dd}.zip`
-- **Import with font replacement:** `_font_replacement_manifest.json` sentinel in ZIP; import MUST backup target asset files BEFORE extraction (ZIP overwrites originals); update `OriginalPath` in manifest to match importing game's directory
-
-### DI & Provider Gotchas
-
-- Pre-constructed `ILoggerProvider`: use `AddSingleton<T>(_ => instance)` to avoid double-dispose
-- `IHubContext<T>.SendAsync` is extension method — requires `using Microsoft.AspNetCore.SignalR;`
-- **`SystemTrayService` DI:** `AddSingleton` + `AddHostedService(sp => sp.GetRequired...)` for injection + hosting
-
-### Adding a New Page
-
-- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
-- **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`
-- **GlossaryEditorView:** NTabs with "术语表" and "禁翻表" tabs; each tab has independent auto-save, import/export, and search; adding a new per-game text management feature → add as a new NTabPane here
-- **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
-- SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
-- Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
-
-### Frontend Patterns
-
-- **Theme default:** CSS `:root` = dark theme; `loadInitialTheme()` must default to `'dark'` when OS detection fails — detect `prefers-color-scheme: light` (not dark) to avoid flash-of-wrong-theme
-- **Scoped → global CSS:** Scoped styles (`.class[data-v-xxx]`) have higher specificity than global (`.class`); when extracting shared styles to `main.css`, must REMOVE scoped duplicates or they'll override; page-specific overrides stay in scoped with just the differing properties
-- **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232
-- **KeepAlive:** Top-level views (Library, AiTranslation, FontGenerator, Log, Settings) are cached via `<KeepAlive :include>` in AppShell; each MUST have `defineOptions({ name: 'XxxView' })` after imports
-- **Install state recovery:** `startInstall`/`startUninstall` must query backend `GET /api/games/{id}/status` as fallback — Pinia store state is lost on page reload while backend install continues running
-- Use composables (`src/composables/`) for complex multi-step UI flows
-- **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
-- **ConfigPanel** auto-saves internally (2s), no `save` event
-- Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard; `NDialogOptions.onPositiveClick`: returning a `Promise` keeps dialog open until resolved — fire-and-forget long async work (e.g., `() => { doWork() }`) to close immediately
-- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``
-- `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
-- `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
-- **RouterView key:** `:key="route.path"` ensures transitions fire for same-component different-route navigations
-- **RouteMeta extension:** `env.d.ts` declares `depth?: number` on `RouteMeta` for TypeScript
-- **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
-- **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
-- After changes: verify with `npx vue-tsc --noEmit` and `npm run build`
-- Verify icon: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
-- **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
-- **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
-- TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
-- **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false })` for synchronous string return
-- **Regex match groups:** `match[1]` is `string | undefined` in strict TS — always check `match && match[1]`
-- **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
-- **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
-
-### Web Image Search
-
-- **`WebImageSearchService`:** Scrapes Bing and Google for image results; no API key needed
-- **`WebImageSearchTab` modes:** `'cover'` | `'icon'` | `'background'` — each with distinct search suffix, size filter, and grid aspect ratio
-- **SSRF protection:** `ValidateImageUrl` rejects non-http(s), loopback, private IPs before server-side download
-- **Content-Type validation:** Must check `IsAllowedContentType` before saving downloaded images
-- **GameDetailView title-icon:** left-click → IconPickerModal; right-click → context menu (Change Cover / Change Background / Search Icon / Upload Icon / Delete Icon / Delete Background)
-
-### Game Detail Background Image
-
-- **Hero backdrop:** `GameDetailView.vue` — absolute-positioned behind content; NO blur on image (`filter: brightness(0.65) saturate(1.1)` only); gradient + vignette overlays fade to `--bg-root`
-- **Acrylic cards:** `.section-card` uses `backdrop-filter: blur(20px)` with semi-transparent `--bg-card` — cards blur the background, not the image itself
-- **Parallax:** scroll listener on `.main-content` (parent); `translateY(scrollTop * 0.3)` on hero img; `passive: true`
-- **bgTimestamp:** separate `ref(Date.now())` for cache-busting background URL independently of `game.updatedAt`
 
 ### Sync Points
 

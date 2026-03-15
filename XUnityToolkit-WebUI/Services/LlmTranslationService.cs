@@ -263,16 +263,21 @@ public sealed class LlmTranslationService(
             if (glossaryMapping is not null)
                 translations = RestoreGlossaryPlaceholders(translations, glossaryMapping);
 
-            // Restore do-not-translate placeholders
-            if (dntMapping is not null)
-                translations = RestoreDoNotTranslatePlaceholders(translations, dntMapping);
-
-            // Apply glossary post-processing (safety net: catches regex entries + any remaining originals)
+            // Apply glossary post-processing BEFORE DNT restoration — if DNT words are restored first,
+            // the glossary post-process (which does string.Replace on translated text) can accidentally
+            // replace restored DNT words with glossary translations, undoing the do-not-translate intent.
             for (int i = 0; i < translations.Count; i++)
             {
                 if (glossary is not null)
                     translations[i] = ApplyGlossaryPostProcess(translations[i], glossary);
+            }
 
+            // Restore do-not-translate placeholders AFTER glossary post-processing
+            if (dntMapping is not null)
+                translations = RestoreDoNotTranslatePlaceholders(translations, dntMapping);
+
+            for (int i = 0; i < translations.Count; i++)
+            {
                 // Record recent translation
                 var recent = new RecentTranslation(
                     texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName);

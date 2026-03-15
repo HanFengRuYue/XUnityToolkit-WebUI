@@ -285,6 +285,7 @@ public sealed class TmpFontGeneratorService(
                         var bitmapTempPath = Path.Combine(tempDir, $"{g.Unicode}.bin");
                         if (!File.Exists(bitmapTempPath)) continue;
                         var bitmapData = File.ReadAllBytes(bitmapTempPath);
+                        if (bitmapData.Length != g.BitmapWidth * g.BitmapHeight) continue;
 
                         for (int row = 0; row < g.BitmapHeight; row++)
                         {
@@ -609,6 +610,10 @@ public sealed class TmpFontGeneratorService(
                             // NOT from newTexBase which has all zeros — Unity won't render mip=0 textures
                             var texFile = TextureFile.ReadTextureFile(texTemplate);
                             texFile.m_TextureFormat = 1; // Alpha8
+                            texFile.m_MipCount = 1;
+                            texFile.m_MipMap = false;
+                            texFile.m_StreamingMipmaps = false;
+                            texFile.m_IsReadable = true;
                             texFile.SetPictureData(atlasPages[pageIdx], atlasWidth, atlasHeight);
                             texFile.WriteTo(newTexBase);
 
@@ -687,6 +692,10 @@ public sealed class TmpFontGeneratorService(
         var texBase = manager.GetBaseField(afileInst, texInfo);
         var texFile = TextureFile.ReadTextureFile(texBase);
         texFile.m_TextureFormat = 1; // Alpha8
+        texFile.m_MipCount = 1;
+        texFile.m_MipMap = false;
+        texFile.m_StreamingMipmaps = false;
+        texFile.m_IsReadable = true;
         texFile.SetPictureData(atlasData, atlasWidth, atlasHeight);
         texFile.WriteTo(texBase);
 

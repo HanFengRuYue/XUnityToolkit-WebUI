@@ -38,8 +38,16 @@ public static class FontReplacementEndpoints
             if (game.DetectedInfo is null)
                 return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
 
+            // Prevent concurrent replacements for the same game
+            if (_cancellationTokens.ContainsKey(id))
+                return Results.Conflict(ApiResult.Fail("字体替换正在进行中，请等待完成或先取消。"));
+
             var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            _cancellationTokens[id] = cts;
+            if (!_cancellationTokens.TryAdd(id, cts))
+            {
+                cts.Dispose();
+                return Results.Conflict(ApiResult.Fail("字体替换正在进行中，请等待完成或先取消。"));
+            }
             try
             {
                 var progress = new Progress<FontReplacementProgress>(async p =>

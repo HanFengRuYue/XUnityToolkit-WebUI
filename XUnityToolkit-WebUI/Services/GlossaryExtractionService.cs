@@ -11,6 +11,7 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class GlossaryExtractionService(
     LlmTranslationService translationService,
     GlossaryService glossaryService,
+    DoNotTranslateService doNotTranslateService,
     AppSettingsService settingsService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<GlossaryExtractionService> logger)
@@ -165,8 +166,11 @@ public sealed class GlossaryExtractionService(
             // Load existing glossary for dedup context
             var existingGlossary = await glossaryService.GetAsync(gameId);
 
+            // Load do-not-translate list to exclude from extraction
+            var dntEntries = await doNotTranslateService.GetAsync(gameId);
+
             // Build prompt
-            var systemPrompt = BuildExtractionSystemPrompt(existingGlossary);
+            var systemPrompt = BuildExtractionSystemPrompt(existingGlossary, dntEntries);
             var userContent = BuildUserContent(pairs);
 
             // Call LLM
@@ -174,8 +178,16 @@ public sealed class GlossaryExtractionService(
             var (content, _) = await translationService.CallLlmRawAsync(
                 endpoint, systemPrompt, userContent, 0.1, CancellationToken.None);
 
-            // Parse result
+            // Parse result and filter out do-not-translate words
             var entries = ParseExtractionResult(content);
+            if (dntEntries.Count > 0)
+            {
+                entries = entries.Where(e => !dntEntries.Any(d =>
+                    d.CaseSensitive
+                        ? e.Original.Equals(d.Original, StringComparison.Ordinal)
+                        : e.Original.Equals(d.Original, StringComparison.OrdinalIgnoreCase)
+                )).ToList();
+            }
             if (entries.Count == 0) return;
 
             // Merge into glossary (atomic dedup + save)
@@ -220,7 +232,8 @@ public sealed class GlossaryExtractionService(
         return enabled[0];
     }
 
-    private static string BuildExtractionSystemPrompt(List<GlossaryEntry> existingGlossary)
+    private static string BuildExtractionSystemPrompt(List<GlossaryEntry> existingGlossary,
+        List<DoNotTranslateEntry> dntEntries)
     {
         var sb = new StringBuilder(ExtractionPrompt);
 
@@ -234,6 +247,13 @@ public sealed class GlossaryExtractionService(
                     sb.Append($" ({entry.Description})");
                 sb.Append('\n');
             }
+        }
+
+        if (dntEntries.Count > 0)
+        {
+            sb.Append("\n\n以下词汇属于禁翻表（不翻译的词），请不要提取为术语：\n");
+            foreach (var entry in dntEntries.Take(50)) // Limit context size
+                sb.Append($"  {entry.Original}\n");
         }
 
         return sb.ToString();

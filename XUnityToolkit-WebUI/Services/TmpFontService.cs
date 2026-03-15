@@ -6,7 +6,7 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed partial class TmpFontService(BundledAssetPaths bundledPaths, ILogger<TmpFontService> logger)
 {
-    private const string FontFileName = "SourceHanSans";
+    internal const string FontFileName = "SourceHanSans";
     public const string ConfigValue = "BepInEx/Font/SourceHanSans";
 
     private static string GetInstalledFontPath(string gamePath) =>
