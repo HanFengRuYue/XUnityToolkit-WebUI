@@ -20,6 +20,9 @@ XUnityToolkit-Vue/src/components.d.ts
 # Build output
 Release/
 
+# Installer generated files (rebuilt each build)
+Installer/Generated/
+
 # Bundled assets (downloaded during build)
 bundled/*
 # But track TMP fonts (required for CJK text rendering in Unity games)
