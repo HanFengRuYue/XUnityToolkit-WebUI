@@ -590,9 +590,9 @@ foreach ($rid in $Runtimes) {
 
         if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
 
-        # Find MSI in WiX default output location
+        # Find MSI in WiX default output location (may be in culture subfolder e.g. zh-CN/)
         $wixOutputDir = Join-Path $ProjectRoot "Installer\bin\$wixPlatform\Release"
-        $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($msiSrc) {
             $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-$rid.msi"
             Move-Item $msiSrc.FullName $msiDst -Force
