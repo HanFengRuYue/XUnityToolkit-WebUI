@@ -6,8 +6,9 @@
     <!-- ICE38: file KeyPath in user profile; ICE64: user profile dir not in RemoveFile; ICE91: per-user dir warning -->
     <SuppressIces>ICE38;ICE64;ICE91</SuppressIces>
     <!-- AppPublishDir: path to publish output (passed via -p:AppPublishDir=...) -->
-    <!-- Resolve relative paths against repo root (parent of .wixproj directory) -->
-    <AppPublishDirAbs Condition="'$(AppPublishDir)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\$(AppPublishDir)'))</AppPublishDirAbs>
+    <!-- If already absolute, use as-is; if relative, resolve against repo root -->
+    <AppPublishDirAbs Condition="'$(AppPublishDir)' != '' AND $([System.IO.Path]::IsPathRooted('$(AppPublishDir)'))">$(AppPublishDir)</AppPublishDirAbs>
+    <AppPublishDirAbs Condition="'$(AppPublishDir)' != '' AND !$([System.IO.Path]::IsPathRooted('$(AppPublishDir)'))">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\$(AppPublishDir)'))</AppPublishDirAbs>
     <AppPublishDirAbs Condition="'$(AppPublishDir)' == ''">$(MSBuildThisFileDirectory)</AppPublishDirAbs>
     <!-- Pass as WiX preprocessor variables -->
     <DefineConstants>PublishDir=$(AppPublishDirAbs);MsiVersion=$(MsiVersion)</DefineConstants>
