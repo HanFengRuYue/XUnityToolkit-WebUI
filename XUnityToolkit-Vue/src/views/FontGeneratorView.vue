@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   NButton, NIcon, NUpload, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
-  NDescriptions, NDescriptionsItem,
+  NDescriptions, NDescriptionsItem, NInputNumber,
 } from 'naive-ui'
 import {
   FontDownloadOutlined, UploadFileOutlined, SettingsOutlined, DownloadOutlined,
@@ -29,6 +29,10 @@ const uploading = ref(false)
 const unityVersion = ref('2022')
 const samplingSize = ref(64)
 const atlasSize = ref(8192)
+const renderMode = ref<'SDFAA' | 'SDF8' | 'SDF16' | 'SDF32'>('SDFAA')
+const samplingSizeMode = ref<'auto' | 'manual'>('manual')
+const paddingMode = ref<'percentage' | 'pixel'>('percentage')
+const paddingValue = ref(10)
 
 // Generation state
 const isGenerating = ref(false)
@@ -89,6 +93,13 @@ const atlasOptions = [
   { label: '2048 x 2048', value: 2048 },
   { label: '4096 x 4096', value: 4096 },
   { label: '8192 x 8192 (推荐)', value: 8192 },
+]
+
+const renderModeOptions = [
+  { label: 'SDFAA (默认)', value: 'SDFAA' },
+  { label: 'SDF8 (8x 上采样)', value: 'SDF8' },
+  { label: 'SDF16 (16x 上采样)', value: 'SDF16' },
+  { label: 'SDF32 (32x 上采样，最高质量)', value: 'SDF32' },
 ]
 
 // Upload handler
@@ -194,6 +205,10 @@ async function startGeneration() {
       atlasWidth: atlasSize.value,
       atlasHeight: atlasSize.value,
       characterSet: buildCharsetConfig(),
+      renderMode: renderMode.value,
+      samplingSizeMode: samplingSizeMode.value,
+      paddingMode: paddingMode.value,
+      paddingValue: paddingValue.value,
     })
     isGenerating.value = true
     phase.value = 'parsing'
@@ -410,12 +425,47 @@ onBeforeUnmount(async () => {
             <NSelect v-model:value="unityVersion" :options="versionOptions" :disabled="isGenerating" size="small" />
           </div>
           <div class="form-row">
+            <label class="form-label">渲染模式</label>
+            <NSelect v-model:value="renderMode" :options="renderModeOptions" :disabled="isGenerating" size="small" />
+          </div>
+          <div class="form-row">
             <label class="form-label">采样大小</label>
-            <NSelect v-model:value="samplingSize" :options="samplingOptions" :disabled="isGenerating" size="small" />
+            <NSpace align="center" :size="8">
+              <NRadioGroup v-model:value="samplingSizeMode" :disabled="isGenerating" size="small">
+                <NRadio value="manual">手动</NRadio>
+                <NRadio value="auto">自动</NRadio>
+              </NRadioGroup>
+              <NSelect
+                v-if="samplingSizeMode === 'manual'"
+                v-model:value="samplingSize"
+                :options="samplingOptions"
+                :disabled="isGenerating"
+                size="small"
+                style="width: 140px"
+              />
+            </NSpace>
           </div>
           <div class="form-row">
             <label class="form-label">Atlas 尺寸</label>
             <NSelect v-model:value="atlasSize" :options="atlasOptions" :disabled="isGenerating" size="small" />
+          </div>
+          <div class="form-row">
+            <label class="form-label">Padding</label>
+            <NSpace align="center" :size="8">
+              <NRadioGroup v-model:value="paddingMode" :disabled="isGenerating" size="small">
+                <NRadio value="percentage">百分比</NRadio>
+                <NRadio value="pixel">像素</NRadio>
+              </NRadioGroup>
+              <NInputNumber
+                v-model:value="paddingValue"
+                :min="1"
+                :max="paddingMode === 'percentage' ? 50 : 100"
+                :disabled="isGenerating"
+                size="small"
+                style="width: 80px"
+              />
+              <span style="font-size: 12px; color: var(--text-3)">{{ paddingMode === 'percentage' ? '%' : 'px' }}</span>
+            </NSpace>
           </div>
         </div>
       </div>
@@ -586,6 +636,12 @@ onBeforeUnmount(async () => {
         <NDescriptionsItem label="Atlas">
           {{ activeReport.atlasCount }} 页 &times; {{ activeReport.atlasWidth }}&times;{{ activeReport.atlasHeight }}
         </NDescriptionsItem>
+        <NDescriptionsItem label="渲染模式">{{ activeReport.renderMode }}</NDescriptionsItem>
+        <NDescriptionsItem v-if="activeReport.samplingSizeMode === 'auto'" label="实际采样大小">
+          {{ activeReport.actualSamplingSize }}px
+        </NDescriptionsItem>
+        <NDescriptionsItem label="Padding">{{ activeReport.padding }}px</NDescriptionsItem>
+        <NDescriptionsItem label="GradientScale">{{ activeReport.gradientScale }}</NDescriptionsItem>
       </NDescriptions>
 
       <div v-if="Object.keys(activeReport.sourceBreakdown).length" style="margin-top: 12px">
