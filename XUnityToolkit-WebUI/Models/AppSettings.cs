@@ -12,4 +12,5 @@ public sealed class AppSettings
     public string LibraryCardSize { get; set; } = "medium";
     public string LibraryGap { get; set; } = "normal";
     public bool LibraryShowLabels { get; set; } = true;
+    public bool ReceivePreReleaseUpdates { get; set; }
 }
