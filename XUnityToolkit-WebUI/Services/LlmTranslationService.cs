@@ -316,9 +316,28 @@ public sealed class LlmTranslationService(
 
             if (llmTexts.Count > 0)
             {
-                (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
-                    llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
-                    gameDescription, memoryContext, dntHint, semaphore, ct);
+                if (isLocalMode && llmTexts.Count > 1)
+                {
+                    // Local mode: translate one text at a time to avoid overloading the local model
+                    var singleResults = new List<string>(llmTexts.Count);
+                    foreach (var text in llmTexts)
+                    {
+                        var (r, t, m, e) = await TranslateBatchAsync(
+                            new List<string> { text }, from, to, ai, enabledEndpoints, promptGlossary,
+                            gameDescription, memoryContext, dntHint, semaphore, ct);
+                        singleResults.Add(r[0]);
+                        tokens += t;
+                        ms += m;
+                        endpointName = e;
+                    }
+                    batchResult = singleResults;
+                }
+                else
+                {
+                    (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
+                        llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
+                        gameDescription, memoryContext, dntHint, semaphore, ct);
+                }
             }
             else
             {
