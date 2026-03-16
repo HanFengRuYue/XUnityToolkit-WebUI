@@ -7,6 +7,13 @@
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <OptimizationPreference>Size</OptimizationPreference>
+
+    <!-- PE metadata — helps antivirus heuristic engines recognize this as legitimate software -->
+    <Company>XUnityToolkit</Company>
+    <Product>XUnityToolkit Updater</Product>
+    <Description>Delta updater for XUnityToolkit-WebUI. Downloads and applies incremental updates.</Description>
+    <AssemblyTitle>XUnityToolkit Updater</AssemblyTitle>
+    <FileDescription>XUnityToolkit Updater</FileDescription>
+    <ApplicationIcon>..\XUnityToolkit-WebUI\app.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>

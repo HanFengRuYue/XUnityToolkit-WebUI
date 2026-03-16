@@ -548,7 +548,7 @@ public sealed class UpdateService(
         {
             FileName = updaterDst,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = false
         };
         startInfo.ArgumentList.Add("--pid");
         startInfo.ArgumentList.Add(pid.ToString());

@@ -1,5 +1,10 @@
 using System.Diagnostics;
 
+// Show visible window title so antivirus heuristics recognize this as a user-facing updater
+try { Console.Title = "XUnityToolkit Updater"; } catch { /* no console */ }
+Console.WriteLine("XUnityToolkit 正在更新，请勿关闭此窗口...");
+Console.WriteLine();
+
 // Parse CLI arguments
 string? pidArg = null;
 string? appDir = null;
