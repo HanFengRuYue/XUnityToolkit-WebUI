@@ -12,6 +12,7 @@ public static class TranslateEndpoints
             TranslateRequest request,
             LlmTranslationService translationService,
             GlossaryExtractionService extractionService,
+            PreTranslationCacheMonitor cacheMonitor,
             AppSettingsService settingsService,
             ILogger<LlmTranslationService> logger,
             CancellationToken ct) =>
@@ -20,6 +21,10 @@ public static class TranslateEndpoints
                 return Results.Ok(new TranslateResponse([]));
             if (request.Texts.Count > 500)
                 return Results.BadRequest(ApiResult.Fail("单次请求最多 500 条文本"));
+
+            // Record texts for pre-translation cache monitoring
+            if (!string.IsNullOrEmpty(request.GameId))
+                cacheMonitor.RecordTexts(request.GameId, request.Texts);
 
             try
             {
@@ -78,6 +83,9 @@ public static class TranslateEndpoints
 
         app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
             Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
+
+        app.MapGet("/api/translate/cache-stats", (PreTranslationCacheMonitor cacheMonitor) =>
+            Results.Ok(ApiResult<PreTranslationCacheStats>.Ok(cacheMonitor.GetStats())));
 
         app.MapGet("/api/ai/extraction/stats", (GlossaryExtractionService extractionService) =>
             Results.Ok(ApiResult<GlossaryExtractionStats>.Ok(extractionService.GetStats())));

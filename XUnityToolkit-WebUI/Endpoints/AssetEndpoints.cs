@@ -145,7 +145,50 @@ public static class AssetEndpoints
             preTranslation.Cancel(id);
             return Results.Ok(ApiResult.Ok());
         });
+
+        // Get custom regex patterns for pre-translation
+        app.MapGet("/api/games/{id}/pre-translate/regex", async (
+            string id,
+            AppDataPaths paths) =>
+        {
+            var file = paths.PreTranslationRegexFile(id);
+            if (!File.Exists(file))
+                return Results.Ok(ApiResult<string>.Ok(""));
+            var content = await File.ReadAllTextAsync(file);
+            return Results.Ok(ApiResult<string>.Ok(content));
+        });
+
+        // Save custom regex patterns for pre-translation
+        app.MapPut("/api/games/{id}/pre-translate/regex", async (
+            string id,
+            RegexPatternsRequest request,
+            AppDataPaths paths) =>
+        {
+            foreach (var line in (request.Patterns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("//")) continue;
+                if (!trimmed.StartsWith("sr:") && !trimmed.StartsWith("r:"))
+                    return Results.Ok(ApiResult.Fail("每行必须以 sr: 或 r: 开头，或为 // 注释"));
+                if (!trimmed.Contains('='))
+                    return Results.Ok(ApiResult.Fail($"模式缺少 = 分隔符: {trimmed}"));
+
+                var patternStart = trimmed.IndexOf('"') + 1;
+                var patternEnd = trimmed.IndexOf('"', patternStart);
+                if (patternStart > 0 && patternEnd > patternStart)
+                {
+                    var pattern = trimmed[patternStart..patternEnd];
+                    try { _ = new System.Text.RegularExpressions.Regex(pattern, default, TimeSpan.FromSeconds(1)); }
+                    catch (Exception ex) { return Results.Ok(ApiResult.Fail($"无效的正则表达式: {ex.Message}")); }
+                }
+            }
+
+            var file = paths.PreTranslationRegexFile(id);
+            await File.WriteAllTextAsync(file, request.Patterns ?? "");
+            return Results.Ok(ApiResult.Ok());
+        });
     }
 }
 
 public record PreTranslateRequest(string? FromLang, string? ToLang);
+public record RegexPatternsRequest(string? Patterns);

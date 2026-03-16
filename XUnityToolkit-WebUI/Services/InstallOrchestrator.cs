@@ -288,6 +288,21 @@ public sealed class InstallOrchestrator(
                 }, ct);
         }
 
+        // Apply pre-translation cache optimization config if enabled
+        {
+            var aiSettings = await appSettingsService.GetAsync(ct);
+            if (aiSettings.AiTranslation.EnablePreTranslationCache)
+            {
+                await configService.PatchSectionAsync(game.GamePath, "Behaviour", new Dictionary<string, string>
+                {
+                    ["CacheWhitespaceDifferences"] = "False",
+                    ["IgnoreWhitespaceInDialogue"] = "True",
+                    ["MinDialogueChars"] = "4",
+                    ["TemplateAllNumberAway"] = "True"
+                }, ct);
+            }
+        }
+
         // Step 8: Extract game assets for language detection
         await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "正在提取游戏资产以检测语言...");
         try
