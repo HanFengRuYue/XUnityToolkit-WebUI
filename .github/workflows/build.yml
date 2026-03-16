@@ -13,7 +13,7 @@ on:
   workflow_call:
     inputs:
       build_version:
-        description: 'Version string (e.g. 1.7.202603130200); auto-generated if empty'
+        description: 'Version string (e.g. 1.8.202603130200); auto-generated if empty'
         required: false
         type: string
       release_tag:
@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "1.7.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "1.8.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
