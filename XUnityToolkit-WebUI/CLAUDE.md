@@ -10,7 +10,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
 - **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `{baseDir}/data` before DI — must stay in sync with `AppDataPaths._root` formula
 - **App URL:** `http://127.0.0.1:{port}` default `51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`); port configurable via `settings.json` → `aiTranslation.port` (read pre-DI in `Program.cs`)
-- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA), `"GitHubUpdate"` (60s)
+- **Static file caching:** `UseStaticFiles` sets `Cache-Control: public, max-age=31536000, immutable` for `/assets/*` (Vite content-hashed); `no-cache` for root files (`index.html`, `favicon.ico`); `MapFallbackToFile` also sets `no-cache` on `index.html` — both must be configured separately
+- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA), `"GitHubUpdate"` (60s), `"GitHubCdn"` (30s, CDN/web requests)
 - **Updater AOT constraints:** `Updater/` targets `net10.0` (not `-windows`), `PublishAot=true`, `InvariantGlobalization`; no `JsonSerializer` reflection — use manual string formatting for JSON; no WinForms or UI frameworks
 - **InformationalVersion gotcha:** .NET SDK appends `+commitHash` suffix; always `Split('+')[0]` before version comparison
 - **GitHub API JSON:** `JsonOptions` uses `CamelCase`; GitHub API returns snake_case (`tag_name`, `browser_download_url`) — `GitHubRelease`/`GitHubAsset` models use `[JsonPropertyName]` to override; any new GitHub API model properties must also use explicit `[JsonPropertyName("snake_case")]`
@@ -66,6 +67,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
 - **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results must also skip `ApplyGlossaryPostProcess` (marked via `preComputed` dictionary)
 - **Prompt glossary:** ALL glossary entries (including non-regex) must remain in system prompt even when placeholders are used — do NOT filter `promptGlossary` to regex-only; removing non-regex entries from prompt eliminates the LLM's awareness of terminology AND breaks `ApplyGlossaryPostProcess` fallback
+- **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
 
 ## Asset Extraction (AssetsTools.NET)
 
@@ -128,7 +130,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
 - Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/data/llama/{cuda,vulkan,cpu}/`
 - **Bundled binaries:** ZIPs in `bundled/llama/`; lazy-extracted on first `POST /start` via `ExtractLlamaZipAsync`
-- **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel
+- **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel; dual source: HuggingFace (`/resolve/main/`) or ModelScope (`/models/{repo}/resolve/master/` — note `master` not `main`); `_downloadModelScopeState` tracks active source; cleanup checks both sources' temp files
+- **ModelScope URL:** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}` — supports Range headers for resume; public models need no auth
 - **GPU monitoring:** nvidia-smi polled every 3s when CUDA running
 - **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
 - Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
