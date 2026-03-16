@@ -45,6 +45,8 @@ public sealed class UpdateService(
     private bool _hasAutoChecked;
     private string? _lastCheckedApiUrl; // Track API URL for ETag cache invalidation
     private string? _dismissedVersion;
+    private string? _resolvedTag;
+    private DateTime _lastCheckTime = DateTime.MinValue;
 
     private static string GetCurrentRid()
     {
@@ -84,6 +86,12 @@ public sealed class UpdateService(
         return false;
     }
 
+    private static string ExtractVersionFromTag(string tag)
+    {
+        if (tag.StartsWith("auto-")) return tag["auto-".Length..];
+        return tag.TrimStart('v');
+    }
+
     private static string ComputeFileHash(string filePath)
     {
         using var stream = File.OpenRead(filePath);
@@ -111,8 +119,13 @@ public sealed class UpdateService(
         return status;
     }
 
-    public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken ct = default)
+    public async Task<UpdateCheckResult> CheckForUpdateAsync(
+        CancellationToken ct = default, bool bypassThrottle = false)
     {
+        // Throttle guard (before semaphore)
+        if (!bypassThrottle && DateTime.UtcNow - _lastCheckTime < TimeSpan.FromMinutes(5))
+            return _lastCheckResult ?? new UpdateCheckResult();
+
         if (!await _lock.WaitAsync(0, ct))
             return _lastCheckResult ?? new UpdateCheckResult();
 
@@ -122,63 +135,27 @@ public sealed class UpdateService(
             await BroadcastStatus();
 
             var settings = await settingsService.GetAsync(ct);
-            var client = httpClientFactory.CreateClient("GitHubUpdate");
             var rid = GetCurrentRid();
             var localVersion = GetCurrentVersion();
 
-            // Fetch latest release from GitHub
-            var apiUrl = settings.ReceivePreReleaseUpdates
-                ? $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases"
-                : $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
+            // Reset state from previous check
+            _resolvedTag = null;
+            _releaseAssets = null;
 
-            // Load cached ETag (only use if API URL matches)
-            var cachePath = Path.Combine(paths.Root, "update-check-cache.json");
-            UpdateCheckCache? cache = null;
-            if (File.Exists(cachePath))
-            {
-                var cacheJson = await File.ReadAllTextAsync(cachePath, ct);
-                cache = JsonSerializer.Deserialize<UpdateCheckCache>(cacheJson, JsonOptions);
-            }
+            // Layer 1/2: Try CDN or Atom Feed first
+            UpdateCheckInfo? info;
+            string? tag;
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
-            if (cache?.ETag is not null && _lastCheckedApiUrl == apiUrl)
-                request.Headers.TryAddWithoutValidation("If-None-Match", cache.ETag);
-            _lastCheckedApiUrl = apiUrl;
-
-            using var response = await client.SendAsync(request, ct);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotModified)
-            {
-                logger.LogInformation("GitHub API 返回 304 Not Modified，无新版本");
-                _status = new UpdateStatusInfo { State = UpdateState.None };
-                await BroadcastStatus();
-                _lastCheckResult = new UpdateCheckResult();
-                return _lastCheckResult;
-            }
-
-            if ((int)response.StatusCode == 403)
-            {
-                logger.LogWarning("GitHub API 速率限制，跳过检查");
-                _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "GitHub API 请求频率超限，请稍后再试" };
-                await BroadcastStatus();
-                throw new InvalidOperationException("GitHub API 请求频率超限，请稍后再试");
-            }
-
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(ct);
-
-            GitHubRelease? release;
             if (settings.ReceivePreReleaseUpdates)
-            {
-                var releases = JsonSerializer.Deserialize<List<GitHubRelease>>(json, JsonOptions);
-                release = releases?.FirstOrDefault();
-            }
+                (info, tag) = await TryCheckViaAtomFeedAsync(ct);
             else
-            {
-                release = JsonSerializer.Deserialize<GitHubRelease>(json, JsonOptions);
-            }
+                (info, tag) = await TryCheckViaCdnAsync(ct);
 
-            if (release is null)
+            // Layer 3: Fall back to GitHub API
+            if (info is null)
+                (info, tag) = await CheckViaGitHubApiAsync(settings.ReceivePreReleaseUpdates, ct);
+
+            if (info is null)
             {
                 _status = new UpdateStatusInfo { State = UpdateState.None };
                 await BroadcastStatus();
@@ -186,17 +163,7 @@ public sealed class UpdateService(
                 return _lastCheckResult;
             }
 
-            // Save ETag cache
-            var newCache = new UpdateCheckCache
-            {
-                ETag = response.Headers.ETag?.Tag,
-                LatestVersion = release.TagName.TrimStart('v'),
-                LastChecked = DateTime.UtcNow
-            };
-            await File.WriteAllTextAsync(cachePath,
-                JsonSerializer.Serialize(newCache, JsonOptions), ct);
-
-            var remoteVersion = release.TagName.TrimStart('v');
+            var remoteVersion = info.Version;
 
             // Check if dismissed
             var dismissedPath = Path.Combine(paths.Root, "update-dismissed-version.txt");
@@ -223,20 +190,40 @@ public sealed class UpdateService(
             }
 
             // Download remote manifest
-            var manifestAsset = release.Assets
-                .FirstOrDefault(a => a.Name == $"manifest-{rid}.json");
-            if (manifestAsset is null)
+            string? manifestJson;
+            if (tag is not null)
             {
-                logger.LogWarning("Release {Version} 缺少 manifest-{Rid}.json", remoteVersion, rid);
+                // CDN path
+                var cdnClient = httpClientFactory.CreateClient("GitHubCdn");
+                var manifestUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/manifest-{rid}.json";
+                manifestJson = await cdnClient.GetStringAsync(manifestUrl, ct);
+            }
+            else if (_releaseAssets is not null)
+            {
+                // API fallback path
+                var apiClient = httpClientFactory.CreateClient("GitHubUpdate");
+                var manifestAsset = _releaseAssets.FirstOrDefault(a => a.Name == $"manifest-{rid}.json");
+                if (manifestAsset is null)
+                {
+                    logger.LogWarning("Release {Version} 缺少 manifest-{Rid}.json", remoteVersion, rid);
+                    _status = new UpdateStatusInfo { State = UpdateState.None };
+                    await BroadcastStatus();
+                    _lastCheckResult = new UpdateCheckResult();
+                    return _lastCheckResult;
+                }
+                manifestJson = await apiClient.GetStringAsync(manifestAsset.BrowserDownloadUrl, ct);
+            }
+            else
+            {
+                logger.LogWarning("无法获取 manifest: 既无 tag 也无 release assets");
                 _status = new UpdateStatusInfo { State = UpdateState.None };
                 await BroadcastStatus();
                 _lastCheckResult = new UpdateCheckResult();
                 return _lastCheckResult;
             }
 
-            var manifestJson = await client.GetStringAsync(manifestAsset.BrowserDownloadUrl, ct);
             _remoteManifest = JsonSerializer.Deserialize<UpdateManifest>(manifestJson, JsonOptions);
-            _releaseAssets = release.Assets;
+            _resolvedTag = tag;
 
             if (_remoteManifest is null)
             {
@@ -252,7 +239,6 @@ public sealed class UpdateService(
             var changedCount = 0;
             var deletedCount = 0;
 
-            // Check remote files against local
             foreach (var (relativePath, entry) in _remoteManifest.Files)
             {
                 var localPath = Path.Combine(appDir, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -263,7 +249,6 @@ public sealed class UpdateService(
                 }
             }
 
-            // Check for files to delete (local files not in remote manifest)
             foreach (var filePath in Directory.EnumerateFiles(appDir, "*", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(appDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
@@ -274,16 +259,26 @@ public sealed class UpdateService(
                     deletedCount++;
             }
 
-            // Calculate download size (sum of package ZIP sizes)
+            // Calculate download size
             long downloadSize = 0;
             foreach (var pkg in changedPackages)
             {
                 var zipName = pkg == "app" ? $"app-{rid}.zip" : $"{pkg}.zip";
-                var asset = release.Assets.FirstOrDefault(a => a.Name == zipName);
-                if (asset is not null) downloadSize += asset.Size;
+                if (_resolvedTag is not null)
+                {
+                    // CDN/Atom path: use UpdateCheckInfo.Assets
+                    if (info.Assets.TryGetValue(zipName, out var size))
+                        downloadSize += size;
+                }
+                else if (_releaseAssets is not null)
+                {
+                    // API path: use release assets
+                    var asset = _releaseAssets.FirstOrDefault(a => a.Name == zipName);
+                    if (asset is not null) downloadSize += asset.Size;
+                }
             }
 
-            var changelog = ExtractChangelog(release.Body);
+            var changelog = info.Changelog;
 
             _lastCheckResult = new UpdateCheckResult
             {
@@ -320,7 +315,14 @@ public sealed class UpdateService(
 
             return _lastCheckResult;
         }
-        catch (Exception ex) when (ex is not InvalidOperationException)
+        catch (InvalidOperationException ex)
+        {
+            // Rate limit or other user-facing errors from CheckViaGitHubApiAsync
+            _status = new UpdateStatusInfo { State = UpdateState.Error, Error = ex.Message };
+            await BroadcastStatus();
+            throw;
+        }
+        catch (Exception ex)
         {
             logger.LogError(ex, "检查更新失败");
             _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "检查更新失败，请检查网络连接" };
@@ -329,13 +331,15 @@ public sealed class UpdateService(
         }
         finally
         {
+            _lastCheckTime = DateTime.UtcNow;
             _lock.Release();
         }
     }
 
     public async Task DownloadUpdateAsync(CancellationToken ct = default)
     {
-        if (_lastCheckResult is not { UpdateAvailable: true } || _remoteManifest is null || _releaseAssets is null)
+        if (_lastCheckResult is not { UpdateAvailable: true } || _remoteManifest is null
+            || (_resolvedTag is null && _releaseAssets is null))
             throw new InvalidOperationException("没有可用的更新");
 
         _downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -371,11 +375,20 @@ public sealed class UpdateService(
                 token.ThrowIfCancellationRequested();
 
                 var zipName = pkg == "app" ? $"app-{rid}.zip" : $"{pkg}.zip";
-                var asset = _releaseAssets.FirstOrDefault(a => a.Name == zipName);
-                if (asset is null)
+                string downloadUrl;
+                if (_resolvedTag is not null)
                 {
-                    logger.LogWarning("找不到 Release Asset: {Name}", zipName);
-                    continue;
+                    downloadUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{_resolvedTag}/{zipName}";
+                }
+                else
+                {
+                    var asset = _releaseAssets?.FirstOrDefault(a => a.Name == zipName);
+                    if (asset is null)
+                    {
+                        logger.LogWarning("找不到 Release Asset: {Name}", zipName);
+                        continue;
+                    }
+                    downloadUrl = asset.BrowserDownloadUrl;
                 }
 
                 _status.CurrentPackage = zipName;
@@ -385,7 +398,7 @@ public sealed class UpdateService(
 
                 // Download with progress (scoped to release file handle before extraction)
                 {
-                    using var response = await client.GetAsync(asset.BrowserDownloadUrl,
+                    using var response = await client.GetAsync(downloadUrl,
                         HttpCompletionOption.ResponseHeadersRead, token);
                     response.EnsureSuccessStatusCode();
 
@@ -679,7 +692,7 @@ public sealed class UpdateService(
         await Task.Delay(5000);
         try
         {
-            await CheckForUpdateAsync();
+            await CheckForUpdateAsync(ct: default, bypassThrottle: true);
         }
         catch (Exception ex)
         {
@@ -717,5 +730,156 @@ public sealed class UpdateService(
     private Task BroadcastStatus()
     {
         return hubContext.Clients.Group("update").SendAsync("UpdateStatus", _status);
+    }
+
+    private async Task<(UpdateCheckInfo?, string?)> TryCheckViaCdnAsync(CancellationToken ct)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient("GitHubCdn");
+            var url = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/latest/download/update-check.json";
+            var json = await client.GetStringAsync(url, ct);
+            var info = JsonSerializer.Deserialize<UpdateCheckInfo>(json, JsonOptions);
+            if (info is null) return (null, null);
+            logger.LogDebug("CDN 获取 update-check.json 成功: v{Version}", info.Version);
+            return (info, info.Tag);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "CDN 获取 update-check.json 失败，将回退到 API");
+            return (null, null);
+        }
+    }
+
+    private async Task<(UpdateCheckInfo?, string?)> TryCheckViaAtomFeedAsync(CancellationToken ct)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient("GitHubCdn");
+
+            // Fetch Atom Feed
+            var feedUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases.atom";
+            var feedXml = await client.GetStringAsync(feedUrl, ct);
+
+            // Parse first entry's tag from link href
+            var ns = System.Xml.Linq.XNamespace.Get("http://www.w3.org/2005/Atom");
+            var doc = System.Xml.Linq.XDocument.Parse(feedXml);
+            var firstEntry = doc.Root?.Element(ns + "entry");
+            var link = firstEntry?.Elements(ns + "link")
+                .FirstOrDefault(e => e.Attribute("rel")?.Value == "alternate");
+            var href = link?.Attribute("href")?.Value;
+            if (href is null)
+            {
+                logger.LogDebug("Atom Feed 解析失败: 未找到 link 元素");
+                return (null, null);
+            }
+
+            var tag = href.Split('/')[^1];
+            logger.LogDebug("Atom Feed 获取最新 tag: {Tag}", tag);
+
+            // Download update-check.json for this tag
+            var checkUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/update-check.json";
+            var json = await client.GetStringAsync(checkUrl, ct);
+            var info = JsonSerializer.Deserialize<UpdateCheckInfo>(json, JsonOptions);
+            if (info is null) return (null, null);
+            return (info, tag);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Atom Feed 检查失败，将回退到 API");
+            return (null, null);
+        }
+    }
+
+    private async Task<(UpdateCheckInfo?, string?)> CheckViaGitHubApiAsync(
+        bool isPreRelease, CancellationToken ct)
+    {
+        var client = httpClientFactory.CreateClient("GitHubUpdate");
+        var apiUrl = isPreRelease
+            ? $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases"
+            : $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
+
+        // Load cached ETag
+        var cachePath = Path.Combine(paths.Root, "update-check-cache.json");
+        UpdateCheckCache? cache = null;
+        if (File.Exists(cachePath))
+        {
+            var cacheJson = await File.ReadAllTextAsync(cachePath, ct);
+            cache = JsonSerializer.Deserialize<UpdateCheckCache>(cacheJson, JsonOptions);
+        }
+
+        // Fix startup ETag bug: restore _lastCheckedApiUrl from disk cache
+        if (_lastCheckedApiUrl is null && cache?.ApiUrl is not null)
+            _lastCheckedApiUrl = cache.ApiUrl;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+        if (cache?.ETag is not null && _lastCheckedApiUrl == apiUrl)
+            request.Headers.TryAddWithoutValidation("If-None-Match", cache.ETag);
+        _lastCheckedApiUrl = apiUrl;
+
+        using var response = await client.SendAsync(request, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotModified)
+        {
+            logger.LogInformation("GitHub API 返回 304 Not Modified，无新版本");
+            return (null, null);
+        }
+
+        if ((int)response.StatusCode is 403 or 429)
+        {
+            var retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds
+                ?? response.Headers.RetryAfter?.Date?.Subtract(DateTimeOffset.UtcNow).TotalSeconds;
+            var waitMsg = retryAfter > 0 ? $"，请 {(int)retryAfter} 秒后重试" : "，请稍后再试";
+            logger.LogWarning("GitHub API 速率限制 ({StatusCode})", (int)response.StatusCode);
+            throw new InvalidOperationException($"GitHub API 请求频率超限{waitMsg}");
+        }
+
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadAsStringAsync(ct);
+
+        GitHubRelease? release;
+        if (isPreRelease)
+        {
+            var releases = JsonSerializer.Deserialize<List<GitHubRelease>>(json, JsonOptions);
+            release = releases?.FirstOrDefault();
+        }
+        else
+        {
+            release = JsonSerializer.Deserialize<GitHubRelease>(json, JsonOptions);
+        }
+
+        if (release is null) return (null, null);
+
+        // Save ETag cache
+        var newCache = new UpdateCheckCache
+        {
+            ETag = response.Headers.ETag?.Tag,
+            LatestVersion = ExtractVersionFromTag(release.TagName),
+            LastChecked = DateTime.UtcNow,
+            ApiUrl = apiUrl
+        };
+        await File.WriteAllTextAsync(cachePath,
+            JsonSerializer.Serialize(newCache, JsonOptions), ct);
+
+        // Store release assets for download phase (API fallback only)
+        _releaseAssets = release.Assets;
+
+        // Build UpdateCheckInfo from API response
+        var version = ExtractVersionFromTag(release.TagName);
+        var changelog = ExtractChangelog(release.Body);
+        var assets = new Dictionary<string, long>();
+        foreach (var asset in release.Assets)
+            assets[asset.Name] = asset.Size;
+
+        var info = new UpdateCheckInfo
+        {
+            Tag = release.TagName,
+            Version = version,
+            Changelog = changelog,
+            Prerelease = release.Prerelease,
+            Assets = assets
+        };
+
+        return (info, release.TagName);
     }
 }
