@@ -10,13 +10,20 @@ import {
   NSpin,
   NEmpty,
   NAlert,
+  NSelect,
+  NRadioGroup,
+  NRadio,
+  NCheckboxGroup,
+  NCheckbox,
+  NSwitch,
+  NBadge,
+  NTooltip,
   useMessage,
   useDialog,
 } from 'naive-ui'
 import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import {
   ArrowBackOutlined,
-  SearchOutlined,
   SaveOutlined,
   FileUploadOutlined,
   FileDownloadOutlined,
@@ -24,6 +31,9 @@ import {
   DeleteOutlined,
   DriveFileRenameOutlineOutlined,
   FolderOutlined,
+  FilterAltOutlined,
+  FindReplaceOutlined,
+  RestartAltOutlined,
 } from '@vicons/material'
 import { gamesApi, translationEditorApi } from '@/api/games'
 import type { Game, TranslationEntry } from '@/api/types'
@@ -101,6 +111,19 @@ const FEATURE_PATTERNS: Record<string, RegExp> = {
   newline: /[\n\r]/,
   special: /[^\w\s\p{P}\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}]/u,
 }
+
+const SORT_OPTIONS = [
+  { label: '默认顺序', value: 'default' },
+  { label: '原文长度（升序）', value: 'length-asc' },
+  { label: '原文长度（降序）', value: 'length-desc' },
+  { label: '未翻译优先', value: 'untranslated-first' },
+]
+
+const FEATURE_OPTIONS = [
+  { label: '包含占位符', value: 'placeholder' },
+  { label: '包含换行符', value: 'newline' },
+  { label: '包含特殊字符', value: 'special' },
+]
 
 const filteredAndSortedEntries = ref<TranslationRow[]>([])
 
@@ -397,14 +420,20 @@ function handleAddEntry() {
     message.warning('该原文已存在')
     return
   }
-  entries.value.unshift({
+  const newEntry: TranslationRow = {
     _id: nextId++,
     original: newOriginal.value,
     translation: newTranslation.value,
-  })
+  }
+  entries.value.unshift(newEntry)
   bumpEntriesVersion()
   newOriginal.value = ''
   newTranslation.value = ''
+
+  // Check if the new entry is hidden by active filters
+  if (hasActiveFilters.value && !filteredAndSortedEntries.value.some(e => e._id === newEntry._id)) {
+    message.info('条目已添加（被当前筛选条件隐藏）')
+  }
 }
 
 function handleImportClick() {
@@ -576,18 +605,100 @@ function handleExport() {
         </NButton>
       </div>
 
-      <!-- Search -->
-      <NInput
-        v-model:value="filterKeyword"
-        placeholder="搜索原文或译文..."
-        clearable
-        size="small"
-        style="margin-bottom: 12px"
-      >
-        <template #prefix>
-          <NIcon :size="16"><SearchOutlined /></NIcon>
-        </template>
-      </NInput>
+      <!-- Toolbar -->
+      <div class="editor-toolbar">
+        <NBadge :show="hasActiveFilters" dot :offset="[-2, 2]">
+          <NButton
+            size="small"
+            :type="showFilterPanel ? 'primary' : 'default'"
+            secondary
+            @click="showFilterPanel = !showFilterPanel"
+          >
+            <template #icon><NIcon :size="16"><FilterAltOutlined /></NIcon></template>
+            筛选
+          </NButton>
+        </NBadge>
+        <NButton
+          size="small"
+          :type="showReplacePanel ? 'primary' : 'default'"
+          secondary
+          @click="showReplacePanel = !showReplacePanel"
+        >
+          <template #icon><NIcon :size="16"><FindReplaceOutlined /></NIcon></template>
+          替换
+        </NButton>
+      </div>
+
+      <!-- Filter Panel -->
+      <div v-if="showFilterPanel" class="filter-panel">
+        <div class="filter-row">
+          <span class="filter-label">排序方式</span>
+          <NSelect
+            v-model:value="panelSortMode"
+            :options="SORT_OPTIONS"
+            size="small"
+            style="width: 200px"
+          />
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label">关键词</span>
+          <NInput
+            v-model:value="filterKeyword"
+            placeholder="搜索关键词…"
+            clearable
+            size="small"
+            style="flex: 1"
+          />
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label">翻译状态</span>
+          <NRadioGroup v-model:value="filterStatus" size="small">
+            <NRadio value="all">全部</NRadio>
+            <NRadio value="translated">已翻译</NRadio>
+            <NRadio value="untranslated">未翻译</NRadio>
+          </NRadioGroup>
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label">特征筛选</span>
+          <NCheckboxGroup v-model:value="filterFeatures" size="small">
+            <NCheckbox v-for="opt in FEATURE_OPTIONS" :key="opt.value" :value="opt.value" :label="opt.label" />
+          </NCheckboxGroup>
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label">正则表达式</span>
+          <div style="display: flex; flex-direction: column; gap: 6px; flex: 1">
+            <NInput
+              v-model:value="filterRegexPattern"
+              placeholder="正则表达式…"
+              clearable
+              size="small"
+              :status="regexError ? 'error' : undefined"
+            />
+            <NTooltip v-if="regexError" trigger="hover">
+              <template #trigger>
+                <span class="regex-error">{{ regexError }}</span>
+              </template>
+              {{ regexError }}
+            </NTooltip>
+            <NRadioGroup v-model:value="filterRegexTarget" size="small">
+              <NRadio value="original">原文</NRadio>
+              <NRadio value="translation">译文</NRadio>
+              <NRadio value="both">两者</NRadio>
+            </NRadioGroup>
+          </div>
+        </div>
+
+        <div class="filter-row" style="justify-content: flex-end">
+          <NButton size="small" @click="resetFilters">
+            <template #icon><NIcon :size="14"><RestartAltOutlined /></NIcon></template>
+            重置筛选
+          </NButton>
+        </div>
+      </div>
 
       <!-- Table -->
       <div v-if="entries.length > 0" class="table-container">
@@ -618,6 +729,57 @@ function handleExport() {
 </template>
 
 <style scoped>
+.editor-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filter-label {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.regex-error {
+  font-size: 11px;
+  color: var(--error, #e88080);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+@media (max-width: 768px) {
+  .filter-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .filter-label {
+    min-width: unset;
+  }
+}
+
 .file-info {
   display: flex;
   flex-direction: column;
