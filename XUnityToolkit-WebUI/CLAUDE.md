@@ -15,6 +15,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Updater AOT constraints:** `Updater/` targets `net10.0` (not `-windows`), `PublishAot=true`, `InvariantGlobalization`; no `JsonSerializer` reflection — use manual string formatting for JSON; no WinForms or UI frameworks
 - **InformationalVersion gotcha:** .NET SDK appends `+commitHash` suffix; always `Split('+')[0]` before version comparison
 - **GitHub API JSON:** `JsonOptions` uses `CamelCase`; GitHub API returns snake_case (`tag_name`, `browser_download_url`) — `GitHubRelease`/`GitHubAsset` models use `[JsonPropertyName]` to override; any new GitHub API model properties must also use explicit `[JsonPropertyName("snake_case")]`
+- **GitHub API rate limit:** Unauthenticated ETag/`If-None-Match` 304 responses **still count** against the 60/hour limit — only authenticated 304s are exempt; CDN (`objects.githubusercontent.com`) and web (`github.com`) requests have separate, more generous limits
+- **Update check three-layer strategy:** CDN (`update-check.json` asset) → Atom Feed (`/releases.atom`) → GitHub API fallback; when extracting methods that throw `InvalidOperationException` (e.g., rate limit), caller **must** still set `_status` to Error and broadcast via SignalR — otherwise status gets stuck at `Checking`
 - **Mirror:** `AppSettings.HfMirrorUrl`; HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
 - **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
 - **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
