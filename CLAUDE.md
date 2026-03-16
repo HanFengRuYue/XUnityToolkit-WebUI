@@ -39,7 +39,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`)
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`); `preCacheStatsUpdate` broadcast to `ai-translation` group for pre-translation cache hit/miss stats
 - **Persistence:** JSON files in `%AppData%\XUnityToolkit\` (`library.json`, `settings.json`); `AppData:Root` config key allows override for dev/test; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
@@ -48,6 +48,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Do-Not-Translate:** `DoNotTranslateService` stores per-game lists at `data/do-not-translate/{gameId}.json`; `LlmTranslationService` replaces matched words with `{{DNT_x}}` placeholders before LLM calls, restores after; prompt hint tells LLM to preserve placeholders; entries sorted longest-first; per-entry case sensitivity
 - **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
 - **Pre-computed placeholder texts:** Texts entirely replaced by a single placeholder are resolved before the LLM call (pre-computed); they bypass both the LLM and all post-processing steps (`ApplyGlossaryPostProcess`, placeholder restoration) since their results are final; the `preComputed` dictionary tracks these indices
+- **Pre-translation cache optimization:** `PreTranslationCacheMonitor` tracks cache hit/miss when `EnablePreTranslationCache` is on; `PreTranslationService` normalizes cache keys (rich text tag stripping) and generates `_PreTranslated_Regex.txt` with `sr:` splitter patterns; XUnity config optimized for whitespace tolerance (`CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars`)
 - **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, batch size=1, disables glossary extraction
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
 - **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{dataRoot}/backups/{gameId}.json`
@@ -93,14 +94,14 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
 - **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`, `GET .../data-path`, `POST .../export` (ZIP, **not ApiResult**), `POST .../import` (multipart ZIP), `POST .../open-data-folder`
 - **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
-- **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `POST /api/translate/test`
+- **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `.../download` (model) + `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
 - **Glossary:** `GET/PUT /api/games/{id}/glossary` | **Description:** `GET/PUT .../description`
 - **Do-Not-Translate:** `GET/PUT /api/games/{id}/do-not-translate`
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
-- **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`
+- **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`, `GET/PUT .../pre-translate/regex`
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
 - **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`
 - **BepInEx Log:** `GET /api/games/{id}/bepinex-log`, `GET .../download` (**not ApiResult**), `POST .../analyze`
@@ -127,6 +128,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
 - **Adding DoNotTranslateEntry fields:** Sync 2 places: `Models/DoNotTranslateEntry.cs`, `src/api/types.ts`
 - **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
+- **PreTranslationCacheStats fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
 - **Font replacement models:** Sync `FontInfo`/`FontReplacementStatus` between `Models/FontReplacement.cs` ↔ `src/api/types.ts` ↔ `FontReplacementView.vue`
