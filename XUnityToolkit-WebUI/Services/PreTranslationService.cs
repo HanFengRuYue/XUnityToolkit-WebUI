@@ -110,10 +110,11 @@ public sealed class PreTranslationService(
         var translations = new ConcurrentDictionary<string, string>();
         var textList = texts.Select(t => t.Text).ToList();
 
-        // Read max concurrency from settings
+        // Read max concurrency from settings — forced to 1 in local mode
         var settings = await settingsService.GetAsync(ct);
-        var maxConc = Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
-        const int batchSize = 10; // Match DLL's MaxTranslationsPerRequest for consistent batching
+        var isLocalMode = string.Equals(settings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
+        var maxConc = isLocalMode ? 1 : Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
+        var batchSize = isLocalMode ? 1 : 10; // Local mode: one text at a time
 
         var counters = new ProgressCounters();
 

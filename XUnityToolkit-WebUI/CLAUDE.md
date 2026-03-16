@@ -49,7 +49,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 ## Concurrency & Performance
 
 - **Hot-path:** `POST /api/translate` receives 100+ req/s; all I/O must use in-memory caches, never disk per request
-- `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks
+- `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks; **local mode batch splitting:** `TranslateAsync` loops single-text `TranslateBatchAsync` calls so `_translating` shows 1 (not batch size)
 - **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
 - `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
 - **Stats counters unit:** `_queued`, `_translating`, `_totalReceived`, `_totalTranslated` must ALL count individual texts (not batches/HTTP requests)
@@ -57,7 +57,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
 - **Plugin concurrency:** DLL 10x10 = 100 texts; Mono >15 connections deadlocks — batch instead
 - **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
-- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10; CAS-throttled 200ms progress
+- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10 (local mode: batch=1, parallelism=1); CAS-throttled 200ms progress
 
 ## AI Translation Context
 
