@@ -34,7 +34,16 @@ read settings.AiTranslation.ActiveMode
   → "machine"          → set MachineTranslationService.Enabled
 ```
 
-Both services have their own `Enabled` property (volatile bool). When the user switches modes, the previous mode's service is disabled and the new mode's service is enabled. The toggle endpoint reads `activeMode` from settings to determine which service to toggle.
+**Relationship between persisted and in-memory `Enabled`:**
+
+- `AiTranslationSettings.Enabled` (persisted in `settings.json`) is the single source of truth
+- Each service has its own in-memory `volatile bool _enabled` field, used for hot-path checks without reading settings
+- On app startup: read `ActiveMode` and `Enabled` from settings; set the corresponding service's `_enabled` to match; the other service's `_enabled` stays `false`
+- On toggle: the endpoint sets both the persisted `AiTranslationSettings.Enabled` and the correct service's `_enabled`
+- On mode switch (e.g., machine → cloud): set old service `_enabled = false`, set new service `_enabled = AiTranslationSettings.Enabled`
+- No new persisted `MachineTranslationEnabled` field needed — the single `Enabled` + `ActiveMode` pair fully determines state
+
+Both endpoints (`POST /api/ai/toggle`, mode-switching in `PUT /api/settings`) must inject **both** `LlmTranslationService` and `MachineTranslationService` via DI.
 
 ### Backend Service: `MachineTranslationService`
 
@@ -46,6 +55,8 @@ Independent service parallel to `LlmTranslationService`. Core responsibilities:
 - Concurrency control via `SemaphoreSlim(1, 1)` — single-concurrency due to provider rate limits
 - DNT placeholder substitution/restoration (shared utility methods)
 - Glossary post-processing (shared utility methods)
+- `RecordError(string message, string? gameId)` — same signature as `LlmTranslationService.RecordError`; called from `TranslateEndpoints.cs` catch blocks in machine mode
+- `GetStats()` → `TranslationStats` — returns current statistics; called by `GET /api/machine-translate/stats`
 - Statistics tracking using existing `TranslationStats` structure
 - SignalR broadcast via `IHubContext<InstallProgressHub>` to `"ai-translation"` group
 
@@ -59,7 +70,9 @@ Machine translation providers enforce strict rate limits (~1 req/s). The service
 3. Release semaphore
 ```
 
-For a typical DLL batch of 10 texts at 1 req/s, each batch takes ~10 seconds. With 10 concurrent DLL requests queued, worst-case latency is ~100 seconds for the last batch. This is acceptable for free translation — users trade speed for zero cost. The 120s semaphore timeout prevents indefinite blocking.
+The 120s timeout is for **waiting to acquire** the semaphore, not for the translation work itself. Once acquired, the translation runs to completion regardless of time. For a typical DLL batch of 10 texts at 1 req/s, each batch takes ~10 seconds. With 10 concurrent DLL requests queued, worst-case wait is ~100 seconds for the last batch. This is acceptable for free translation — users trade speed for zero cost.
+
+**Pre-translation batch handling:** The pre-translation feature (`POST .../pre-translate`) can send up to 500 texts. For machine mode, `MachineTranslationService.TranslateAsync` internally splits large batches into chunks of 20 texts, translating each chunk sequentially. This avoids monopolizing the semaphore for 500+ seconds while still processing efficiently.
 
 ### Provider Failover Logic
 
@@ -86,8 +99,10 @@ Extract from `LlmTranslationService` into `TranslationHelper` static class. Exac
 
 **Compiled regexes to share:**
 
-- `DntRestoreRegex` (`\{\{DNT_\d+\}\}`) — used by both services for DNT placeholder restoration
-- `FullDntPlaceholderRegex` (`^\{\{DNT_\d+\}\}$`) — used for pre-computation check
+- `DntRestoreRegex` (`\{{1,2}\s*DNT_(\d+)\s*\}{1,2}`) — lenient pattern matching 1-2 braces with optional whitespace, used for DNT placeholder restoration
+- `FullDntPlaceholderRegex` (`^\{{1,2}\s*DNT_\d+\s*\}{1,2}$`) — full-match variant for pre-computation check
+
+Note: these use the actual lenient patterns from the existing codebase (not simplified versions) to handle slightly malformed placeholders from LLM/machine translation output.
 
 **NOT extracted (LLM-specific):**
 
@@ -209,7 +224,7 @@ class ProviderStatus
     string Name { get; set; }        // Display name
     bool Healthy { get; set; }
     bool InCooldown { get; set; }
-    string? LastError { get; set; }
+    string? LastError { get; set; }    // Safe static messages only (no raw ex.Message)
     DateTime? LastErrorTime { get; set; }
 }
 ```
@@ -266,10 +281,11 @@ interface ProviderStatus {
 
 The endpoint modification must handle:
 
-1. **Service routing:** Read `activeMode` from settings; call `MachineTranslationService.TranslateAsync()` for `"machine"` mode
-2. **Error handling:** Call `machineTranslationService.RecordError()` in catch blocks (not `LlmTranslationService.RecordError()`)
-3. **Glossary extraction:** Disable for machine mode (same as local mode — add `isMachineMode` check alongside existing `isLocalMode`)
-4. **Log messages:** Use mode-appropriate messages (e.g., "机器翻译完成" instead of "AI 翻译完成")
+1. **DI injection:** Endpoint parameters must inject both `LlmTranslationService` and `MachineTranslationService`
+2. **Service routing:** Read `activeMode` from settings; call `MachineTranslationService.TranslateAsync()` for `"machine"` mode
+3. **Error handling:** Call `machineTranslationService.RecordError()` in catch blocks (not `LlmTranslationService.RecordError()`) — same `(string message, string? gameId)` signature
+4. **Glossary extraction:** Disable for machine mode (same as local mode — add `isMachineMode` check alongside existing `isLocalMode`)
+5. **Log messages:** Use mode-appropriate messages (e.g., "机器翻译完成" instead of "AI 翻译完成")
 
 ### Test Translation Request/Response
 
@@ -387,6 +403,8 @@ The UI should display a notice that machine translation uses reverse-engineered 
 Reuse existing `"ai-translation"` group and `statsUpdate` event. Machine translation and AI translation are never active simultaneously, so there is no conflict. No new hub groups needed.
 
 The `InstallProgressHub` requires no changes — `MachineTranslationService` broadcasts through `IHubContext<InstallProgressHub>` directly (same pattern as `LlmTranslationService`).
+
+**Stats page isolation:** Both `AiTranslationView` and `MachineTranslationView` use `KeepAlive` caching, so they connect/disconnect SignalR on mount/unmount (not on activation/deactivation). Since only one mode is active at a time, the `statsUpdate` events from the active service are consumed by whichever page the user is viewing. If both pages are cached and connected, the inactive page simply receives zero-change updates (the inactive service doesn't broadcast). No filtering needed.
 
 ## Sync Points (to add to CLAUDE.md)
 
