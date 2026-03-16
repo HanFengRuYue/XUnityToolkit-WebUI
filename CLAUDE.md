@@ -140,6 +140,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **LocalLlmDownloadProgress fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Updater/Program.cs` (MsiProductCode, InstallDir); `DataPath` key written by MSI for `RemoveFolderEx` cleanup only — app no longer reads it; key path: `HKCU\Software\XUnityToolkit`
 - **DataPathInfo:** Sync 2 places: `Endpoints/SettingsEndpoints.cs` (record), `src/api/types.ts`
+- **Adding AppDataPaths directories:** Also update export exclusion list in `SettingsEndpoints.cs` `/export` endpoint if the new directory contains large/regeneratable/machine-specific data
 - **Installer license:** `Installer/License.rtf` must match project root `LICENSE` (copyright holder, license type)
 
 ### Build & Deploy
