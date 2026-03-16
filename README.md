@@ -21,8 +21,9 @@
 
 ## 下载安装
 
-| [**前往下载页面**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest) |
-|:---:|
+| 安装包（MSI） | 便携版（ZIP） |
+|:---:|:---:|
+| [**下载 MSI 安装包**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest/download/XUnityToolkit-WebUI-win-x64.msi) | [**下载便携版 ZIP**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest/download/XUnityToolkit-WebUI-win-x64.zip) |
 
 ---
 
