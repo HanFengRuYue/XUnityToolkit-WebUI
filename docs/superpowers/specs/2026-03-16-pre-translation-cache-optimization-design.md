@@ -11,13 +11,45 @@ Two types of mismatches occur simultaneously:
 
 XUnity.AutoTranslator uses **exact string matching** for cache lookups (after its own preprocessing). There is no built-in fuzzy matching.
 
+## Feature Toggle
+
+The entire pre-translation cache optimization (Layers 1–4) is gated behind a **per-game toggle**, disabled by default.
+
+### Backend
+
+Add to `AiTranslationSettings` (per-game AI settings, not global `AppSettings`):
+
+| Field | Type | Default |
+|-------|------|---------|
+| `EnablePreTranslationCache` | `bool` | `false` |
+
+When `false`:
+- `PreTranslationService.WriteTranslationCacheAsync` skips normalization and regex generation (writes plain entries as before, preserving existing behavior)
+- `PreTranslationCacheMonitor` does not load or track cache stats
+- `TranslateEndpoints` does not call `cacheMonitor.RecordTexts()`
+- Layer 1 XUnity config fields are not overridden during installation
+
+When `true`:
+- All four layers are active
+
+### Frontend
+
+In the pre-translation section of the game detail page, add an `NSwitch` toggle: "Enable pre-translation cache optimization" with an experimental badge/tag.
+
+Display an `NAlert` (type `warning`) beneath the toggle:
+
+> "This is an experimental feature. It modifies XUnity.AutoTranslator configuration and generates regex translation patterns to improve pre-translation cache hit rates. Results may vary depending on the game. If you experience translation issues after enabling this feature, disable it and re-run pre-translation."
+
+The cache status card on `AiTranslationView.vue` is only rendered when `enablePreTranslationCache` is `true` for the current game.
+
 ## Solution Overview
 
-Leverage XUnity.AutoTranslator's native features across three layers:
+Leverage XUnity.AutoTranslator's native features across four layers (all gated by `EnablePreTranslationCache`):
 
 1. **XUnity configuration optimization** — Enable built-in whitespace tolerance
 2. **Cache key normalization** — Apply the same text preprocessing XUnity does before writing cache keys
 3. **Splitter regex generation** — Use XUnity's `sr:` regex feature to split concatenated runtime text into fragments that can individually hit the cache
+4. **Cache hit monitoring & logging** — Track and display cache effectiveness in real time
 
 ## Layer 1: XUnity Configuration Optimization
 
@@ -221,6 +253,7 @@ The Debug-level miss logs are key for post-hoc diagnosis — users can view them
 
 | File | Change |
 |------|--------|
+| `Models/AiTranslationSettings.cs` | Add `EnablePreTranslationCache` field (default `false`) |
 | `Models/XUnityConfig.cs` | Add `CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars` |
 | `Models/TranslationStats.cs` | Add `PreTranslationCacheStats` and `CacheMissEntry` records |
 | `Services/ConfigurationService.cs` | Read/write new INI keys in `[Behaviour]` section |
@@ -239,9 +272,9 @@ The Debug-level miss logs are key for post-hoc diagnosis — users can view them
 |------|--------|
 | `src/api/types.ts` | Add `XUnityConfig` fields, `PreTranslationCacheStats`, `CacheMissEntry` types |
 | `src/stores/aiTranslation.ts` | Subscribe to `preCacheStatsUpdate` SignalR message; add `cacheStats` ref |
-| `src/views/AiTranslationView.vue` | Add pre-translation cache status card with metrics + recent misses list |
-| `src/components/config/ConfigPanel.vue` | Add controls for new config fields |
-| Pre-translation UI component | Add custom regex pattern text area |
+| `src/views/AiTranslationView.vue` | Add pre-translation cache status card (conditional on toggle) |
+| `src/components/config/ConfigPanel.vue` | Add controls for new XUnity config fields |
+| Pre-translation UI component | Add `EnablePreTranslationCache` toggle with experimental warning + custom regex text area |
 
 ### No Changes Needed
 
@@ -264,6 +297,7 @@ The Debug-level miss logs are key for post-hoc diagnosis — users can view them
 
 ## Sync Points
 
+- **`EnablePreTranslationCache` field:** Sync per CLAUDE.md AiTranslationSettings pattern: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (DEFAULT_AI_TRANSLATION), `SettingsView.vue`
 - **XUnityConfig fields:** Sync 4 places per CLAUDE.md pattern: `Models/XUnityConfig.cs`, `ConfigurationService.cs` (read/write), `src/api/types.ts`, `ConfigPanel.vue`
 - **`TemplateAllNumberAway` default change:** Update the default in `XUnityConfig.cs` from `false` to `true`; update `InstallOrchestrator` to write the new default
 - **Pre-translation regex path:** Add to `AppDataPaths`; add `cache/pre-translation-regex/` to `EnsureDirectoriesExist()`; evaluate for export exclusion list in `SettingsEndpoints.cs` (should be exported as user data)
