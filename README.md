@@ -24,10 +24,6 @@
 | 安装包（MSI） | 便携版（ZIP） |
 |:---:|:---:|
 | [**下载 MSI 安装包**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest/download/XUnityToolkit-WebUI-win-x64.msi) | [**下载便携版 ZIP**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest/download/XUnityToolkit-WebUI-win-x64.zip) |
-| 双击安装 | 解压即用，不写注册表，可随意移动 |
-| 数据：`%AppData%\XUnityToolkit\` | 数据：程序目录下 `data/` |
-
-> 启动后浏览器自动打开 http://127.0.0.1:51821
 
 ---
 
