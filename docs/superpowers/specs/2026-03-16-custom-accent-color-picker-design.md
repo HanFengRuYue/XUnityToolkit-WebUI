@@ -21,7 +21,7 @@ Add a "custom color" swatch button at the end of the existing preset color row i
 - When a custom (non-preset) color is active: displays the current custom color with the active border + checkmark, same as preset swatches
 
 **Color picker:**
-- Uses `NColorPicker` with the custom swatch button rendered via its `#label` slot — no separate `NPopover` needed
+- Uses `NColorPicker` with the custom swatch button rendered via its `#trigger` slot — no separate `NPopover` needed
 - Visibility controlled via `:show` / `@update:show` props
 - Restricted to hex-only mode via `:modes="['hex']"` to ensure output is always `#RRGGBB` format (theme store's `hexToRgb()` expects this)
 - The 8 preset colors are passed as `swatches` prop for quick access within the picker
