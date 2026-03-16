@@ -70,6 +70,8 @@ export const useUpdateStore = defineStore('update', () => {
   }
 
   async function checkForUpdate() {
+    state.value = 'checking'
+    error.value = undefined
     try {
       checkResult.value = await updateApi.check()
       if (checkResult.value.updateAvailable) {
@@ -79,8 +81,13 @@ export const useUpdateStore = defineStore('update', () => {
           downloadSize: checkResult.value.downloadSize,
           changedPackages: checkResult.value.changedPackages,
         }
+        state.value = 'available'
+      } else {
+        state.value = 'none'
       }
     } catch (err) {
+      state.value = 'error'
+      error.value = err instanceof Error ? err.message : '检查更新失败'
       console.error('Check for update failed:', err)
     }
   }

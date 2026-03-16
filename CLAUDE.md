@@ -136,12 +136,13 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Update status model:** `Models/UpdateInfo.cs` → `src/api/types.ts` → `src/stores/update.ts` → `SettingsView.vue`
 - **AppSettings.ReceivePreReleaseUpdates:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue` (settings default + NSwitch)
 - **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Program.cs` (DataPath) and `Updater/Program.cs` (MsiProductCode, InstallDir); key path: `HKCU\Software\XUnityToolkit`
+- **Installer license:** `Installer/License.rtf` must match project root `LICENSE` (copyright holder, license type)
 
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **Versioning:** `build.ps1` auto-generates `1.6.{YYYYMMDDHHmm}` (CI uses `1.6.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
+- **Versioning:** `build.ps1` auto-generates `1.7.{YYYYMMDDHHmm}` (CI uses `1.7.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
 - **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
@@ -167,6 +168,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
 - **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
 - **CI/CD:** GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
+- **CI parallel builds:** `build.yml` uses PowerShell `Start-Job` for intra-step parallelism — npm ci runs in background during asset download; frontend/Updater/TranslatorEndpoint build in parallel; main ZIP created in background during component ZIP creation
+- **CI NuGet cache:** `actions/cache@v4` on `~/.nuget/packages` keyed by `hashFiles('**/*.csproj')`; explicit `dotnet restore` before parallel builds, then `--no-restore` on all subsequent dotnet commands
+- **CI component ZIPs:** Use `ZipFileExtensions.CreateEntryFromFile` with path prefix directly — do NOT create temp wrapper directories with `Copy-Item` (wastes I/O on large bundled assets)
 - **CI version tracking:** `.github/deps.json` stores last-known versions; `dep-check.yml` compares upstream
 - **CI cannot call `build.ps1`** — `Wait-Exit` blocks in non-interactive; workflow replicates logic inline; changes must be manually synced between `build.ps1` and `build.yml`
 - **dep-check.yml** only tracks BepInEx 5/6 and XUnity versions — llama.cpp is pinned and not auto-checked

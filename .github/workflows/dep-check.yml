@@ -91,7 +91,8 @@ jobs:
 
           FORCE="${{ inputs.force_build }}"
           if [ -n "$CHANGED" ] || [ "$FORCE" = "true" ]; then
-            BUILD_VER="1.6.$(date -u +%Y%m%d%H%M)"
+            BUILD_VER="1.7.$(date -u +%Y%m%d%H%M)"
+            VER_PREFIX="v$(echo "$BUILD_VER" | cut -d. -f1,2)"
             RELEASE_TAG="auto-${BUILD_VER}"
 
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
@@ -126,7 +127,7 @@ jobs:
               echo "### Downloads"
               echo "| File | Platform |"
               echo "|------|----------|"
-              echo "| \`XUnityToolkit-WebUI-win-x64.zip\` | Windows x64 |"
+              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64.zip\` | Windows x64 |"
               echo 'RELEASE_EOF'
             } >> "$GITHUB_OUTPUT"
 

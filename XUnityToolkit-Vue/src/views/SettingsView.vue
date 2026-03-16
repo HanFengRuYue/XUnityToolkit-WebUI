@@ -16,7 +16,6 @@ import {
   InfoOutlined,
   PaletteOutlined,
   TuneOutlined,
-  LocalOfferOutlined,
   LayersOutlined,
   DisplaySettingsOutlined,
   PersonOutlined,
@@ -116,9 +115,13 @@ async function loadSettings() {
 const version = ref('...')
 
 const shortVersion = computed(() => {
-  // Keep only first 3 segments: "1.0.0+abc..." → "1.0.0"
-  const match = version.value.match(/^(\d+\.\d+\.\d+)/)
+  const match = version.value.match(/^(\d+\.\d+)/)
   return match ? match[1] : version.value
+})
+
+const buildNumber = computed(() => {
+  const match = version.value.match(/^\d+\.\d+\.(.+)/)
+  return match ? match[1] : ''
 })
 
 const changelogHtml = computed(() => {
@@ -164,8 +167,11 @@ function handleReset() {
   })
 }
 
+const hasChecked = ref(false)
+
 async function handleCheckUpdate() {
   await updateStore.checkForUpdate()
+  hasChecked.value = true
   if (updateStore.state === 'none') {
     message.success('已是最新版本')
   }
@@ -310,68 +316,61 @@ onUnmounted(() => {
           </span>
           更新
         </h2>
+        <div class="header-actions">
+          <NButton
+            size="small"
+            :loading="updateStore.state === 'checking'"
+            :disabled="updateStore.isDownloading"
+            @click="handleCheckUpdate"
+          >
+            检查更新
+          </NButton>
+        </div>
       </div>
 
-      <!-- Version & Check Button Row -->
-      <div class="info-row" style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-        <div class="info-card">
-          <div class="info-card-icon version">
-            <NIcon :size="18"><LocalOfferOutlined /></NIcon>
-          </div>
-          <div class="info-card-content">
-            <span class="info-label">版本</span>
-            <span class="info-value mono">v{{ shortVersion }}</span>
-          </div>
+      <!-- Version & Status -->
+      <div class="update-version-block">
+        <div class="update-version-info">
+          <span class="update-version-number">v{{ shortVersion }}</span>
+          <span v-if="buildNumber" class="update-build-number">Build {{ buildNumber }}</span>
         </div>
-
-        <div class="update-status">
-          <template v-if="updateStore.state === 'none'">
-            <span class="status-ok">&#10003; 已是最新版本</span>
-          </template>
-          <template v-else-if="updateStore.state === 'checking'">
-            <NSpin :size="14" />
-            <span>检查中...</span>
-          </template>
-          <template v-else-if="updateStore.isUpdateAvailable">
-            <span class="status-update">新版本 v{{ updateStore.availableInfo?.version }} 可用</span>
-          </template>
-          <template v-else-if="updateStore.isReady">
-            <span class="status-ready">更新已就绪</span>
-          </template>
-          <template v-else-if="updateStore.hasError">
-            <span class="status-error">更新出错</span>
-          </template>
+        <div v-if="updateStore.state === 'checking'" class="update-status-badge checking">
+          <NSpin :size="12" />
+          <span>正在检查...</span>
         </div>
-
-        <NButton
-          size="small"
-          :loading="updateStore.state === 'checking'"
-          :disabled="updateStore.isDownloading"
-          @click="handleCheckUpdate"
-        >
-          检查更新
-        </NButton>
+        <div v-else-if="updateStore.isUpdateAvailable" class="update-status-badge available">
+          新版本可用
+        </div>
+        <div v-else-if="updateStore.isReady" class="update-status-badge ready">
+          更新已就绪
+        </div>
+        <div v-else-if="updateStore.hasError" class="update-status-badge error-badge">
+          检查失败
+        </div>
+        <div v-else-if="hasChecked" class="update-status-badge latest">
+          &#10003; 已是最新
+        </div>
       </div>
 
       <!-- Update Available Details -->
       <template v-if="updateStore.isUpdateAvailable && updateStore.availableInfo">
         <div class="update-details">
           <div class="update-header">
-            <span class="update-title">更新可用: v{{ updateStore.availableInfo.version }}</span>
+            <span class="update-title">v{{ updateStore.availableInfo.version }} 可用</span>
           </div>
 
           <div v-if="changelogHtml" class="update-changelog">
-            <div class="changelog-label">更新内容:</div>
+            <div class="changelog-label">更新内容</div>
             <div class="changelog-content" v-html="changelogHtml"></div>
           </div>
 
           <div class="update-packages">
-            <div class="packages-label">需要下载:</div>
+            <div class="packages-label">需要下载</div>
             <div v-for="pkg in updateStore.availableInfo.changedPackages" :key="pkg" class="package-item">
-              &#9679; {{ pkg }}.zip
+              {{ pkg }}.zip
             </div>
             <div class="packages-total">
-              总计: {{ updateStore.formatBytes(updateStore.availableInfo.downloadSize) }}
+              总计 {{ updateStore.formatBytes(updateStore.availableInfo.downloadSize) }}
             </div>
           </div>
 
@@ -413,12 +412,13 @@ onUnmounted(() => {
       <template v-if="updateStore.hasError">
         <div class="update-error">
           <span>{{ updateStore.error || '更新过程中出现错误' }}</span>
-          <NButton size="small" @click="updateStore.checkForUpdate()">重试</NButton>
+          <NButton size="small" @click="handleCheckUpdate">重试</NButton>
         </div>
       </template>
 
       <!-- Prerelease Toggle -->
-      <div class="setting-row" style="margin-top: 12px;">
+      <div class="update-divider"></div>
+      <div class="setting-row">
         <div class="setting-info">
           <span class="setting-label">接收预发布更新</span>
           <span class="setting-description">接收尚未正式发布的测试版本，可能包含新功能但稳定性较低</span>
@@ -680,28 +680,93 @@ onUnmounted(() => {
 }
 
 /* ===== Update Section ===== */
-.update-status {
+.update-version-block {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.status-ok { color: var(--success-color, #18a058); }
-.status-update { color: var(--accent); font-weight: 500; }
-.status-ready { color: var(--accent); font-weight: 500; }
-.status-error { color: var(--error-color, #d03050); }
+
+.update-version-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.update-version-number {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+
+.update-build-number {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.update-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.update-status-badge.checking {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.update-status-badge.available {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.update-status-badge.ready {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.update-status-badge.error-badge {
+  background: color-mix(in srgb, var(--error-color, #d03050) 12%, transparent);
+  color: var(--error-color, #d03050);
+}
+
+.update-status-badge.latest {
+  background: color-mix(in srgb, var(--success-color, #18a058) 12%, transparent);
+  color: var(--success-color, #18a058);
+}
+
+.update-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 16px 0;
+}
 
 .update-details {
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 16px;
   border-radius: 8px;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .update-header { margin-bottom: 12px; }
-.update-title { font-weight: 600; font-size: 14px; }
+.update-title { font-weight: 600; font-size: 14px; color: var(--accent); }
 .update-changelog { margin-bottom: 12px; }
-.changelog-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+.changelog-label {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 .changelog-content {
   font-size: 13px;
   :deep(ul) { margin: 0; padding-left: 20px; }
@@ -709,33 +774,49 @@ onUnmounted(() => {
   :deep(code) { font-size: 12px; padding: 1px 4px; border-radius: 3px; background: var(--bg-muted); }
   :deep(p) { margin: 4px 0; }
 }
-.packages-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
-.package-item { font-size: 13px; font-family: monospace; }
-.packages-total { font-size: 13px; font-weight: 500; margin-top: 4px; }
+.packages-label {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.package-item { font-size: 13px; padding: 2px 0; }
+.packages-total { font-size: 13px; font-weight: 500; margin-top: 6px; color: var(--text-2); }
 .update-actions { display: flex; gap: 8px; margin-top: 16px; }
 
 .update-progress {
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 16px;
   border-radius: 8px;
-  background: var(--card-bg);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
   border: 1px solid var(--border-color);
 }
-.progress-header { font-size: 14px; margin-bottom: 8px; }
-.progress-detail { font-size: 12px; color: var(--text-secondary); margin-top: 4px; margin-bottom: 8px; }
+.progress-header { font-size: 14px; margin-bottom: 8px; font-weight: 500; }
+.progress-detail {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
 
 .update-ready, .update-error {
-  margin-top: 12px;
+  margin-top: 16px;
   padding: 16px;
   border-radius: 8px;
-  background: var(--card-bg);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
   border: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  font-size: 13px;
 }
-.update-error { border-color: var(--error-color, #d03050); }
+.update-error {
+  background: color-mix(in srgb, var(--error-color, #d03050) 5%, var(--bg-subtle, var(--bg-muted)));
+  border-color: color-mix(in srgb, var(--error-color, #d03050) 20%, transparent);
+}
 
 .setting-row {
   display: flex;

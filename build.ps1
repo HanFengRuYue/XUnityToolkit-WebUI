@@ -164,7 +164,8 @@ $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 
 # Generate version: 1.6.{YYYYMMDDHHmm}
-$BuildVersion = "1.6.$(Get-Date -Format 'yyyyMMddHHmm')"
+$BuildVersion = "1.7.$(Get-Date -Format 'yyyyMMddHHmm')"
+$VersionPrefix = ($BuildVersion -split '\.')[0..1] -join '.'
 
 # Generate MSI-compatible version: {(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}
 # Constraints: major < 256, minor < 256, build < 65536
@@ -589,7 +590,7 @@ if (Test-Path $installerProject) {
     $wixOutputDir = Join-Path $ProjectRoot "Installer\bin\$wixPlatform\Release"
     $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($msiSrc) {
-        $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-$rid.msi"
+        $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-v$VersionPrefix-$rid.msi"
         Move-Item $msiSrc.FullName $msiDst -Force
         $msiSize = [math]::Round((Get-Item $msiDst).Length / 1MB, 1)
         Write-Host "  MSI: $msiSize MB -> $msiDst" -ForegroundColor Green

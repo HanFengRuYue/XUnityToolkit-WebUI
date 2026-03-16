@@ -1,5 +1,12 @@
 # Reusable build workflow — called by release.yml and dep-check.yml
 # Can also be triggered manually via workflow_dispatch for testing.
+#
+# Optimizations over naive sequential build:
+#   - NuGet package cache (actions/cache)
+#   - npm ci runs in parallel with bundled asset downloads + dotnet restore
+#   - Frontend build, Updater AOT, and TranslatorEndpoint build run in parallel
+#   - Main release ZIP created in parallel with component ZIPs
+#   - Component ZIPs use direct entry creation (no temp directory copies)
 name: Build
 
 on:
@@ -39,6 +46,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    outputs:
+      version_prefix: ${{ steps.ver.outputs.version_prefix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -48,9 +57,11 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "1.6.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "1.7.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Build version: $v"
+          "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Build version: $v (prefix: $prefix)"
 
       # ── SDK setup ──
 
@@ -67,13 +78,40 @@ jobs:
           cache: 'npm'
           cache-dependency-path: XUnityToolkit-Vue/package-lock.json
 
-      # ── Download bundled assets ──
+      # ── Caching ──
 
-      - name: Download bundled assets
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      # ── Parallel: npm ci + dotnet restore + download bundled assets ──
+      # npm ci (longest, ~54s) runs in background while dotnet restore and
+      # asset downloads proceed in the foreground (~32s combined).
+
+      - name: Download bundled assets & install dependencies
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Start npm ci in background (independent of everything else)
+          $npmCiJob = Start-Job -ScriptBlock {
+              param($workDir)
+              Set-Location $workDir
+              & npm ci 2>&1
+              if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
+          } -ArgumentList (Resolve-Path "XUnityToolkit-Vue").Path
+
+          # ── Restore .NET projects (populates NuGet cache) ──
+          Write-Host "Restoring .NET projects..."
+          dotnet restore XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj -r win-x64 -v quiet
+          dotnet restore Updater/Updater.csproj -r win-x64 -v quiet
+          dotnet restore TranslatorEndpoint/TranslatorEndpoint.csproj -v quiet
+          Write-Host ".NET restore complete."
+
+          # ── Download bundled assets ──
           $headers = @{
             'Authorization' = "Bearer $env:GH_TOKEN"
             'User-Agent'    = 'XUnityToolkit-CI/1.0'
@@ -297,36 +335,96 @@ jobs:
 
           Write-Host "Bundled assets ready."
 
-      # ── Build frontend ──
+          # ── Wait for npm ci ──
+          Write-Host "`n--- Waiting for npm ci ---"
+          $npmCiJob | Wait-Job | Out-Null
+          $npmCiOutput = Receive-Job $npmCiJob 2>&1
+          if ($npmCiOutput) { $npmCiOutput | ForEach-Object { Write-Host $_ } }
+          if ($npmCiJob.State -eq 'Failed') {
+              $err = $npmCiJob.ChildJobs[0].JobStateInfo.Reason.Message
+              Remove-Job $npmCiJob
+              throw "npm ci failed: $err"
+          }
+          Remove-Job $npmCiJob
+          Write-Host "npm ci complete."
 
-      - name: Install frontend dependencies
-        working-directory: XUnityToolkit-Vue
-        run: npm ci
+      # ── Parallel: Build frontend + Updater AOT + TranslatorEndpoint ──
+      # Frontend build runs in foreground (longest, shows progress live).
+      # Updater AOT and TranslatorEndpoint run in background via Start-Job.
 
-      - name: Build frontend
-        working-directory: XUnityToolkit-Vue
-        run: npm run build
-
-      # ── Build TranslatorEndpoint ──
-
-      - name: Build TranslatorEndpoint (LLMTranslate.dll)
+      - name: Build frontend, Updater & TranslatorEndpoint
         shell: pwsh
         run: |
-          $hasLibs = (Test-Path "TranslatorEndpoint\libs\XUnity.AutoTranslator.Plugin.Core.dll") -and
-                     (Test-Path "TranslatorEndpoint\libs\XUnity.Common.dll")
+          $workDir = $PWD.Path
+
+          # Start Updater AOT publish in background
+          $updaterJob = Start-Job -ScriptBlock {
+              param($dir)
+              Set-Location $dir
+              & dotnet publish Updater/Updater.csproj -c Release -r win-x64 --no-restore 2>&1
+              if ($LASTEXITCODE -ne 0) { throw "Updater AOT build failed (exit code $LASTEXITCODE)" }
+          } -ArgumentList $workDir
+
+          # Start TranslatorEndpoint build in background (conditional on XUnity DLLs)
+          $endpointJob = $null
+          $hasLibs = (Test-Path "TranslatorEndpoint/libs/XUnity.AutoTranslator.Plugin.Core.dll") -and
+                     (Test-Path "TranslatorEndpoint/libs/XUnity.Common.dll")
           if ($hasLibs) {
-            dotnet build TranslatorEndpoint\TranslatorEndpoint.csproj -c Release --nologo -v quiet
-            if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
-            Write-Host "LLMTranslate.dll built successfully."
+              $endpointJob = Start-Job -ScriptBlock {
+                  param($dir)
+                  Set-Location $dir
+                  & dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release --nologo -v quiet --no-restore 2>&1
+                  if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed (exit code $LASTEXITCODE)" }
+              } -ArgumentList $workDir
           } else {
-            Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
+              Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
           }
 
-      # ── Build Updater ──
+          # Build frontend in foreground (longest task, ~34s)
+          Write-Host "::group::Frontend Build"
+          Push-Location XUnityToolkit-Vue
+          & npm run build
+          $frontendExit = $LASTEXITCODE
+          Pop-Location
+          Write-Host "::endgroup::"
 
-      - name: Build Updater (AOT)
-        run: |
-          dotnet publish Updater/Updater.csproj -c Release -r win-x64 /p:PublishAot=true
+          if ($frontendExit -ne 0) {
+              $updaterJob | Stop-Job -PassThru | Remove-Job -Force
+              if ($endpointJob) { $endpointJob | Stop-Job -PassThru | Remove-Job -Force }
+              throw "Frontend build failed"
+          }
+          Write-Host "Frontend build complete."
+
+          # Collect Updater AOT results
+          Write-Host "::group::Updater AOT Build"
+          $updaterJob | Wait-Job | Out-Null
+          $updaterOutput = Receive-Job $updaterJob 2>&1
+          if ($updaterOutput) { $updaterOutput | ForEach-Object { Write-Host $_ } }
+          if ($updaterJob.State -eq 'Failed') {
+              $err = $updaterJob.ChildJobs[0].JobStateInfo.Reason.Message
+              Remove-Job $updaterJob -Force
+              if ($endpointJob) { $endpointJob | Stop-Job -PassThru | Remove-Job -Force }
+              throw "Updater AOT build failed: $err"
+          }
+          Remove-Job $updaterJob -Force
+          Write-Host "Updater build complete."
+          Write-Host "::endgroup::"
+
+          # Collect TranslatorEndpoint results
+          if ($endpointJob) {
+              Write-Host "::group::TranslatorEndpoint Build"
+              $endpointJob | Wait-Job | Out-Null
+              $endpointOutput = Receive-Job $endpointJob 2>&1
+              if ($endpointOutput) { $endpointOutput | ForEach-Object { Write-Host $_ } }
+              if ($endpointJob.State -eq 'Failed') {
+                  $err = $endpointJob.ChildJobs[0].JobStateInfo.Reason.Message
+                  Remove-Job $endpointJob -Force
+                  throw "TranslatorEndpoint build failed: $err"
+              }
+              Remove-Job $endpointJob -Force
+              Write-Host "TranslatorEndpoint build complete."
+              Write-Host "::endgroup::"
+          }
 
       # ── Publish backend ──
 
@@ -341,6 +439,7 @@ jobs:
             -p:DebugType=none `
             -p:SkipFrontendBuild=true `
             -p:InformationalVersion=$v `
+            --no-restore `
             -o "Release\win-x64"
 
           if ($LASTEXITCODE -ne 0) { throw "Publish failed for win-x64" }
@@ -357,30 +456,50 @@ jobs:
             Write-Host "Copied bundled assets to output."
           }
 
+          # Copy Updater.exe
+          $updaterExe = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
+          if (Test-Path $updaterExe) {
+            Copy-Item $updaterExe "Release/win-x64/" -Force
+            Write-Host "Copied Updater.exe"
+          }
+
           $exeFile = Get-Item "Release\win-x64\XUnityToolkit-WebUI.exe"
           $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
           Write-Host "win-x64 done (exe: $sizeMB MB)"
 
-      - name: Copy Updater.exe
-        run: |
-          cp "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe" "Release/win-x64/"
+      # ── Generate manifest & create all packages ──
+      # Main release ZIP runs in a background job while component ZIPs are
+      # created in the foreground. Component ZIPs use direct entry creation
+      # (no temp directory copies) to reduce I/O.
 
-      - name: Generate update manifest
+      - name: Generate manifest & create packages
         shell: pwsh
         run: |
           $rid = "win-x64"
-          $version = "${{ steps.ver.outputs.build_version }}"
           $releaseDir = "Release/$rid"
+          $releaseDirAbs = (Resolve-Path $releaseDir).Path
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
 
+          # Start main release ZIP in background
+          $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
+          $mainZipDst = Join-Path $PWD.Path "XUnityToolkit-WebUI-v$vPrefix-win-x64.zip"
+          $mainZipJob = Start-Job -ScriptBlock {
+              param($src, $dst)
+              Add-Type -AssemblyName System.IO.Compression.FileSystem
+              if (Test-Path $dst) { Remove-Item $dst }
+              [System.IO.Compression.ZipFile]::CreateFromDirectory($src, $dst)
+          } -ArgumentList $releaseDirAbs, $mainZipDst
+
+          # ── Generate update manifest ──
+          $version = "${{ steps.ver.outputs.build_version }}"
           $manifest = @{
               version = $version
               rid = $rid
               files = @{}
           }
 
-          $basePath = (Resolve-Path $releaseDir).Path
           Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
-              $relativePath = $_.FullName.Substring($basePath.Length + 1).Replace('\', '/')
+              $relativePath = $_.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
               $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
               $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
@@ -392,15 +511,10 @@ jobs:
                   package = $package
               }
           }
-
           $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$rid.json" -Encoding utf8
+          Write-Host "Generated manifest."
 
-      - name: Create component ZIPs
-        shell: pwsh
-        run: |
-          $rid = "win-x64"
-          $releaseDir = "Release/$rid"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          # ── Create component ZIPs ──
 
           # app ZIP — root-level files (exclude appsettings*)
           $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
@@ -413,29 +527,54 @@ jobs:
                 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
               }
             } finally { $zip.Dispose() }
+            Write-Host "Created app-$rid.zip"
           }
 
-          # wwwroot ZIP
+          # wwwroot ZIP — direct entry creation with prefix (no temp directory copy)
           $wwwrootDir = Join-Path $releaseDir "wwwroot"
           if (Test-Path $wwwrootDir) {
-            $tempDir = "Release/_wwwroot_wrap"
-            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-            New-Item -ItemType Directory -Path $tempDir | Out-Null
-            Copy-Item $wwwrootDir (Join-Path $tempDir "wwwroot") -Recurse
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, "Release/wwwroot.zip")
-            Remove-Item $tempDir -Recurse -Force
+            $wwwrootZip = "Release/wwwroot.zip"
+            if (Test-Path $wwwrootZip) { Remove-Item $wwwrootZip }
+            $zip = [System.IO.Compression.ZipFile]::Open($wwwrootZip, 'Create')
+            try {
+              $wwwBase = (Resolve-Path $wwwrootDir).Path
+              Get-ChildItem -Path $wwwrootDir -Recurse -File | ForEach-Object {
+                $entry = "wwwroot/" + $_.FullName.Substring($wwwBase.Length + 1).Replace('\', '/')
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
+              }
+            } finally { $zip.Dispose() }
+            Write-Host "Created wwwroot.zip"
           }
 
-          # bundled ZIP
+          # bundled ZIP — direct entry creation with prefix (no temp directory copy)
           $bundledDir = Join-Path $releaseDir "bundled"
           if (Test-Path $bundledDir) {
-            $tempDir = "Release/_bundled_wrap"
-            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-            New-Item -ItemType Directory -Path $tempDir | Out-Null
-            Copy-Item $bundledDir (Join-Path $tempDir "bundled") -Recurse
-            [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, "Release/bundled.zip")
-            Remove-Item $tempDir -Recurse -Force
+            $bundledZip = "Release/bundled.zip"
+            if (Test-Path $bundledZip) { Remove-Item $bundledZip }
+            $zip = [System.IO.Compression.ZipFile]::Open($bundledZip, 'Create')
+            try {
+              $bundledBase = (Resolve-Path $bundledDir).Path
+              Get-ChildItem -Path $bundledDir -Recurse -File | ForEach-Object {
+                $entry = "bundled/" + $_.FullName.Substring($bundledBase.Length + 1).Replace('\', '/')
+                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
+              }
+            } finally { $zip.Dispose() }
+            Write-Host "Created bundled.zip"
           }
+
+          # Wait for main ZIP background job
+          $mainZipJob | Wait-Job | Out-Null
+          $mainZipOutput = Receive-Job $mainZipJob 2>&1
+          if ($mainZipOutput) { $mainZipOutput | ForEach-Object { Write-Host $_ } }
+          if ($mainZipJob.State -eq 'Failed') {
+              $err = $mainZipJob.ChildJobs[0].JobStateInfo.Reason.Message
+              Remove-Job $mainZipJob -Force
+              throw "Main ZIP creation failed: $err"
+          }
+          Remove-Job $mainZipJob -Force
+
+          $zipSize = [math]::Round((Get-Item "XUnityToolkit-WebUI-v$vPrefix-win-x64.zip").Length / 1MB, 1)
+          Write-Host "Created XUnityToolkit-WebUI-v$vPrefix-win-x64.zip ($zipSize MB)"
 
       # ── Build MSI installer ──
 
@@ -484,27 +623,18 @@ jobs:
           $wixOutputDir = "Installer/bin/$wixPlatform/Release"
           $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($msiFile) {
-            Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-$rid.msi" -Force
-            Write-Host "MSI built: Release/XUnityToolkit-WebUI-$rid.msi"
+            $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
+            Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-v$vPrefix-$rid.msi" -Force
+            Write-Host "MSI built: Release/XUnityToolkit-WebUI-v$vPrefix-$rid.msi"
           }
 
-      # ── Package as ZIP ──
-
-      - name: Package as ZIP
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zipName = "XUnityToolkit-WebUI-win-x64.zip"
-          if (Test-Path $zipName) { Remove-Item $zipName }
-          [System.IO.Compression.ZipFile]::CreateFromDirectory("Release\win-x64", $zipName)
-          $sizeMB = [math]::Round((Get-Item $zipName).Length / 1MB, 1)
-          Write-Host "Created $zipName ($sizeMB MB)"
+      # ── Upload artifacts ──
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
           name: release-win-x64
-          path: XUnityToolkit-WebUI-win-x64.zip
+          path: XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.zip
           retention-days: 3
 
       - name: Upload component packages artifact
@@ -517,7 +647,7 @@ jobs:
             Release/app-win-x64.zip
             Release/wwwroot.zip
             Release/bundled.zip
-            Release/XUnityToolkit-WebUI-win-x64.msi
+            Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.msi
           retention-days: 3
 
   # ── Create GitHub Release ──
@@ -579,8 +709,9 @@ jobs:
             PRERELEASE_FLAG="--prerelease"
           fi
 
+          VER_PREFIX="${{ needs.build.outputs.version_prefix }}"
           gh release create "${{ inputs.release_tag }}" \
-            XUnityToolkit-WebUI-win-x64.zip \
+            "XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.zip" \
             --title "${{ inputs.release_name }}" \
             --notes-file release_notes.md \
             $PRERELEASE_FLAG \
@@ -607,7 +738,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MSI_FILE="components/XUnityToolkit-WebUI-win-x64.msi"
+          VER_PREFIX="${{ needs.build.outputs.version_prefix }}"
+          MSI_FILE="components/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.msi"
           if [ -f "$MSI_FILE" ]; then
             gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber --repo "${{ github.repository }}"
           fi
