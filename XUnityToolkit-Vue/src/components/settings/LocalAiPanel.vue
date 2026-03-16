@@ -489,8 +489,8 @@ onUnmounted(() => {
           <div class="download-task-info">
             <div class="download-task-name">
               {{ getDownloadName(downloadId) }}
-              <NTag size="small" :bordered="false" :type="progress.useMirror ? 'info' : 'default'">
-                {{ progress.useMirror ? '镜像' : '官方' }}
+              <NTag size="small" :bordered="false" :type="progress.useModelScope ? 'success' : progress.useMirror ? 'info' : 'default'">
+                {{ progress.useModelScope ? 'ModelScope' : progress.useMirror ? '镜像' : '官方' }}
               </NTag>
             </div>
             <NProgress

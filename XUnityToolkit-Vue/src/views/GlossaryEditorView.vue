@@ -13,6 +13,7 @@ import {
   NTabs,
   NTabPane,
   useMessage,
+  useDialog,
 } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import {
@@ -23,6 +24,7 @@ import {
   FileDownloadOutlined,
   AddOutlined,
   DeleteOutlined,
+  DeleteSweepOutlined,
   MenuBookOutlined,
 } from '@vicons/material'
 import { gamesApi } from '@/api/games'
@@ -36,6 +38,7 @@ interface GlossaryRow extends GlossaryEntry {
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 
 const gameId = route.params['id'] as string
 const game = ref<Game | null>(null)
@@ -404,6 +407,20 @@ function handleExport() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
 
+function handleClearAll() {
+  if (entries.value.length === 0) return
+  dialog.warning({
+    title: '清空术语库',
+    content: `确定要清空全部 ${entries.value.length} 条术语吗？此操作不可撤销。`,
+    positiveText: '清空',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      entries.value = []
+      message.success('已清空术语库')
+    },
+  })
+}
+
 // ── Do-Not-Translate Actions ──
 
 function handleAddDntEntry() {
@@ -506,6 +523,20 @@ function handleDntExport() {
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
+
+function handleClearAllDnt() {
+  if (dntEntries.value.length === 0) return
+  dialog.warning({
+    title: '清空禁翻表',
+    content: `确定要清空全部 ${dntEntries.value.length} 条禁翻条目吗？此操作不可撤销。`,
+    positiveText: '清空',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      dntEntries.value = []
+      message.success('已清空禁翻表')
+    },
+  })
+}
 </script>
 
 <template>
@@ -546,6 +577,10 @@ function handleDntExport() {
               </NTag>
             </h2>
             <div class="header-actions">
+              <NButton size="small" type="error" secondary :disabled="entries.length === 0" @click="handleClearAll">
+                <template #icon><NIcon :size="16"><DeleteSweepOutlined /></NIcon></template>
+                清空
+              </NButton>
               <NButton size="small" @click="handleImportClick">
                 <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
                 导入
@@ -596,6 +631,10 @@ function handleDntExport() {
               </NTag>
             </h2>
             <div class="header-actions">
+              <NButton size="small" type="error" secondary :disabled="dntEntries.length === 0" @click="handleClearAllDnt">
+                <template #icon><NIcon :size="16"><DeleteSweepOutlined /></NIcon></template>
+                清空
+              </NButton>
               <NButton size="small" @click="handleDntImportClick">
                 <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
                 导入
@@ -655,5 +694,27 @@ function handleDntExport() {
 }
 .editor-tabs {
   animation: slideUp 0.5s var(--ease-out) backwards;
+}
+
+/* ── Segment tab dark-mode contrast overrides ── */
+.editor-tabs :deep(.n-tabs-rail) {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+}
+
+.editor-tabs :deep(.n-tabs-tab) {
+  color: var(--text-3);
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.editor-tabs :deep(.n-tabs-tab--active) {
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  border: 1px solid var(--accent-border);
+  border-radius: var(--n-tab-border-radius, 3px);
+}
+
+.editor-tabs :deep(.n-tabs-tab:not(.n-tabs-tab--active)) {
+  color: var(--text-3);
 }
 </style>

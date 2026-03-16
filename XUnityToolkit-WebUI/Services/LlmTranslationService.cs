@@ -354,6 +354,15 @@ public sealed class LlmTranslationService(
             if (dntMapping is not null)
                 translations = RestoreDoNotTranslatePlaceholders(translations, dntMapping);
 
+            // Guard: empty translations cause XUnity.AutoTranslator to count as errors;
+            // 5 consecutive errors trigger automatic translator shutdown.
+            // Fall back to the original text when the LLM returns an empty string.
+            for (int i = 0; i < translations.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(translations[i]))
+                    translations[i] = texts[i];
+            }
+
             for (int i = 0; i < translations.Count; i++)
             {
                 // Record recent translation

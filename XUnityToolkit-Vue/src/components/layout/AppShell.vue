@@ -17,24 +17,6 @@ const showUpdateBadge = computed(() =>
   updateStore.isUpdateAvailable || updateStore.isReady || updateStore.isDownloading
 )
 
-// Watch for update availability — push Windows system notification
-let notifiedVersion: string | undefined
-watch(() => updateStore.availableInfo, (info) => {
-  if (!info || !updateStore.isUpdateAvailable) return
-  if (notifiedVersion === info.version) return
-  notifiedVersion = info.version
-
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification('XUnity Toolkit', {
-      body: `发现新版本 v${info.version}，点击前往设置更新`,
-      icon: '/logo.png',
-    }).onclick = () => {
-      window.focus()
-      router.push('/settings')
-    }
-  }
-})
-
 onMounted(async () => {
   try {
     const info = await settingsApi.getVersion()
@@ -42,10 +24,6 @@ onMounted(async () => {
     appVersion.value = match?.[1] ?? info.version
   } catch {
     appVersion.value = '1.0.0'
-  }
-  // Request notification permission early
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission()
   }
   // Initialize update system early so we receive SignalR broadcasts from startup auto-check
   updateStore.init()
