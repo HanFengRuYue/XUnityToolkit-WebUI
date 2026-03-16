@@ -22,18 +22,44 @@ POST /api/translate
     → "machine" → MachineTranslationService.TranslateAsync()
 ```
 
-Only one mode is active at a time. The enable/disable toggle (`POST /api/ai/toggle`) controls whichever mode is currently active.
+Only one mode is active at a time.
+
+### Enable/Disable Toggle
+
+`POST /api/ai/toggle` is modified to route based on `activeMode`:
+
+```
+read settings.AiTranslation.ActiveMode
+  → "cloud" or "local" → set LlmTranslationService.Enabled
+  → "machine"          → set MachineTranslationService.Enabled
+```
+
+Both services have their own `Enabled` property (volatile bool). When the user switches modes, the previous mode's service is disabled and the new mode's service is enabled. The toggle endpoint reads `activeMode` from settings to determine which service to toggle.
 
 ### Backend Service: `MachineTranslationService`
 
 Independent service parallel to `LlmTranslationService`. Core responsibilities:
 
 - `TranslateAsync(texts, from, to, gameId)` — main translation method (same signature as LLM service)
+- `Enabled` property (volatile bool) — toggled by `POST /api/ai/toggle`
 - Provider dispatch with priority-based selection and automatic failover
+- Concurrency control via `SemaphoreSlim(1, 1)` — single-concurrency due to provider rate limits
 - DNT placeholder substitution/restoration (shared utility methods)
 - Glossary post-processing (shared utility methods)
 - Statistics tracking using existing `TranslationStats` structure
 - SignalR broadcast via `IHubContext<InstallProgressHub>` to `"ai-translation"` group
+
+### Concurrency Model
+
+Machine translation providers enforce strict rate limits (~1 req/s). The service uses `SemaphoreSlim(1, 1)` to serialize all translation requests. Incoming requests from the DLL (which sends batches of up to 10 texts, up to 10 concurrent requests) are queued:
+
+```
+1. Acquire semaphore (timeout: 120s — accounts for large queues)
+2. Translate texts one-by-one through the selected provider (1 req/s rate limit)
+3. Release semaphore
+```
+
+For a typical DLL batch of 10 texts at 1 req/s, each batch takes ~10 seconds. With 10 concurrent DLL requests queued, worst-case latency is ~100 seconds for the last batch. This is acceptable for free translation — users trade speed for zero cost. The 120s semaphore timeout prevents indefinite blocking.
 
 ### Provider Failover Logic
 
@@ -48,14 +74,29 @@ Independent service parallel to `LlmTranslationService`. Core responsibilities:
 
 ### Shared Utility Methods
 
-Extract from `LlmTranslationService` into `TranslationHelper` static class:
+Extract from `LlmTranslationService` into `TranslationHelper` static class. Exact methods and assets to extract:
 
-- `ApplyDntPlaceholders(texts, dntEntries)` → `(processedTexts, restoreMap)`
-- `RestoreDntPlaceholders(translations, restoreMap)`
-- `ApplyGlossaryPostProcess(translations, glossary)`
-- `LoadGameContext(gameId, services)` → `(glossary, dntEntries)`
+**Methods (current names → TranslationHelper names):**
 
-Both `LlmTranslationService` and `MachineTranslationService` call these shared methods.
+- `ApplyDoNotTranslateReplacements` → `TranslationHelper.ApplyDntReplacements(texts, dntEntries)` → returns `(processedTexts, dntMap)`
+- `RestoreDoNotTranslatePlaceholders` → `TranslationHelper.RestoreDntPlaceholders(translations, dntMap)`
+- `ApplyGlossaryPostProcess` → `TranslationHelper.ApplyGlossaryPostProcess(translations, glossary)`
+- DNT entries loading logic (from `DoNotTranslateService`) → `TranslationHelper.LoadDntEntries(gameId, dntService)`
+- Glossary loading logic → `TranslationHelper.LoadGlossary(gameId, gameService)`
+
+**Compiled regexes to share:**
+
+- `DntRestoreRegex` (`\{\{DNT_\d+\}\}`) — used by both services for DNT placeholder restoration
+- `FullDntPlaceholderRegex` (`^\{\{DNT_\d+\}\}$`) — used for pre-computation check
+
+**NOT extracted (LLM-specific):**
+
+- `ApplyGlossaryReplacements` / `RestoreGlossaryPlaceholders` — glossary placeholder substitution is LLM-only
+- `GlossaryRestoreRegex` / `FullGlossaryPlaceholderRegex` — LLM-only
+- `BuildSystemPrompt` — LLM-only
+- Translation memory context building — LLM-only
+
+Both `LlmTranslationService` and `MachineTranslationService` call the shared methods. `LlmTranslationService` internal calls are replaced with `TranslationHelper` calls (no behavior change).
 
 ## Provider Implementations
 
@@ -79,7 +120,7 @@ Each provider is an independent class implementing this interface.
 - **Endpoint:** `https://fanyi.baidu.com/v2transapi`
 - **Initialization:** Request `https://fanyi.baidu.com` to obtain cookie (`BAIDUID`) and page token (from embedded JS `window.gtk` and `token` variables)
 - **Signature:** Custom algorithm based on `gtk` + input text (port from Baidu's JS `sign()` function)
-- **Rate limit:** 1 request/second with random jitter (50-200ms)
+- **Rate limit:** 1 request/second with random jitter (200-800ms)
 - **Batch handling:** Single text per request; serialize for batches
 - **Language codes:** `jp` → `zh`
 
@@ -88,7 +129,7 @@ Each provider is an independent class implementing this interface.
 - **Endpoint:** `https://dict.youdao.com/webtranslate`
 - **Initialization:** Extract `secretKey` and `aesKey`/`aesIv` from Youdao's JS bundle for response decryption
 - **Signature:** `sign = MD5(client + text + salt + key)` with parameters derived from page JS
-- **Rate limit:** 1 request/second with random jitter
+- **Rate limit:** 1 request/second with random jitter (200-800ms)
 - **Batch handling:** Single text per request
 - **Response:** AES-encrypted JSON, decrypt with extracted keys
 - **Language codes:** `ja` → `zh-CHS`
@@ -98,9 +139,31 @@ Each provider is an independent class implementing this interface.
 - **Endpoint:** `https://papago.naver.com/apis/n2mt/translate`
 - **Initialization:** Generate device ID (UUID), obtain auth token from Papago page
 - **Signature:** HMAC-based authorization header with device ID and timestamp
-- **Rate limit:** 1 request/second with random jitter
+- **Rate limit:** 1 request/second with random jitter (200-800ms)
 - **Batch handling:** Supports longer text; concatenate multiple texts with newline, split results after translation
 - **Language codes:** `ja` → `zh-CN`
+
+### HttpClient Configuration
+
+Register a named `HttpClient` `"MachineTranslation"` in `Program.cs`:
+
+- **Timeout:** 30 seconds
+- **User-Agent:** Browser-like UA string (Chrome on Windows) to avoid bot detection
+- **Cookie handling:** `HttpClientHandler` with `CookieContainer` per provider instance (Baidu requires `BAIDUID` cookie)
+- **Auto-redirect:** Enabled
+
+Each provider holds its own `CookieContainer` instance, injected via the `IHttpClientFactory` pattern with per-provider message handlers.
+
+### Provider Initialization Lifecycle
+
+- **When:** Lazy initialization on first translation request in machine mode (not on app startup)
+- **Thread safety:** `SemaphoreSlim(1, 1)` guards `InitializeAsync()` — concurrent requests wait for initialization to complete
+- **Token expiry:** Each provider tracks token age; re-initialize when:
+  - HTTP 401/403 response received
+  - Token age exceeds provider-specific TTL (Baidu: 1 hour, Youdao: 2 hours, Papago: 1 hour)
+  - Explicit re-initialization on repeated failures (3 consecutive failures trigger re-init)
+- **Re-initialization:** Same `InitializeAsync()` path; clears old tokens/cookies, fetches new ones
+- **Failure:** If initialization fails, provider is marked unhealthy with 60s cooldown; failover to next provider
 
 ### Debug Logging
 
@@ -196,7 +259,17 @@ interface ProviderStatus {
 | Endpoint | Change |
 |---|---|
 | `POST /api/translate` | Route to `MachineTranslationService` when `activeMode = "machine"` |
+| `POST /api/ai/toggle` | Route to correct service's `Enabled` based on `activeMode` |
 | `PUT /api/settings` | Persist `machineTranslation` settings |
+
+### `POST /api/translate` Routing Details
+
+The endpoint modification must handle:
+
+1. **Service routing:** Read `activeMode` from settings; call `MachineTranslationService.TranslateAsync()` for `"machine"` mode
+2. **Error handling:** Call `machineTranslationService.RecordError()` in catch blocks (not `LlmTranslationService.RecordError()`)
+3. **Glossary extraction:** Disable for machine mode (same as local mode — add `isMachineMode` check alongside existing `isLocalMode`)
+4. **Log messages:** Use mode-appropriate messages (e.g., "机器翻译完成" instead of "AI 翻译完成")
 
 ### Test Translation Request/Response
 
@@ -254,9 +327,20 @@ fetchProviderStatus()  // GET /api/machine-translate/providers/status
 toggleEnabled(enabled) // POST /api/ai/toggle
 ```
 
+### API Client (`src/api/games.ts`)
+
+```typescript
+export const machineTranslateApi = {
+  getStats: () => api.get<TranslationStats>('/api/machine-translate/stats'),
+  testTranslate: (request: { text: string; from: string; to: string; provider?: MachineTranslationProvider }) =>
+    api.post<{ translation: string; provider: string; responseTimeMs: number }>('/api/machine-translate/test', request),
+  getProviderStatus: () => api.get<ProviderStatus[]>('/api/machine-translate/providers/status'),
+}
+```
+
 ### Settings Integration
 
-Machine translation settings saved via `AppSettings` auto-save (same pattern as AI translation). Provider list and priorities persist in `settings.json`.
+Machine translation settings saved via `AppSettings` auto-save (same pattern as AI translation). Provider list and priorities persist in `settings.json`. `SettingsView.vue` must include `machineTranslation` in `loadPreferences`/`savePreferences` for settings reset to work correctly.
 
 ## Integration with Existing Features
 
@@ -275,8 +359,9 @@ Machine translation settings saved via `AppSettings` auto-save (same pattern as 
 
 ### Translation Memory
 
-- Machine translation results **are written** to translation memory
-- Machine translation **does not use** translation memory as context input
+- Machine translation results **are NOT written** to translation memory
+- Reason: machine translation quality differs from LLM output; cross-mode contamination would degrade LLM context when the user switches back to cloud/local mode
+- Translation memory remains exclusively for LLM translation modes
 
 ### Mode Switching UI Linkage
 
@@ -284,6 +369,18 @@ Machine translation settings saved via `AppSettings` auto-save (same pattern as 
 - When machine translation is enabled, AI Translation page shows "已切换至机器翻译模式" indicator
 - When AI Translation switches to cloud/local, Machine Translation page toggle reflects disabled state
 - Both pages use the same `enabled` field in `AiTranslationSettings`
+
+### Per-Game Data
+
+Machine translation creates **no per-game data**. All settings are global (`AppSettings.MachineTranslation`). No cleanup needed in `DELETE /api/games/{id}`.
+
+### Stability Disclaimer
+
+The UI should display a notice that machine translation uses reverse-engineered web APIs:
+
+- These APIs are undocumented and may break at any time
+- Provider rate limits may result in slower translation compared to AI translation
+- The feature is labeled "实验性" (experimental) in the UI
 
 ## SignalR
 
@@ -296,7 +393,7 @@ The `InstallProgressHub` requires no changes — `MachineTranslationService` bro
 | Sync Item | Files |
 |---|---|
 | `ActiveMode` values | `AiTranslationSettings.cs`, `types.ts`, `AiTranslationView.vue`, `MachineTranslationView.vue`, `TranslateEndpoints.cs` |
-| `MachineTranslationSettings` model | `Models/MachineTranslationSettings.cs`, `types.ts`, `MachineTranslationView.vue` |
+| `MachineTranslationSettings` model | `Models/MachineTranslationSettings.cs`, `types.ts`, `MachineTranslationView.vue`, `SettingsView.vue` |
 | `MachineTranslationProvider` enum | `Models/MachineTranslationSettings.cs`, `types.ts` |
 | `ProviderStatus` model | `MachineTranslationService.cs`, `types.ts`, `MachineTranslationView.vue` |
 | Provider display names | `MachineTranslationService.cs` (backend), `MachineTranslationView.vue` (frontend mapping) |
@@ -329,3 +426,4 @@ The `InstallProgressHub` requires no changes — `MachineTranslationService` bro
 | `XUnityToolkit-Vue/src/router/index.ts` | Add route |
 | `XUnityToolkit-Vue/src/components/layout/AppShell.vue` | Add nav item |
 | `XUnityToolkit-Vue/src/views/AiTranslationView.vue` | Show mode indicator when machine mode active |
+| `XUnityToolkit-Vue/src/views/SettingsView.vue` | Include `machineTranslation` in settings load/save/reset |
