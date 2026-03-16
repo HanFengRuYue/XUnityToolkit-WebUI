@@ -21,8 +21,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 // 从 settings.json 读取端口，如果文件不存在或端口无效则使用默认值
 var appDataRoot = builder.Configuration["AppData:Root"]
-    ?? GetRegistryDataPath()
-    ?? Path.Combine(AppContext.BaseDirectory, "data");
+    ?? Path.Combine(Environment.GetFolderPath(
+           Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
 builder.Configuration["AppData:Root"] = appDataRoot;
 var settingsPath = Path.Combine(appDataRoot, "settings.json");
 var listenPort = 51821;
@@ -292,16 +292,3 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 app.Run();
-
-static string? GetRegistryDataPath()
-{
-    try
-    {
-        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\XUnityToolkit");
-        return key?.GetValue("DataPath") as string;
-    }
-    catch
-    {
-        return null;
-    }
-}
