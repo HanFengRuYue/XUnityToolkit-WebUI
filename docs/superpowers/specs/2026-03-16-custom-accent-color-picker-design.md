@@ -11,7 +11,7 @@ The application has 8 preset accent colors, but users cannot pick an arbitrary c
 
 ### Overview
 
-Add a "custom color" swatch button at the end of the existing preset color row in both `SettingsView.vue` and `LibraryCustomizer.vue`. Clicking it opens an `NPopover` containing Naive UI's built-in `NColorPicker`. The selected color feeds into the existing `themeStore.setAccentColor(hex)` pipeline — no backend or theme store changes required.
+Add a "custom color" swatch button at the end of the existing preset color row in both `SettingsView.vue` and `LibraryCustomizer.vue`. Clicking it opens Naive UI's built-in `NColorPicker`. The selected color feeds into the existing `themeStore.setAccentColor(hex)` pipeline — no backend or theme store changes required.
 
 ### UI Behavior
 
@@ -20,20 +20,25 @@ Add a "custom color" swatch button at the end of the existing preset color row i
 - When no custom color is active (current color matches a preset): displays a conic rainbow gradient to indicate "pick any color"
 - When a custom (non-preset) color is active: displays the current custom color with the active border + checkmark, same as preset swatches
 
-**Popover color picker:**
-- Triggered by clicking the custom swatch button
-- Contains `NColorPicker` in panel mode (no trigger, embedded directly in popover body)
-- Supports: color palette area, hue slider, hex input
+**Color picker:**
+- Uses `NColorPicker` with the custom swatch button rendered via its `#label` slot — no separate `NPopover` needed
+- Visibility controlled via `:show` / `@update:show` props
+- Restricted to hex-only mode via `:modes="['hex']"` to ensure output is always `#RRGGBB` format (theme store's `hexToRgb()` expects this)
 - The 8 preset colors are passed as `swatches` prop for quick access within the picker
-- On color change: immediately calls `themeStore.setAccentColor(hex)` for live preview
-- Popover closes on click-outside (default NPopover behavior)
+- On color change: calls `themeStore.setAccentColor(hex)` for live preview
+- Picker closes on click-outside (default behavior)
+
+**LibraryCustomizer save debounce:**
+- `LibraryCustomizer.setAccent()` does a GET+PUT API roundtrip on every call
+- During color picker drag, `on-update:value` fires on every mouse movement
+- Solution: call `themeStore.setAccentColor(hex)` on every update for instant CSS preview, but debounce the backend save (e.g., 500ms) to avoid flooding the API
 
 ### Affected Files
 
 | File | Change |
 |------|--------|
-| `XUnityToolkit-Vue/src/views/SettingsView.vue` | Add custom swatch button + NPopover + NColorPicker after preset loop |
-| `XUnityToolkit-Vue/src/components/library/LibraryCustomizer.vue` | Same pattern, adapted to 28px swatch size |
+| `XUnityToolkit-Vue/src/views/SettingsView.vue` | Add custom swatch with NColorPicker after preset loop |
+| `XUnityToolkit-Vue/src/components/library/LibraryCustomizer.vue` | Same pattern (28px swatch), debounced backend save |
 
 ### No Changes Required
 
@@ -50,6 +55,7 @@ A computed `isCustomColor` checks whether `themeStore.accentColor` is NOT in the
 
 ### Edge Cases
 
-- **Invalid color from picker:** `NColorPicker` always returns valid hex — no validation needed
+- **Color format:** `:modes="['hex']"` ensures NColorPicker always outputs `#RRGGBB`, compatible with `hexToRgb()` in theme store
 - **Same color as preset:** If user picks a color that matches a preset hex exactly, the preset swatch shows active instead of the custom swatch (natural behavior from the existing `===` check)
 - **Persistence:** No change — `setAccentColor` already persists to localStorage and syncs to backend via existing settings save
+- **Drag performance:** Theme store CSS update is cheap (inline style set); only the API save is debounced
