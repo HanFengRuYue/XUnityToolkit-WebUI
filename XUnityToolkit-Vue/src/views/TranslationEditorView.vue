@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted } from 'vue'
+import { ref, computed, h, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   NButton,
@@ -13,7 +13,7 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
-import type { DataTableColumns } from 'naive-ui'
+import type { DataTableColumns, DataTableSortState } from 'naive-ui'
 import {
   ArrowBackOutlined,
   SearchOutlined,
@@ -47,7 +47,6 @@ const fileExists = ref(false)
 // Editor state
 const entries = ref<TranslationRow[]>([])
 const savedSnapshot = ref('')
-const searchKeyword = ref('')
 let nextId = 1
 
 // Import
@@ -57,6 +56,32 @@ const importing = ref(false)
 // Add entry form
 const newOriginal = ref('')
 const newTranslation = ref('')
+
+// Filter & sort state
+const showFilterPanel = ref(false)
+const showReplacePanel = ref(false)
+const panelSortMode = ref<string>('default')
+const filterKeyword = ref('')
+const filterStatus = ref<string>('all')
+const filterFeatures = ref<string[]>([])
+const filterRegexPattern = ref('')
+const filterRegexTarget = ref<string>('both')
+const debouncedRegexPattern = ref('')
+let regexDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// Column sort state (controlled mode)
+const columnSortKey = ref<string | null>(null)
+const columnSortOrder = ref<'ascend' | 'descend' | false>(false)
+
+// Intl.Collator for performant string sorting
+const collator = new Intl.Collator(undefined, { sensitivity: 'base' })
+
+// Replace state
+const replaceFindText = ref('')
+const replaceWithText = ref('')
+const replaceIsRegex = ref(false)
+const debouncedReplaceFindText = ref('')
+let replaceFindDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const isDirty = computed(() => {
   const current = JSON.stringify(entries.value.map(e => ({ o: e.original, t: e.translation })))
@@ -71,13 +96,156 @@ function toRows(items: TranslationEntry[]): TranslationRow[] {
   return items.map(e => ({ ...e, _id: nextId++ }))
 }
 
-const filteredEntries = computed(() => {
-  const kw = searchKeyword.value.toLowerCase()
-  if (!kw) return entries.value
-  return entries.value.filter(
-    e => e.original.toLowerCase().includes(kw) || e.translation.toLowerCase().includes(kw)
-  )
+const FEATURE_PATTERNS: Record<string, RegExp> = {
+  placeholder: /\{\{.*?\}\}|\{[0-9]+\}|<[^>]+>/,
+  newline: /[\n\r]/,
+  special: /[^\w\s\p{P}\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}]/u,
+}
+
+const filteredAndSortedEntries = ref<TranslationRow[]>([])
+
+function recomputeFilteredEntries() {
+  let result: TranslationRow[] = entries.value
+
+  const kw = filterKeyword.value.toLowerCase()
+  if (kw) {
+    result = result.filter(
+      e => e.original.toLowerCase().includes(kw) || e.translation.toLowerCase().includes(kw)
+    )
+  }
+
+  if (filterStatus.value === 'translated') {
+    result = result.filter(e => e.translation !== '')
+  } else if (filterStatus.value === 'untranslated') {
+    result = result.filter(e => e.translation === '')
+  }
+
+  if (filterFeatures.value.length > 0) {
+    result = result.filter(e => {
+      return filterFeatures.value.some(feat => {
+        const re = FEATURE_PATTERNS[feat]
+        if (!re) return false
+        return re.test(e.original) || re.test(e.translation)
+      })
+    })
+  }
+
+  if (debouncedRegexPattern.value) {
+    try {
+      const re = new RegExp(debouncedRegexPattern.value)
+      result = result.filter(e => {
+        const target = filterRegexTarget.value
+        if (target === 'original') return re.test(e.original)
+        if (target === 'translation') return re.test(e.translation)
+        return re.test(e.original) || re.test(e.translation)
+      })
+    } catch {
+      // Invalid regex — skip filter
+    }
+  }
+
+  if (columnSortKey.value && columnSortOrder.value) {
+    const key = columnSortKey.value as keyof TranslationRow
+    const dir = columnSortOrder.value === 'ascend' ? 1 : -1
+    result = [...result].sort((a, b) => dir * collator.compare(String(a[key]), String(b[key])))
+  } else if (panelSortMode.value !== 'default') {
+    result = [...result]
+    switch (panelSortMode.value) {
+      case 'length-asc':
+        result.sort((a, b) => a.original.length - b.original.length)
+        break
+      case 'length-desc':
+        result.sort((a, b) => b.original.length - a.original.length)
+        break
+      case 'untranslated-first':
+        result.sort((a, b) => {
+          const aEmpty = a.translation === '' ? 0 : 1
+          const bEmpty = b.translation === '' ? 0 : 1
+          return aEmpty - bEmpty
+        })
+        break
+    }
+  }
+
+  filteredAndSortedEntries.value = result
+}
+
+watch(
+  [filterKeyword, filterStatus, filterFeatures, debouncedRegexPattern, filterRegexTarget,
+   panelSortMode, columnSortKey, columnSortOrder],
+  recomputeFilteredEntries,
+  { deep: true }
+)
+
+const entriesVersion = ref(0)
+watch(entriesVersion, recomputeFilteredEntries)
+
+function bumpEntriesVersion() {
+  entriesVersion.value++
+}
+
+watch(filterRegexPattern, (val) => {
+  if (regexDebounceTimer) clearTimeout(regexDebounceTimer)
+  regexDebounceTimer = setTimeout(() => {
+    debouncedRegexPattern.value = val
+  }, 300)
 })
+
+watch(replaceFindText, (val) => {
+  if (replaceFindDebounceTimer) clearTimeout(replaceFindDebounceTimer)
+  replaceFindDebounceTimer = setTimeout(() => {
+    debouncedReplaceFindText.value = val
+  }, 300)
+})
+
+watch(panelSortMode, (val) => {
+  if (val !== 'default') {
+    columnSortKey.value = null
+    columnSortOrder.value = false
+  }
+})
+
+const hasActiveFilters = computed(() => {
+  return filterKeyword.value !== ''
+    || filterStatus.value !== 'all'
+    || filterFeatures.value.length > 0
+    || filterRegexPattern.value !== ''
+    || panelSortMode.value !== 'default'
+})
+
+const regexError = computed(() => {
+  if (!debouncedRegexPattern.value) return ''
+  try {
+    new RegExp(debouncedRegexPattern.value)
+    return ''
+  } catch (e) {
+    return (e as Error).message
+  }
+})
+
+function resetFilters() {
+  panelSortMode.value = 'default'
+  filterKeyword.value = ''
+  filterStatus.value = 'all'
+  filterFeatures.value = []
+  filterRegexPattern.value = ''
+  debouncedRegexPattern.value = ''
+  filterRegexTarget.value = 'both'
+  columnSortKey.value = null
+  columnSortOrder.value = false
+}
+
+function handleSortersChange(sorters: DataTableSortState | DataTableSortState[] | null) {
+  const sorter = Array.isArray(sorters) ? sorters[0] : sorters
+  if (!sorter || sorter.order === false) {
+    columnSortKey.value = null
+    columnSortOrder.value = false
+  } else {
+    columnSortKey.value = sorter.columnKey as string
+    columnSortOrder.value = sorter.order
+    panelSortMode.value = 'default'
+  }
+}
 
 const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
   {
@@ -85,6 +253,8 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
     key: 'original',
     resizable: true,
     minWidth: 200,
+    sorter: true,
+    sortOrder: columnSortKey.value === 'original' ? columnSortOrder.value : false,
     render(row) {
       return h(NInput, {
         value: row.original,
@@ -99,6 +269,8 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
     key: 'translation',
     resizable: true,
     minWidth: 200,
+    sorter: true,
+    sortOrder: columnSortKey.value === 'translation' ? columnSortOrder.value : false,
     render(row) {
       return h(NInput, {
         value: row.translation,
@@ -119,7 +291,10 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
         type: 'error',
         onClick: () => {
           const idx = entries.value.findIndex(e => e._id === row._id)
-          if (idx >= 0) entries.value.splice(idx, 1)
+          if (idx >= 0) {
+            entries.value.splice(idx, 1)
+            bumpEntriesVersion()
+          }
         },
       }, {
         icon: () => h(NIcon, { size: 16 }, () => h(DeleteOutlined)),
@@ -149,6 +324,7 @@ onMounted(async () => {
     fileExists.value = editorData.fileExists
     entries.value = toRows(editorData.entries)
     takeSnapshot()
+    bumpEntriesVersion()
   } catch {
     message.error('加载失败')
   } finally {
@@ -158,6 +334,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
+  if (regexDebounceTimer) clearTimeout(regexDebounceTimer)
+  if (replaceFindDebounceTimer) clearTimeout(replaceFindDebounceTimer)
 })
 
 onBeforeRouteLeave(() => {
@@ -200,6 +378,7 @@ async function handleSave() {
     })))
     fileExists.value = true
     takeSnapshot()
+    bumpEntriesVersion()
     message.success('保存成功')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '保存失败')
@@ -223,6 +402,7 @@ function handleAddEntry() {
     original: newOriginal.value,
     translation: newTranslation.value,
   })
+  bumpEntriesVersion()
   newOriginal.value = ''
   newTranslation.value = ''
 }
@@ -250,6 +430,7 @@ async function handleImportFile(e: Event) {
         added++
       }
     }
+    bumpEntriesVersion()
     message.success(`导入完成: 新增 ${added} 条，跳过 ${importedEntries.length - added} 条重复`)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '导入失败')
@@ -363,7 +544,7 @@ function handleExport() {
           </span>
           翻译条目
           <NTag size="small" :bordered="false" style="margin-left: 8px">
-            {{ filteredEntries.length }} / {{ entries.length }}
+            {{ filteredAndSortedEntries.length }} / {{ entries.length }}
           </NTag>
         </h2>
       </div>
@@ -397,7 +578,7 @@ function handleExport() {
 
       <!-- Search -->
       <NInput
-        v-model:value="searchKeyword"
+        v-model:value="filterKeyword"
         placeholder="搜索原文或译文..."
         clearable
         size="small"
@@ -412,13 +593,14 @@ function handleExport() {
       <div v-if="entries.length > 0" class="table-container">
         <NDataTable
           :columns="tableColumns"
-          :data="filteredEntries"
+          :data="filteredAndSortedEntries"
           :max-height="560"
           :item-size="40"
           :row-key="(row: TranslationRow) => row._id"
           virtual-scroll
           size="small"
           striped
+          @update:sorters="handleSortersChange"
         />
       </div>
       <NEmpty v-else description="暂无翻译条目" style="padding: 40px 0" />
