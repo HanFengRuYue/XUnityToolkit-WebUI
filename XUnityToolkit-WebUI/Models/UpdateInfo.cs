@@ -47,6 +47,7 @@ public sealed class UpdateStatusInfo
     public string? CurrentPackage { get; set; }
     public string? Message { get; set; }
     public string? Error { get; set; }
+    public UpdateAvailableInfo? AvailableUpdate { get; set; }
 }
 
 public sealed class UpdateAvailableInfo

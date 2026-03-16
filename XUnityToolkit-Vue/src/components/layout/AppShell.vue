@@ -5,11 +5,13 @@ import { NIcon } from 'naive-ui'
 import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
 import { settingsApi } from '@/api/games'
+import { useUpdateStore } from '@/stores/update'
 
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
 const appVersion = ref('')
+const updateStore = useUpdateStore()
 
 onMounted(async () => {
   try {
@@ -19,6 +21,8 @@ onMounted(async () => {
   } catch {
     appVersion.value = '1.0.0'
   }
+  // Initialize update system early so we receive SignalR broadcasts from startup auto-check
+  updateStore.init()
 })
 
 // Cache top-level pages to avoid full re-renders on navigation
