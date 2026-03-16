@@ -307,22 +307,22 @@ function handleReplaceAll() {
       for (const entry of entries.value) {
         if (!visibleIds.has(entry._id)) continue
 
-        let newTranslation: string
+        let replacedText: string
         if (replaceIsRegex.value) {
           try {
             const re = new RegExp(findText, 'g')
-            newTranslation = entry.translation.replace(re, replaceWithText.value)
+            replacedText = entry.translation.replace(re, replaceWithText.value)
           } catch {
             continue
           }
         } else {
           const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
           const re = new RegExp(escaped, 'gi')
-          newTranslation = entry.translation.replace(re, replaceWithText.value)
+          replacedText = entry.translation.replace(re, replaceWithText.value)
         }
 
-        if (newTranslation !== entry.translation) {
-          entry.translation = newTranslation
+        if (replacedText !== entry.translation) {
+          entry.translation = replacedText
           replaced++
         }
       }
