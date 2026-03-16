@@ -142,7 +142,6 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             {
                 ["MaxCharactersPerTranslation"] = "2500",
                 ["OverrideFont"] = "Microsoft YaHei",
-                ["FallbackFontTextMeshPro"] = TmpFontService.ConfigValue,
                 ["MaxTextParserRecursion"] = "4",
                 ["CacheParsedTranslations"] = "True",
             },

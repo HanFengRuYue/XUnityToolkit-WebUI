@@ -446,25 +446,33 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
             }
         }
 
-        if (totalChars == 0) return "ja";
+        if (totalChars == 0) return "en";
 
         // Non-Latin characters are strong indicators of the game's actual language,
         // since Unity engine internals (component names, event names, animation states, etc.)
         // always contribute English/Latin text that can outnumber real game text.
-        // When non-Latin scripts are present, prioritize them over Latin.
         int nonLatin = japanese + chinese + korean + cyrillic;
 
-        if (nonLatin >= 10)
+        // If Latin text strongly dominates (>80%), classify as English regardless of
+        // small amounts of non-Latin characters (e.g. stray asset names, plugin metadata).
+        if (latin > totalChars * 0.8)
+            return "en";
+
+        // Require meaningful non-Latin presence: at least 50 chars AND ≥2% of total.
+        // This avoids misclassifying English games that have a few stray CJK/kana chars.
+        if (nonLatin >= 50 && nonLatin >= totalChars * 0.02)
         {
-            // Hiragana/Katakana are exclusive to Japanese
-            if (japanese > 0)
+            // For Japanese: kana must be a meaningful portion of CJK+kana characters.
+            // A few stray kana in an otherwise English game should not trigger Japanese.
+            int cjkPlusKana = japanese + chinese;
+            if (japanese > 0 && cjkPlusKana > 0 && (double)japanese / cjkPlusKana >= 0.05)
                 return "ja";
 
             // Hangul is exclusive to Korean
             if (korean > 0)
                 return "ko";
 
-            // CJK ideographs without kana or hangul → Chinese
+            // CJK ideographs without meaningful kana → Chinese
             if (chinese > 0)
                 return "zh";
 
@@ -473,11 +481,22 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                 return "ru";
         }
 
-        // No meaningful non-Latin scripts found → English
+        // Moderate non-Latin presence (lower threshold) — still needs proportion check
+        if (nonLatin >= 10 && nonLatin >= totalChars * 0.005)
+        {
+            int cjkPlusKana = japanese + chinese;
+            if (japanese > 0 && cjkPlusKana > 0 && (double)japanese / cjkPlusKana >= 0.1)
+                return "ja";
+            if (korean > 0) return "ko";
+            if (chinese > 0) return "zh";
+            if (cyrillic > 0) return "ru";
+        }
+
+        // Default to English
         if (latin >= totalChars * 0.3)
             return "en";
 
-        return "ja"; // Conservative default for games
+        return "en";
     }
 
     [GeneratedRegex(@"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase)]

@@ -7,12 +7,12 @@ import { useThemeStore, getAccentVariants } from '@/stores/theme'
 
 const themeStore = useThemeStore()
 
-const isDark = computed(() => themeStore.mode === 'dark')
+const isDark = computed(() => themeStore.resolvedTheme === 'dark')
 
 const naiveTheme = computed(() => isDark.value ? darkTheme : null)
 
 const themeOverrides = computed<GlobalThemeOverrides>(() => {
-  const accent = getAccentVariants(themeStore.accentColor, themeStore.mode)
+  const accent = getAccentVariants(themeStore.accentColor, themeStore.resolvedTheme)
 
   if (isDark.value) {
     return {
