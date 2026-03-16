@@ -63,6 +63,25 @@ public sealed class UpdateCheckCache
     public string? ETag { get; set; }
     public string? LatestVersion { get; set; }
     public DateTime LastChecked { get; set; }
+    public string? ApiUrl { get; set; }
+}
+
+public sealed class UpdateCheckInfo
+{
+    [JsonPropertyName("tag")]
+    public required string Tag { get; set; }
+
+    [JsonPropertyName("version")]
+    public required string Version { get; set; }
+
+    [JsonPropertyName("changelog")]
+    public string? Changelog { get; set; }
+
+    [JsonPropertyName("prerelease")]
+    public bool Prerelease { get; set; }
+
+    [JsonPropertyName("assets")]
+    public Dictionary<string, long> Assets { get; set; } = [];
 }
 
 public sealed class GitHubRelease

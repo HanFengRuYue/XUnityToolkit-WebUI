@@ -117,6 +117,13 @@ builder.Services.AddHttpClient("GitHubUpdate", client =>
     client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
 });
 
+// HTTP client for GitHub CDN/web requests (not API — no rate limit)
+builder.Services.AddHttpClient("GitHubCdn", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI");
+});
+
 // Services
 builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
@@ -209,7 +216,22 @@ app.Use(async (context, next) =>
 
 // Static files (Vue SPA)
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        if (ctx.Context.Request.Path.StartsWithSegments("/assets"))
+        {
+            // 带内容哈希的文件（Vite 构建产物）：长期缓存
+            ctx.Context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+        }
+        else
+        {
+            // index.html、favicon.ico 等无哈希文件：每次验证
+            ctx.Context.Response.Headers.CacheControl = "no-cache";
+        }
+    }
+});
 
 // API endpoints
 app.MapGameEndpoints();
@@ -233,8 +255,14 @@ app.MapUpdateEndpoints();
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");
 
-// SPA fallback
-app.MapFallbackToFile("index.html");
+// SPA fallback — index.html 必须每次验证，防止浏览器缓存旧版本
+app.MapFallbackToFile("index.html", new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        ctx.Context.Response.Headers.CacheControl = "no-cache";
+    }
+});
 
 // Wire log broadcast: push new log entries to SignalR "logs" group
 var hubContext = app.Services.GetRequiredService<IHubContext<InstallProgressHub>>();
