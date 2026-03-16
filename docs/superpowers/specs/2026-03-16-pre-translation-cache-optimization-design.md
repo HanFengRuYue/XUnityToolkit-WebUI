@@ -23,18 +23,24 @@ Leverage XUnity.AutoTranslator's native features across three layers:
 
 ### New Config Fields
 
-Add three fields to `XUnityConfig` model under `[Behaviour]`:
+Add four fields to `XUnityConfig` model under `[Behaviour]`:
 
 | Field | Type | Default | INI Key |
 |-------|------|---------|---------|
 | `CacheWhitespaceDifferences` | `bool` | `false` | `CacheWhitespaceDifferences` |
 | `IgnoreWhitespaceInDialogue` | `bool` | `true` | `IgnoreWhitespaceInDialogue` |
 | `MinDialogueChars` | `int` | `4` | `MinDialogueChars` |
+| `TemplateAllNumberAway` | `bool` | `true` | `TemplateAllNumberAway` |
+
+Note: `TemplateAllNumberAway` already exists in `XUnityConfig` (currently defaults to `false`). Change its default to `true` for pre-translation optimization.
 
 **Rationale:**
 - `CacheWhitespaceDifferences=False` (XUnity default) — Texts differing only by whitespace share a single cache entry
 - `IgnoreWhitespaceInDialogue=True` (XUnity default) — Strips whitespace from text before cache lookup when text length exceeds `MinDialogueChars`
 - `MinDialogueChars=4` (lowered from XUnity default of 20) — Ensures whitespace stripping applies to shorter game strings too
+- `TemplateAllNumberAway=True` (changed from XUnity default `false`) — Replaces all numbers with `{{A}}`, `{{B}}` placeholders before cache lookup, so "HP: 100" and "HP: 200" share one cache key. This handles text+number concatenation patterns that `sr:` regex cannot cleanly address (since `sr:` would try to independently translate number-only groups)
+
+**Interaction note:** When `TemplateAllNumberAway=True`, pre-translation should also write number-templated cache keys. For extracted text containing numbers (e.g., "Stage 1"), the cache key should be written as the templated form (e.g., "Stage {{A}}") so it matches the runtime lookup key.
 
 ### Implementation
 
@@ -55,12 +61,12 @@ public static string NormalizeForCache(string text)
 ```
 
 **Normalization steps (in order):**
-1. Strip rich text tags — Remove `<color=...>`, `<b>`, `</b>`, `<size=...>`, `<i>`, `</i>`, `<sprite=...>`, etc. via regex `<[^>]+>`
+1. Strip known Unity/TMP rich text tags via whitelist regex — matches only recognized tags: `</?(?:color|b|i|size|sprite|material|quad|voffset|indent|link|mark|sup|sub|font|cspace|align|mspace|uppercase|lowercase|smallcaps|noparse|nobr|space|width|margin|rotate|s|u|line-height|line-indent|page|style|br)(?:=[^>]*)?>`. This avoids stripping legitimate angle-bracket content like `"Press <A> button"`.
 2. Trim leading/trailing whitespace
-3. Collapse consecutive whitespace characters into a single space
-4. Apply Unicode NFC normalization (`string.Normalize(NormalizationForm.FormC)`)
 
-**Rationale:** XUnity's `HandleRichText=True` (our default) strips rich text tags from runtime text before cache lookup. By applying the same stripping to extracted text, cache keys become more likely to match.
+**Important:** Only these two steps are applied. Whitespace collapsing and Unicode NFC normalization are intentionally omitted because XUnity does not perform these operations during its preprocessing. Adding them would create *more* mismatches, not fewer. The `CacheWhitespaceDifferences=False` config (Layer 1) handles internal whitespace differences at the XUnity level.
+
+**Rationale:** XUnity's `HandleRichText=True` (our default) strips rich text tags from runtime text before cache lookup. By applying the same tag stripping to extracted text, cache keys become more likely to match.
 
 ### Integration Point
 
@@ -75,6 +81,7 @@ The translation value remains unchanged (it's the translated text, not a lookup 
 **Edge cases:**
 - If normalization produces an empty string, skip the entry
 - If normalization produces a duplicate key, keep the first occurrence
+- When re-running pre-translation on a game with existing `_PreTranslated.txt`, the file is regenerated from scratch (not appended), so old non-normalized keys are naturally replaced
 
 ## Layer 3: Splitter Regex (`sr:`) Generation
 
@@ -88,28 +95,29 @@ Write `sr:` entries to a separate file: `{gamePath}/BepInEx/Translation/{toLang}
 
 XUnity loads all `.txt` files in the `Text/` directory, so this file is automatically picked up.
 
+### Important: `sr:` Semantics
+
+`sr:` translates **each capture group independently** via normal cache lookup, then reassembles. This means every capture group should contain translatable text that has a corresponding cache entry. Non-text groups (pure numbers, punctuation) would be sent to the translation endpoint as standalone strings, which is wasteful and may produce garbage.
+
+For text + number patterns (e.g., "HP: 100"), use `TemplateAllNumberAway=True` in Layer 1 instead of `sr:` regex. This makes XUnity replace numbers with `{{A}}`, `{{B}}` placeholders before lookup, so "HP: 100" becomes "HP: {{A}}" — a single consistent cache key.
+
 ### Built-in Patterns
 
-A set of common Unity UI text concatenation patterns:
+A conservative set targeting text-only concatenation patterns:
 
 ```
-// Comment header
 // Pre-translation regex patterns generated by XUnity Toolkit
 
-// Number prefix + text (e.g., "01 Attack Power", "3. Choose weapon", "1) Option")
-sr:"^(\d+[\.\):\-]?\s*)(.+)$"=$1$2
-
-// Text + separator + numeric value (e.g., "HP: 100", "Level 5", "Damage: 3.5")
-sr:"^(.+?)([\s:：]+\d+[\.\d]*)$"=$1$2
-
-// Two-line concatenation
-sr:"^(.+)\n(.+)$"=$1\n$2
+// Two-line concatenation (both groups are text)
+sr:"^([\S\s]+?)\n([\S\s]+)$"=$1\n$2
 
 // Three-line concatenation
-sr:"^(.+)\n(.+)\n(.+)$"=$1\n$2\n$3
+sr:"^([\S\s]+?)\n([\S\s]+?)\n([\S\s]+)$"=$1\n$2\n$3
 ```
 
-These patterns are always generated when pre-translation runs.
+**Intentionally excluded:** Number-prefix and text+number patterns. These are better handled by `TemplateAllNumberAway=True` (see Layer 1) which normalizes numbers to placeholders before cache lookup, avoiding wasteful translation of number-only groups.
+
+These patterns are always generated when pre-translation runs. The set is kept minimal to avoid XUnity performance degradation (regex patterns are evaluated for every text lookup).
 
 ### User Custom Patterns
 
@@ -151,17 +159,33 @@ Before writing, validate each custom pattern:
 - `TranslatorEndpoint/LLMTranslateEndpoint.cs` — No changes; all optimization happens at cache level
 - `LlmTranslationService.cs` — No changes; translation logic unchanged
 
+## API Endpoints (New)
+
+- `GET /api/games/{id}/pre-translate/regex` — Get custom regex patterns for game
+- `PUT /api/games/{id}/pre-translate/regex` — Save custom regex patterns for game
+
+## Backup & Cleanup
+
+- `_PreTranslated_Regex.txt` is written to the game directory alongside `_PreTranslated.txt` — must be included in:
+  - `BackupService` backup manifest (for uninstall cleanup)
+  - Plugin package export (`PluginPackageService`)
+  - `DELETE /api/games/{id}` cleanup handler
+- Custom regex patterns at `{dataRoot}/cache/pre-translation-regex/{gameId}.txt` — user data, should be included in settings export
+
 ## Sync Points
 
 - **XUnityConfig fields:** Sync 4 places per CLAUDE.md pattern: `Models/XUnityConfig.cs`, `ConfigurationService.cs` (read/write), `src/api/types.ts`, `ConfigPanel.vue`
-- **Pre-translation regex path:** Add to `AppDataPaths`
+- **`TemplateAllNumberAway` default change:** Update the default in `XUnityConfig.cs` from `false` to `true`; update `InstallOrchestrator` to write the new default
+- **Pre-translation regex path:** Add to `AppDataPaths`; add `cache/pre-translation-regex/` to `EnsureDirectoriesExist()`; evaluate for export exclusion list in `SettingsEndpoints.cs` (should be exported as user data)
+- **New API endpoints:** Add to CLAUDE.md API Endpoints section
 
 ## Risks & Mitigations
 
 | Risk | Mitigation |
 |------|-----------|
-| `sr:` patterns cause false splits on unexpected text | Keep built-in patterns conservative; user can disable/customize |
-| Normalization strips meaningful rich text from cache key | Only strip tags, not tag content; extracted text rarely has rich text anyway |
+| `sr:` patterns cause false splits on unexpected text | Keep built-in patterns conservative (line-split only); user can disable/customize |
+| Normalization strips legitimate angle-bracket content | Whitelist regex matches only known Unity/TMP rich text tag names; `<A>` button prompts etc. are preserved |
+| `TemplateAllNumberAway=True` breaks games relying on number-specific translations | Make it configurable in UI; user can disable per game |
 | Regex patterns degrade XUnity performance | XUnity docs warn to use regex sparingly; limit to a small set of patterns |
 | `MinDialogueChars=4` too aggressive | Make it configurable; user can raise if it causes issues |
 
