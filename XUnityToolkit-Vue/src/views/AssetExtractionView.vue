@@ -12,6 +12,7 @@ import {
   NSpin,
   NEmpty,
   NSelect,
+  NSwitch,
   useMessage,
 } from 'naive-ui'
 import {
@@ -42,6 +43,32 @@ const searchKeyword = ref('')
 const fromLang = ref('ja')
 const toLang = ref('zh')
 const hasAiProvider = ref(false)
+const enablePreTranslationCache = ref(false)
+
+async function loadCacheSetting() {
+  try {
+    const res = await fetch('/api/settings')
+    const json = await res.json()
+    if (json.success) {
+      enablePreTranslationCache.value = json.data.aiTranslation?.enablePreTranslationCache ?? false
+    }
+  } catch { /* ignore */ }
+}
+
+async function handleToggleCache(value: boolean) {
+  try {
+    const res = await fetch('/api/settings')
+    const json = await res.json()
+    if (json.success) {
+      json.data.aiTranslation.enablePreTranslationCache = value
+      await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(json.data)
+      })
+    }
+  } catch { /* ignore */ }
+}
 
 const langOptions = [
   { label: '日语 (ja)', value: 'ja' },
@@ -107,6 +134,7 @@ onMounted(async () => {
       const settings = await settingsApi.get()
       const endpoints = settings.aiTranslation?.endpoints ?? []
       hasAiProvider.value = endpoints.some(e => e.enabled && e.apiKey)
+      enablePreTranslationCache.value = settings.aiTranslation?.enablePreTranslationCache ?? false
     } catch { /* ignore */ }
   } catch {
     message.error('加载失败')
@@ -302,6 +330,18 @@ function langLabel(code: string): string {
           <router-link to="/ai-translation" style="color: var(--accent); font-weight: 500">AI 翻译页面</router-link>
           添加至少一个提供商。
         </NAlert>
+
+        <!-- Pre-Translation Cache Toggle -->
+        <div style="margin-bottom: 16px">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+            <n-switch v-model:value="enablePreTranslationCache" @update:value="handleToggleCache" />
+            <span>预翻译缓存优化</span>
+            <n-tag size="small" type="warning">实验性</n-tag>
+          </div>
+          <n-alert v-if="enablePreTranslationCache" type="warning" style="margin-bottom: 12px" :bordered="false">
+            这是一个实验性功能。它会修改 XUnity.AutoTranslator 配置并生成正则翻译模式以提高预翻译缓存命中率。效果因游戏而异。如果启用后出现翻译问题，请关闭此功能并重新运行预翻译。
+          </n-alert>
+        </div>
 
         <!-- Action Buttons -->
         <div class="action-row">

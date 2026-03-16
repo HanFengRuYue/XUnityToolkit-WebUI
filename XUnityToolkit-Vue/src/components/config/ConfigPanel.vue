@@ -57,6 +57,9 @@ const form = ref<XUnityConfig>({
   templateAllNumberAway: false,
   disableTextMeshProScrollInEffects: false,
   cacheParsedTranslations: true,
+  cacheWhitespaceDifferences: false,
+  ignoreWhitespaceInDialogue: true,
+  minDialogueChars: 4,
   textureDirectory: '',
   enableTextureTranslation: false,
   enableTextureDumping: false,
@@ -481,6 +484,15 @@ watch(() => props.disabled, (disabled) => {
             </NFormItem>
             <NFormItem label="缓存已解析翻译">
               <NSwitch v-model:value="form.cacheParsedTranslations" />
+            </NFormItem>
+            <NFormItem label="缓存空白差异">
+              <NSwitch v-model:value="form.cacheWhitespaceDifferences" />
+            </NFormItem>
+            <NFormItem label="对话忽略空白">
+              <NSwitch v-model:value="form.ignoreWhitespaceInDialogue" />
+            </NFormItem>
+            <NFormItem label="最小对话字符数">
+              <NInputNumber v-model:value="form.minDialogueChars" :min="1" :max="100" size="small" />
             </NFormItem>
             <NFormItem label="翻译输出文件">
               <NInput

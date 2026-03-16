@@ -2,11 +2,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { translateApi } from '@/api/games'
-import type { TranslationStats, GlossaryExtractionStats } from '@/api/types'
+import type { TranslationStats, GlossaryExtractionStats, PreTranslationCacheStats } from '@/api/types'
 
 export const useAiTranslationStore = defineStore('aiTranslation', () => {
   const stats = ref<TranslationStats | null>(null)
   const extractionStats = ref<GlossaryExtractionStats | null>(null)
+  const cacheStats = ref<PreTranslationCacheStats | null>(null)
 
   let connection: signalR.HubConnection | null = null
 
@@ -24,6 +25,10 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
 
     connection.on('extractionStatsUpdate', (update: GlossaryExtractionStats) => {
       extractionStats.value = update
+    })
+
+    connection.on('preCacheStatsUpdate', (data: PreTranslationCacheStats) => {
+      cacheStats.value = data
     })
 
     await connection.start()
@@ -51,6 +56,14 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
     }
   }
 
+  async function fetchCacheStats() {
+    try {
+      const res = await fetch('/api/translate/cache-stats')
+      const json = await res.json()
+      if (json.success) cacheStats.value = json.data
+    } catch { /* ignore */ }
+  }
+
   async function toggleEnabled(enabled: boolean) {
     await translateApi.toggle(enabled)
     if (stats.value) {
@@ -58,5 +71,5 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
     }
   }
 
-  return { stats, extractionStats, connect, disconnect, fetchStats, toggleEnabled }
+  return { stats, extractionStats, cacheStats, connect, disconnect, fetchStats, fetchCacheStats, toggleEnabled }
 })

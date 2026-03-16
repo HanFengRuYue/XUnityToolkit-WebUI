@@ -5,6 +5,10 @@ import {
   NButton,
   NSwitch,
   NSelect,
+  NTag,
+  NProgress,
+  NCollapse,
+  NCollapseItem,
   useMessage,
 } from 'naive-ui'
 import {
@@ -61,6 +65,7 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   endpoints: [],
   glossaryExtractionEnabled: false,
   glossaryExtractionEndpointId: undefined,
+  enablePreTranslationCache: false,
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -196,6 +201,7 @@ onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
     aiStore.fetchStats(),
+    aiStore.fetchCacheStats(),
     loadSettings(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
@@ -356,6 +362,57 @@ onUnmounted(() => {
           <span class="error-bar-rate">{{ successRate }}%</span>
         </div>
       </div>
+    </div>
+
+    <!-- Pre-Translation Cache Stats -->
+    <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" style="animation-delay: 0.06s">
+      <div class="section-header">
+        <div class="section-title">
+          <span class="section-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+          </span>
+          预翻译缓存
+          <n-tag size="small" type="warning" style="margin-left: 8px">实验性</n-tag>
+        </div>
+      </div>
+      <div class="metrics-strip">
+        <div class="metric-pill">
+          <span class="metric-label">总条目</span>
+          <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">命中</span>
+          <span class="metric-value" style="color: var(--success-color, #18a058)">{{ aiStore.cacheStats.cacheHits }}</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">未命中</span>
+          <span class="metric-value" style="color: var(--error-color, #d03050)">{{ aiStore.cacheStats.cacheMisses }}</span>
+        </div>
+        <div class="metric-pill">
+          <span class="metric-label">命中率</span>
+          <span class="metric-value">{{ aiStore.cacheStats.hitRate }}%</span>
+        </div>
+      </div>
+      <n-progress
+        type="line"
+        :percentage="aiStore.cacheStats.hitRate"
+        :color="aiStore.cacheStats.hitRate > 50 ? '#18a058' : '#d03050'"
+        style="margin: 12px 0"
+      />
+      <n-collapse v-if="aiStore.cacheStats.recentMisses.length > 0">
+        <n-collapse-item title="最近未命中详情" name="misses">
+          <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" style="padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.1)">
+            <div style="display: flex; gap: 8px; font-size: 12px; margin: 2px 0">
+              <span style="color: var(--text-color-3); white-space: nowrap">预翻译键:</span>
+              <code style="word-break: break-all">{{ miss.preTranslatedKey }}</code>
+            </div>
+            <div style="display: flex; gap: 8px; font-size: 12px; margin: 2px 0">
+              <span style="color: var(--text-color-3); white-space: nowrap">运行时文本:</span>
+              <code style="word-break: break-all">{{ miss.runtimeText }}</code>
+            </div>
+          </div>
+        </n-collapse-item>
+      </n-collapse>
     </div>
 
     <!-- Recent Translations -->
