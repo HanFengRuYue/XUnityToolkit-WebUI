@@ -48,6 +48,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       version_prefix: ${{ steps.ver.outputs.version_prefix }}
+      build_version: ${{ steps.ver.outputs.build_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -507,6 +508,22 @@ jobs:
           $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$rid.json" -Encoding utf8
           Write-Host "Generated manifest."
 
+          # Generate update-check.json for CDN-based update checks
+          $ucAssets = [ordered]@{}
+          @("manifest-$rid.json", "app-$rid.zip", "wwwroot.zip", "bundled.zip") | ForEach-Object {
+            $p = "Release/$_"
+            if (Test-Path $p) { $ucAssets[$_] = (Get-Item $p).Length }
+          }
+          $updateCheck = [ordered]@{
+            tag = ""
+            version = "${{ steps.ver.outputs.build_version }}"
+            changelog = ""
+            prerelease = $false
+            assets = $ucAssets
+          }
+          $updateCheck | ConvertTo-Json -Depth 3 | Set-Content -Path "Release/update-check.json" -Encoding utf8
+          Write-Host "Generated update-check.json"
+
           # ── Create component ZIPs ──
 
           # app ZIP — root-level files (exclude appsettings*)
@@ -640,6 +657,7 @@ jobs:
             Release/app-win-x64.zip
             Release/wwwroot.zip
             Release/bundled.zip
+            Release/update-check.json
             Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.msi
           retention-days: 3
 
@@ -726,6 +744,54 @@ jobs:
             components/bundled.zip \
             --clobber \
             --repo "${{ github.repository }}"
+
+      - name: Generate and upload update-check.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          VER="${{ needs.build.outputs.build_version }}"
+          TAG="${{ inputs.release_tag }}"
+          PRERELEASE="${{ inputs.prerelease }}"
+
+          # Extract ### Changelog section from release notes
+          CHANGELOG=""
+          if [ -f release_notes.md ]; then
+            CHANGELOG=$(awk '/^### Changelog/{found=1; next} /^## |^### /{if(found) exit} found{print}' release_notes.md | sed 's/^ *//' | sed '/^$/d')
+          fi
+
+          # Get component file sizes
+          MANIFEST_SIZE=$(stat -c%s components/manifest-win-x64.json 2>/dev/null || echo 0)
+          APP_SIZE=$(stat -c%s components/app-win-x64.zip 2>/dev/null || echo 0)
+          WWWROOT_SIZE=$(stat -c%s components/wwwroot.zip 2>/dev/null || echo 0)
+          BUNDLED_SIZE=$(stat -c%s components/bundled.zip 2>/dev/null || echo 0)
+
+          # Build JSON (jq for proper escaping)
+          jq -n \
+            --arg tag "$TAG" \
+            --arg version "$VER" \
+            --arg changelog "$CHANGELOG" \
+            --argjson prerelease "${PRERELEASE:-false}" \
+            --argjson manifest_size "$MANIFEST_SIZE" \
+            --argjson app_size "$APP_SIZE" \
+            --argjson wwwroot_size "$WWWROOT_SIZE" \
+            --argjson bundled_size "$BUNDLED_SIZE" \
+            '{
+              tag: $tag,
+              version: $version,
+              changelog: $changelog,
+              prerelease: $prerelease,
+              assets: {
+                "manifest-win-x64.json": $manifest_size,
+                "app-win-x64.zip": $app_size,
+                "wwwroot.zip": $wwwroot_size,
+                "bundled.zip": $bundled_size
+              }
+            }' > update-check.json
+
+          gh release upload "${{ inputs.release_tag }}" update-check.json \
+            --clobber --repo "${{ github.repository }}"
+          echo "Uploaded update-check.json"
 
       - name: Upload MSI to release
         env:

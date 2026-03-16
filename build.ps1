@@ -142,6 +142,26 @@ function Create-ComponentZips {
     }
 }
 
+function Generate-UpdateCheckJson {
+    param([string]$ReleaseDir, [string]$Rid, [string]$Version, [string]$Tag = "")
+    $outputDir = Split-Path $ReleaseDir
+    $assets = [ordered]@{}
+    @("manifest-$Rid.json", "app-$Rid.zip", "wwwroot.zip", "bundled.zip") | ForEach-Object {
+        $path = Join-Path $outputDir $_
+        if (Test-Path $path) { $assets[$_] = (Get-Item $path).Length }
+    }
+    $updateCheck = [ordered]@{
+        tag = $(if ($Tag) { $Tag } else { "v$Version" })
+        version = $Version
+        changelog = ""
+        prerelease = $false
+        assets = $assets
+    }
+    $updateCheck | ConvertTo-Json -Depth 3 |
+        Set-Content -Path (Join-Path $outputDir "update-check.json") -Encoding utf8
+    Write-Host "  Generated: update-check.json" -ForegroundColor Green
+}
+
 try {
 
 # Ensure TLS 1.2+ for all HTTPS requests (PowerShell 5.1 defaults to TLS 1.0)
@@ -560,6 +580,7 @@ Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
 Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
 Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
 Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
+Generate-UpdateCheckJson -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
 
 # Build MSI installer
 $currentStep++
