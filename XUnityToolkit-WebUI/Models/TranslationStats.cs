@@ -56,3 +56,18 @@ public sealed record RecentExtraction(
     int TermsExtracted,
     DateTime Timestamp
 );
+
+public sealed record PreTranslationCacheStats(
+    int TotalPreTranslated,
+    int CacheHits,
+    int CacheMisses,
+    int NewTexts,
+    double HitRate,
+    IList<CacheMissEntry> RecentMisses
+);
+
+public sealed record CacheMissEntry(
+    string PreTranslatedKey,
+    string RuntimeText,
+    DateTime Timestamp
+);
