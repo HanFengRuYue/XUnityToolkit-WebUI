@@ -159,9 +159,9 @@ public sealed class UpdateService(
             if ((int)response.StatusCode == 403)
             {
                 logger.LogWarning("GitHub API 速率限制，跳过检查");
-                _status = new UpdateStatusInfo { State = UpdateState.None };
+                _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "GitHub API 请求频率超限，请稍后再试" };
                 await BroadcastStatus();
-                return _lastCheckResult ?? new UpdateCheckResult();
+                throw new InvalidOperationException("GitHub API 请求频率超限，请稍后再试");
             }
 
             response.EnsureSuccessStatusCode();
@@ -320,12 +320,12 @@ public sealed class UpdateService(
 
             return _lastCheckResult;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             logger.LogError(ex, "检查更新失败");
             _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "检查更新失败，请检查网络连接" };
             await BroadcastStatus();
-            return _lastCheckResult ?? new UpdateCheckResult();
+            throw new InvalidOperationException("检查更新失败，请检查网络连接", ex);
         }
         finally
         {
@@ -538,26 +538,37 @@ public sealed class UpdateService(
         var updaterDst = Path.Combine(tempDir, "Updater.exe");
         File.Copy(updaterSrc, updaterDst, overwrite: true);
 
-        // Build arguments
+        // Build arguments (use ArgumentList to avoid backslash-quote escaping issues —
+        // AppContext.BaseDirectory ends with '\', and "path\" is parsed as escaped quote by CommandLineToArgvW)
         var pid = Environment.ProcessId;
         var exeName = Path.GetFileName(Environment.ProcessPath ?? "XUnityToolkit-WebUI.exe");
         var deleteListPath = Path.Combine(stagingDir, "delete-list.txt");
-        var args = $"--pid {pid} --app-dir \"{appDir}\" --staging-dir \"{filesDir}\" --exe-name \"{exeName}\" --data-dir \"{paths.Root}\"";
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = updaterDst,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--pid");
+        startInfo.ArgumentList.Add(pid.ToString());
+        startInfo.ArgumentList.Add("--app-dir");
+        startInfo.ArgumentList.Add(appDir);
+        startInfo.ArgumentList.Add("--staging-dir");
+        startInfo.ArgumentList.Add(filesDir);
+        startInfo.ArgumentList.Add("--exe-name");
+        startInfo.ArgumentList.Add(exeName);
+        startInfo.ArgumentList.Add("--data-dir");
+        startInfo.ArgumentList.Add(paths.Root);
         if (File.Exists(deleteListPath))
-            args += $" --delete-list \"{deleteListPath}\"";
+        {
+            startInfo.ArgumentList.Add("--delete-list");
+            startInfo.ArgumentList.Add(deleteListPath);
+        }
 
         // Launch Updater
-        logger.LogInformation("启动 Updater.exe: {Args}", args);
-        var process = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = updaterDst,
-                Arguments = args,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
+        logger.LogInformation("启动 Updater.exe: {Args}", string.Join(" ", startInfo.ArgumentList));
+        using var process = new System.Diagnostics.Process { StartInfo = startInfo };
         process.Start();
 
         _status = new UpdateStatusInfo { State = UpdateState.Applying, Message = "正在应用更新..." };

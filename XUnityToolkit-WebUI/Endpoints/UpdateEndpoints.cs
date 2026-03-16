@@ -11,8 +11,15 @@ public static class UpdateEndpoints
 
         group.MapGet("/check", async (UpdateService updateService, CancellationToken ct) =>
         {
-            var result = await updateService.CheckForUpdateAsync(ct);
-            return Results.Ok(ApiResult<UpdateCheckResult>.Ok(result));
+            try
+            {
+                var result = await updateService.CheckForUpdateAsync(ct);
+                return Results.Ok(ApiResult<UpdateCheckResult>.Ok(result));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Ok(ApiResult.Fail(ex.Message));
+            }
         });
 
         group.MapGet("/status", (UpdateService updateService) =>

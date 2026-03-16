@@ -164,6 +164,7 @@ export const useUpdateStore = defineStore('update', () => {
 
   function pollForRestart() {
     if (restartPollTimer) return
+    const expectedVersion = availableInfo.value?.version
     let elapsed = 0
     restartPollTimer = setInterval(async () => {
       elapsed += 2000
@@ -178,6 +179,17 @@ export const useUpdateStore = defineStore('update', () => {
       try {
         const resp = await fetch('/api/settings/version')
         if (resp.ok) {
+          // Verify the new version is actually running (not a rollback to old version)
+          const result = await resp.json()
+          const runningVersion = (result?.data?.version as string)?.split('+')[0]
+          if (expectedVersion && runningVersion && runningVersion !== expectedVersion) {
+            // Server restarted but with old version — update failed (rollback)
+            if (restartPollTimer) clearInterval(restartPollTimer)
+            restartPollTimer = null
+            state.value = 'Error'
+            error.value = '更新失败，已回滚到旧版本'
+            return
+          }
           if (restartPollTimer) clearInterval(restartPollTimer)
           restartPollTimer = null
           window.location.reload()

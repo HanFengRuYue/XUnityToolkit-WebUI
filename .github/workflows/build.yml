@@ -57,7 +57,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "2.0.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "2.1.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -580,7 +580,7 @@ jobs:
           $installerProject = "Installer/Installer.wixproj"
 
           # Generate MSI version from build version
-          # Build version format: 2.0.YYYYMMDDHHmm
+          # Build version format: 2.1.YYYYMMDDHHmm
           # MSI constraints: major < 256, minor < 256, build < 65536
           $parts = "${{ steps.ver.outputs.build_version }}".Split('.')
           $timestamp = $parts[2]  # YYYYMMDDHHmm

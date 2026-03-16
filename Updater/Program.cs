@@ -61,7 +61,7 @@ if (pidArg is not null && int.TryParse(pidArg, out int pid))
     {
         try
         {
-            var p = Process.GetProcessById(pid);
+            using var p = Process.GetProcessById(pid);
             if (p.HasExited)
             {
                 exited = true;
