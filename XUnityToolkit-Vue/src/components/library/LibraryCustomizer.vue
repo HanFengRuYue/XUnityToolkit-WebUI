@@ -1,11 +1,36 @@
 <script setup lang="ts">
-import { NIcon, NSwitch, NPopover } from 'naive-ui'
+import { ref, computed, onBeforeUnmount } from 'vue'
+import { NIcon, NSwitch, NPopover, NColorPicker } from 'naive-ui'
 import { TuneRound } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 
 const gamesStore = useGamesStore()
 const themeStore = useThemeStore()
+
+const showColorPicker = ref(false)
+const isCustomAccent = computed(() =>
+  !accentPresets.some(p => p.hex === themeStore.accentColor)
+)
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+function setAccentFromPicker(hex: string) {
+  themeStore.setAccentColor(hex)
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    import('@/api/games').then(({ settingsApi }) => {
+      settingsApi.get().then(s => {
+        s.accentColor = hex
+        settingsApi.save(s)
+      })
+    })
+  }, 500)
+}
+
+onBeforeUnmount(() => {
+  if (saveTimer) clearTimeout(saveTimer)
+})
 
 const cardSizeOptions = [
   { value: 'small' as const, label: 'S' },
@@ -113,6 +138,31 @@ function setAccent(hex: string) {
               <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
+          <NColorPicker
+            :show="showColorPicker"
+            :value="themeStore.accentColor"
+            :modes="['hex']"
+            :show-alpha="false"
+            :swatches="accentPresets.map(p => p.hex)"
+            :actions="[]"
+            placement="bottom-end"
+            @update:show="showColorPicker = $event"
+            @update:value="setAccentFromPicker($event)"
+          >
+            <template #trigger>
+              <button
+                class="color-swatch custom-swatch"
+                :class="{ active: isCustomAccent }"
+                :style="isCustomAccent ? { '--swatch-color': themeStore.accentColor } : {}"
+                title="自定义颜色"
+                @click="showColorPicker = !showColorPicker"
+              >
+                <svg v-if="isCustomAccent" class="check-icon" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </template>
+          </NColorPicker>
         </div>
       </div>
     </div>
@@ -251,5 +301,11 @@ function setAccent(hex: string) {
 .check-icon {
   width: 12px;
   height: 12px;
+}
+
+.custom-swatch:not(.active) {
+  background: conic-gradient(
+    #f43f5e, #f97316, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #f43f5e
+  );
 }
 </style>
