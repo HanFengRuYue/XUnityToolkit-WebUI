@@ -18,6 +18,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Shared CSS (main.css):** `.page-title`, `.page-title-icon`, `.section-card`, `.section-header`, `.section-title`, `.section-icon`, `.header-actions`, `.section-desc`, `.loading-state`, `.table-container`, `.add-entry-row`, `.unsaved-badge`, `.auto-save-badge`, `.empty-hint`, `.back-button` are global classes — do NOT redefine in scoped styles
 - **Sub-page layout:** Game sub-pages use `.sub-page` (24px title) + `.sub-page-header` + `.back-button`; top-level pages use `.page-title` directly (26px)
 - **Header actions:** Use `.header-actions` (NOT `.header-btn-group`) for button groups in section headers
+- **Typography:** Do NOT use `font-family: monospace` for UI text (version numbers, labels, etc.) — it clashes with the system font; only use monospace inside code blocks or developer-facing output
 - **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match
 
 ## Adding a New Page
