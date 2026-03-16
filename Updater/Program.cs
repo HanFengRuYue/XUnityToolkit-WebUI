@@ -32,8 +32,9 @@ if (appDir is null || stagingDir is null || exeName is null)
     return 1;
 }
 
-// Default data directory: --data-dir or {appDir}/data
-var effectiveDataDir = dataDir ?? Path.Combine(appDir!, "data");
+// Default data directory: --data-dir or %AppData%\XUnityToolkit\
+var effectiveDataDir = dataDir ?? Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
 
 // Ensure log directory exists and open log file
 string logDir = Path.Combine(effectiveDataDir, "update-temp");
@@ -351,7 +352,7 @@ partial class Program
 
         if (result != 0)
         {
-            log("  No MSI registration found (portable mode). Skipping.");
+            log("  No MSI registration found. Skipping.");
             return;
         }
 
