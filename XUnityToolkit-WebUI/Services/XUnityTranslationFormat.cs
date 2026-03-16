@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace XUnityToolkit_WebUI.Services;
 
@@ -9,6 +10,21 @@ namespace XUnityToolkit_WebUI.Services;
 /// </summary>
 internal static class XUnityTranslationFormat
 {
+    private static readonly Regex RichTextTagRegex = new(
+        @"</?(?:color|b|i|size|sprite|material|quad|voffset|indent|link|mark|sup|sub|font|cspace|align|mspace|uppercase|lowercase|smallcaps|noparse|nobr|space|width|margin|rotate|s|u|line-height|line-indent|page|style|br)(?:=[^>]*)?>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Normalize text for XUnity cache key: strip known rich text tags and trim whitespace.
+    /// Mirrors XUnity's HandleRichText=True preprocessing so extracted asset text
+    /// matches runtime text after XUnity's own preprocessing.
+    /// </summary>
+    internal static string NormalizeForCache(string text)
+    {
+        var stripped = RichTextTagRegex.Replace(text, string.Empty);
+        return stripped.Trim();
+    }
+
     /// <summary>Encode a string for XUnity translation cache file.</summary>
     internal static string Encode(string text)
     {

@@ -38,6 +38,9 @@ public sealed class XUnityConfig
     public bool TemplateAllNumberAway { get; set; }
     public bool DisableTextMeshProScrollInEffects { get; set; }
     public bool CacheParsedTranslations { get; set; }
+    public bool CacheWhitespaceDifferences { get; set; }
+    public bool IgnoreWhitespaceInDialogue { get; set; } = true;
+    public int MinDialogueChars { get; set; } = 4;
 
     // [Texture]
     public string? TextureDirectory { get; set; }
