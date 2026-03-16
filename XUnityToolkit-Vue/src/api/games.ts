@@ -191,21 +191,6 @@ export const settingsApi = {
 }
 
 export const translateApi = {
-  /** POST /api/translate returns raw TranslateResponse (not ApiResult) since it's also called by the in-game DLL */
-  translate: async (texts: string[], from: string, to: string) => {
-    const resp = await fetch('/api/translate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texts, from, to }),
-    })
-    if (!resp.ok) {
-      const text = await resp.text()
-      let message = `HTTP ${resp.status}`
-      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
-      throw new Error(message)
-    }
-    return (await resp.json()) as { translations: string[] }
-  },
   getStats: () => api.get<TranslationStats>('/api/translate/stats'),
   toggle: (enabled: boolean) => api.post<boolean>('/api/ai/toggle', { enabled }),
   fetchModels: (provider: LlmProvider, apiBaseUrl: string, apiKey: string) =>

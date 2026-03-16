@@ -1384,7 +1384,7 @@ public sealed class FontReplacementService(
         return Convert.ToHexString(sha.ComputeHash(stream));
     }
 
-    public async Task<List<CatalogFileEntry>> ClearAddressablesCrcAsync(
+    private async Task<List<CatalogFileEntry>> ClearAddressablesCrcAsync(
         string gamePath, string gameName, List<string> modifiedBundles,
         string gameId, CancellationToken ct = default)
     {

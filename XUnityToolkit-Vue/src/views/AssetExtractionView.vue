@@ -28,7 +28,7 @@ import {
 } from '@vicons/material'
 import { useAssetExtractionStore } from '@/stores/assetExtraction'
 import { gamesApi, settingsApi } from '@/api/games'
-import type { Game, ExtractedText } from '@/api/types'
+import type { Game } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()

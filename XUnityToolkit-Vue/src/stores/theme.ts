@@ -33,12 +33,12 @@ function rgbToHex(r: number, g: number, b: number): string {
   return '#' + [r, g, b].map(v => clamp(v).toString(16).padStart(2, '0')).join('')
 }
 
-export function lightenColor(hex: string, amount: number): string {
+function lightenColor(hex: string, amount: number): string {
   const { r, g, b } = hexToRgb(hex)
   return rgbToHex(r + (255 - r) * amount, g + (255 - g) * amount, b + (255 - b) * amount)
 }
 
-export function darkenColor(hex: string, amount: number): string {
+function darkenColor(hex: string, amount: number): string {
   const { r, g, b } = hexToRgb(hex)
   return rgbToHex(r * (1 - amount), g * (1 - amount), b * (1 - amount))
 }

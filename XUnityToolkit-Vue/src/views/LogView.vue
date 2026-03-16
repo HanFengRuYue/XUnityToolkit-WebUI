@@ -3,7 +3,6 @@ import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { NButton, NIcon, NInput, NSwitch, NTooltip } from 'naive-ui'
 import {
   TerminalOutlined,
-  FilterListOutlined,
   SearchOutlined,
   FileDownloadOutlined,
   DeleteOutlined,
@@ -26,7 +25,6 @@ const autoScroll = ref(true)
 const loading = ref(false)
 const historyLoading = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
-const showFilters = ref(true)
 
 interface LevelDef {
   key: string
