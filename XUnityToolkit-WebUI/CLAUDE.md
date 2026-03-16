@@ -6,9 +6,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 
 - **No migration code:** Project is pre-stable — no backward-compat migrations or old-format converters
 - `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
-- **Data storage:** `{programDir}/data/` for all runtime data; `AppDataPaths` centralizes paths; shipped assets (`bundled/`, `wwwroot/`) stay at program root
+- **Data storage:** `%AppData%\XUnityToolkit\` for all runtime data; `AppDataPaths` centralizes paths; shipped assets (`bundled/`, `wwwroot/`) stay at program root
 - **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
-- **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `{baseDir}/data` before DI — must stay in sync with `AppDataPaths._root` formula
+- **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `%AppData%\XUnityToolkit\` before DI — must stay in sync with `AppDataPaths._root` formula
 - **App URL:** `http://127.0.0.1:{port}` default `51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`); port configurable via `settings.json` → `aiTranslation.port` (read pre-DI in `Program.cs`)
 - **Static file caching:** `UseStaticFiles` sets `Cache-Control: public, max-age=31536000, immutable` for `/assets/*` (Vite content-hashed); `no-cache` for root files (`index.html`, `favicon.ico`); `MapFallbackToFile` also sets `no-cache` on `index.html` — both must be configured separately
 - Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA), `"GitHubUpdate"` (60s), `"GitHubCdn"` (30s, CDN/web requests)
@@ -130,7 +130,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 ## Local LLM
 
 - GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
-- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{programDir}/data/llama/{cuda,vulkan,cpu}/`
+- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{dataRoot}/llama/{cuda,vulkan,cpu}/`
 - **Bundled binaries:** ZIPs in `bundled/llama/`; lazy-extracted on first `POST /start` via `ExtractLlamaZipAsync`
 - **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel; dual source: HuggingFace (`/resolve/main/`) or ModelScope (`/models/{repo}/resolve/master/` — note `master` not `main`); `_downloadModelScopeState` tracks active source; cleanup checks both sources' temp files
 - **ModelScope URL:** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}` — supports Range headers for resume; public models need no auth
