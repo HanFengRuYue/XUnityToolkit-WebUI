@@ -73,6 +73,7 @@ const settings = ref<AppSettings>({
     endpoints: [],
     glossaryExtractionEnabled: false,
     glossaryExtractionEndpointId: undefined,
+    enablePreTranslationCache: false,
   },
   steamGridDbApiKey: undefined,
   libraryViewMode: 'grid',
