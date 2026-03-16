@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Reflection;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -83,6 +84,114 @@ public static class SettingsEndpoints
                 ?? "1.0.0";
             return Results.Ok(ApiResult<VersionInfo>.Ok(new VersionInfo(version)));
         });
+
+        group.MapGet("/data-path", (AppDataPaths paths) =>
+        {
+            return Results.Ok(ApiResult<DataPathInfo>.Ok(new DataPathInfo(paths.Root)));
+        });
+
+        group.MapPost("/open-data-folder", (AppDataPaths paths) =>
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = paths.Root,
+                    UseShellExecute = true,
+                });
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch
+            {
+                return Results.Ok(ApiResult.Fail("无法打开文件夹"));
+            }
+        });
+
+        group.MapPost("/export", async (AppDataPaths paths) =>
+        {
+            var excludedDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "models", "llama", "generated-fonts", "logs",
+                "update-staging", "update-backup", "update-temp",
+                "backups", "font-backups", "custom-fonts",
+            };
+            // font-generation/temp and font-generation/uploads are excluded separately
+            var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["font-generation"] = new(StringComparer.OrdinalIgnoreCase) { "temp", "uploads" },
+            };
+
+            var memoryStream = new MemoryStream();
+            using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                var rootPath = Path.GetFullPath(paths.Root);
+                foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories))
+                {
+                    var relativePath = Path.GetRelativePath(rootPath, filePath);
+                    var parts = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                    // Skip top-level excluded directories
+                    if (parts.Length > 1 && excludedDirs.Contains(parts[0]))
+                        continue;
+
+                    // Skip excluded sub-directories (e.g., font-generation/temp)
+                    if (parts.Length > 2 && excludedSubDirs.TryGetValue(parts[0], out var subExclusions)
+                        && subExclusions.Contains(parts[1]))
+                        continue;
+
+                    var entry = archive.CreateEntry(relativePath.Replace('\\', '/'), CompressionLevel.Optimal);
+                    await using var entryStream = entry.Open();
+                    await using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    await fileStream.CopyToAsync(entryStream);
+                }
+            }
+
+            memoryStream.Position = 0;
+            var fileName = $"XUnityToolkit_data_{DateTime.Now:yyyy-MM-dd}.zip";
+            return Results.File(memoryStream, "application/zip", fileName);
+        });
+
+        group.MapPost("/import", async (HttpRequest request, AppDataPaths paths, ILogger<AppSettingsService> logger) =>
+        {
+            if (!request.HasFormContentType)
+                return Results.BadRequest(ApiResult.Fail("请求必须是 multipart/form-data"));
+
+            var form = await request.ReadFormAsync();
+            var file = form.Files.FirstOrDefault();
+            if (file is null || file.Length == 0)
+                return Results.BadRequest(ApiResult.Fail("未找到上传的文件"));
+
+            var rootPath = Path.GetFullPath(paths.Root);
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+                foreach (var entry in archive.Entries)
+                {
+                    // Skip directories
+                    if (string.IsNullOrEmpty(entry.Name))
+                        continue;
+
+                    var destPath = PathSecurity.SafeJoin(rootPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+
+                    await using var entryStream = entry.Open();
+                    await using var destStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    await entryStream.CopyToAsync(destStream);
+                }
+
+                logger.LogInformation("已导入配置数据");
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.BadRequest(ApiResult.Fail("文件路径不安全，导入已中止"));
+            }
+            catch (InvalidDataException)
+            {
+                return Results.BadRequest(ApiResult.Fail("无效的 ZIP 文件"));
+            }
+        }).DisableAntiforgery();
     }
     private static void TryDelete(Action action, string name, List<string> errors)
     {
@@ -92,3 +201,5 @@ public static class SettingsEndpoints
 }
 
 public record VersionInfo(string Version);
+
+public record DataPathInfo(string Path);
