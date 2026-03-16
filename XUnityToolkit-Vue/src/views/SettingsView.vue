@@ -8,6 +8,7 @@ import {
   NProgress,
   NSpin,
   NSwitch,
+  NColorPicker,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -40,6 +41,11 @@ const message = useMessage()
 const dialog = useDialog()
 const themeStore = useThemeStore()
 const updateStore = useUpdateStore()
+
+const showColorPicker = ref(false)
+const isCustomAccent = computed(() =>
+  !accentPresets.some(p => p.hex === settings.value.accentColor)
+)
 
 // Settings
 const settings = ref<AppSettings>({
@@ -232,6 +238,30 @@ onMounted(() => {
                 <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
+            <NColorPicker
+              :show="showColorPicker"
+              :value="settings.accentColor"
+              :modes="['hex']"
+              :show-alpha="false"
+              :swatches="accentPresets.map(p => p.hex)"
+              :actions="[]"
+              @update:show="showColorPicker = $event"
+              @update:value="settings.accentColor = $event"
+            >
+              <template #trigger>
+                <button
+                  class="accent-swatch custom-swatch"
+                  :class="{ active: isCustomAccent }"
+                  :style="isCustomAccent ? { '--swatch-color': settings.accentColor } : {}"
+                  title="自定义颜色"
+                  @click="showColorPicker = !showColorPicker"
+                >
+                  <svg v-if="isCustomAccent" class="swatch-check" viewBox="0 0 16 16" fill="none">
+                    <path d="M4 8.5L7 11.5L12 5" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </template>
+            </NColorPicker>
           </div>
           <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
         </div>
@@ -635,6 +665,12 @@ onMounted(() => {
 .swatch-check {
   width: 14px;
   height: 14px;
+}
+
+.custom-swatch:not(.active) {
+  background: conic-gradient(
+    #f43f5e, #f97316, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #f43f5e
+  );
 }
 
 /* ===== Danger Zone ===== */
