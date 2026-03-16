@@ -37,6 +37,11 @@ public sealed class AiTranslationSettings
     /// </summary>
     public int LocalContextSize { get; set; }
 
+    /// <summary>
+    /// Experimental: enable pre-translation cache optimization (normalization, regex generation, monitoring).
+    /// </summary>
+    public bool EnablePreTranslationCache { get; set; }
+
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
     // Glossary extraction
