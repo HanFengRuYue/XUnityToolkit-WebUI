@@ -32,6 +32,7 @@ import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 import { useAutoSave } from '@/composables/useAutoSave'
+import { marked } from 'marked'
 import { useUpdateStore } from '@/stores/update'
 
 defineOptions({ name: 'SettingsView' })
@@ -118,6 +119,12 @@ const shortVersion = computed(() => {
   // Keep only first 3 segments: "1.0.0+abc..." → "1.0.0"
   const match = version.value.match(/^(\d+\.\d+\.\d+)/)
   return match ? match[1] : version.value
+})
+
+const changelogHtml = computed(() => {
+  const md = updateStore.availableInfo?.changelog
+  if (!md) return ''
+  return marked.parse(md, { async: false }) as string
 })
 
 async function loadVersion() {
@@ -353,9 +360,9 @@ onUnmounted(() => {
             <span class="update-title">更新可用: v{{ updateStore.availableInfo.version }}</span>
           </div>
 
-          <div v-if="updateStore.availableInfo.changelog" class="update-changelog">
+          <div v-if="changelogHtml" class="update-changelog">
             <div class="changelog-label">更新内容:</div>
-            <div class="changelog-content">{{ updateStore.availableInfo.changelog }}</div>
+            <div class="changelog-content" v-html="changelogHtml"></div>
           </div>
 
           <div class="update-packages">
@@ -695,7 +702,13 @@ onUnmounted(() => {
 .update-title { font-weight: 600; font-size: 14px; }
 .update-changelog { margin-bottom: 12px; }
 .changelog-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
-.changelog-content { font-size: 13px; white-space: pre-line; }
+.changelog-content {
+  font-size: 13px;
+  :deep(ul) { margin: 0; padding-left: 20px; }
+  :deep(li) { margin: 2px 0; }
+  :deep(code) { font-size: 12px; padding: 1px 4px; border-radius: 3px; background: var(--bg-muted); }
+  :deep(p) { margin: 4px 0; }
+}
 .packages-label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
 .package-item { font-size: 13px; font-family: monospace; }
 .packages-total { font-size: 13px; font-weight: 500; margin-top: 4px; }
