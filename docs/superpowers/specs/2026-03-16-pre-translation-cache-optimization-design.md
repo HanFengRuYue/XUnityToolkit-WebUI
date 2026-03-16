@@ -132,6 +132,89 @@ Before writing, validate each custom pattern:
 - Must contain an `=` separator
 - Test regex compilation with a 1-second timeout (consistent with existing glossary regex validation)
 
+## Layer 4: Cache Hit Monitoring & Logging
+
+### Concept
+
+When XUnity's cache hits a pre-translated entry, the text never reaches `POST /api/translate`. Therefore cache hits are inferred by elimination: texts that arrive at the endpoint despite having a pre-translation are **misses**; pre-translated texts never seen at the endpoint are **hits**.
+
+### Backend: `PreTranslationCacheMonitor` Service
+
+A new singleton service that tracks cache effectiveness per game:
+
+**State:**
+```csharp
+// Loaded from _PreTranslated.txt when monitoring starts
+HashSet<string> preTranslatedKeys;           // all normalized pre-translated originals
+ConcurrentDictionary<string, string> misses; // normalized key → raw runtime text (came through endpoint)
+long hitCount;                               // preTranslatedKeys.Count - misses.Count (updated lazily)
+```
+
+**Lifecycle:**
+1. When AI translation is enabled for a game, load that game's `_PreTranslated.txt` entries into `preTranslatedKeys` (normalized form)
+2. On each `POST /api/translate` call, check each incoming text against `preTranslatedKeys` (after normalizing). If match found → record as miss (pre-translation existed but XUnity didn't match it)
+3. Expose stats via `GetCacheStats(gameId)` → `PreTranslationCacheStats`
+
+**Integration point:** In `TranslateEndpoints.cs`, after receiving texts from the endpoint, call `cacheMonitor.RecordTexts(gameId, texts)` before passing to `LlmTranslationService`.
+
+### Stats Model
+
+```csharp
+public sealed record PreTranslationCacheStats(
+    int TotalPreTranslated,    // total entries in _PreTranslated.txt
+    int CacheHits,             // entries NOT seen at endpoint (inferred hits)
+    int CacheMisses,           // entries that arrived at endpoint despite pre-translation
+    int NewTexts,              // texts at endpoint with no pre-translation at all
+    double HitRate,            // CacheHits / TotalPreTranslated (0 if no pre-translations)
+    IList<CacheMissEntry> RecentMisses  // last N misses for debugging
+);
+
+public sealed record CacheMissEntry(
+    string PreTranslatedKey,   // the normalized pre-translated original
+    string RuntimeText,        // what XUnity actually sent
+    DateTime Timestamp
+);
+```
+
+### SignalR Broadcasting
+
+Extend the existing `ai-translation` SignalR group with a new message:
+- Message name: `preCacheStatsUpdate`
+- Payload: `PreTranslationCacheStats`
+- Throttle: same 200ms CAS pattern as `BroadcastStats`
+- Triggered: after each `RecordTexts` call
+
+### API Endpoint
+
+- `GET /api/translate/cache-stats` — Get current pre-translation cache stats for the active game
+
+### Frontend: Cache Status Card on AiTranslationView
+
+Add a new card section in `AiTranslationView.vue` (between the Status Dashboard and Recent Translations):
+
+**Card layout:**
+- Title: "Pre-Translation Cache" (预翻译缓存)
+- Metrics row: Total entries | Hits | Misses | Hit Rate %
+- Color-coded progress bar: green (hits) / red (misses) / gray (unseen)
+- Collapsible "Recent Misses" list showing `CacheMissEntry` items — displays the pre-translated key vs actual runtime text side by side, helping users diagnose WHY mismatches occur
+
+**Visibility:** Only shown when `totalPreTranslated > 0` (game has pre-translations).
+
+**Data source:** Subscribe to `preCacheStatsUpdate` SignalR message in `aiTranslation.ts` store; also fetch via REST on mount.
+
+### Logging
+
+All log messages go through standard `ILogger<PreTranslationCacheMonitor>`, automatically flowing to file log + SignalR `logs` group.
+
+| Event | Level | Message |
+|-------|-------|---------|
+| Cache loaded | Info | `预翻译缓存已加载: {gameId}, {count} 条条目` |
+| Cache miss detected | Debug | `预翻译缓存未命中: 预翻译键="{key}", 运行时文本="{runtime}"` |
+| Periodic summary (every 60s while active) | Info | `预翻译缓存统计: 总计={total}, 命中={hits}, 未命中={misses}, 命中率={rate}%` |
+| Cache unloaded | Info | `预翻译缓存已卸载: {gameId}` |
+
+The Debug-level miss logs are key for post-hoc diagnosis — users can view them in the Logs page or download the log file.
+
 ## Files Changed
 
 ### Backend
@@ -139,18 +222,24 @@ Before writing, validate each custom pattern:
 | File | Change |
 |------|--------|
 | `Models/XUnityConfig.cs` | Add `CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars` |
+| `Models/TranslationStats.cs` | Add `PreTranslationCacheStats` and `CacheMissEntry` records |
 | `Services/ConfigurationService.cs` | Read/write new INI keys in `[Behaviour]` section |
 | `Services/XUnityTranslationFormat.cs` | Add `NormalizeForCache()` static method |
 | `Services/PreTranslationService.cs` | Apply normalization before writing cache; generate `_PreTranslated_Regex.txt` |
+| `Services/PreTranslationCacheMonitor.cs` | **New** — singleton service tracking cache hits/misses per game |
 | `Services/InstallOrchestrator.cs` | Set defaults for new config fields during installation |
 | `Endpoints/AssetEndpoints.cs` | Add endpoint for custom regex patterns CRUD |
+| `Endpoints/TranslateEndpoints.cs` | Call `cacheMonitor.RecordTexts()` on incoming texts; add `GET /api/translate/cache-stats` |
 | `Models/AppDataPaths.cs` | Add `PreTranslationRegexFile(string gameId)` path |
+| `Program.cs` | Register `PreTranslationCacheMonitor` as singleton |
 
 ### Frontend
 
 | File | Change |
 |------|--------|
-| `src/api/types.ts` | Add new `XUnityConfig` fields |
+| `src/api/types.ts` | Add `XUnityConfig` fields, `PreTranslationCacheStats`, `CacheMissEntry` types |
+| `src/stores/aiTranslation.ts` | Subscribe to `preCacheStatsUpdate` SignalR message; add `cacheStats` ref |
+| `src/views/AiTranslationView.vue` | Add pre-translation cache status card with metrics + recent misses list |
 | `src/components/config/ConfigPanel.vue` | Add controls for new config fields |
 | Pre-translation UI component | Add custom regex pattern text area |
 
@@ -163,6 +252,7 @@ Before writing, validate each custom pattern:
 
 - `GET /api/games/{id}/pre-translate/regex` — Get custom regex patterns for game
 - `PUT /api/games/{id}/pre-translate/regex` — Save custom regex patterns for game
+- `GET /api/translate/cache-stats` — Get pre-translation cache monitoring stats for active game
 
 ## Backup & Cleanup
 
@@ -178,6 +268,8 @@ Before writing, validate each custom pattern:
 - **`TemplateAllNumberAway` default change:** Update the default in `XUnityConfig.cs` from `false` to `true`; update `InstallOrchestrator` to write the new default
 - **Pre-translation regex path:** Add to `AppDataPaths`; add `cache/pre-translation-regex/` to `EnsureDirectoriesExist()`; evaluate for export exclusion list in `SettingsEndpoints.cs` (should be exported as user data)
 - **New API endpoints:** Add to CLAUDE.md API Endpoints section
+- **PreTranslationCacheStats model:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
+- **SignalR `preCacheStatsUpdate` message:** Backend broadcast in `PreTranslationCacheMonitor`; frontend subscribe in `aiTranslation.ts` store
 
 ## Risks & Mitigations
 
@@ -197,3 +289,6 @@ Before writing, validate each custom pattern:
   - Concatenated text that follows common patterns (number+text, text+value, newline-joined)
 - No regression in existing translation features
 - XUnity performance not noticeably degraded
+- AI Translation page shows pre-translation cache card with real-time hit/miss stats
+- Cache misses are logged with both the pre-translated key and runtime text for diagnosis
+- All cache monitoring events appear in the Logs page via standard logging infrastructure
