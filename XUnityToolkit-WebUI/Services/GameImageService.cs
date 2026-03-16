@@ -82,6 +82,7 @@ public sealed class GameImageService(
 
     public async Task SaveCoverFromUrlAsync(string gameId, string imageUrl, int? steamGridDbGameId, CancellationToken ct = default)
     {
+        PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
         var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();
@@ -277,6 +278,7 @@ public sealed class GameImageService(
 
     public async Task SaveCustomIconFromUrlAsync(string gameId, string imageUrl, CancellationToken ct = default)
     {
+        PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
         var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();
@@ -286,7 +288,7 @@ public sealed class GameImageService(
         await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
     }
 
-    public async Task SaveCustomIconFromSteamGridDbAsync(string gameId, int steamGridDbGameId, CancellationToken ct = default)
+    private async Task SaveCustomIconFromSteamGridDbAsync(string gameId, int steamGridDbGameId, CancellationToken ct = default)
     {
         try
         {
@@ -491,6 +493,7 @@ public sealed class GameImageService(
 
     public async Task SaveBackgroundFromUrlAsync(string gameId, string imageUrl, int? steamGridDbGameId, CancellationToken ct = default)
     {
+        PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
         var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();

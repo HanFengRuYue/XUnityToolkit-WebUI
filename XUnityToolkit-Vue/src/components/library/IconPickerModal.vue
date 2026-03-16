@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { NModal, NTabs, NTabPane, NIcon, NButton, NInput, NSpin, useMessage } from 'naive-ui'
 import { SearchRound, CloudUploadOutlined } from '@vicons/material'
 import { gamesApi } from '@/api/games'

@@ -7,17 +7,11 @@ import { useThemeStore } from '@/stores/theme'
 export const useGamesStore = defineStore('games', () => {
   const games = ref<Game[]>([])
   const loading = ref(false)
-  const error = ref<string | null>(null)
   const viewMode = ref<'grid' | 'list'>('grid')
   const sortBy = ref<'name' | 'recent' | 'added'>('name')
   const cardSize = ref<'small' | 'medium' | 'large' | 'xlarge'>('medium')
   const gap = ref<'compact' | 'normal' | 'spacious'>('normal')
   const showLabels = ref(true)
-
-  const gameCount = computed(() => games.value.length)
-  const installedCount = computed(
-    () => games.value.filter((g) => g.installState === 'FullyInstalled').length,
-  )
 
   const sortedGames = computed(() => {
     const sorted = [...games.value]
@@ -39,48 +33,23 @@ export const useGamesStore = defineStore('games', () => {
 
   async function fetchGames() {
     loading.value = true
-    error.value = null
     try {
       games.value = await gamesApi.list()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to load games'
     } finally {
       loading.value = false
     }
   }
 
-  async function addGame(gamePath: string, name?: string) {
-    try {
-      const game = await gamesApi.add(gamePath, name)
-      games.value.push(game)
-      return game
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to add game'
-      return null
-    }
-  }
-
   async function renameGame(id: string, name: string) {
-    try {
-      const game = await gamesApi.update(id, { name })
-      const index = games.value.findIndex((g) => g.id === id)
-      if (index >= 0) games.value[index] = game
-      return game
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to rename game'
-      return null
-    }
+    const game = await gamesApi.update(id, { name })
+    const index = games.value.findIndex((g) => g.id === id)
+    if (index >= 0) games.value[index] = game
+    return game
   }
 
   async function removeGame(id: string) {
-    try {
-      await gamesApi.remove(id)
-      games.value = games.value.filter((g) => g.id !== id)
-      return true
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to remove game'
-      return false
-    }
+    await gamesApi.remove(id)
+    games.value = games.value.filter((g) => g.id !== id)
   }
 
   async function refreshGame(id: string) {
@@ -94,26 +63,10 @@ export const useGamesStore = defineStore('games', () => {
     }
   }
 
-  async function detectGame(id: string) {
-    try {
-      const info = await gamesApi.detect(id)
-      await refreshGame(id)
-      return info
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Detection failed'
-      return null
-    }
-  }
-
   async function launchGame(id: string) {
-    try {
-      await gamesApi.launch(id)
-      // Update lastPlayedAt locally
-      const game = games.value.find((g) => g.id === id)
-      if (game) game.lastPlayedAt = new Date().toISOString()
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : 'Failed to launch game'
-    }
+    await gamesApi.launch(id)
+    const game = games.value.find((g) => g.id === id)
+    if (game) game.lastPlayedAt = new Date().toISOString()
   }
 
   async function loadPreferences() {
@@ -149,31 +102,21 @@ export const useGamesStore = defineStore('games', () => {
     } catch { /* ignore */ }
   }
 
-  function getGame(id: string) {
-    return computed(() => games.value.find((g) => g.id === id))
-  }
-
   return {
     games,
     loading,
-    error,
     viewMode,
     sortBy,
     cardSize,
     gap,
     showLabels,
     sortedGames,
-    gameCount,
-    installedCount,
     fetchGames,
-    addGame,
     renameGame,
     removeGame,
     refreshGame,
-    detectGame,
     launchGame,
     loadPreferences,
     savePreferences,
-    getGame,
   }
 })

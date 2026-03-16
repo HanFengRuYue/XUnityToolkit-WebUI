@@ -270,10 +270,12 @@ function handleRemoveGame() {
     positiveText: '确认移除',
     negativeText: '取消',
     onPositiveClick: async () => {
-      const ok = await gamesStore.removeGame(gameId)
-      if (ok) {
+      try {
+        await gamesStore.removeGame(gameId)
         message.success('已移除')
         router.push('/')
+      } catch {
+        message.error('移除失败')
       }
     },
   })

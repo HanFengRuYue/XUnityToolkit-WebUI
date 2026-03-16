@@ -410,7 +410,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
     /// Unity engine internals always contribute English text, so non-Latin scripts
     /// are prioritized as more reliable indicators of the game's true language.
     /// </summary>
-    public static string DetectLanguage(IList<string> texts)
+    private static string DetectLanguage(IList<string> texts)
     {
         if (texts.Count == 0) return "ja"; // Default
 

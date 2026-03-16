@@ -18,7 +18,6 @@ public sealed class AppDataPaths(IConfiguration config)
     public string LogsDirectory => Path.Combine(_root, "logs");
     public string ExtractedTextsDirectory => Path.Combine(CacheDirectory, "extracted-texts");
     public string LlamaDirectory => Path.Combine(_root, "llama");
-    public string LlamaDownloadsDirectory => Path.Combine(LlamaDirectory, ".downloads");
     public string ModelsDirectory => Path.Combine(_root, "models");
     public string LocalLlmSettingsFile => Path.Combine(_root, "local-llm-settings.json");
     public string FontBackupsDirectory => Path.Combine(_root, "font-backups");
