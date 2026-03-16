@@ -75,7 +75,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
 - **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
 - Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
-- **Language detection:** Non-Latin scripts prioritized over Latin (Unity internals always contribute English); only classify as English when non-Latin count < 10; `IsGameText` is heuristic exclusion filter
+- **Language detection:** Proportion-based; Latin >80% → English immediately; non-Latin needs ≥50 chars AND ≥2% of total; Japanese requires kana ≥5% of CJK+kana; default is `"en"` (not `"ja"`); `IsGameText` is heuristic exclusion filter
 - XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
 - **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
 
@@ -119,8 +119,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **`HashSet<int>` not `HashSet<char>`:** CJK Extension B (U+20000+) requires supplementary plane support; `char` is 16-bit; use `int` codepoints throughout pipeline; `StringInfo.GetTextElementEnumerator()` for surrogate pair handling
 - **Disk-temp SDF bitmaps:** For large charsets (70K+ chars), SDF bitmaps saved to `data/font-generation/temp/{sessionId}/` during rendering, read back per-page during compositing, cleaned up in `finally`
 - **CharacterSetService:** singleton; depends on `AppDataPaths`, `GameLibraryService`; `ResolveCharactersAsync` merges built-in + custom TXT + translation file sources; superset warnings from `BuiltinCharsets.SupersetOf`; translation file path resolved from game INI `[Files] OutputFile` + `[General] Language`
-- **Install as TMP font:** `POST /install-tmp-font/{gameId}` copies generated bundle to `{GamePath}/BepInEx/Font/SourceHanSans` and patches `[Behaviour] FallbackFontTextMeshPro`; replaces old `use-as-custom` flow (which copied to `data/custom-fonts/` for font replacement)
-- **`TmpFontService.FontFileName`:** `internal const` — accessible from `FontGenerationEndpoints` for install path construction
+- **Install as TMP font:** `POST /install-tmp-font/{gameId}` copies generated bundle to `{GamePath}/BepInEx/Font/{fontName}` (preserves actual name, strips `.bundle` ext) and patches `[Behaviour] FallbackFontTextMeshPro`; uses `TmpFontService.InstallCustomFont`
+- **`TmpFontService` API:** `InstallFont(gamePath, gameInfo)` returns `string?` config path (e.g. `"BepInEx/Font/SourceHanSans_U2022"`), null if unavailable; `InstallCustomFont(gamePath, srcPath, destFileName)` static method for generated fonts; `RemoveFont` deletes all files in `BepInEx/Font/`; no `FontFileName`/`ConfigValue` constants
+- **`FallbackFontTextMeshPro` config:** NOT in `ApplyOptimalDefaultsAsync` defaults; set by `InstallOrchestrator` after font install and by `POST /{id}/tmp-font` endpoint
 
 ## Local LLM
 
