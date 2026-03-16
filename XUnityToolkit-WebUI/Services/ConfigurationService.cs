@@ -52,6 +52,9 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             TemplateAllNumberAway = GetBool(ini, "Behaviour", "TemplateAllNumberAway", false),
             DisableTextMeshProScrollInEffects = GetBool(ini, "Behaviour", "DisableTextMeshProScrollInEffects", false),
             CacheParsedTranslations = GetBool(ini, "Behaviour", "CacheParsedTranslations", false),
+            CacheWhitespaceDifferences = GetBool(ini, "Behaviour", "CacheWhitespaceDifferences", false),
+            IgnoreWhitespaceInDialogue = GetBool(ini, "Behaviour", "IgnoreWhitespaceInDialogue", true),
+            MinDialogueChars = GetInt(ini, "Behaviour", "MinDialogueChars", 4),
             // [Texture]
             TextureDirectory = GetNullableValue(ini, "Texture", "TextureDirectory"),
             EnableTextureTranslation = GetBool(ini, "Texture", "EnableTextureTranslation", false),
@@ -213,7 +216,10 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
                 ("EnableTranslationHelper", config.EnableTranslationHelper.ToString()),
                 ("TemplateAllNumberAway", config.TemplateAllNumberAway.ToString()),
                 ("DisableTextMeshProScrollInEffects", config.DisableTextMeshProScrollInEffects.ToString()),
-                ("CacheParsedTranslations", config.CacheParsedTranslations.ToString())),
+                ("CacheParsedTranslations", config.CacheParsedTranslations.ToString()),
+                ("CacheWhitespaceDifferences", config.CacheWhitespaceDifferences.ToString()),
+                ("IgnoreWhitespaceInDialogue", config.IgnoreWhitespaceInDialogue.ToString()),
+                ("MinDialogueChars", config.MinDialogueChars.ToString())),
             ["Texture"] = BuildSectionMods(
                 ("TextureDirectory", config.TextureDirectory),
                 ("EnableTextureTranslation", config.EnableTextureTranslation.ToString()),
@@ -298,6 +304,9 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
         sb.AppendLine($"TemplateAllNumberAway={config.TemplateAllNumberAway}");
         sb.AppendLine($"DisableTextMeshProScrollInEffects={config.DisableTextMeshProScrollInEffects}");
         sb.AppendLine($"CacheParsedTranslations={config.CacheParsedTranslations}");
+        sb.AppendLine($"CacheWhitespaceDifferences={config.CacheWhitespaceDifferences}");
+        sb.AppendLine($"IgnoreWhitespaceInDialogue={config.IgnoreWhitespaceInDialogue}");
+        sb.AppendLine($"MinDialogueChars={config.MinDialogueChars}");
         sb.AppendLine();
         sb.AppendLine("[Texture]");
         sb.AppendLine($"TextureDirectory={config.TextureDirectory ?? "Translation\\{Lang}\\Texture"}");
