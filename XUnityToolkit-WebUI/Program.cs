@@ -172,6 +172,28 @@ try
 }
 catch { /* ignore */ }
 
+// Global exception handler — prevent stack traces and internal details from leaking to clients
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next(context);
+    }
+    catch (Exception ex) when (context.Request.Path.StartsWithSegments("/api"))
+    {
+        var exLogger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("XUnityToolkit_WebUI.ExceptionHandler");
+        exLogger.LogError(ex, "未处理的异常: {Method} {Path}", context.Request.Method, context.Request.Path);
+
+        if (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new { success = false, message = "服务器内部错误" });
+        }
+    }
+});
+
 // Log incoming API requests for diagnostics (especially /api/translate from game plugin)
 app.Use(async (context, next) =>
 {

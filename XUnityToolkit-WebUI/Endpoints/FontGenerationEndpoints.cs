@@ -53,7 +53,7 @@ public static class FontGenerationEndpoints
         group.MapPost("/generate", (FontGenerationStartRequest body,
             TmpFontGeneratorService generator, AppDataPaths appDataPaths) =>
         {
-            var fontPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory, body.FileName);
+            var fontPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory, Path.GetFileName(body.FileName));
             if (!File.Exists(fontPath))
                 return Results.NotFound(ApiResult.Fail("上传的字体文件不存在"));
 
@@ -159,11 +159,18 @@ public static class FontGenerationEndpoints
             if (!File.Exists(fullPath))
                 return Results.NotFound(ApiResult.Fail("文件不存在"));
 
-            File.Delete(fullPath);
+            try
+            {
+                File.Delete(fullPath);
 
-            var reportPath = Path.ChangeExtension(fullPath, ".report.json");
-            if (File.Exists(reportPath))
-                File.Delete(reportPath);
+                var reportPath = Path.ChangeExtension(fullPath, ".report.json");
+                if (File.Exists(reportPath))
+                    File.Delete(reportPath);
+            }
+            catch (IOException)
+            {
+                return Results.Json(ApiResult.Fail("文件正在使用中，无法删除"), statusCode: 409);
+            }
 
             return Results.Ok(ApiResult.Ok());
         });

@@ -2,7 +2,4 @@
 <WixLocalization Culture="zh-CN" xmlns="http://wixtoolset.org/schemas/v4/wxl">
   <!-- Custom string for launch-after-install checkbox on ExitDialog -->
   <String Id="LaunchCheckboxText" Overridable="yes" Value="安装完成后启动 XUnityToolkit-WebUI" />
-
-  <!-- License file reference (RTF format required by WixUI) -->
-  <String Id="WixUILicenseRtf" Overridable="yes" Value="License.rtf" />
 </WixLocalization>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -108,17 +109,7 @@ public sealed partial class WebImageSearchService(
         await imageService.SaveCustomIconFromUploadAsync(gameId, ms, ct);
     }
 
-    private static void ValidateImageUrl(string imageUrl)
-    {
-        if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
-            throw new ArgumentException("无效的图片 URL");
-        if (uri.Scheme is not ("https" or "http"))
-            throw new ArgumentException("图片 URL 必须使用 HTTP/HTTPS 协议");
-        if (uri.Host is "localhost" or "127.0.0.1" or "::1"
-            || uri.Host.StartsWith("192.168.") || uri.Host.StartsWith("10.")
-            || uri.Host.StartsWith("172."))
-            throw new ArgumentException("不允许访问内网地址");
-    }
+    private static void ValidateImageUrl(string imageUrl) => PathSecurity.ValidateExternalUrl(imageUrl);
 
     // ===== Bing =====
 

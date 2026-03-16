@@ -88,11 +88,16 @@ public static class GameEndpoints
             if (!Directory.Exists(request.GamePath))
                 return Results.BadRequest(ApiResult<Game>.Fail("Game path does not exist."));
 
-            var name = request.Name ?? Path.GetFileName(request.GamePath);
+            var gamePath = Path.GetFullPath(request.GamePath);
+            var name = request.Name ?? Path.GetFileName(gamePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+            if (request.ExecutableName is not null &&
+                request.ExecutableName.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/']) >= 0)
+                return Results.BadRequest(ApiResult<Game>.Fail("可执行文件名不能包含路径分隔符。"));
 
             try
             {
-                var game = await library.AddAsync(name, request.GamePath, request.ExecutableName);
+                var game = await library.AddAsync(name, gamePath, request.ExecutableName);
                 return Results.Created($"/api/games/{game.Id}", ApiResult<Game>.Ok(game));
             }
             catch (InvalidOperationException ex)
@@ -242,7 +247,13 @@ public static class GameEndpoints
             if (game is null) return Results.NotFound(ApiResult<Game>.Fail("Game not found."));
 
             if (request.Name is not null) game.Name = request.Name;
-            if (request.ExecutableName is not null) game.ExecutableName = request.ExecutableName;
+            if (request.ExecutableName is not null)
+            {
+                // Validate ExecutableName is a simple filename (no path separators)
+                if (request.ExecutableName.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/']) >= 0)
+                    return Results.BadRequest(ApiResult<Game>.Fail("可执行文件名不能包含路径分隔符。"));
+                game.ExecutableName = request.ExecutableName;
+            }
             var updated = await library.UpdateAsync(game);
             return Results.Ok(ApiResult<Game>.Ok(updated));
         });
@@ -486,7 +497,10 @@ public static class GameEndpoints
             if (string.IsNullOrEmpty(exeName))
                 return Results.BadRequest(ApiResult.Fail("未检测到可执行文件。"));
 
-            var exePath = Path.Combine(game.GamePath, exeName);
+            var exePath = Path.GetFullPath(Path.Combine(game.GamePath, exeName));
+            var normalizedGamePath = Path.GetFullPath(game.GamePath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!exePath.StartsWith(normalizedGamePath, StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(ApiResult.Fail("可执行文件必须位于游戏目录内。"));
             if (!File.Exists(exePath))
                 return Results.BadRequest(ApiResult.Fail($"可执行文件不存在: {exeName}"));
 
@@ -653,6 +667,17 @@ public static class GameEndpoints
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
+            if (entries.Count > 5000)
+                return Results.BadRequest(ApiResult.Fail("术语表条目不能超过 5000 条。"));
+
+            // Validate regex entries
+            foreach (var entry in entries.Where(e => e.IsRegex))
+            {
+                try { _ = new System.Text.RegularExpressions.Regex(entry.Original, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1)); }
+                catch (System.Text.RegularExpressions.RegexParseException)
+                { return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {entry.Original}")); }
+            }
+
             await glossaryService.SaveAsync(id, entries, ct);
             return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
         });
@@ -682,6 +707,9 @@ public static class GameEndpoints
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (entries.Count > 10000)
+                return Results.BadRequest(ApiResult.Fail("免翻译列表条目不能超过 10000 条。"));
 
             await dntService.SaveAsync(id, entries, ct);
             var saved = await dntService.GetAsync(id, ct);

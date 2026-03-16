@@ -18,6 +18,8 @@ public static class TranslateEndpoints
         {
             if (request.Texts is not { Count: > 0 })
                 return Results.Ok(new TranslateResponse([]));
+            if (request.Texts.Count > 500)
+                return Results.BadRequest(ApiResult.Fail("单次请求最多 500 条文本"));
 
             try
             {
@@ -69,8 +71,8 @@ public static class TranslateEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "翻译时发生未知错误");
-                translationService.RecordError($"未知错误: {ex.Message}", gameId: request.GameId);
-                return Results.Json(ApiResult.Fail($"内部错误: {ex.Message}"), statusCode: 500);
+                translationService.RecordError("翻译服务内部错误", gameId: request.GameId);
+                return Results.Json(ApiResult.Fail("翻译服务内部错误"), statusCode: 500);
             }
         });
 

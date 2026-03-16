@@ -40,9 +40,11 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
             });
         }
 
-        // Save manifest
+        // Save manifest (atomic: write to temp, then rename)
         var manifestPath = Path.Combine(backupDir, "manifest.json");
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+        var tmpManifestPath = manifestPath + ".tmp";
+        File.WriteAllText(tmpManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+        File.Move(tmpManifestPath, manifestPath, overwrite: true);
 
         logger.LogInformation("已创建备份: 游戏 {GameId}，共 {Count} 个文件",
             gameId, manifest.BackedUpFiles.Count);
