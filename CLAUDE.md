@@ -40,7 +40,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Backend:** ASP.NET Core Minimal API (.NET 10.0, Windows Forms for native dialogs)
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
 - **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`)
-- **Persistence:** JSON files in `{programDir}/data/` (`library.json`, `settings.json`) — portable app pattern; API keys encrypted with DPAPI
+- **Persistence:** JSON files in `%AppData%\XUnityToolkit\` (`library.json`, `settings.json`); `AppData:Root` config key allows override for dev/test; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
@@ -50,11 +50,11 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Pre-computed placeholder texts:** Texts entirely replaced by a single placeholder are resolved before the LLM call (pre-computed); they bypass both the LLM and all post-processing steps (`ApplyGlossaryPostProcess`, placeholder restoration) since their results are final; the `preComputed` dictionary tracks these indices
 - **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, disables glossary extraction
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
-- **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{programDir}/data/backups/{gameId}.json`
-- **Font Replacement:** `FontReplacementService` uses AssetsTools.NET to scan and replace TMP_FontAsset in game `.assets` and bundle files; field-level replacement preserves PPtr references; automatic Addressables CRC clearing; backups at `{programDir}/data/font-backups/{gameId}/`; custom fonts at `{programDir}/data/custom-fonts/{gameId}/`
-- **Font Generation:** `TmpFontGeneratorService` renders AA bitmaps via FreeType (`FT_RENDER_MODE_NORMAL`) then generates SDF via `DistanceFieldGenerator` (Felzenszwalb EDT), replicating Unity's FontEngine approach; supports SDFAA/SDF8/SDF16/SDF32 render modes with upsampling (8x/16x/32x); dynamic padding (percentage/pixel mode); auto-sizing binary search; `GradientScale = padding + 1` injected into Material; RectpackSharp for atlas packing; multi-atlas support; `CharacterSetService` resolves stackable character sets (built-in/custom TXT/XUnity translation file); `BuiltinCharsets` enumerates GB2312/GBK/CJK Common/CJK Full/Japanese; disk-temp SDF bitmaps for memory control; generation reports saved as `.report.json` sidecars; outputs at `{programDir}/data/generated-fonts/`
+- **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{dataRoot}/backups/{gameId}.json`
+- **Font Replacement:** `FontReplacementService` uses AssetsTools.NET to scan and replace TMP_FontAsset in game `.assets` and bundle files; field-level replacement preserves PPtr references; automatic Addressables CRC clearing; backups at `{dataRoot}/font-backups/{gameId}/`; custom fonts at `{dataRoot}/custom-fonts/{gameId}/`
+- **Font Generation:** `TmpFontGeneratorService` renders AA bitmaps via FreeType (`FT_RENDER_MODE_NORMAL`) then generates SDF via `DistanceFieldGenerator` (Felzenszwalb EDT), replicating Unity's FontEngine approach; supports SDFAA/SDF8/SDF16/SDF32 render modes with upsampling (8x/16x/32x); dynamic padding (percentage/pixel mode); auto-sizing binary search; `GradientScale = padding + 1` injected into Material; RectpackSharp for atlas packing; multi-atlas support; `CharacterSetService` resolves stackable character sets (built-in/custom TXT/XUnity translation file); `BuiltinCharsets` enumerates GB2312/GBK/CJK Common/CJK Full/Japanese; disk-temp SDF bitmaps for memory control; generation reports saved as `.report.json` sidecars; outputs at `{dataRoot}/generated-fonts/`
 - **BepInEx Log:** `BepInExLogService` reads `{GamePath}/BepInEx/LogOutput.log` with `FileShare.ReadWrite`; AI analysis via `LlmTranslationService.CallLlmRawAsync` (no semaphore contention); diagnostic prompt is predefined Chinese; log truncated to last 4000 lines for LLM context; `hasBepInEx` computed includes `PartiallyInstalled` state
-- **Online Update:** `UpdateService` three-layer check strategy: CDN (`update-check.json` asset) → Atom Feed (`/releases.atom`) → GitHub API fallback; CDN/Atom paths use `GitHubCdn` client (zero API calls); `update-check.json` generated by CI per release; manifest-based differential download (app/wwwroot/bundled component ZIPs); `Updater.exe` (AOT, no runtime dependency) handles file replacement and restart; staging at `data/update-staging/`; two-phase backup-then-replace for atomicity; rollback on failure; prerelease opt-in via `AppSettings.ReceivePreReleaseUpdates`
+- **Online Update:** `UpdateService` checks GitHub Releases for new versions; manifest-based differential download (app/wwwroot/bundled component ZIPs); `Updater.exe` (AOT, no runtime dependency) handles file replacement and restart; staging at `data/update-staging/`; two-phase backup-then-replace for atomicity; rollback on failure; prerelease opt-in via `AppSettings.ReceivePreReleaseUpdates`
 
 ## Security Conventions
 
@@ -91,7 +91,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../cover`
 - **Background:** `GET .../background`, `POST .../background/upload` (10MB), `POST .../background/{search,heroes,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../background`
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
-- **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`
+- **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`, `GET .../data-path`, `POST .../export` (ZIP, **not ApiResult**), `POST .../import` (multipart ZIP), `POST .../open-data-folder`
 - **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
 - **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `POST /api/translate/test`
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
@@ -138,7 +138,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **AppSettings.ReceivePreReleaseUpdates:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue` (settings default + NSwitch)
 - **Adding BuiltInModelInfo fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **LocalLlmDownloadProgress fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
-- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Program.cs` (DataPath) and `Updater/Program.cs` (MsiProductCode, InstallDir); key path: `HKCU\Software\XUnityToolkit`
+- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Updater/Program.cs` (MsiProductCode, InstallDir); `DataPath` key written by MSI for `RemoveFolderEx` cleanup only — app no longer reads it; key path: `HKCU\Software\XUnityToolkit`
+- **DataPathInfo:** Sync 2 places: `Endpoints/SettingsEndpoints.cs` (record), `src/api/types.ts`
 - **Installer license:** `Installer/License.rtf` must match project root `LICENSE` (copyright holder, license type)
 
 ### Build & Deploy
@@ -151,7 +152,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
 - **MSI Installer:** `Installer/Installer.wixproj` (WixToolset.Sdk); per-user install to `%LocalAppData%\Programs\`; `build.ps1` auto-generates `Installer/Generated/HarvestedFiles.wxs` from publish output; MSI version: `{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}` (all segments within MSI limits: major<256, minor<256, build<65536)
 - **MSI + Updater coexistence:** Updater.exe syncs `DisplayVersion`/`InstallDate` in HKCU Uninstall key after delta update via P/Invoke (AOT-safe)
-- **Installed vs portable mode:** `Program.cs` checks `HKCU\Software\XUnityToolkit\DataPath` registry; present → installed mode (`%AppData%\XUnityToolkit\`); absent → portable mode (`{programDir}/data/`)
+- **Data path:** Always `%AppData%\XUnityToolkit\` (no portable mode); `AppData:Root` config key allows override for dev/test
 - **Updater AOT P/Invoke:** `DllImport`/`const`/`static readonly` cannot be used in top-level statements — must wrap in `partial class Program`; cannot use `Microsoft.Win32.Registry` — must P/Invoke advapi32.dll directly
 - **AppDataPaths config write-back:** After modifying `appDataRoot` source in `Program.cs`, **must** execute `builder.Configuration["AppData:Root"] = appDataRoot` — otherwise `AppDataPaths` (reads `IConfiguration` via DI) won't pick up the new value
 - **WiX build artifact cleanup:** WiX produces `.wixpdb` files in `OutputPath`; must clean up after moving MSI, otherwise they pollute release ZIPs
@@ -164,7 +165,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **WiX gotcha — v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
 - **WiX gotcha — DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI
 - **WiX UI extension:** `WixToolset.UI.wixext` ships with built-in `zh-CN` localization; only need custom `.wxl` for app-specific strings (launch checkbox text, license path); Chinese text in `.wxs` must use `!(loc.StringId)` to avoid codepage errors
-- **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled.zip`; `update-check.json` generated per release (tag, version, changelog, prerelease, asset sizes) for CDN-based update checks
+- **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled.zip`
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity auto-detect latest versions via API; llama.cpp pinned to b8354 (update `$llamaTag` in build.ps1/build.yml to change); CUDA 12.4; copied post-publish
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
 - **PowerShell ZIP:** Do NOT use `Compress-Archive` (broken on PowerShell 7.5.5 — module load error); use `[System.IO.Compression.ZipFile]` instead
@@ -183,5 +184,5 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **CI gotcha — `gh release create --notes`:** backticks in `${{ }}` become bash command substitution; use `--notes-file` instead
 - Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
 - Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
-- Logs: `{programDir}/data/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
+- Logs: `{dataRoot}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
 - Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing
