@@ -168,7 +168,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
 - **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
 - **CI/CD:** GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
-- **CI parallel builds:** `build.yml` uses PowerShell `Start-Job` for intra-step parallelism — npm ci runs in background during asset download; frontend/TranslatorEndpoint build in parallel (Updater AOT runs as separate step — AOT needs native toolchain unreliable inside `Start-Job`); main ZIP created in background during component ZIP creation
+- **CI parallel builds:** `build.yml` uses PowerShell `Start-Job` for intra-step parallelism — npm ci runs in background during asset download; frontend/TranslatorEndpoint build in parallel (Updater AOT runs as separate step — AOT publish needs its own restore, `--no-restore` breaks it); main ZIP created in background during component ZIP creation
+- **CI gotcha — AOT and `--no-restore`:** `dotnet publish` with AOT requires its own restore phase to populate `PrivateSdkAssemblies` ItemGroup; standalone `dotnet restore` + `--no-restore` publish fails with `PrivateSdkAssemblies is required`
 - **CI NuGet cache:** `actions/cache@v4` on `~/.nuget/packages` keyed by `hashFiles('**/*.csproj')`; explicit `dotnet restore` before parallel builds, then `--no-restore` on all subsequent dotnet commands
 - **CI component ZIPs:** Use `ZipFileExtensions.CreateEntryFromFile` with path prefix directly — do NOT create temp wrapper directories with `Copy-Item` (wastes I/O on large bundled assets)
 - **CI version tracking:** `.github/deps.json` stores last-known versions; `dep-check.yml` compares upstream

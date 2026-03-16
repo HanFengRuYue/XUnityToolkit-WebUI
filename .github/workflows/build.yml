@@ -410,13 +410,13 @@ jobs:
           }
 
       # ── Build Updater (AOT) ──
-      # AOT compilation requires native C/C++ linker (link.exe) from Visual Studio.
-      # Must run as a dedicated step — Start-Job child processes may lack VS toolchain.
+      # AOT publish requires its own restore phase to populate PrivateSdkAssemblies;
+      # --no-restore breaks AOT. Runs as a dedicated step for clear error reporting.
 
       - name: Build Updater (AOT)
         shell: pwsh
         run: |
-          dotnet publish Updater/Updater.csproj -c Release -r win-x64 --no-restore
+          dotnet publish Updater/Updater.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw "Updater AOT build failed" }
 
       # ── Publish backend ──
