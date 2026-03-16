@@ -113,6 +113,9 @@ export interface XUnityConfig {
   templateAllNumberAway: boolean
   disableTextMeshProScrollInEffects: boolean
   cacheParsedTranslations: boolean
+  cacheWhitespaceDifferences: boolean
+  ignoreWhitespaceInDialogue: boolean
+  minDialogueChars: number
   // [Texture]
   textureDirectory?: string
   enableTextureTranslation: boolean
@@ -167,6 +170,7 @@ export interface AiTranslationSettings {
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
   glossaryExtractionEndpointId?: string
+  enablePreTranslationCache: boolean
 }
 
 export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
@@ -625,4 +629,19 @@ export interface UpdateAvailableInfo {
   changelog?: string
   downloadSize: number
   changedPackages: string[]
+}
+
+export interface PreTranslationCacheStats {
+  totalPreTranslated: number
+  cacheHits: number
+  cacheMisses: number
+  newTexts: number
+  hitRate: number
+  recentMisses: CacheMissEntry[]
+}
+
+export interface CacheMissEntry {
+  preTranslatedKey: string
+  runtimeText: string
+  timestamp: string
 }
