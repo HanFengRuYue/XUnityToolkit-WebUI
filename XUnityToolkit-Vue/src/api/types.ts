@@ -169,8 +169,11 @@ export interface AiTranslationSettings {
   glossaryExtractionEndpointId?: string
 }
 
+export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
+
 export interface AppSettings {
   hfMirrorUrl: string
+  modelDownloadSource: ModelDownloadSource
   theme: string
   aiTranslation: AiTranslationSettings
   steamGridDbApiKey?: string
@@ -185,6 +188,10 @@ export interface AppSettings {
 
 export interface VersionInfo {
   version: string
+}
+
+export interface DataPathInfo {
+  path: string
 }
 
 export interface RecentTranslation {
@@ -472,6 +479,8 @@ export interface BuiltInModelInfo {
   huggingFaceRepo: string
   huggingFaceFile: string
   tags: string[]
+  modelScopeRepo?: string
+  modelScopeFile?: string
 }
 
 export interface LocalLlmTestResult {
@@ -490,6 +499,7 @@ export interface LocalLlmDownloadProgress {
   error?: string
   paused?: boolean
   useMirror?: boolean
+  useModelScope?: boolean
 }
 
 // Font Generation

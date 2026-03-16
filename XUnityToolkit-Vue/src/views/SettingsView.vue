@@ -25,6 +25,10 @@ import {
   ImageOutlined,
   ColorLensOutlined,
   SystemUpdateAltOutlined,
+  FolderOpenOutlined,
+  FileDownloadOutlined,
+  FileUploadOutlined,
+  StorageOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
@@ -48,8 +52,14 @@ const isCustomAccent = computed(() =>
 )
 
 // Settings
+const modelDownloadSourceOptions = [
+  { label: 'HuggingFace（默认）', value: 'HuggingFace' },
+  { label: 'ModelScope（魔搭社区，国内加速）', value: 'ModelScope' },
+]
+
 const settings = ref<AppSettings>({
   hfMirrorUrl: 'https://hf-mirror.com',
+  modelDownloadSource: 'HuggingFace',
   theme: themeStore.mode,
   aiTranslation: {
     enabled: true,
@@ -173,6 +183,68 @@ function handleReset() {
   })
 }
 
+// Data management
+const dataPath = ref('')
+const exportLoading = ref(false)
+const importLoading = ref(false)
+
+async function loadDataPath() {
+  try {
+    const info = await settingsApi.getDataPath()
+    dataPath.value = info.path
+  } catch {
+    dataPath.value = '(unknown)'
+  }
+}
+
+async function handleOpenDataFolder() {
+  try {
+    await settingsApi.openDataFolder()
+  } catch {
+    message.error('无法打开文件夹')
+  }
+}
+
+async function handleExport() {
+  exportLoading.value = true
+  try {
+    await settingsApi.exportData()
+    message.success('导出成功')
+  } catch {
+    message.error('导出失败')
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+function handleImport() {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.zip'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    dialog.warning({
+      title: '导入配置',
+      content: '导入将覆盖当前所有配置数据，导入完成后需要重启程序。确定要继续吗？',
+      positiveText: '确认导入',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        importLoading.value = true
+        try {
+          await settingsApi.importData(file)
+          message.success('导入成功，请重启程序以使配置生效')
+        } catch (e) {
+          message.error(e instanceof Error ? e.message : '导入失败')
+        } finally {
+          importLoading.value = false
+        }
+      },
+    })
+  }
+  input.click()
+}
+
 const hasChecked = ref(false)
 
 async function handleCheckUpdate() {
@@ -186,6 +258,7 @@ async function handleCheckUpdate() {
 onMounted(() => {
   loadSettings()
   loadVersion()
+  loadDataPath()
 })
 </script>
 
@@ -268,6 +341,18 @@ onMounted(() => {
         <div class="form-row">
           <label class="form-label">
             <NIcon :size="14" color="var(--text-3)"><CloudDownloadOutlined /></NIcon>
+            模型下载源
+          </label>
+          <NSelect
+            v-model:value="settings.modelDownloadSource"
+            :options="modelDownloadSourceOptions"
+            style="width: 320px"
+          />
+          <span class="form-hint">选择 AI 模型的下载来源，ModelScope 适合国内网络环境</span>
+        </div>
+        <div v-if="settings.modelDownloadSource === 'HuggingFace'" class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><CloudDownloadOutlined /></NIcon>
             HuggingFace 镜像地址
           </label>
           <NInput
@@ -308,8 +393,44 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- Data Management -->
+    <div class="section-card" style="animation-delay: 0.2s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><StorageOutlined /></NIcon>
+          </span>
+          数据管理
+        </h2>
+      </div>
+      <div class="settings-form">
+        <div class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><FolderOpenOutlined /></NIcon>
+            配置文件夹路径
+          </label>
+          <div class="data-path-row">
+            <span class="data-path-text">{{ dataPath }}</span>
+            <NButton size="small" @click="handleOpenDataFolder">打开文件夹</NButton>
+          </div>
+          <span class="form-hint">所有应用配置、游戏库、术语表等数据存储在此文件夹中</span>
+        </div>
+        <div class="data-actions">
+          <NButton :loading="exportLoading" @click="handleExport">
+            <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
+            导出配置
+          </NButton>
+          <NButton :loading="importLoading" @click="handleImport">
+            <template #icon><NIcon><FileUploadOutlined /></NIcon></template>
+            导入配置
+          </NButton>
+        </div>
+        <span class="form-hint">导出不包含 AI 模型文件、生成的字体、日志等大文件。导入会覆盖现有配置。</span>
+      </div>
+    </div>
+
     <!-- Danger Zone (full width) -->
-    <div class="section-card danger-card" style="animation-delay: 0.2s">
+    <div class="section-card danger-card" style="animation-delay: 0.25s">
       <div class="danger-bar"></div>
       <div class="danger-body">
         <div class="section-header">
@@ -333,7 +454,7 @@ onMounted(() => {
     </div>
 
     <!-- Update -->
-    <div class="section-card" style="animation-delay: 0.25s">
+    <div class="section-card" style="animation-delay: 0.3s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -469,7 +590,7 @@ onMounted(() => {
     </div>
 
     <!-- About (full width) -->
-    <div class="section-card" style="animation-delay: 0.3s">
+    <div class="section-card" style="animation-delay: 0.35s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon about">
@@ -671,6 +792,30 @@ onMounted(() => {
   background: conic-gradient(
     #f43f5e, #f97316, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #f43f5e
   );
+}
+
+/* ===== Data Management ===== */
+.data-path-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.data-path-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-2);
+  padding: 6px 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  word-break: break-all;
+  user-select: all;
+}
+
+.data-actions {
+  display: flex;
+  gap: 10px;
 }
 
 /* ===== Danger Zone ===== */

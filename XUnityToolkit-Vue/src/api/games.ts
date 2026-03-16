@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -188,6 +188,32 @@ export const settingsApi = {
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
   reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
+  getDataPath: () => api.get<DataPathInfo>('/api/settings/data-path'),
+  openDataFolder: () => api.post('/api/settings/open-data-folder'),
+  async exportData(): Promise<void> {
+    const res = await fetch('/api/settings/export', { method: 'POST' })
+    if (!res.ok) throw new Error('导出失败')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    const disposition = res.headers.get('content-disposition')
+    a.download = disposition?.match(/filename="?([^";\s]+)"?/)?.[1]
+        ?? `XUnityToolkit_data_${new Date().toISOString().slice(0, 10)}.zip`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  },
+  async importData(file: File): Promise<void> {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/settings/import', { method: 'POST', body: formData })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      throw new Error(data?.error ?? '导入失败')
+    }
+  },
 }
 
 export const translateApi = {
