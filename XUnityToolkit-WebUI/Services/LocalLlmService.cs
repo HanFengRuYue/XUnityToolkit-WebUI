@@ -291,7 +291,7 @@ public sealed class LocalLlmService(
             if (!File.Exists(modelPath))
             {
                 _state = LocalLlmServerState.Failed;
-                _error = $"模型文件不存在: {modelPath}";
+                _error = $"模型文件不存在: {Path.GetFileName(modelPath)}";
                 await BroadcastStatus();
                 return GetStatus();
             }
@@ -308,7 +308,7 @@ public sealed class LocalLlmService(
             if (!File.Exists(serverPath))
             {
                 _state = LocalLlmServerState.Failed;
-                _error = $"llama-server.exe 未找到: {serverPath}";
+                _error = "llama-server.exe 未找到，请检查 llama 二进制文件是否已正确解压";
                 await BroadcastStatus();
                 return GetStatus();
             }
@@ -317,7 +317,9 @@ public sealed class LocalLlmService(
             _internalPort = GetAvailablePort();
 
             // Build arguments (--reasoning-budget 0 disables thinking in reasoning models)
-            var args = $"-m \"{modelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} --log-disable --no-webui --reasoning-budget 0";
+            // Sanitize modelPath to prevent argument injection via embedded quotes
+            var safeModelPath = modelPath.Replace("\"", "");
+            var args = $"-m \"{safeModelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} --log-disable --no-webui --reasoning-budget 0";
 
             logger.LogInformation("启动 llama-server: {Path} {Args}", serverPath, args);
 
@@ -357,6 +359,7 @@ public sealed class LocalLlmService(
                 _state = LocalLlmServerState.Failed;
                 _error = "llama-server 启动超时（30秒内未就绪）";
                 try { _process.Kill(true); } catch { /* ignore */ }
+                try { _process.Dispose(); } catch { /* ignore */ }
                 _process = null;
                 await BroadcastStatus();
                 return GetStatus();
@@ -419,6 +422,7 @@ public sealed class LocalLlmService(
         if (_process is null || _process.HasExited)
         {
             _state = LocalLlmServerState.Idle;
+            try { _process?.Dispose(); } catch { /* ignore */ }
             _process = null;
             return;
         }
@@ -427,13 +431,15 @@ public sealed class LocalLlmService(
         try
         {
             _process.Kill(true);
-            await _process.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _process.WaitForExitAsync(timeoutCts.Token);
         }
         catch
         {
             // Force kill if graceful failed
             try { _process.Kill(true); } catch { /* ignore */ }
         }
+        try { _process.Dispose(); } catch { /* ignore */ }
         _process = null;
         _state = LocalLlmServerState.Idle;
         _error = null;
@@ -448,6 +454,7 @@ public sealed class LocalLlmService(
         StopGpuPolling();
         _state = LocalLlmServerState.Failed;
         _error = "llama-server 进程意外退出";
+        try { _process?.Dispose(); } catch { /* ignore */ }
         _process = null;
         logger.LogWarning("llama-server 进程意外退出");
         try

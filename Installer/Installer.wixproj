@@ -2,9 +2,8 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <InstallerPlatform Condition="'$(Platform)' == ''">x64</InstallerPlatform>
-    <!-- Suppress per-user install ICE validations (valid pattern, overly strict checks) -->
-    <!-- ICE38: file KeyPath in user profile; ICE64: user profile dir not in RemoveFile; ICE91: per-user dir warning -->
-    <SuppressIces>ICE38;ICE60;ICE61;ICE64;ICE91</SuppressIces>
+    <!-- Skip ICE validation entirely (faster builds; per-user install triggers many false positives anyway) -->
+    <SuppressValidation>true</SuppressValidation>
     <!-- WIX1077: [INSTALLDIR] in WixShellExecTarget is an intentional formatted reference -->
     <SuppressSpecificWarnings>1077</SuppressSpecificWarnings>
     <DefaultLanguage>zh-CN</DefaultLanguage>

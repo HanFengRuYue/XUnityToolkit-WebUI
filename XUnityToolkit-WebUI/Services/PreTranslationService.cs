@@ -54,6 +54,8 @@ public sealed class PreTranslationService(
             status.Error = null;
 
             var cts = new CancellationTokenSource();
+            if (_cancellations.TryRemove(gameId, out var oldCts))
+                oldCts.Dispose();
             _cancellations[gameId] = cts;
 
             _ = Task.Run(async () =>
@@ -77,7 +79,8 @@ public sealed class PreTranslationService(
                 }
                 finally
                 {
-                    _cancellations.TryRemove(gameId, out _);
+                    if (_cancellations.TryRemove(gameId, out var doneCts))
+                        doneCts.Dispose();
                 }
             });
 

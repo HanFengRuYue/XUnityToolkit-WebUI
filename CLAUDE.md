@@ -56,6 +56,23 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **BepInEx Log:** `BepInExLogService` reads `{GamePath}/BepInEx/LogOutput.log` with `FileShare.ReadWrite`; AI analysis via `LlmTranslationService.CallLlmRawAsync` (no semaphore contention); diagnostic prompt is predefined Chinese; log truncated to last 4000 lines for LLM context; `hasBepInEx` computed includes `PartiallyInstalled` state
 - **Online Update:** `UpdateService` checks GitHub Releases for new versions; manifest-based differential download (app/wwwroot/bundled component ZIPs); `Updater.exe` (AOT, no runtime dependency) handles file replacement and restart; staging at `data/update-staging/`; two-phase backup-then-replace for atomicity; rollback on failure; prerelease opt-in via `AppSettings.ReceivePreReleaseUpdates`
 
+## Security Conventions
+
+- **Path traversal:** Use `PathSecurity.SafeJoin(root, relative)` for all ZIP extraction and user-supplied relative paths; use `Path.GetFileName()` to strip directory components from user-supplied filenames
+- **SSRF protection:** Use `PathSecurity.ValidateExternalUrl(url)` before `HttpClient.GetAsync()` on any user-supplied URL; blocks loopback, private IPs (IPv4+IPv6), link-local, `.local`/`.internal` hostnames
+- **ExecutableName validation:** Must be a simple filename with no path separators (`/`, `\`); validated in both `POST /api/games/` and `PUT /api/games/{id}`
+- **Game launch safety:** Always validate `exePath` is inside `GamePath` via `Path.GetFullPath` + `StartsWith` before `Process.Start`
+- **Process arguments:** Never interpolate user input into argument strings without sanitizing quotes; strip `"` from user-supplied paths used in `-m "..."` style arguments
+- **CancellationTokenSource:** Always `Dispose()` when removing from `ConcurrentDictionary`; dispose old CTS before overwriting
+- **Process disposal:** Always call `Process.Dispose()` before setting `_process = null`
+- **Error messages to clients:** Never return `ex.Message` from generic `catch (Exception)` blocks — use safe static messages; `ex.Message` from typed catches (`HttpRequestException`, `InvalidOperationException`) is acceptable
+- **Global exception handler:** Middleware in `Program.cs` catches unhandled `/api` exceptions, logs full details server-side, returns generic error to client
+- **Settings validation:** Clamp numeric settings in `SettingsEndpoints` (Port, ContextSize, Temperature, etc.)
+- **Input size limits:** Enforce maximum counts on list endpoints (glossary 5000, DNT 10000, translate texts 500, raw config 512 KB)
+- **Regex validation:** Validate glossary `IsRegex` entries with `new Regex(..., timeout: 1s)` before saving
+- **Atomic file writes:** Use write-to-temp + `File.Move(overwrite: true)` for critical data files (settings, library, manifests)
+- **SignalR error messages:** Do not broadcast internal file paths in `_error` fields; use `Path.GetFileName()` or generic messages
+
 ## Code Conventions
 
 - **Git commit messages:** Titles and body MUST be written in Chinese (conventional commit prefixes like `feat:`/`fix:`/`ci:`/`docs:` may remain in English)
@@ -137,7 +154,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **CI shared PowerShell functions:** Extract to standalone `.ps1` files (e.g., `Installer/Generate-InstallerWxs.ps1`); both `build.ps1` and CI source via `. ./path/to/script.ps1`
 - **WiX gotcha — reserved properties:** `PublishDir` and `SourceDir` are reserved by MSBuild/WiX SDK and get silently overridden; use custom names (e.g., `AppPublishDir`) and pass via `-p:AppPublishDir=...`
 - **WiX gotcha — path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
-- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE false positives; suppress via `<SuppressIces>ICE38;ICE60;ICE61;ICE64;ICE91</SuppressIces>`
+- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE false positives; `SuppressValidation=true` skips all ICE checks (also faster builds)
+- **WiX gotcha — WixUI variable overrides:** `WixUILicenseRtf` etc. must be `<WixVariable>` in `.wxs`, NOT `<String>` in `.wxl` — localization strings don't work for WixUI variable overrides in WiX v5
 - **WiX gotcha — MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
 - **WiX gotcha — v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
 - **WiX gotcha — DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI

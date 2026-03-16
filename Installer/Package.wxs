@@ -14,7 +14,7 @@
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   DowngradeErrorMessage="A newer version of XUnityToolkit-WebUI is already installed. Downgrade is not supported." />
 
-    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
 
     <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\XUnityToolkit-WebUI.exe" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
@@ -29,6 +29,9 @@
 
     <!-- Install wizard UI (Welcome -> License -> Directory -> Install -> Finish) -->
     <ui:WixUI Id="WixUI_InstallDir" />
+
+    <!-- Custom license file (overrides default WixUI Lorem Ipsum placeholder) -->
+    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
 
     <!-- Bind directory chooser to INSTALLDIR -->
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLDIR" />

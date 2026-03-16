@@ -46,6 +46,8 @@ public static class ConfigEndpoints
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
 
+            if (request.Content.Length > 512 * 1024)
+                return Results.BadRequest(ApiResult.Fail("配置文件内容不能超过 512 KB。"));
             await configService.SaveRawAsync(game.GamePath, request.Content);
             return Results.Ok(ApiResult.Ok());
         });

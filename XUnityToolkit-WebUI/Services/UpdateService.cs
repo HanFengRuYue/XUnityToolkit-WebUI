@@ -398,8 +398,8 @@ public sealed class UpdateService(
                     if (File.Exists(localPath) && ComputeFileHash(localPath) == manifestEntry.Hash)
                         continue;
 
-                    // Extract to staging
-                    var destPath = Path.Combine(filesDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                    // Extract to staging (with path traversal protection)
+                    var destPath = PathSecurity.SafeJoin(filesDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
                     Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
                     entry.ExtractToFile(destPath, overwrite: true);
                 }

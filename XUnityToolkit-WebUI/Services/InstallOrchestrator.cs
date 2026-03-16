@@ -53,6 +53,8 @@ public sealed class InstallOrchestrator(
             status.Message = null;
 
             var cts = new CancellationTokenSource();
+            if (_cancellations.TryRemove(gameId, out var oldCts))
+                oldCts.Dispose();
             _cancellations[gameId] = cts;
 
             _ = Task.Run(async () =>
@@ -72,7 +74,8 @@ public sealed class InstallOrchestrator(
                 }
                 finally
                 {
-                    _cancellations.TryRemove(gameId, out _);
+                    if (_cancellations.TryRemove(gameId, out var doneCts))
+                        doneCts.Dispose();
                 }
             });
 
@@ -196,7 +199,10 @@ public sealed class InstallOrchestrator(
         var configPath = configService.GetConfigPath(game.GamePath);
         var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable
             ?? throw new InvalidOperationException("无法确定游戏可执行文件路径。");
-        var exePath = Path.Combine(game.GamePath, exeName);
+        var exePath = Path.GetFullPath(Path.Combine(game.GamePath, exeName));
+        var normalizedGamePath = Path.GetFullPath(game.GamePath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!exePath.StartsWith(normalizedGamePath, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("可执行文件路径不在游戏目录内。");
 
         Process? gameProcess = null;
         try

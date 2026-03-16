@@ -19,8 +19,12 @@ public static class SettingsEndpoints
 
         group.MapPut("/", async (AppSettings settings, AppSettingsService settingsService) =>
         {
-            // Server-side validation: clamp MaxConcurrency to [1, 100]
+            // Server-side validation: clamp values to valid ranges
             settings.AiTranslation.MaxConcurrency = Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
+            settings.AiTranslation.Port = Math.Clamp(settings.AiTranslation.Port, 1, 65535);
+            settings.AiTranslation.ContextSize = Math.Clamp(settings.AiTranslation.ContextSize, 0, 100);
+            settings.AiTranslation.LocalContextSize = Math.Clamp(settings.AiTranslation.LocalContextSize, 0, 10);
+            settings.AiTranslation.Temperature = Math.Clamp(settings.AiTranslation.Temperature, 0.0, 2.0);
 
             var saved = await settingsService.SaveAsync(settings);
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
