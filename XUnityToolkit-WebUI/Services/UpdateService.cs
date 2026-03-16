@@ -41,6 +41,7 @@ public sealed class UpdateService(
     private UpdateManifest? _remoteManifest;
     private List<GitHubAsset>? _releaseAssets;
     private CancellationTokenSource? _downloadCts;
+    private UpdateAvailableInfo? _availableInfo;
     private bool _hasAutoChecked;
     private string? _lastCheckedApiUrl; // Track API URL for ETag cache invalidation
     private string? _dismissedVersion;
@@ -90,7 +91,25 @@ public sealed class UpdateService(
         return "sha256:" + Convert.ToHexStringLower(hash);
     }
 
-    public UpdateStatusInfo GetUpdateStatus() => _status;
+    public UpdateStatusInfo GetUpdateStatus()
+    {
+        var status = _status;
+        if (_availableInfo is not null && status.State is not UpdateState.None)
+        {
+            return new UpdateStatusInfo
+            {
+                State = status.State,
+                Progress = status.Progress,
+                DownloadedBytes = status.DownloadedBytes,
+                TotalBytes = status.TotalBytes,
+                CurrentPackage = status.CurrentPackage,
+                Message = status.Message,
+                Error = status.Error,
+                AvailableUpdate = _availableInfo
+            };
+        }
+        return status;
+    }
 
     public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken ct = default)
     {
@@ -279,15 +298,16 @@ public sealed class UpdateService(
 
             if (_lastCheckResult.UpdateAvailable)
             {
-                _status = new UpdateStatusInfo { State = UpdateState.Available, Message = $"新版本 {remoteVersion} 可用" };
-                await BroadcastStatus();
-                await hubContext.Clients.Group("update").SendAsync("UpdateAvailable", new UpdateAvailableInfo
+                _availableInfo = new UpdateAvailableInfo
                 {
                     Version = remoteVersion,
                     Changelog = changelog,
                     DownloadSize = downloadSize,
                     ChangedPackages = changedPackages.ToList()
-                }, ct);
+                };
+                _status = new UpdateStatusInfo { State = UpdateState.Available, Message = $"新版本 {remoteVersion} 可用" };
+                await BroadcastStatus();
+                await hubContext.Clients.Group("update").SendAsync("UpdateAvailable", _availableInfo, ct);
                 logger.LogInformation("发现新版本 {Version}，需要下载 {Packages}",
                     remoteVersion, string.Join(", ", changedPackages));
                 trayService.ShowNotification("XUnityToolkit", $"发现新版本 v{remoteVersion} 可用");
@@ -484,7 +504,9 @@ public sealed class UpdateService(
         }
         finally
         {
+            var cts = _downloadCts;
             _downloadCts = null;
+            cts?.Dispose();
         }
     }
 
@@ -561,6 +583,7 @@ public sealed class UpdateService(
         }
         _status = new UpdateStatusInfo { State = UpdateState.None };
         _lastCheckResult = null;
+        _availableInfo = null;
         await BroadcastStatus();
     }
 
@@ -585,6 +608,11 @@ public sealed class UpdateService(
                     if (manifest is not null && Directory.Exists(filesDir))
                     {
                         _remoteManifest = manifest;
+                        _availableInfo = new UpdateAvailableInfo
+                        {
+                            Version = manifest.Version,
+                            ChangedPackages = []
+                        };
                         _status = new UpdateStatusInfo
                         {
                             State = UpdateState.Ready,

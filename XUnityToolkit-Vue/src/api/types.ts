@@ -587,7 +587,7 @@ export interface BepInExLogAnalysis {
 }
 
 // Online Update
-export type UpdateState = 'none' | 'checking' | 'available' | 'downloading' | 'ready' | 'applying' | 'error'
+export type UpdateState = 'None' | 'Checking' | 'Available' | 'Downloading' | 'Ready' | 'Applying' | 'Error'
 
 export interface UpdateCheckResult {
   updateAvailable: boolean
@@ -607,6 +607,7 @@ export interface UpdateStatusInfo {
   currentPackage?: string
   message?: string
   error?: string
+  availableUpdate?: UpdateAvailableInfo
 }
 
 export interface UpdateAvailableInfo {

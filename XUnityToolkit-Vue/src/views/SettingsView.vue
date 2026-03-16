@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
@@ -172,7 +172,7 @@ const hasChecked = ref(false)
 async function handleCheckUpdate() {
   await updateStore.checkForUpdate()
   hasChecked.value = true
-  if (updateStore.state === 'none') {
+  if (updateStore.state === 'None') {
     message.success('已是最新版本')
   }
 }
@@ -180,11 +180,6 @@ async function handleCheckUpdate() {
 onMounted(() => {
   loadSettings()
   loadVersion()
-  updateStore.connectHub()
-})
-
-onUnmounted(() => {
-  updateStore.disconnectHub()
 })
 </script>
 
@@ -319,8 +314,8 @@ onUnmounted(() => {
         <div class="header-actions">
           <NButton
             size="small"
-            :loading="updateStore.state === 'checking'"
-            :disabled="updateStore.isDownloading"
+            :loading="updateStore.state === 'Checking'"
+            :disabled="updateStore.isDownloading || updateStore.isApplying"
             @click="handleCheckUpdate"
           >
             检查更新
@@ -334,18 +329,26 @@ onUnmounted(() => {
           <span class="update-version-number">v{{ shortVersion }}</span>
           <span v-if="buildNumber" class="update-build-number">Build {{ buildNumber }}</span>
         </div>
-        <div v-if="updateStore.state === 'checking'" class="update-status-badge checking">
+        <div v-if="updateStore.state === 'Checking'" class="update-status-badge checking">
           <NSpin :size="12" />
           <span>正在检查...</span>
         </div>
         <div v-else-if="updateStore.isUpdateAvailable" class="update-status-badge available">
           新版本可用
         </div>
+        <div v-else-if="updateStore.isDownloading" class="update-status-badge checking">
+          <NSpin :size="12" />
+          <span>正在下载...</span>
+        </div>
         <div v-else-if="updateStore.isReady" class="update-status-badge ready">
           更新已就绪
         </div>
+        <div v-else-if="updateStore.isApplying" class="update-status-badge checking">
+          <NSpin :size="12" />
+          <span>正在更新...</span>
+        </div>
         <div v-else-if="updateStore.hasError" class="update-status-badge error-badge">
-          检查失败
+          更新失败
         </div>
         <div v-else-if="hasChecked" class="update-status-badge latest">
           &#10003; 已是最新
@@ -405,6 +408,14 @@ onUnmounted(() => {
         <div class="update-ready">
           <span>更新已下载完成，需要重启应用以完成更新</span>
           <NButton type="primary" @click="updateStore.applyUpdate()">立即重启更新</NButton>
+        </div>
+      </template>
+
+      <!-- Applying -->
+      <template v-if="updateStore.isApplying">
+        <div class="update-applying">
+          <NSpin :size="16" />
+          <span>{{ updateStore.message || '正在应用更新，应用即将重启...' }}</span>
         </div>
       </template>
 
@@ -799,6 +810,19 @@ onUnmounted(() => {
   color: var(--text-3);
   margin-top: 4px;
   margin-bottom: 8px;
+}
+
+.update-applying {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--accent);
 }
 
 .update-ready, .update-error {
