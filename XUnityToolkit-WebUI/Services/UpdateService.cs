@@ -264,11 +264,13 @@ public sealed class UpdateService(
                 if (asset is not null) downloadSize += asset.Size;
             }
 
+            var changelog = ExtractChangelog(release.Body);
+
             _lastCheckResult = new UpdateCheckResult
             {
                 UpdateAvailable = changedCount > 0 || deletedCount > 0,
                 NewVersion = remoteVersion,
-                Changelog = release.Body,
+                Changelog = changelog,
                 DownloadSize = downloadSize,
                 ChangedPackages = changedPackages.ToList(),
                 ChangedFileCount = changedCount,
@@ -282,7 +284,7 @@ public sealed class UpdateService(
                 await hubContext.Clients.Group("update").SendAsync("UpdateAvailable", new UpdateAvailableInfo
                 {
                     Version = remoteVersion,
-                    Changelog = release.Body,
+                    Changelog = changelog,
                     DownloadSize = downloadSize,
                     ChangedPackages = changedPackages.ToList()
                 }, ct);
@@ -301,7 +303,7 @@ public sealed class UpdateService(
         catch (Exception ex)
         {
             logger.LogError(ex, "检查更新失败");
-            _status = new UpdateStatusInfo { State = UpdateState.Error, Error = ex.Message };
+            _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "检查更新失败，请检查网络连接" };
             await BroadcastStatus();
             return _lastCheckResult ?? new UpdateCheckResult();
         }
@@ -361,22 +363,24 @@ public sealed class UpdateService(
 
                 var zipPath = Path.Combine(stagingDir, zipName);
 
-                // Download with progress
-                using var response = await client.GetAsync(asset.BrowserDownloadUrl,
-                    HttpCompletionOption.ResponseHeadersRead, token);
-                response.EnsureSuccessStatusCode();
-
-                await using var stream = await response.Content.ReadAsStreamAsync(token);
-                await using var fileStream = File.Create(zipPath);
-                var buffer = new byte[81920];
-                int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
+                // Download with progress (scoped to release file handle before extraction)
                 {
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-                    downloadedBytes += bytesRead;
-                    _status.DownloadedBytes = downloadedBytes;
-                    _status.Progress = totalBytes > 0 ? (double)downloadedBytes / totalBytes * 100 : 0;
-                    await BroadcastStatus();
+                    using var response = await client.GetAsync(asset.BrowserDownloadUrl,
+                        HttpCompletionOption.ResponseHeadersRead, token);
+                    response.EnsureSuccessStatusCode();
+
+                    await using var stream = await response.Content.ReadAsStreamAsync(token);
+                    await using var fileStream = File.Create(zipPath);
+                    var buffer = new byte[81920];
+                    int bytesRead;
+                    while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
+                    {
+                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                        downloadedBytes += bytesRead;
+                        _status.DownloadedBytes = downloadedBytes;
+                        _status.Progress = totalBytes > 0 ? (double)downloadedBytes / totalBytes * 100 : 0;
+                        await BroadcastStatus();
+                    }
                 }
 
                 logger.LogInformation("已下载: {Name} ({Size:N0} bytes)", zipName, new FileInfo(zipPath).Length);
@@ -471,8 +475,9 @@ public sealed class UpdateService(
             logger.LogError(ex, "下载更新失败");
             if (Directory.Exists(stagingDir))
                 Directory.Delete(stagingDir, true);
-            _status = new UpdateStatusInfo { State = UpdateState.Error, Error = ex.Message };
+            _status = new UpdateStatusInfo { State = UpdateState.Error, Error = "下载更新失败，请重试" };
             await BroadcastStatus();
+            trayService.ShowNotification("XUnityToolkit", "下载更新失败，请重试");
             throw;
         }
         finally
@@ -639,6 +644,33 @@ public sealed class UpdateService(
         {
             logger.LogWarning(ex, "启动时自动检查更新失败");
         }
+    }
+
+    /// <summary>
+    /// Extracts the "### Changelog" section from GitHub release body,
+    /// stripping download links, installation instructions, etc.
+    /// </summary>
+    private static string? ExtractChangelog(string? releaseBody)
+    {
+        if (string.IsNullOrWhiteSpace(releaseBody)) return null;
+
+        var startIndex = releaseBody.IndexOf("### Changelog", StringComparison.OrdinalIgnoreCase);
+        if (startIndex < 0) return releaseBody; // No Changelog section found, return full body
+
+        // Skip past the "### Changelog" line
+        var contentStart = releaseBody.IndexOf('\n', startIndex);
+        if (contentStart < 0) return null;
+        contentStart++; // Skip the newline
+
+        // Find the end (next ## or ### section, or end of string)
+        var endIndex = releaseBody.IndexOf("\n##", contentStart, StringComparison.Ordinal);
+
+        var content = endIndex >= 0
+            ? releaseBody[contentStart..endIndex]
+            : releaseBody[contentStart..];
+
+        var trimmed = content.Trim();
+        return trimmed.Length > 0 ? trimmed : null;
     }
 
     private Task BroadcastStatus()
