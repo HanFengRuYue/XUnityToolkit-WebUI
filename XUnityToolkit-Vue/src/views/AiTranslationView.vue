@@ -436,98 +436,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Glossary Extraction (cloud mode only) -->
-    <div class="section-card" style="animation-delay: 0.095s" v-if="settings && !isLocalMode">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon extraction">
-            <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
-          </span>
-          自动术语提取
-        </h2>
-        <NSwitch
-          :value="aiSettings.glossaryExtractionEnabled"
-          @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
-          size="small"
-        />
-      </div>
-
-      <div class="extraction-content">
-        <p class="extraction-desc">
-          翻译过程中自动从原文和译文中提取专有名词、角色名等术语，并加入对应游戏的术语表。
-        </p>
-
-        <div v-if="aiSettings.glossaryExtractionEnabled" class="extraction-config">
-          <div class="extraction-field">
-            <label class="extraction-label">提取使用的 AI 提供商</label>
-            <NSelect
-              :value="aiSettings.glossaryExtractionEndpointId ?? ''"
-              @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
-              :options="extractionEndpointOptions"
-              size="small"
-              class="extraction-select"
-            />
-          </div>
-
-          <div v-if="extractionStats" class="extraction-stats">
-            <div class="ext-metrics">
-              <div class="ext-metric-card">
-                <div class="ext-metric-icon">
-                  <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
-                </div>
-                <div class="ext-metric-data">
-                  <span class="ext-metric-value">{{ extractionStats.totalExtracted }}</span>
-                  <span class="ext-metric-label">已提取术语</span>
-                </div>
-              </div>
-              <div class="ext-metric-card">
-                <div class="ext-metric-icon">
-                  <NIcon :size="16"><SyncOutlined /></NIcon>
-                </div>
-                <div class="ext-metric-data">
-                  <span class="ext-metric-value">{{ extractionStats.totalExtractionCalls }}</span>
-                  <span class="ext-metric-label">提取调用</span>
-                </div>
-              </div>
-              <div v-if="extractionStats.activeExtractions > 0" class="ext-metric-card is-active">
-                <div class="ext-metric-icon active">
-                  <NIcon :size="16"><HourglassEmptyOutlined /></NIcon>
-                </div>
-                <div class="ext-metric-data">
-                  <span class="ext-metric-value">{{ extractionStats.activeExtractions }}</span>
-                  <span class="ext-metric-label">正在提取</span>
-                </div>
-              </div>
-              <div v-if="extractionStats.totalErrors > 0" class="ext-metric-card has-error">
-                <div class="ext-metric-icon error">
-                  <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
-                </div>
-                <div class="ext-metric-data">
-                  <span class="ext-metric-value">{{ extractionStats.totalErrors }}</span>
-                  <span class="ext-metric-label">错误</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="extractionStats.recentExtractions.length > 0" class="extraction-recent">
-              <span class="extraction-recent-title">最近提取</span>
-              <div
-                v-for="(item, index) in extractionStats.recentExtractions.slice().reverse().slice(0, 5)"
-                :key="index"
-                class="extraction-recent-item"
-              >
-                <div class="ext-recent-left">
-                  <span class="ext-recent-game">{{ getGameName(item.gameId) }}</span>
-                  <span class="ext-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
-                </div>
-                <span class="ext-recent-badge">+{{ item.termsExtracted }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- AI Settings with Mode Tabs -->
     <div class="section-card" style="animation-delay: 0.1s" v-if="settings">
       <div class="section-header">
@@ -560,18 +468,107 @@ onUnmounted(() => {
       </div>
 
       <!-- Cloud Settings -->
-      <AiTranslationCard
-        v-if="activeMode === 'cloud'"
-        v-model="aiSettings"
-        :embedded="true"
-      />
-
-      <!-- Local AI Panel -->
-      <LocalAiPanel
-        v-if="activeMode === 'local'"
-        v-model="aiSettings"
-      />
+      <Transition name="mode-switch" mode="out-in">
+        <AiTranslationCard v-if="activeMode === 'cloud'" key="cloud" v-model="aiSettings" :embedded="true" />
+        <LocalAiPanel v-else key="local" v-model="aiSettings" />
+      </Transition>
     </div>
+
+    <!-- Glossary Extraction (cloud mode only) -->
+    <Transition name="card-slide">
+      <div class="section-card" style="animation-delay: 0.12s" v-if="settings && !isLocalMode">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon extraction">
+              <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
+            </span>
+            自动术语提取
+          </h2>
+          <NSwitch
+            :value="aiSettings.glossaryExtractionEnabled"
+            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
+            size="small"
+          />
+        </div>
+
+        <div class="extraction-content">
+          <p class="extraction-desc">
+            翻译过程中自动从原文和译文中提取专有名词、角色名等术语，并加入对应游戏的术语表。
+          </p>
+
+          <Transition name="expand-fade">
+            <div v-if="aiSettings.glossaryExtractionEnabled" class="extraction-config">
+              <div class="extraction-field">
+                <label class="extraction-label">提取使用的 AI 提供商</label>
+                <NSelect
+                  :value="aiSettings.glossaryExtractionEndpointId ?? ''"
+                  @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
+                  :options="extractionEndpointOptions"
+                  size="small"
+                  class="extraction-select"
+                />
+              </div>
+
+              <div v-if="extractionStats" class="extraction-stats">
+                <div class="ext-metrics">
+                  <div class="ext-metric-card">
+                    <div class="ext-metric-icon">
+                      <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
+                    </div>
+                    <div class="ext-metric-data">
+                      <span class="ext-metric-value">{{ extractionStats.totalExtracted }}</span>
+                      <span class="ext-metric-label">已提取术语</span>
+                    </div>
+                  </div>
+                  <div class="ext-metric-card">
+                    <div class="ext-metric-icon">
+                      <NIcon :size="16"><SyncOutlined /></NIcon>
+                    </div>
+                    <div class="ext-metric-data">
+                      <span class="ext-metric-value">{{ extractionStats.totalExtractionCalls }}</span>
+                      <span class="ext-metric-label">提取调用</span>
+                    </div>
+                  </div>
+                  <div v-if="extractionStats.activeExtractions > 0" class="ext-metric-card is-active">
+                    <div class="ext-metric-icon active">
+                      <NIcon :size="16"><HourglassEmptyOutlined /></NIcon>
+                    </div>
+                    <div class="ext-metric-data">
+                      <span class="ext-metric-value">{{ extractionStats.activeExtractions }}</span>
+                      <span class="ext-metric-label">正在提取</span>
+                    </div>
+                  </div>
+                  <div v-if="extractionStats.totalErrors > 0" class="ext-metric-card has-error">
+                    <div class="ext-metric-icon error">
+                      <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
+                    </div>
+                    <div class="ext-metric-data">
+                      <span class="ext-metric-value">{{ extractionStats.totalErrors }}</span>
+                      <span class="ext-metric-label">错误</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="extractionStats.recentExtractions.length > 0" class="extraction-recent">
+                  <span class="extraction-recent-title">最近提取</span>
+                  <div
+                    v-for="(item, index) in extractionStats.recentExtractions.slice().reverse().slice(0, 5)"
+                    :key="index"
+                    class="extraction-recent-item"
+                  >
+                    <div class="ext-recent-left">
+                      <span class="ext-recent-game">{{ getGameName(item.gameId) }}</span>
+                      <span class="ext-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
+                    </div>
+                    <span class="ext-recent-badge">+{{ item.termsExtracted }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1238,6 +1235,56 @@ onUnmounted(() => {
   background: var(--bg-card);
   color: var(--accent);
   box-shadow: 0 1px 3px color-mix(in srgb, #000 5%, transparent);
+  font-weight: 600;
+}
+
+/* ===== Transition Animations ===== */
+
+/* Mode switch transition (cloud <-> local) */
+.mode-switch-enter-active,
+.mode-switch-leave-active {
+  transition: all 0.3s var(--ease-out);
+}
+.mode-switch-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.mode-switch-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+/* Expand fade for extraction config */
+.expand-fade-enter-active,
+.expand-fade-leave-active {
+  transition: all 0.35s var(--ease-out);
+  overflow: hidden;
+}
+.expand-fade-enter-from,
+.expand-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+  max-height: 0;
+}
+.expand-fade-enter-to,
+.expand-fade-leave-from {
+  max-height: 600px;
+}
+
+/* Card slide for glossary extraction card */
+.card-slide-enter-active {
+  transition: all 0.4s var(--ease-out);
+}
+.card-slide-leave-active {
+  transition: all 0.25s ease-in;
+}
+.card-slide-enter-from {
+  opacity: 0;
+  transform: translateY(16px);
+}
+.card-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-12px);
 }
 
 /* ===== Extraction Section ===== */

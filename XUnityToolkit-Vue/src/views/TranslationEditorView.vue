@@ -29,6 +29,8 @@ import {
   FileDownloadOutlined,
   AddOutlined,
   DeleteOutlined,
+  DeleteSweepOutlined,
+  BookmarkAddOutlined,
   DriveFileRenameOutlineOutlined,
   FolderOutlined,
   FilterAltOutlined,
@@ -36,7 +38,7 @@ import {
   RestartAltOutlined,
 } from '@vicons/material'
 import { gamesApi, translationEditorApi } from '@/api/games'
-import type { Game, TranslationEntry } from '@/api/types'
+import type { Game, TranslationEntry, GlossaryEntry } from '@/api/types'
 
 interface TranslationRow extends TranslationEntry {
   _id: number
@@ -345,6 +347,46 @@ function handleSortersChange(sorters: DataTableSortState | DataTableSortState[] 
   }
 }
 
+const addingToGlossary = ref(false)
+
+async function handleAddToGlossary(row: TranslationRow) {
+  if (!row.original.trim() || !row.translation.trim()) return
+  addingToGlossary.value = true
+  try {
+    const glossary = await gamesApi.getGlossary(gameId)
+    if (glossary.some((e: GlossaryEntry) => e.original === row.original)) {
+      message.warning('该原文在术语库中已存在')
+      return
+    }
+    glossary.unshift({
+      original: row.original,
+      translation: row.translation,
+      isRegex: false,
+    })
+    await gamesApi.saveGlossary(gameId, glossary)
+    message.success('已添加到术语库')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '添加失败')
+  } finally {
+    addingToGlossary.value = false
+  }
+}
+
+function handleClearAll() {
+  if (entries.value.length === 0) return
+  dialog.warning({
+    title: '清空全部',
+    content: `确定要清空全部 ${entries.value.length} 条翻译条目吗？此操作不可撤销。`,
+    positiveText: '清空',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      entries.value = []
+      bumpEntriesVersion()
+      message.success('已清空全部条目')
+    },
+  })
+}
+
 const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
   {
     title: '原文',
@@ -381,22 +423,36 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
   {
     title: '',
     key: 'actions',
-    width: 50,
+    width: 80,
     render(row) {
-      return h(NButton, {
-        size: 'tiny',
-        quaternary: true,
-        type: 'error',
-        onClick: () => {
-          const idx = entries.value.findIndex(e => e._id === row._id)
-          if (idx >= 0) {
-            entries.value.splice(idx, 1)
-            bumpEntriesVersion()
-          }
-        },
-      }, {
-        icon: () => h(NIcon, { size: 16 }, () => h(DeleteOutlined)),
-      })
+      return h('div', { style: 'display: flex; gap: 2px' }, [
+        h(NTooltip, null, {
+          trigger: () => h(NButton, {
+            size: 'tiny',
+            quaternary: true,
+            type: 'primary',
+            disabled: !row.translation.trim() || addingToGlossary.value,
+            onClick: () => handleAddToGlossary(row),
+          }, {
+            icon: () => h(NIcon, { size: 16 }, () => h(BookmarkAddOutlined)),
+          }),
+          default: () => '添加到术语库',
+        }),
+        h(NButton, {
+          size: 'tiny',
+          quaternary: true,
+          type: 'error',
+          onClick: () => {
+            const idx = entries.value.findIndex(e => e._id === row._id)
+            if (idx >= 0) {
+              entries.value.splice(idx, 1)
+              bumpEntriesVersion()
+            }
+          },
+        }, {
+          icon: () => h(NIcon, { size: 16 }, () => h(DeleteOutlined)),
+        }),
+      ])
     },
   },
 ])
@@ -651,6 +707,38 @@ function handleExport() {
             {{ filteredAndSortedEntries.length }} / {{ entries.length }}
           </NTag>
         </h2>
+        <div class="header-actions">
+          <NButton
+            size="small"
+            type="error"
+            secondary
+            :disabled="entries.length === 0"
+            @click="handleClearAll"
+          >
+            <template #icon><NIcon :size="16"><DeleteSweepOutlined /></NIcon></template>
+            清空
+          </NButton>
+          <NBadge :show="hasActiveFilters" dot :offset="[-2, 2]">
+            <NButton
+              size="small"
+              :type="showFilterPanel ? 'primary' : 'default'"
+              secondary
+              @click="showFilterPanel = !showFilterPanel"
+            >
+              <template #icon><NIcon :size="16"><FilterAltOutlined /></NIcon></template>
+              筛选
+            </NButton>
+          </NBadge>
+          <NButton
+            size="small"
+            :type="showReplacePanel ? 'primary' : 'default'"
+            secondary
+            @click="showReplacePanel = !showReplacePanel"
+          >
+            <template #icon><NIcon :size="16"><FindReplaceOutlined /></NIcon></template>
+            替换
+          </NButton>
+        </div>
       </div>
 
       <!-- Add Entry Form -->
@@ -677,30 +765,6 @@ function handleExport() {
         >
           <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
           添加
-        </NButton>
-      </div>
-
-      <!-- Toolbar -->
-      <div class="editor-toolbar">
-        <NBadge :show="hasActiveFilters" dot :offset="[-2, 2]">
-          <NButton
-            size="small"
-            :type="showFilterPanel ? 'primary' : 'default'"
-            secondary
-            @click="showFilterPanel = !showFilterPanel"
-          >
-            <template #icon><NIcon :size="16"><FilterAltOutlined /></NIcon></template>
-            筛选
-          </NButton>
-        </NBadge>
-        <NButton
-          size="small"
-          :type="showReplacePanel ? 'primary' : 'default'"
-          secondary
-          @click="showReplacePanel = !showReplacePanel"
-        >
-          <template #icon><NIcon :size="16"><FindReplaceOutlined /></NIcon></template>
-          替换
         </NButton>
       </div>
 
@@ -864,12 +928,6 @@ function handleExport() {
 </template>
 
 <style scoped>
-.editor-toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
 .filter-panel {
   display: flex;
   flex-direction: column;

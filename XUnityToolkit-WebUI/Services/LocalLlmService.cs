@@ -34,6 +34,7 @@ public sealed class LocalLlmService(
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _downloads = new();
     private readonly ConcurrentDictionary<string, bool> _pauseRequests = new();
     private readonly ConcurrentDictionary<string, bool> _downloadMirrorState = new();
+    private readonly ConcurrentDictionary<string, bool> _downloadModelScopeState = new();
 
     // GPU cache
     private List<GpuInfo>? _gpuCache;
@@ -649,8 +650,9 @@ public sealed class LocalLlmService(
         {
             logger.LogError(ex, "模型下载失败: {Name}", catalogEntry.Name);
             _downloadMirrorState.TryGetValue(catalogId, out var mirror);
+            _downloadModelScopeState.TryGetValue(catalogId, out var modelScope);
             await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-                catalogId, 0, 0, 0, false, ex.Message, UseMirror: mirror));
+                catalogId, 0, 0, 0, false, ex.Message, UseMirror: mirror, UseModelScope: modelScope));
             await CleanupModelDownloadAsync(catalogId);
             trayService.ShowNotification("下载失败", $"模型 {catalogEntry.Name} 下载失败", ToolTipIcon.Error);
         }
@@ -658,6 +660,7 @@ public sealed class LocalLlmService(
         {
             _downloads.TryRemove(catalogId, out _);
             _downloadMirrorState.TryRemove(catalogId, out _);
+            _downloadModelScopeState.TryRemove(catalogId, out _);
             cts.Dispose();
         }
     }
@@ -665,14 +668,33 @@ public sealed class LocalLlmService(
     private async Task DownloadModelInternalAsync(BuiltInModelInfo entry, CancellationToken ct)
     {
         var appSettings = await settingsService.GetAsync(ct);
-        var useHfMirror = !string.IsNullOrWhiteSpace(appSettings.HfMirrorUrl);
-        _downloadMirrorState[entry.Id] = useHfMirror;
-        var mirrorBase = useHfMirror
-            ? appSettings.HfMirrorUrl.TrimEnd('/')
-            : "https://huggingface.co";
+        var useModelScope = appSettings.ModelDownloadSource == ModelDownloadSource.ModelScope
+            && !string.IsNullOrEmpty(entry.ModelScopeRepo)
+            && !string.IsNullOrEmpty(entry.ModelScopeFile);
 
-        var url = $"{mirrorBase}/{entry.HuggingFaceRepo}/resolve/main/{entry.HuggingFaceFile}";
-        var finalPath = Path.Combine(paths.ModelsDirectory, entry.HuggingFaceFile);
+        string url;
+        string fileName;
+        if (useModelScope)
+        {
+            // ModelScope uses /models/{repo}/resolve/master/{file} (branch: master, not main)
+            url = $"https://modelscope.cn/models/{entry.ModelScopeRepo}/resolve/master/{entry.ModelScopeFile}";
+            fileName = entry.ModelScopeFile!;
+            _downloadMirrorState[entry.Id] = false;
+            _downloadModelScopeState[entry.Id] = true;
+        }
+        else
+        {
+            var useHfMirror = !string.IsNullOrWhiteSpace(appSettings.HfMirrorUrl);
+            _downloadMirrorState[entry.Id] = useHfMirror;
+            var mirrorBase = useHfMirror
+                ? appSettings.HfMirrorUrl.TrimEnd('/')
+                : "https://huggingface.co";
+            url = $"{mirrorBase}/{entry.HuggingFaceRepo}/resolve/main/{entry.HuggingFaceFile}";
+            fileName = entry.HuggingFaceFile;
+            _downloadModelScopeState[entry.Id] = false;
+        }
+
+        var finalPath = Path.Combine(paths.ModelsDirectory, fileName);
         var tempPath = finalPath + ".downloading";
 
         long existingBytes = 0;
@@ -680,6 +702,9 @@ public sealed class LocalLlmService(
             existingBytes = new FileInfo(tempPath).Length;
 
         var client = httpClientFactory.CreateClient("LocalLlmDownload");
+
+        _downloadMirrorState.TryGetValue(entry.Id, out var isMirror);
+        _downloadModelScopeState.TryGetValue(entry.Id, out var isModelScope);
 
         if (existingBytes > 0)
         {
@@ -695,7 +720,7 @@ public sealed class LocalLlmService(
                 {
                     if (File.Exists(finalPath)) File.Delete(finalPath);
                     File.Move(tempPath, finalPath);
-                    await FinalizeModelDownloadAsync(entry, finalPath, existingBytes, useHfMirror, ct);
+                    await FinalizeModelDownloadAsync(entry, finalPath, existingBytes, isMirror, isModelScope, ct);
                     return;
                 }
                 File.Delete(tempPath);
@@ -706,7 +731,7 @@ public sealed class LocalLlmService(
                 var totalBytes = rangeResp.Content.Headers.ContentLength.HasValue
                     ? rangeResp.Content.Headers.ContentLength.Value + existingBytes
                     : entry.FileSizeBytes;
-                await DownloadModelStreamAsync(entry, rangeResp, tempPath, finalPath, existingBytes, totalBytes, useHfMirror, ct);
+                await DownloadModelStreamAsync(entry, rangeResp, tempPath, finalPath, existingBytes, totalBytes, isMirror, isModelScope, ct);
                 return;
             }
         }
@@ -717,11 +742,11 @@ public sealed class LocalLlmService(
         resp.EnsureSuccessStatusCode();
 
         var freshTotal = resp.Content.Headers.ContentLength ?? entry.FileSizeBytes;
-        await DownloadModelStreamAsync(entry, resp, tempPath, finalPath, 0, freshTotal, useHfMirror, ct);
+        await DownloadModelStreamAsync(entry, resp, tempPath, finalPath, 0, freshTotal, isMirror, isModelScope, ct);
     }
 
     private async Task DownloadModelStreamAsync(BuiltInModelInfo entry, HttpResponseMessage resp,
-        string tempPath, string finalPath, long existingBytes, long totalBytes, bool useMirror, CancellationToken ct)
+        string tempPath, string finalPath, long existingBytes, long totalBytes, bool useMirror, bool useModelScope, CancellationToken ct)
     {
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         await using var fs = new FileStream(tempPath, existingBytes > 0 ? FileMode.Append : FileMode.Create,
@@ -745,7 +770,7 @@ public sealed class LocalLlmService(
                 var speed = elapsed > 0 ? (long)((bytesDownloaded - existingBytes) / elapsed) : 0;
 
                 await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-                    entry.Id, bytesDownloaded, totalBytes, speed, false, null, UseMirror: useMirror));
+                    entry.Id, bytesDownloaded, totalBytes, speed, false, null, UseMirror: useMirror, UseModelScope: useModelScope));
                 lastBroadcastTicks = now;
             }
         }
@@ -755,10 +780,10 @@ public sealed class LocalLlmService(
         if (File.Exists(finalPath)) File.Delete(finalPath);
         File.Move(tempPath, finalPath);
 
-        await FinalizeModelDownloadAsync(entry, finalPath, bytesDownloaded, useMirror, ct);
+        await FinalizeModelDownloadAsync(entry, finalPath, bytesDownloaded, useMirror, useModelScope, ct);
     }
 
-    private async Task FinalizeModelDownloadAsync(BuiltInModelInfo entry, string finalPath, long fileSize, bool useMirror, CancellationToken ct)
+    private async Task FinalizeModelDownloadAsync(BuiltInModelInfo entry, string finalPath, long fileSize, bool useMirror, bool useModelScope, CancellationToken ct)
     {
         var settings = await LoadSettingsAsync(ct);
         settings.PausedDownloads.RemoveAll(p => p.CatalogId == entry.Id);
@@ -777,15 +802,26 @@ public sealed class LocalLlmService(
         await SaveSettingsAsync(settings, ct);
 
         await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-            entry.Id, fileSize, fileSize, 0, true, null, UseMirror: useMirror));
+            entry.Id, fileSize, fileSize, 0, true, null, UseMirror: useMirror, UseModelScope: useModelScope));
 
         logger.LogInformation("模型下载完成: {Name} → {Path}", entry.Name, finalPath);
         trayService.ShowNotification("下载完成", $"模型 {entry.Name} 已下载完成");
     }
 
+    /// <summary>Returns the download filename for a model, preferring ModelScope when configured.</summary>
+    private async Task<string> GetDownloadFileNameAsync(BuiltInModelInfo entry, CancellationToken ct = default)
+    {
+        var appSettings = await settingsService.GetAsync(ct);
+        if (appSettings.ModelDownloadSource == ModelDownloadSource.ModelScope
+            && !string.IsNullOrEmpty(entry.ModelScopeFile))
+            return entry.ModelScopeFile;
+        return entry.HuggingFaceFile;
+    }
+
     private async Task SavePausedStateAsync(BuiltInModelInfo entry)
     {
-        var tempPath = Path.Combine(paths.ModelsDirectory, entry.HuggingFaceFile + ".downloading");
+        var fileName = await GetDownloadFileNameAsync(entry);
+        var tempPath = Path.Combine(paths.ModelsDirectory, fileName + ".downloading");
         long bytesDownloaded = File.Exists(tempPath) ? new FileInfo(tempPath).Length : 0;
 
         var settings = await LoadSettingsAsync();
@@ -807,9 +843,14 @@ public sealed class LocalLlmService(
         var entry = BuiltInModelCatalog.Models.FirstOrDefault(m => m.Id == catalogId);
         if (entry is not null)
         {
-            var tempPath = Path.Combine(paths.ModelsDirectory, entry.HuggingFaceFile + ".downloading");
-            try { if (File.Exists(tempPath)) File.Delete(tempPath); }
-            catch { /* file might be briefly in use */ }
+            // Clean up temp files for both possible download sources
+            foreach (var file in new[] { entry.HuggingFaceFile, entry.ModelScopeFile })
+            {
+                if (string.IsNullOrEmpty(file)) continue;
+                var tempPath = Path.Combine(paths.ModelsDirectory, file + ".downloading");
+                try { if (File.Exists(tempPath)) File.Delete(tempPath); }
+                catch { /* file might be briefly in use */ }
+            }
         }
 
         var settings = await LoadSettingsAsync();

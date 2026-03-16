@@ -458,6 +458,17 @@ onBeforeUnmount(async () => {
   opacity: 0.45;
 }
 
+/* ===== Upload Button Alignment ===== */
+.header-actions :deep(.n-upload) {
+  display: flex;
+  align-items: center;
+}
+
+.header-actions :deep(.n-upload-trigger) {
+  display: flex;
+  align-items: center;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .section-header {

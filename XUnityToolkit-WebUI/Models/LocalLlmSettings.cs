@@ -84,7 +84,9 @@ public sealed record BuiltInModelInfo(
     int RecommendedVramGb,
     string HuggingFaceRepo,
     string HuggingFaceFile,
-    string[] Tags);
+    string[] Tags,
+    string? ModelScopeRepo = null,
+    string? ModelScopeFile = null);
 
 public sealed record LocalLlmDownloadProgress(
     string CatalogId,
@@ -94,7 +96,8 @@ public sealed record LocalLlmDownloadProgress(
     bool Done,
     string? Error,
     bool Paused = false,
-    bool UseMirror = false);
+    bool UseMirror = false,
+    bool UseModelScope = false);
 
 /// <summary>
 /// Static catalog of recommended models. Updated with app releases, not stored on disk.
@@ -110,7 +113,9 @@ public static class BuiltInModelCatalog
             6,
             "Murasaki-Project/Murasaki-8B-v0.2-GGUF",
             "Murasaki-8B-v0.2-Q4_K_M.gguf",
-            ["ACGN", "日→中", "轻量"]),
+            ["ACGN", "日→中", "轻量"],
+            "Murasaki-Project/Murasaki-8B-v0.2-GGUF",
+            "Murasaki-8B-v0.2-Q4_K_M.gguf"),
 
         new("murasaki-14b-q4",
             "Murasaki 14B Q4_K_M",
@@ -119,7 +124,9 @@ public static class BuiltInModelCatalog
             10,
             "Murasaki-Project/Murasaki-14B-v0.2-GGUF",
             "Murasaki-14B-v0.2-Q4_K_M.gguf",
-            ["ACGN", "日→中", "推荐"]),
+            ["ACGN", "日→中", "推荐"],
+            "Murasaki-Project/Murasaki-14B-v0.2-GGUF",
+            "Murasaki-14B-v0.2-Q4_K_M.gguf"),
 
         new("qwen3.5-4b-q4",
             "Qwen3.5 4B Q4_K_M",
@@ -128,7 +135,9 @@ public static class BuiltInModelCatalog
             4,
             "unsloth/Qwen3.5-4B-GGUF",
             "Qwen3.5-4B-Q4_K_M.gguf",
-            ["通用", "多语言", "轻量"]),
+            ["通用", "多语言", "轻量"],
+            "unsloth/Qwen3.5-4B-GGUF",
+            "Qwen3.5-4B-Q4_K_M.gguf"),
 
         new("qwen3.5-9b-q4",
             "Qwen3.5 9B Q4_K_M",
@@ -137,7 +146,9 @@ public static class BuiltInModelCatalog
             8,
             "unsloth/Qwen3.5-9B-GGUF",
             "Qwen3.5-9B-Q4_K_M.gguf",
-            ["通用", "多语言"]),
+            ["通用", "多语言"],
+            "unsloth/Qwen3.5-9B-GGUF",
+            "Qwen3.5-9B-Q4_K_M.gguf"),
 
         new("qwen3.5-27b-q4",
             "Qwen3.5 27B Q4_K_M",
@@ -146,6 +157,8 @@ public static class BuiltInModelCatalog
             20,
             "unsloth/Qwen3.5-27B-GGUF",
             "Qwen3.5-27B-Q4_K_M.gguf",
-            ["通用", "多语言", "高质量"]),
+            ["通用", "多语言", "高质量"],
+            "unsloth/Qwen3.5-27B-GGUF",
+            "Qwen3.5-27B-Q4_K_M.gguf"),
     ];
 }

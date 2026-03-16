@@ -727,9 +727,7 @@ onBeforeUnmount(async () => {
 .font-generator-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 24px 28px;
-  max-width: 900px;
+  gap: 16px;
 }
 
 .page-subtitle {
@@ -737,6 +735,14 @@ onBeforeUnmount(async () => {
   color: var(--text-3);
   margin: -12px 0 0 0;
   animation: slideUp 0.5s var(--ease-out) backwards;
+}
+
+/* NUpload full width */
+:deep(.n-upload) {
+  width: 100%;
+}
+:deep(.n-upload-trigger) {
+  width: 100%;
 }
 
 /* Upload + Settings Grid */
@@ -965,9 +971,6 @@ onBeforeUnmount(async () => {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .font-generator-page {
-    padding: 20px 20px;
-  }
   .upload-settings-grid {
     grid-template-columns: 1fr;
   }
@@ -990,10 +993,6 @@ onBeforeUnmount(async () => {
 }
 
 @media (max-width: 480px) {
-  .font-generator-page {
-    padding: 16px 12px;
-    gap: 14px;
-  }
   .upload-area {
     padding: 16px 12px;
   }

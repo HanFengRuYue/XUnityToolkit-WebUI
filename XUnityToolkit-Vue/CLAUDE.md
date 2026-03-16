@@ -19,13 +19,13 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Sub-page layout:** Game sub-pages use `.sub-page` (24px title) + `.sub-page-header` + `.back-button`; top-level pages use `.page-title` directly (26px)
 - **Header actions:** Use `.header-actions` (NOT `.header-btn-group`) for button groups in section headers
 - **Typography:** Do NOT use `font-family: monospace` for UI text (version numbers, labels, etc.) — it clashes with the system font; only use monospace inside code blocks or developer-facing output
-- **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match
+- **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match; do NOT set padding on page-level containers (`.main-content` already provides it); do NOT use `max-width` on page containers unless content truly needs constraining; use `gap: 16px` for page-level flex column
 
 ## Adding a New Page
 
 - **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
 - **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`
-- **GlossaryEditorView:** NTabs with "术语表" and "禁翻表" tabs; each tab has independent auto-save, import/export, and search; adding a new per-game text management feature → add as a new NTabPane here
+- **GlossaryEditorView:** NTabs with "术语表" and "禁翻表" tabs; each tab has independent auto-save, import/export, search, and clear-all; adding a new per-game text management feature → add as a new NTabPane here
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
 - SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
 
@@ -40,7 +40,8 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
 - **ConfigPanel** auto-saves internally (2s), no `save` event
 - Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard; `NDialogOptions.onPositiveClick`: returning a `Promise` keeps dialog open until resolved — fire-and-forget long async work (e.g., `() => { doWork() }`) to close immediately
-- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``; columns without explicit `width`/`minWidth` get squeezed to 0px when fixed-width columns sum exceeds container — always set `minWidth` on flexible columns
+- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``; columns without explicit `width`/`minWidth` get squeezed to 0px when fixed-width columns sum exceeds container — always set `minWidth` on flexible columns; **sort stability with in-cell editing**: `computed` re-triggers on every cell mutation via deep reactivity — use a `ref` cache + version counter (`entriesVersion`) and explicit `watch` on filter/sort settings to decouple; **controlled sort mode**: use `sorter: true` + `@update:sorters` + reactive `sortOrder` on columns, apply sorting manually in data pipeline (not NDataTable's built-in sort); type is `DataTableSortState` (NOT `SortState`)
+- `NBadge`: use `:show` prop to control dot visibility (NOT `:value` with `dot: true` — `show` defaults to `true` so dot always appears if only `dot` is set)
 - `NColorPicker`: `#trigger` slot replaces entire trigger element; `#label` only customizes text inside default rectangular trigger — use `#trigger` for custom trigger buttons; always set `:modes="['hex']"` when consuming hex values (default allows rgb/hsl/hsv switching, which breaks `hexToRgb()`); manage visibility manually via `:show`/`@update:show` — do NOT also call slot's provided `onClick` (it only opens, never toggles)
 - `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
 - `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
@@ -56,6 +57,10 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false })` for synchronous string return
 - **Regex match groups:** `match[1]` is `string | undefined` in strict TS — always check `match && match[1]`
 - **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
+- **`NTabs type="segment"` dark theme:** segment tabs blend into background; override with `:deep(.n-tabs-tab--active)` using `color: var(--accent)`, `background: color-mix(in srgb, var(--accent) 12%, var(--bg-card))`, `border: 1px solid var(--accent-border)`
+- **`NUpload` in flex containers:** NUpload wraps trigger in extra divs that break flex alignment; fix with `:deep(.n-upload), :deep(.n-upload-trigger) { display: flex; align-items: center; }`
+- **Cross-page glossary access:** Other views (e.g., TranslationEditorView) can add entries to glossary via `gamesApi.getGlossary` → check duplicate → `unshift` → `gamesApi.saveGlossary`; no shared Pinia store — each page fetches/saves independently
+- **Bulk clear pattern:** "Clear all" = set reactive array to `[]`; for auto-save views (GlossaryEditor) this triggers auto-save of empty array; for manual-save views (TranslationEditor) it marks dirty state; always use `dialog.warning` confirmation
 
 ## Game Detail Background Image
 
