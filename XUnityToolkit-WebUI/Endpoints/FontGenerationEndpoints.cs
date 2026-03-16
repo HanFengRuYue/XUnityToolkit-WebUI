@@ -274,16 +274,15 @@ public static class FontGenerationEndpoints
             if (game.InstallState != InstallState.FullyInstalled)
                 return Results.BadRequest(ApiResult.Fail("请先安装 BepInEx 和 XUnity.AutoTranslator。"));
 
-            // Install to BepInEx/Font/SourceHanSans
-            var destPath = Path.Combine(game.GamePath, "BepInEx", "Font", TmpFontService.FontFileName);
-            Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-            File.Copy(srcPath, destPath, overwrite: true);
+            // Install to BepInEx/Font/ using the generated font's actual name (without .bundle extension)
+            var destFileName = Path.GetFileNameWithoutExtension(safeName);
+            var configValue = TmpFontService.InstallCustomFont(game.GamePath, srcPath, destFileName);
 
             // Patch config
             await configService.PatchSectionAsync(game.GamePath, "Behaviour",
                 new Dictionary<string, string>
                 {
-                    ["FallbackFontTextMeshPro"] = TmpFontService.ConfigValue
+                    ["FallbackFontTextMeshPro"] = configValue
                 }, ct);
 
             return Results.Ok(ApiResult.Ok());

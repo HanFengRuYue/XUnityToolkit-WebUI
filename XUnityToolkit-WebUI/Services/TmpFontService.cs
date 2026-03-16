@@ -6,46 +6,65 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed partial class TmpFontService(BundledAssetPaths bundledPaths, ILogger<TmpFontService> logger)
 {
-    internal const string FontFileName = "SourceHanSans";
-    public const string ConfigValue = "BepInEx/Font/SourceHanSans";
+    private static string GetFontDirectory(string gamePath) =>
+        Path.Combine(gamePath, "BepInEx", "Font");
 
-    private static string GetInstalledFontPath(string gamePath) =>
-        Path.Combine(gamePath, "BepInEx", "Font", FontFileName);
-
-    public bool IsFontInstalled(string gamePath) =>
-        File.Exists(GetInstalledFontPath(gamePath));
+    /// <summary>
+    /// Check if any TMP font is installed in BepInEx/Font/.
+    /// </summary>
+    public bool IsFontInstalled(string gamePath)
+    {
+        var fontDir = GetFontDirectory(gamePath);
+        if (!Directory.Exists(fontDir)) return false;
+        return Directory.GetFiles(fontDir).Length > 0;
+    }
 
     /// <summary>
     /// Install the best-matching TMP font for the given Unity version.
-    /// Returns true if the font was installed, false if no font files available.
+    /// Returns the config value (e.g. "BepInEx/Font/SourceHanSans_U2022"), or null if no font available.
     /// </summary>
-    public bool InstallFont(string gamePath, UnityGameInfo gameInfo)
+    public string? InstallFont(string gamePath, UnityGameInfo gameInfo)
     {
         var fontFile = ResolveFontFile(gameInfo.UnityVersion);
         if (fontFile is null)
         {
             logger.LogWarning("未找到可用的 TMP 字体文件");
-            return false;
+            return null;
         }
 
-        var destPath = GetInstalledFontPath(gamePath);
+        var fileName = Path.GetFileName(fontFile);
+        var destPath = Path.Combine(GetFontDirectory(gamePath), fileName);
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
         File.Copy(fontFile, destPath, overwrite: true);
 
-        logger.LogInformation("已安装 TMP 字体: {Source} → {Dest}", Path.GetFileName(fontFile), destPath);
-        return true;
+        logger.LogInformation("已安装 TMP 字体: {Source} → {Dest}", fileName, destPath);
+        return $"BepInEx/Font/{fileName}";
     }
 
     /// <summary>
-    /// Remove the installed TMP font from a game directory.
+    /// Install a custom font file (e.g. from font generator) to BepInEx/Font/.
+    /// Returns the config value.
+    /// </summary>
+    public static string InstallCustomFont(string gamePath, string srcPath, string destFileName)
+    {
+        var destPath = Path.Combine(GetFontDirectory(gamePath), destFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+        File.Copy(srcPath, destPath, overwrite: true);
+        return $"BepInEx/Font/{destFileName}";
+    }
+
+    /// <summary>
+    /// Remove all TMP font files from a game's BepInEx/Font/ directory.
     /// </summary>
     public void RemoveFont(string gamePath)
     {
-        var path = GetInstalledFontPath(gamePath);
-        if (File.Exists(path))
+        var fontDir = GetFontDirectory(gamePath);
+        if (!Directory.Exists(fontDir)) return;
+
+        foreach (var file in Directory.GetFiles(fontDir))
         {
-            File.Delete(path);
-            logger.LogInformation("已删除 TMP 字体: {Path}", path);
+            File.Delete(file);
+            logger.LogInformation("已删除 TMP 字体: {Path}", file);
         }
     }
 

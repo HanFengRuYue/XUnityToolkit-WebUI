@@ -69,6 +69,7 @@ const settings = ref<AppSettings>({
 })
 
 const themeOptions = [
+  { label: '跟随系统', value: 'system' },
   { label: '深色主题', value: 'dark' },
   { label: '浅色主题', value: 'light' },
 ]
@@ -154,6 +155,13 @@ function handleReset() {
       }
     },
   })
+}
+
+async function handleCheckUpdate() {
+  await updateStore.checkForUpdate()
+  if (updateStore.state === 'none') {
+    message.success('已是最新版本')
+  }
 }
 
 onMounted(() => {
@@ -332,7 +340,7 @@ onUnmounted(() => {
           size="small"
           :loading="updateStore.state === 'checking'"
           :disabled="updateStore.isDownloading"
-          @click="updateStore.checkForUpdate()"
+          @click="handleCheckUpdate"
         >
           检查更新
         </NButton>

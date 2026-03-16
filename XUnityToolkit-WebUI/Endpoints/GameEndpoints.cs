@@ -614,15 +614,15 @@ public static class GameEndpoints
             if (game.DetectedInfo is null)
                 return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
 
-            var installed = tmpFontService.InstallFont(game.GamePath, game.DetectedInfo);
-            if (!installed)
+            var configValue = tmpFontService.InstallFont(game.GamePath, game.DetectedInfo);
+            if (configValue is null)
                 return Results.BadRequest(ApiResult.Fail("未找到可用的 TMP 字体文件。"));
 
             // Patch config to set FallbackFontTextMeshPro
             await configService.PatchSectionAsync(game.GamePath, "Behaviour",
                 new Dictionary<string, string>
                 {
-                    ["FallbackFontTextMeshPro"] = TmpFontService.ConfigValue
+                    ["FallbackFontTextMeshPro"] = configValue
                 }, ct);
 
             return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(true)));

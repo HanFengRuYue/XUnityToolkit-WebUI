@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
-export type ThemeMode = 'dark' | 'light'
+export type ThemeMode = 'dark' | 'light' | 'system'
 
 export interface AccentColorPreset {
   hex: string
@@ -65,40 +65,59 @@ export const useThemeStore = defineStore('theme', () => {
   const mode = ref<ThemeMode>(loadInitialTheme())
   const accentColor = ref<string>(loadInitialAccent())
 
+  /** The resolved display theme (always 'dark' or 'light', never 'system') */
+  const resolvedTheme = ref<'dark' | 'light'>(resolveTheme(mode.value))
+
   function loadInitialTheme(): ThemeMode {
     const saved = localStorage.getItem('theme')
-    if (saved === 'light' || saved === 'dark') return saved
-    // Auto-detect OS theme, default to dark (matches CSS :root default)
-    if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light'
-    return 'dark'
+    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved
+    // Default to system (follow OS theme)
+    return 'system'
   }
 
   function loadInitialAccent(): string {
     return localStorage.getItem('accentColor') || '#3b82f6'
   }
 
+  function getSystemTheme(): 'dark' | 'light' {
+    if (window.matchMedia?.('(prefers-color-scheme: light)').matches) return 'light'
+    return 'dark'
+  }
+
+  function resolveTheme(theme: ThemeMode): 'dark' | 'light' {
+    if (theme === 'system') return getSystemTheme()
+    return theme
+  }
+
+  function applyCurrentTheme() {
+    const resolved = resolveTheme(mode.value)
+    resolvedTheme.value = resolved
+    applyTheme(resolved)
+    applyAccentColor(accentColor.value, resolved)
+  }
+
   function setTheme(theme: ThemeMode) {
     mode.value = theme
     localStorage.setItem('theme', theme)
-    applyTheme(theme)
-    applyAccentColor(accentColor.value, theme)
+    applyCurrentTheme()
   }
 
   function toggle() {
-    setTheme(mode.value === 'dark' ? 'light' : 'dark')
+    const current = resolvedTheme.value
+    setTheme(current === 'dark' ? 'light' : 'dark')
   }
 
   function setAccentColor(hex: string) {
     accentColor.value = hex
     localStorage.setItem('accentColor', hex)
-    applyAccentColor(hex, mode.value)
+    applyAccentColor(hex, resolvedTheme.value)
   }
 
-  function applyTheme(theme: ThemeMode) {
+  function applyTheme(theme: 'dark' | 'light') {
     document.documentElement.setAttribute('data-theme', theme)
   }
 
-  function applyAccentColor(hex: string, theme: ThemeMode) {
+  function applyAccentColor(hex: string, theme: 'dark' | 'light') {
     const { r, g, b } = hexToRgb(hex)
     const el = document.documentElement.style
     const effectiveHex = theme === 'light' ? darkenColor(hex, 0.15) : hex
@@ -120,9 +139,18 @@ export const useThemeStore = defineStore('theme', () => {
     )
   }
 
-  // Apply on init
-  applyTheme(mode.value)
-  applyAccentColor(accentColor.value, mode.value)
+  // Listen for OS theme changes (for 'system' mode)
+  const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)')
+  if (mediaQuery) {
+    mediaQuery.addEventListener('change', () => {
+      if (mode.value === 'system') {
+        applyCurrentTheme()
+      }
+    })
+  }
 
-  return { mode, accentColor, setTheme, toggle, setAccentColor }
+  // Apply on init
+  applyCurrentTheme()
+
+  return { mode, accentColor, resolvedTheme, setTheme, toggle, setAccentColor }
 })

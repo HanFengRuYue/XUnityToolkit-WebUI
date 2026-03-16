@@ -163,8 +163,8 @@ $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint
 $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 
-# Generate version: 1.4.{YYYYMMDDHHmm}
-$BuildVersion = "1.4.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 1.5.{YYYYMMDDHHmm}
+$BuildVersion = "1.5.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # Generate MSI-compatible version: {(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}
 # Constraints: major < 256, minor < 256, build < 65536

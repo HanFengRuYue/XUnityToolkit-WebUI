@@ -388,24 +388,24 @@ onBeforeUnmount(async () => {
           字体与设置
         </h2>
       </div>
-      <div class="upload-settings-grid">
+      <NUpload
+        v-if="!uploadedFont"
+        accept=".ttf,.otf"
+        :max="1"
+        :custom-request="({ file }) => handleUpload({ file: file as any })"
+        :show-file-list="false"
+        :disabled="isGenerating"
+        directory-dnd
+      >
+        <div class="upload-area">
+          <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
+          <p class="upload-text">拖拽或点击上传</p>
+          <p class="upload-hint">TTF / OTF · 最大 50MB</p>
+        </div>
+      </NUpload>
+      <div v-else class="upload-settings-grid">
         <div class="upload-column">
-          <NUpload
-            v-if="!uploadedFont"
-            accept=".ttf,.otf"
-            :max="1"
-            :custom-request="({ file }) => handleUpload({ file: file as any })"
-            :show-file-list="false"
-            :disabled="isGenerating"
-            directory-dnd
-          >
-            <div class="upload-area">
-              <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
-              <p class="upload-text">拖拽或点击上传</p>
-              <p class="upload-hint">TTF / OTF · 最大 50MB</p>
-            </div>
-          </NUpload>
-          <div v-else class="upload-result">
+          <div class="upload-result">
             <div class="upload-result-info">
               <NIcon :size="20" color="var(--accent)"><FontDownloadOutlined /></NIcon>
               <div>

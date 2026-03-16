@@ -927,7 +927,7 @@ onUnmounted(() => {
   color: var(--accent);
 }
 
-.translating-stage.is-active .stage-icon {
+.translating-stage.is-active .stage-icon :deep(.n-icon) {
   animation: spin-icon 2s linear infinite;
 }
 
