@@ -246,6 +246,39 @@ const regexError = computed(() => {
   }
 })
 
+const replaceFindRegexError = computed(() => {
+  if (!replaceIsRegex.value || !debouncedReplaceFindText.value) return ''
+  try {
+    new RegExp(debouncedReplaceFindText.value)
+    return ''
+  } catch (e) {
+    return (e as Error).message
+  }
+})
+
+const replaceMatchCount = computed(() => {
+  const findText = debouncedReplaceFindText.value
+  if (!findText) return 0
+  if (replaceIsRegex.value) {
+    try {
+      const re = new RegExp(findText, 'g')
+      let count = 0
+      for (const entry of filteredAndSortedEntries.value) {
+        if (re.test(entry.translation)) count++
+        re.lastIndex = 0
+      }
+      return count
+    } catch {
+      return 0
+    }
+  } else {
+    const lower = findText.toLowerCase()
+    return filteredAndSortedEntries.value.filter(e =>
+      e.translation.toLowerCase().includes(lower)
+    ).length
+  }
+})
+
 function resetFilters() {
   panelSortMode.value = 'default'
   filterKeyword.value = ''
@@ -256,6 +289,48 @@ function resetFilters() {
   filterRegexTarget.value = 'both'
   columnSortKey.value = null
   columnSortOrder.value = false
+}
+
+function handleReplaceAll() {
+  const findText = debouncedReplaceFindText.value
+  if (!findText || replaceMatchCount.value === 0) return
+
+  dialog.warning({
+    title: '全部替换',
+    content: `将替换 ${replaceMatchCount.value} 条匹配，是否继续？`,
+    positiveText: '替换',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      let replaced = 0
+      const visibleIds = new Set(filteredAndSortedEntries.value.map(e => e._id))
+
+      for (const entry of entries.value) {
+        if (!visibleIds.has(entry._id)) continue
+
+        let newTranslation: string
+        if (replaceIsRegex.value) {
+          try {
+            const re = new RegExp(findText, 'g')
+            newTranslation = entry.translation.replace(re, replaceWithText.value)
+          } catch {
+            continue
+          }
+        } else {
+          const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          const re = new RegExp(escaped, 'gi')
+          newTranslation = entry.translation.replace(re, replaceWithText.value)
+        }
+
+        if (newTranslation !== entry.translation) {
+          entry.translation = newTranslation
+          replaced++
+        }
+      }
+
+      bumpEntriesVersion()
+      message.success(`已替换 ${replaced} 条`)
+    },
+  })
 }
 
 function handleSortersChange(sorters: DataTableSortState | DataTableSortState[] | null) {
@@ -696,6 +771,66 @@ function handleExport() {
           <NButton size="small" @click="resetFilters">
             <template #icon><NIcon :size="14"><RestartAltOutlined /></NIcon></template>
             重置筛选
+          </NButton>
+        </div>
+      </div>
+
+      <!-- Replace Panel -->
+      <div v-if="showReplacePanel" class="filter-panel">
+        <div class="filter-row">
+          <span class="filter-label">查找</span>
+          <div style="display: flex; gap: 8px; flex: 1; align-items: center">
+            <NInput
+              v-model:value="replaceFindText"
+              placeholder="查找…"
+              clearable
+              size="small"
+              :status="replaceFindRegexError ? 'error' : undefined"
+              style="flex: 1"
+            />
+            <NTag v-if="debouncedReplaceFindText && !replaceFindRegexError" size="small" :bordered="false">
+              {{ replaceMatchCount }} 条匹配
+            </NTag>
+          </div>
+        </div>
+
+        <NTooltip v-if="replaceFindRegexError" trigger="hover">
+          <template #trigger>
+            <div class="filter-row" style="padding-left: 82px">
+              <span class="regex-error">{{ replaceFindRegexError }}</span>
+            </div>
+          </template>
+          {{ replaceFindRegexError }}
+        </NTooltip>
+
+        <div class="filter-row">
+          <span class="filter-label">替换为</span>
+          <NInput
+            v-model:value="replaceWithText"
+            placeholder="替换为…"
+            clearable
+            size="small"
+            style="flex: 1"
+          />
+        </div>
+
+        <div class="filter-row">
+          <span class="filter-label">模式</span>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <span style="font-size: 12px; color: var(--text-3)">普通文本</span>
+            <NSwitch v-model:value="replaceIsRegex" size="small" />
+            <span style="font-size: 12px; color: var(--text-3)">正则表达式</span>
+          </div>
+        </div>
+
+        <div class="filter-row" style="justify-content: flex-end">
+          <NButton
+            size="small"
+            type="warning"
+            :disabled="replaceMatchCount === 0"
+            @click="handleReplaceAll"
+          >
+            全部替换
           </NButton>
         </div>
       </div>
