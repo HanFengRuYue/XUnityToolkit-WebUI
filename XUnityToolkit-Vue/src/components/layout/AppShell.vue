@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined } from '@vicons/material'
@@ -13,6 +13,28 @@ const sidebarOpen = ref(false)
 const appVersion = ref('')
 const updateStore = useUpdateStore()
 
+const showUpdateBadge = computed(() =>
+  updateStore.isUpdateAvailable || updateStore.isReady || updateStore.isDownloading
+)
+
+// Watch for update availability — push Windows system notification
+let notifiedVersion: string | undefined
+watch(() => updateStore.availableInfo, (info) => {
+  if (!info || !updateStore.isUpdateAvailable) return
+  if (notifiedVersion === info.version) return
+  notifiedVersion = info.version
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('XUnity Toolkit', {
+      body: `发现新版本 v${info.version}，点击前往设置更新`,
+      icon: '/logo.png',
+    }).onclick = () => {
+      window.focus()
+      router.push('/settings')
+    }
+  }
+})
+
 onMounted(async () => {
   try {
     const info = await settingsApi.getVersion()
@@ -20,6 +42,10 @@ onMounted(async () => {
     appVersion.value = match?.[1] ?? info.version
   } catch {
     appVersion.value = '1.0.0'
+  }
+  // Request notification permission early
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission()
   }
   // Initialize update system early so we receive SignalR broadcasts from startup auto-check
   updateStore.init()
@@ -116,6 +142,7 @@ watch(() => route.path, () => {
             <component :is="item.icon" />
           </NIcon>
           <span>{{ item.label }}</span>
+          <span v-if="item.key === '/settings' && showUpdateBadge" class="update-dot" />
         </a>
       </nav>
 
@@ -272,6 +299,21 @@ watch(() => route.path, () => {
   color: var(--accent);
   filter: drop-shadow(0 0 6px var(--accent-glow));
   transition: filter 0.3s ease, color 0.3s ease;
+}
+
+.update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  margin-left: auto;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 /* ===== Sidebar Footer ===== */
