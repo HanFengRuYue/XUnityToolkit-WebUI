@@ -385,27 +385,29 @@ public sealed class UpdateService(
 
                 logger.LogInformation("已下载: {Name} ({Size:N0} bytes)", zipName, new FileInfo(zipPath).Length);
 
-                // Extract only changed files from this package
-                using var archive = ZipFile.OpenRead(zipPath);
-                foreach (var entry in archive.Entries)
+                // Extract only changed files from this package (scoped to release file handle before delete)
                 {
-                    if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories
+                    using var archive = ZipFile.OpenRead(zipPath);
+                    foreach (var entry in archive.Entries)
+                    {
+                        if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories
 
-                    var entryRelativePath = entry.FullName.Replace('\\', '/');
-                    // For wwwroot.zip and bundled.zip, the zip may contain the directory name
-                    // Normalize path
-                    if (!_remoteManifest.Files.TryGetValue(entryRelativePath, out var manifestEntry))
-                        continue;
+                        var entryRelativePath = entry.FullName.Replace('\\', '/');
+                        // For wwwroot.zip and bundled.zip, the zip may contain the directory name
+                        // Normalize path
+                        if (!_remoteManifest.Files.TryGetValue(entryRelativePath, out var manifestEntry))
+                            continue;
 
-                    // Check if this file actually changed
-                    var localPath = Path.Combine(appDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
-                    if (File.Exists(localPath) && ComputeFileHash(localPath) == manifestEntry.Hash)
-                        continue;
+                        // Check if this file actually changed
+                        var localPath = Path.Combine(appDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                        if (File.Exists(localPath) && ComputeFileHash(localPath) == manifestEntry.Hash)
+                            continue;
 
-                    // Extract to staging (with path traversal protection)
-                    var destPath = PathSecurity.SafeJoin(filesDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                    entry.ExtractToFile(destPath, overwrite: true);
+                        // Extract to staging (with path traversal protection)
+                        var destPath = PathSecurity.SafeJoin(filesDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                        entry.ExtractToFile(destPath, overwrite: true);
+                    }
                 }
 
                 // Clean up downloaded ZIP
