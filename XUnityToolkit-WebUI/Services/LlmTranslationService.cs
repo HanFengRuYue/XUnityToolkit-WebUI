@@ -64,6 +64,7 @@ public sealed class LlmTranslationService(
     private bool _enabled = true;
 
     // ── Term audit stats ──
+    private long _termMatchedTextCount;
     private long _termAuditPhase1PassCount;
     private long _termAuditPhase2PassCount;
     private long _termAuditForceCorrectedCount;
@@ -130,6 +131,7 @@ public sealed class LlmTranslationService(
             CurrentGameId: Volatile.Read(ref _currentGameId)
         )
         {
+            TermMatchedTextCount = (int)Interlocked.Read(ref _termMatchedTextCount),
             TermAuditPhase1PassCount = (int)Interlocked.Read(ref _termAuditPhase1PassCount),
             TermAuditPhase2PassCount = (int)Interlocked.Read(ref _termAuditPhase2PassCount),
             TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount)
@@ -206,8 +208,16 @@ public sealed class LlmTranslationService(
             }
 
             if (logger.IsEnabled(LogLevel.Debug))
+            {
                 logger.LogDebug("翻译上下文: gameId={GameId}, 术语={TermCount}条(匹配={MatchedCount}条), 文本数={TextCount}",
                     gameId ?? "(空)", allTerms?.Count ?? 0, matchedTerms?.Count ?? 0, texts.Count);
+                if (glossary is { Count: > 0 })
+                    logger.LogDebug("翻译术语: {Count} 条 [{Terms}]",
+                        glossary.Count, string.Join(", ", glossary.Select(g => $"\"{g.Original}\"→\"{g.Translation}\"")));
+                if (dntEntries is { Count: > 0 })
+                    logger.LogDebug("禁翻词: {Count} 条 [{Terms}]",
+                        dntEntries.Count, string.Join(", ", dntEntries.Select(d => $"\"{d.Original}\"")));
+            }
 
             // Load per-game description (cached in-memory, no disk I/O)
             string? gameDescription = null;
@@ -253,6 +263,26 @@ public sealed class LlmTranslationService(
             string endpointName = "";
             var translations = new List<string>(new string[texts.Count]);
             var phase1Resolved = new HashSet<int>(); // indices resolved by Phase 1
+
+            // Per-text term tracking for RecentTranslation metadata
+            var perTextHasTerms = new bool[texts.Count];
+            var perTextHasDnt = new bool[texts.Count];
+            var perTextAuditResult = new string?[texts.Count];
+
+            // Compute per-text term info
+            if (matchedTerms is { Count: > 0 })
+            {
+                int matchedCount = 0;
+                for (int i = 0; i < texts.Count; i++)
+                {
+                    var relevant = termMatchingService.FindMatchedTerms(matchedTerms, [texts[i]]);
+                    perTextHasTerms[i] = relevant.Any(t => t.Type == TermType.Translate);
+                    perTextHasDnt[i] = relevant.Any(t => t.Type == TermType.DoNotTranslate);
+                    if (perTextHasTerms[i] || perTextHasDnt[i])
+                        matchedCount++;
+                }
+                Interlocked.Add(ref _termMatchedTextCount, matchedCount);
+            }
 
             // ── Phase 1: Natural Translation Mode ──
             // Send source texts unmodified to LLM with terms in structured prompt format.
@@ -309,6 +339,7 @@ public sealed class LlmTranslationService(
                                     {
                                         translations[i] = translated;
                                         phase1Resolved.Add(i);
+                                        perTextAuditResult[i] = "phase1Pass";
                                         Interlocked.Increment(ref _termAuditPhase1PassCount);
                                     }
                                     // else: leave for Phase 2
@@ -511,6 +542,7 @@ public sealed class LlmTranslationService(
                             {
                                 Interlocked.Increment(ref _termAuditPhase2PassCount);
                                 phase2Resolved.Add(originalIdx);
+                                perTextAuditResult[originalIdx] = "phase2Pass";
                             }
                             // else: leave for Phase 3 force correction
                         }
@@ -526,6 +558,13 @@ public sealed class LlmTranslationService(
 
                     translations[originalIdx] = translated;
                 }
+            }
+
+            if (logger.IsEnabled(LogLevel.Debug) && matchedTerms is { Count: > 0 })
+            {
+                var phase3Candidates = texts.Count - phase1Resolved.Count - phase2Resolved.Count;
+                logger.LogDebug("术语审查汇总: Phase1通过={P1}/{Total}, Phase2通过={P2}, 待强制修正={P3}",
+                    phase1Resolved.Count, texts.Count, phase2Resolved.Count, phase3Candidates);
             }
 
             // ── Phase 3: Force Correction ──
@@ -557,19 +596,28 @@ public sealed class LlmTranslationService(
                         {
                             case TermType.Translate when !string.IsNullOrEmpty(term.Translation):
                                 if (!translated.Contains(term.Translation, comparison))
+                                {
+                                    var before = translated;
                                     translated = translated.Replace(term.Original, term.Translation);
+                                    logger.LogDebug(
+                                        "Phase 3 强制修正: 术语 \"{Original}\"→\"{Translation}\", 修正前=\"{Before}\", 修正后=\"{After}\"",
+                                        term.Original, term.Translation,
+                                        before.Length > 80 ? before[..80] + "..." : before,
+                                        translated.Length > 80 ? translated[..80] + "..." : translated);
+                                }
                                 break;
 
                             case TermType.DoNotTranslate:
                                 if (!translated.Contains(term.Original, comparison))
                                     logger.LogWarning(
-                                        "Phase 3 强制修正: 禁翻词 '{Original}' 在翻译结果中缺失，无法自动修正",
-                                        term.Original);
+                                        "Phase 3 强制修正: 禁翻词 \"{Original}\" 在翻译结果中缺失，无法自动修正。译文=\"{Translated}\"",
+                                        term.Original, translated.Length > 80 ? translated[..80] + "..." : translated);
                                 break;
                         }
                     }
 
                     translations[i] = translated;
+                    perTextAuditResult[i] = "forceCorrected";
                     Interlocked.Increment(ref _termAuditForceCorrectedCount);
                 }
             }
@@ -585,9 +633,14 @@ public sealed class LlmTranslationService(
 
             for (int i = 0; i < translations.Count; i++)
             {
-                // Record recent translation
+                // Record recent translation with term metadata
                 var recent = new RecentTranslation(
-                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName, gameId);
+                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName, gameId)
+                {
+                    HasTerms = perTextHasTerms[i],
+                    HasDnt = perTextHasDnt[i],
+                    TermAuditResult = perTextAuditResult[i],
+                };
                 _recentTranslations.Enqueue(recent);
                 while (_recentTranslations.Count > MaxRecentTranslations)
                     _recentTranslations.TryDequeue(out _);

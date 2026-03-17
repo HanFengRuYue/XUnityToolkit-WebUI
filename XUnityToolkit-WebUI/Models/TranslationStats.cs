@@ -16,8 +16,13 @@ public sealed record TranslationStats(
     string? CurrentGameId
 )
 {
+    /// <summary>Total texts that had at least one matched term.</summary>
+    public int TermMatchedTextCount { get; init; }
+    /// <summary>Texts that passed audit during Phase 1 (natural translation).</summary>
     public int TermAuditPhase1PassCount { get; init; }
+    /// <summary>Texts that passed audit during Phase 2 (placeholder translation).</summary>
     public int TermAuditPhase2PassCount { get; init; }
+    /// <summary>Texts that needed Phase 3 force correction.</summary>
     public int TermAuditForceCorrectedCount { get; init; }
 }
 
@@ -29,7 +34,20 @@ public sealed record RecentTranslation(
     double ResponseTimeMs,
     string EndpointName,
     string? GameId
-);
+)
+{
+    /// <summary>Whether any terms were matched for this text.</summary>
+    public bool HasTerms { get; init; }
+
+    /// <summary>Whether any DNT entries were matched for this text.</summary>
+    public bool HasDnt { get; init; }
+
+    /// <summary>
+    /// Term audit result: null=no audit, "phase1Pass"=first-pass pass,
+    /// "phase2Pass"=placeholder-pass, "forceCorrected"=force-corrected, "failed"=audit failed
+    /// </summary>
+    public string? TermAuditResult { get; init; }
+};
 
 public sealed record TranslationError(
     string Message,

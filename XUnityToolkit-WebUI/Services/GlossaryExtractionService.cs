@@ -41,14 +41,14 @@ public sealed class GlossaryExtractionService(
     private const string ExtractionPrompt =
         "你是一名专业的游戏术语提取专家。根据以下游戏文本的原文和译文对，提取出有价值的术语。\n\n" +
         "请提取以下类型的术语：\n" +
-        "1. 角色名、人名\n" +
-        "2. 地名、场所名\n" +
-        "3. 物品名、道具名\n" +
-        "4. 技能名、魔法名\n" +
-        "5. 组织名、种族名\n" +
-        "6. 其他游戏特有的专有名词\n\n" +
+        "1. 角色名、人名 (category: \"character\")\n" +
+        "2. 地名、场所名 (category: \"location\")\n" +
+        "3. 物品名、道具名 (category: \"item\")\n" +
+        "4. 技能名、魔法名 (category: \"skill\")\n" +
+        "5. 组织名、种族名 (category: \"organization\")\n" +
+        "6. 其他游戏特有的专有名词 (category: \"general\")\n\n" +
         "要求：\n" +
-        "1. 仅返回 JSON 数组，每个元素包含 \"original\"（原文术语）、\"translation\"（译文术语）和 \"description\"（术语描述）字段。\n" +
+        "1. 仅返回 JSON 数组，每个元素包含 \"original\"（原文术语）、\"translation\"（译文术语）、\"category\"（分类，值为上面列出的英文分类名之一）和 \"description\"（术语描述）字段。\n" +
         "2. description 字段用简短的文字说明该术语的含义或上下文（如\"主角的名字\"、\"王国名称\"、\"火属性技能\"等），帮助翻译时理解语境。\n" +
         "3. 不要提取常见词汇、语法结构或通用表达。\n" +
         "4. 不要提取单个字符、数字或标点符号。\n" +
@@ -190,6 +190,13 @@ public sealed class GlossaryExtractionService(
             if (entries.Count == 0) return;
 
             var added = entries.Count;
+            if (logger.IsEnabled(LogLevel.Debug) && added > 0)
+            {
+                var termList = string.Join(", ", entries.Select(e =>
+                    $"\"{e.Original}\"→\"{e.Translation}\" [{e.Category}]"));
+                logger.LogDebug("术语提取结果: 游戏 {GameId}, 提取 {Count} 条: {Terms}",
+                    gameId, added, termList);
+            }
             await termService.MergeAsync(gameId, entries);
             if (added > 0)
             {
@@ -264,6 +271,16 @@ public sealed class GlossaryExtractionService(
         return JsonSerializer.Serialize(items);
     }
 
+    private static readonly Dictionary<string, TermCategory> CategoryMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["character"] = TermCategory.Character,
+        ["location"] = TermCategory.Location,
+        ["item"] = TermCategory.Item,
+        ["skill"] = TermCategory.Skill,
+        ["organization"] = TermCategory.Organization,
+        ["general"] = TermCategory.General,
+    };
+
     private static List<TermEntry> ParseExtractionResult(string content)
     {
         var json = content.Trim();
@@ -290,11 +307,17 @@ public sealed class GlossaryExtractionService(
                 if (!string.IsNullOrWhiteSpace(original) && !string.IsNullOrWhiteSpace(translation))
                 {
                     var description = item?["description"]?.GetValue<string>();
+                    var categoryStr = item?["category"]?.GetValue<string>();
+                    TermCategory? category = null;
+                    if (!string.IsNullOrWhiteSpace(categoryStr) && CategoryMap.TryGetValue(categoryStr, out var cat))
+                        category = cat;
+
                     result.Add(new TermEntry
                     {
                         Type = TermType.Translate,
                         Original = original,
                         Translation = translation,
+                        Category = category,
                         IsRegex = false,
                         Description = string.IsNullOrWhiteSpace(description) ? null : description
                     });

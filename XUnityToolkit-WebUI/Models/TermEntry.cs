@@ -1,15 +1,25 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace XUnityToolkit_WebUI.Models;
 
-[JsonConverter(typeof(JsonStringEnumConverter<TermType>))]
+/// <summary>
+/// camelCase enum converter for JSON serialization.
+/// Frontend uses camelCase enum values (e.g. "translate", "doNotTranslate", "character").
+/// </summary>
+public class CamelCaseJsonStringEnumConverter<T> : JsonStringEnumConverter<T> where T : struct, Enum
+{
+    public CamelCaseJsonStringEnumConverter() : base(JsonNamingPolicy.CamelCase) { }
+}
+
+[JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermType>))]
 public enum TermType
 {
     Translate,
     DoNotTranslate
 }
 
-[JsonConverter(typeof(JsonStringEnumConverter<TermCategory>))]
+[JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermCategory>))]
 public enum TermCategory
 {
     Character,

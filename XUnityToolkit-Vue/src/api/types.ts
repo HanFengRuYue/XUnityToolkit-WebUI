@@ -208,6 +208,10 @@ export interface RecentTranslation {
   responseTimeMs: number
   endpointName: string
   gameId?: string
+  hasTerms?: boolean
+  hasDnt?: boolean
+  /** null=no audit, "phase1Pass", "phase2Pass", "forceCorrected", "failed" */
+  termAuditResult?: string | null
 }
 
 export interface TranslationError {
@@ -231,6 +235,7 @@ export interface TranslationStats {
   totalErrors: number
   recentErrors: TranslationError[]
   currentGameId?: string
+  termMatchedTextCount: number
   termAuditPhase1PassCount: number
   termAuditPhase2PassCount: number
   termAuditForceCorrectedCount: number

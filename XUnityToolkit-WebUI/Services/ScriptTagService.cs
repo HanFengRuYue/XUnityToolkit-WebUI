@@ -144,6 +144,12 @@ public sealed class ScriptTagService(
         _compiled.TryRemove(gameId, out _);
     }
 
+    public void ClearAllCache()
+    {
+        _cache.Clear();
+        _compiled.Clear();
+    }
+
     // ── Core cleaning methods ──
 
     public string? CleanText(string gameId, string text)

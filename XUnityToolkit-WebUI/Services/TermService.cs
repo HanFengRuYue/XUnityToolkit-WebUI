@@ -87,13 +87,18 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
 
     public async Task SaveAsync(string gameId, List<TermEntry> entries, CancellationToken ct = default)
     {
-        // Filter blank Original and deduplicate by Original (ordinal)
+        // Filter blank Original, deduplicate by Original (ordinal),
+        // and clear Translation for DoNotTranslate entries
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var filtered = new List<TermEntry>();
         foreach (var entry in entries)
         {
             if (!string.IsNullOrWhiteSpace(entry.Original) && seen.Add(entry.Original))
+            {
+                if (entry.Type == TermType.DoNotTranslate)
+                    entry.Translation = null;
                 filtered.Add(entry);
+            }
         }
 
         await _lock.WaitAsync(ct);
@@ -166,6 +171,8 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     }
 
     public void RemoveCache(string gameId) => _cache.TryRemove(gameId, out _);
+
+    public void ClearAllCache() => _cache.Clear();
 
     /// <summary>
     /// Import terms from one game to another, dedup by Original.
