@@ -14,7 +14,12 @@ public sealed record TranslationStats(
     long TotalErrors,
     IList<TranslationError> RecentErrors,
     string? CurrentGameId
-);
+)
+{
+    public int TermAuditPhase1PassCount { get; init; }
+    public int TermAuditPhase2PassCount { get; init; }
+    public int TermAuditForceCorrectedCount { get; init; }
+}
 
 public sealed record RecentTranslation(
     string Original,

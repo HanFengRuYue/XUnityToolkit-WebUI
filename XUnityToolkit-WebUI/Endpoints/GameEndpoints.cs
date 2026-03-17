@@ -443,7 +443,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, ScriptTagService scriptTagService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, TermService termService, ScriptTagService scriptTagService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -461,11 +461,24 @@ public static class GameEndpoints
             if (Directory.Exists(customFontDir))
                 Directory.Delete(customFontDir, recursive: true);
 
-            // Clean up do-not-translate list
+            // Clean up glossary file
+            var glossaryPath = Path.Combine(appDataPaths.GlossariesDirectory, $"{id}.json");
+            if (File.Exists(glossaryPath))
+                File.Delete(glossaryPath);
+
+            // Clean up old do-not-translate files (transition period)
+#pragma warning disable CS0612 // Obsolete DoNotTranslateDirectory needed for cleanup
             var dntFile = appDataPaths.DoNotTranslateFile(id);
+#pragma warning restore CS0612
             if (File.Exists(dntFile))
                 File.Delete(dntFile);
+            var migratedDntFile = dntFile + ".migrated";
+            if (File.Exists(migratedDntFile))
+                File.Delete(migratedDntFile);
             dntService.RemoveCache(id);
+
+            // Clean up unified term cache
+            termService.RemoveCache(id);
 
             // Clean up script tag rules
             var scriptTagFile = appDataPaths.ScriptTagFile(id);
@@ -647,27 +660,67 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(false)));
         });
 
-        // Glossary management
+        // Unified term management
+        group.MapGet("/{id}/terms", async (
+            string id,
+            TermService termService) =>
+        {
+            var entries = await termService.GetAsync(id);
+            return Results.Ok(ApiResult<List<TermEntry>>.Ok(entries));
+        });
+
+        group.MapPut("/{id}/terms", async (
+            string id,
+            List<TermEntry> entries,
+            TermService termService) =>
+        {
+            if (entries.Count > 10000)
+                return Results.BadRequest(ApiResult.Fail("术语条目不能超过 10000 条。"));
+
+            // Validate regex entries
+            foreach (var entry in entries.Where(e => e.IsRegex))
+            {
+                try { _ = new System.Text.RegularExpressions.Regex(entry.Original, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(1)); }
+                catch (System.Text.RegularExpressions.RegexParseException)
+                { return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {entry.Original}")); }
+            }
+
+            await termService.SaveAsync(id, entries);
+            return Results.Ok(ApiResult.Ok());
+        });
+
+        group.MapPost("/{id}/terms/import-from-game", async (
+            string id,
+            ImportFromGameRequest request,
+            TermService termService) =>
+        {
+            var (added, skipped) = await termService.ImportFromGameAsync(id, request.SourceGameId);
+            return Results.Ok(ApiResult<object>.Ok(new { added, skipped }));
+        });
+
+        // Glossary management (compat proxy → TermService)
         group.MapGet("/{id}/glossary", async (
             string id,
             GameLibraryService library,
-            GlossaryService glossaryService,
-            CancellationToken ct) =>
+            TermService termService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            var entries = await glossaryService.GetAsync(id, ct);
-            return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
+            var allTerms = await termService.GetAsync(id);
+            var glossaryEntries = allTerms
+                .Where(t => t.Type == TermType.Translate)
+                .Select(t => new { original = t.Original, translation = t.Translation ?? "", isRegex = t.IsRegex, description = t.Description })
+                .ToList();
+            return Results.Ok(ApiResult<object>.Ok(glossaryEntries));
         });
 
         group.MapPut("/{id}/glossary", async (
             string id,
             List<GlossaryEntry> entries,
             GameLibraryService library,
-            GlossaryService glossaryService,
-            CancellationToken ct) =>
+            TermService termService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -684,31 +737,42 @@ public static class GameEndpoints
                 { return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {entry.Original}")); }
             }
 
-            await glossaryService.SaveAsync(id, entries, ct);
+            var newTerms = entries.Select(e => new TermEntry
+            {
+                Type = TermType.Translate,
+                Original = e.Original,
+                Translation = e.Translation,
+                IsRegex = e.IsRegex,
+                Description = e.Description
+            }).ToList();
+
+            await termService.ReplaceByTypeAsync(id, TermType.Translate, newTerms);
             return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
         });
 
-        // Do-not-translate list management
+        // Do-not-translate list management (compat proxy → TermService)
         group.MapGet("/{id}/do-not-translate", async (
             string id,
             GameLibraryService library,
-            DoNotTranslateService dntService,
-            CancellationToken ct) =>
+            TermService termService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            var entries = await dntService.GetAsync(id, ct);
-            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(entries));
+            var allTerms = await termService.GetAsync(id);
+            var dntEntries = allTerms
+                .Where(t => t.Type == TermType.DoNotTranslate)
+                .Select(t => new { original = t.Original, caseSensitive = t.CaseSensitive })
+                .ToList();
+            return Results.Ok(ApiResult<object>.Ok(dntEntries));
         });
 
         group.MapPut("/{id}/do-not-translate", async (
             string id,
             List<DoNotTranslateEntry> entries,
             GameLibraryService library,
-            DoNotTranslateService dntService,
-            CancellationToken ct) =>
+            TermService termService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -717,9 +781,15 @@ public static class GameEndpoints
             if (entries.Count > 10000)
                 return Results.BadRequest(ApiResult.Fail("免翻译列表条目不能超过 10000 条。"));
 
-            await dntService.SaveAsync(id, entries, ct);
-            var saved = await dntService.GetAsync(id, ct);
-            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(saved));
+            var newTerms = entries.Select(e => new TermEntry
+            {
+                Type = TermType.DoNotTranslate,
+                Original = e.Original,
+                CaseSensitive = e.CaseSensitive
+            }).ToList();
+
+            await termService.ReplaceByTypeAsync(id, TermType.DoNotTranslate, newTerms);
+            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(entries));
         });
 
         // Game AI description (per-game context for translation)
@@ -792,3 +862,4 @@ public record AiEndpointStatus(bool Installed);
 public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);
 public record IconSelectRequest(string ImageUrl, int SteamGridDbGameId);
+public record ImportFromGameRequest(string SourceGameId);
