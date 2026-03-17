@@ -617,6 +617,10 @@ public sealed class LlmTranslationService(
                     var relevantTerms = termMatchingService.FindMatchedTerms(
                         matchedTerms, [texts[i]]);
 
+                    // Track protected spans in the translated text to prevent shorter terms
+                    // from corrupting substrings inside already-correct longer terms.
+                    var protectedSpans = new List<(int Start, int Length)>();
+
                     foreach (var term in relevantTerms)
                     {
                         if (term.IsRegex) continue;
@@ -628,23 +632,36 @@ public sealed class LlmTranslationService(
                         switch (term.Type)
                         {
                             case TermType.Translate when !string.IsNullOrEmpty(term.Translation):
-                                if (!translated.Contains(term.Translation, comparison))
+                                if (translated.Contains(term.Translation, comparison))
+                                {
+                                    // Term is already correctly applied — protect its spans
+                                    ProtectExistingSpans(translated, term.Translation, comparison, protectedSpans);
+                                }
+                                else
                                 {
                                     var before = translated;
-                                    translated = translated.Replace(term.Original, term.Translation);
-                                    logger.LogDebug(
-                                        "Phase 3 强制修正: 术语 \"{Original}\"→\"{Translation}\", 修正前=\"{Before}\", 修正后=\"{After}\"",
-                                        term.Original, term.Translation,
-                                        before.Length > 80 ? before[..80] + "..." : before,
-                                        translated.Length > 80 ? translated[..80] + "..." : translated);
+                                    translated = ReplaceWithProtection(translated, term.Original, term.Translation,
+                                        StringComparison.Ordinal, protectedSpans);
+                                    if (before != translated)
+                                        logger.LogDebug(
+                                            "Phase 3 强制修正: 术语 \"{Original}\"→\"{Translation}\", 修正前=\"{Before}\", 修正后=\"{After}\"",
+                                            term.Original, term.Translation,
+                                            before.Length > 80 ? before[..80] + "..." : before,
+                                            translated.Length > 80 ? translated[..80] + "..." : translated);
                                 }
                                 break;
 
                             case TermType.DoNotTranslate:
-                                if (!translated.Contains(term.Original, comparison))
+                                if (translated.Contains(term.Original, comparison))
+                                {
+                                    ProtectExistingSpans(translated, term.Original, comparison, protectedSpans);
+                                }
+                                else
+                                {
                                     logger.LogWarning(
                                         "Phase 3 强制修正: 禁翻词 \"{Original}\" 在翻译结果中缺失，无法自动修正。译文=\"{Translated}\"",
                                         term.Original, translated.Length > 80 ? translated[..80] + "..." : translated);
+                                }
                                 break;
                         }
                     }
@@ -1352,28 +1369,137 @@ public sealed class LlmTranslationService(
     {
         // Sort longest-first to prevent shorter entries from shadowing longer ones
         // (matches the strategy in ApplyGlossaryReplacements)
-        foreach (var entry in glossary.OrderByDescending(e => e.Original?.Length ?? 0))
-        {
-            if (string.IsNullOrWhiteSpace(entry.Original)) continue;
+        var sorted = glossary
+            .Where(e => !string.IsNullOrWhiteSpace(e.Original))
+            .OrderByDescending(e => e.Original!.Length)
+            .ToList();
 
-            if (entry.IsRegex)
+        // Phase 1: Apply regex entries (these use Regex.Replace which is independent)
+        foreach (var entry in sorted.Where(e => e.IsRegex))
+        {
+            try
             {
-                try
-                {
-                    translated = Regex.Replace(translated, entry.Original, entry.Translation ?? "",
-                        RegexOptions.None, TimeSpan.FromMilliseconds(100));
-                }
-                catch (Exception ex)
-                {
-                    log?.LogDebug(ex, "术语后处理正则失败: /{Pattern}/", entry.Original);
-                }
+                translated = Regex.Replace(translated, entry.Original!, entry.Translation ?? "",
+                    RegexOptions.None, TimeSpan.FromMilliseconds(100));
             }
-            else
+            catch (Exception ex)
             {
-                translated = translated.Replace(entry.Original, entry.Translation ?? "");
+                log?.LogDebug(ex, "术语后处理正则失败: /{Pattern}/", entry.Original);
             }
         }
+
+        // Phase 2: Apply non-regex entries using positional replacement to prevent
+        // shorter terms from corrupting substrings inside longer terms' translations.
+        // Track replaced spans so shorter terms cannot match inside them.
+        var nonRegex = sorted.Where(e => !e.IsRegex).ToList();
+        // replacedSpans: list of (start, length) in the current translated string
+        // that have been produced by a term replacement and should not be touched.
+        var protectedSpans = new List<(int Start, int Length)>();
+
+        foreach (var entry in nonRegex)
+        {
+            var original = entry.Original!;
+            var translation = entry.Translation ?? "";
+            int searchStart = 0;
+
+            while (true)
+            {
+                int idx = translated.IndexOf(original, searchStart, StringComparison.Ordinal);
+                if (idx < 0) break;
+
+                // Check if this match overlaps any protected span
+                int matchEnd = idx + original.Length;
+                bool overlaps = false;
+                foreach (var span in protectedSpans)
+                {
+                    int spanEnd = span.Start + span.Length;
+                    if (idx < spanEnd && matchEnd > span.Start)
+                    {
+                        overlaps = true;
+                        // Skip past this protected span
+                        searchStart = spanEnd;
+                        break;
+                    }
+                }
+                if (overlaps) continue;
+
+                // Perform the replacement
+                translated = translated[..idx] + translation + translated[matchEnd..];
+                int delta = translation.Length - original.Length;
+
+                // Shift all existing protected spans that come after the replacement point
+                for (int i = 0; i < protectedSpans.Count; i++)
+                {
+                    if (protectedSpans[i].Start >= matchEnd)
+                        protectedSpans[i] = (protectedSpans[i].Start + delta, protectedSpans[i].Length);
+                }
+
+                // Protect the newly inserted translation span
+                protectedSpans.Add((idx, translation.Length));
+                searchStart = idx + translation.Length;
+            }
+        }
+
         return translated;
+    }
+
+    /// <summary>
+    /// Replace <paramref name="original"/> with <paramref name="translation"/> in <paramref name="text"/>,
+    /// respecting protected spans. Returns modified text and updates protected spans in-place.
+    /// </summary>
+    private static string ReplaceWithProtection(string text, string original, string translation,
+        StringComparison comparison, List<(int Start, int Length)> protectedSpans)
+    {
+        int searchStart = 0;
+        while (true)
+        {
+            int idx = text.IndexOf(original, searchStart, comparison);
+            if (idx < 0) break;
+
+            int matchEnd = idx + original.Length;
+            bool overlaps = false;
+            foreach (var span in protectedSpans)
+            {
+                int spanEnd = span.Start + span.Length;
+                if (idx < spanEnd && matchEnd > span.Start)
+                {
+                    overlaps = true;
+                    searchStart = spanEnd;
+                    break;
+                }
+            }
+            if (overlaps) continue;
+
+            text = text[..idx] + translation + text[matchEnd..];
+            int delta = translation.Length - original.Length;
+
+            for (int i = 0; i < protectedSpans.Count; i++)
+            {
+                if (protectedSpans[i].Start >= matchEnd)
+                    protectedSpans[i] = (protectedSpans[i].Start + delta, protectedSpans[i].Length);
+            }
+
+            protectedSpans.Add((idx, translation.Length));
+            searchStart = idx + translation.Length;
+        }
+        return text;
+    }
+
+    /// <summary>
+    /// Find all occurrences of <paramref name="value"/> in <paramref name="text"/> and add them
+    /// as protected spans (so shorter terms cannot replace substrings within them).
+    /// </summary>
+    private static void ProtectExistingSpans(string text, string value,
+        StringComparison comparison, List<(int Start, int Length)> protectedSpans)
+    {
+        int searchStart = 0;
+        while (true)
+        {
+            int idx = text.IndexOf(value, searchStart, comparison);
+            if (idx < 0) break;
+            protectedSpans.Add((idx, value.Length));
+            searchStart = idx + value.Length;
+        }
     }
 
     // ── Token extraction helpers ──

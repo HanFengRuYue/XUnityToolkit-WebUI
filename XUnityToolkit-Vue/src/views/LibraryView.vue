@@ -331,6 +331,7 @@ const gridStyle = computed(() => {
       :positive-button-props="{ loading: renameSaving }"
       @positive-click="handleRenameConfirm"
       @negative-click="showRenameModal = false"
+      @close="showRenameModal = false"
       @mask-click="showRenameModal = false"
     >
       <NInput
