@@ -75,6 +75,8 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   glossaryExtractionEnabled: false,
   glossaryExtractionEndpointId: undefined,
   enablePreTranslationCache: false,
+  termAuditEnabled: true,
+  naturalTranslationMode: true,
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -139,6 +141,19 @@ const extractionEndpointOptions = computed(() => {
 })
 
 const extractionStats = computed(() => aiStore.extractionStats)
+
+const termAuditTotal = computed(() => {
+  const s = aiStore.stats
+  if (!s) return 0
+  return s.termAuditPhase1PassCount + s.termAuditPhase2PassCount + s.termAuditForceCorrectedCount
+})
+
+const termAuditPassRate = computed(() => {
+  const total = termAuditTotal.value
+  if (total === 0) return null
+  const s = aiStore.stats!
+  return ((s.termAuditPhase1PassCount / total) * 100).toFixed(1)
+})
 
 const activeMode = computed(() => aiSettings.value.activeMode ?? 'cloud')
 const isLocalMode = computed(() => activeMode.value === 'local')
@@ -369,6 +384,37 @@ onUnmounted(() => {
             ></div>
           </div>
           <span class="error-bar-rate">{{ successRate }}%</span>
+        </div>
+      </div>
+
+      <!-- Term Audit Stats -->
+      <div v-if="termAuditTotal > 0" class="term-audit-strip">
+        <div class="stats-group-label">术语审查</div>
+        <div class="metrics-strip">
+          <div class="metric-pill rate-good">
+            <div class="metric-data">
+              <span class="metric-value">{{ aiStore.stats?.termAuditPhase1PassCount ?? 0 }}</span>
+              <span class="metric-label">一次通过</span>
+            </div>
+          </div>
+          <div class="metric-pill">
+            <div class="metric-data">
+              <span class="metric-value">{{ aiStore.stats?.termAuditPhase2PassCount ?? 0 }}</span>
+              <span class="metric-label">二次通过</span>
+            </div>
+          </div>
+          <div class="metric-pill" :class="{ 'rate-warn': (aiStore.stats?.termAuditForceCorrectedCount ?? 0) > 0 }">
+            <div class="metric-data">
+              <span class="metric-value">{{ aiStore.stats?.termAuditForceCorrectedCount ?? 0 }}</span>
+              <span class="metric-label">强制修正</span>
+            </div>
+          </div>
+          <div v-if="termAuditPassRate !== null" class="metric-pill" :class="{ 'rate-good': Number(termAuditPassRate) >= 80, 'rate-warn': Number(termAuditPassRate) < 80 }">
+            <div class="metric-data">
+              <span class="metric-value">{{ termAuditPassRate }}<small>%</small></span>
+              <span class="metric-label">一次通过率</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1140,6 +1186,13 @@ onUnmounted(() => {
   font-weight: 600;
   font-family: var(--font-mono);
   opacity: 0.8;
+}
+
+/* ===== Term Audit Strip ===== */
+.term-audit-strip {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 /* ===== Recent Translations ===== */
