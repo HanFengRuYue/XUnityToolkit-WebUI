@@ -18,7 +18,7 @@ dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 # Run backend (serves the web UI on http://127.0.0.1:51821)
 dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
-# One-click release build (self-contained, win-x64)
+# One-click local build (portable, self-contained, win-x64)
 .\build.ps1
 .\build.ps1 -SkipDownload    # skip asset downloads
 
@@ -46,6 +46,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game unified term list, translation memory, AI description; real-time stats via SignalR
 - **Unified Term Management:** `TermService` stores per-game term entries at `data/glossaries/{gameId}.json` (migrates legacy DNT entries on first load); each `TermEntry` has `Type` (Translate/DoNotTranslate), `Category`, `Priority`, `CaseSensitive`, `ExactMatch`, `IsRegex`; `TermMatchingService` handles priority-based placeholder substitution; `TermAuditService` verifies term compliance in translations
+- **Enum JSON casing:** `TermType` and `TermCategory` use `CamelCaseJsonStringEnumConverter<T>` (camelCase: `"translate"`, `"doNotTranslate"`, `"character"`); ALL other enums use default PascalCase (`"OpenAI"`, `"NotInstalled"`) — do NOT change global `JsonStringEnumConverter` or add naming policy to it
 - **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
 - **Placeholder substitution order:** Terms sorted by priority (higher first), then by original text length (longer first); translate-type terms produce `{{G_x}}` placeholders, do-not-translate terms produce `{{DNT_x}}`; priority-based ordering ensures important terms claim their spans before lower-priority terms
 - **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
@@ -96,7 +97,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Cover:** `GET .../cover`, `POST .../cover/upload` (5MB), `POST .../cover/{search,grids,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../cover`
 - **Background:** `GET .../background`, `POST .../background/upload` (10MB), `POST .../background/{search,heroes,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../background`
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
-- **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`, `GET .../data-path`, `POST .../export` (ZIP, **not ApiResult**), `POST .../import` (multipart ZIP), `POST .../open-data-folder`
+- **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset` (deletes entire `paths.Root` directory, invalidates all service caches, recreates dirs), `GET .../data-path`, `POST .../export` (ZIP, **not ApiResult**), `POST .../import` (multipart ZIP), `POST .../open-data-folder`
 - **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
 - **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
@@ -138,7 +139,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Per-game data cleanup (terms):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete glossary file + call `termService.RemoveCache`
 - **`NormalizeForCache` call sites:** 3 places must all use `ScriptTagService.NormalizeForCache(gameId, text)`: `WriteTranslationCacheAsync`, `LoadCache`, `RecordTexts`
 - **Adding preset rules:** Update `bundled/script-tag-presets.json`, increment `version`
-- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`; includes term audit stats (auditPass/auditFail/auditCorrected)
+- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 3 places: `Models/TranslationStats.cs`, `src/api/types.ts`, `AiTranslationView.vue` (display + recent-meta section); includes term audit stats and per-text term metadata (`HasTerms`, `HasDnt`, `TermAuditResult`)
 - **PreTranslationCacheStats fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
@@ -159,7 +160,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk (requires `gh` CLI) → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips all download/extraction steps; cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- `build.ps1`: local portable build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no Updater, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - **Versioning:** `build.ps1` auto-generates `2.6.{YYYYMMDDHHmm}` (CI uses `2.6.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)

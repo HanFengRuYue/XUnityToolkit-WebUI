@@ -1,4 +1,4 @@
-# build.ps1 - XUnityToolkit-WebUI 一键构建脚本
+# build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
 # 用法: .\build.ps1 [-SkipDownload]
 
 param(
@@ -45,154 +45,6 @@ function Invoke-WithRetry {
     }
 }
 
-function Generate-Manifest {
-    param([string]$ReleaseDir, [string]$Rid, [string]$Version)
-
-    $manifest = @{
-        version = $Version
-        rid = $Rid
-        files = @{}
-    }
-
-    $basePath = (Resolve-Path $ReleaseDir).Path
-    Get-ChildItem -Path $ReleaseDir -Recurse -File | ForEach-Object {
-        $relativePath = $_.FullName.Substring($basePath.Length + 1).Replace('\', '/')
-
-        # Skip data/ and appsettings
-        if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
-
-        $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
-        $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
-                   elseif ($relativePath -match '^bundled/llama/') { "bundled-llama" }
-                   elseif ($relativePath -match '^bundled/fonts/') { "bundled-fonts" }
-                   elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity)/') { "bundled-plugins" }
-                   elseif ($relativePath -match '^bundled/') { "bundled-misc" }
-                   else { "app" }
-
-        $manifest.files[$relativePath] = @{
-            hash = "sha256:$hash"
-            size = $_.Length
-            package = $package
-        }
-    }
-
-    $manifestPath = Join-Path (Split-Path $ReleaseDir) "manifest-$Rid.json"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding utf8
-    Write-Host "  Generated manifest: $manifestPath" -ForegroundColor Green
-}
-
-function Create-ZipFromDirectory {
-    param([string]$SourceDir, [string]$ZipPath, [string]$EntryPrefix = "")
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    if (Test-Path $ZipPath) { Remove-Item $ZipPath }
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($SourceDir, $ZipPath)
-}
-
-function Create-ZipFromFiles {
-    param([System.IO.FileInfo[]]$Files, [string]$ZipPath)
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    if (Test-Path $ZipPath) { Remove-Item $ZipPath }
-    $zip = [System.IO.Compression.ZipFile]::Open($ZipPath, 'Create')
-    try {
-        foreach ($f in $Files) {
-            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
-        }
-    } finally {
-        $zip.Dispose()
-    }
-}
-
-function Create-ComponentZips {
-    param([string]$ReleaseDir, [string]$Rid)
-
-    $outputDir = Split-Path $ReleaseDir
-
-    # app.zip — root-level exe, dll (exclude bundled/, wwwroot/, data/, appsettings*)
-    $appFiles = Get-ChildItem -Path $ReleaseDir -File | Where-Object {
-        $_.Name -notmatch '^appsettings'
-    }
-    $appZip = Join-Path $outputDir "app-$Rid.zip"
-    Create-ZipFromFiles -Files $appFiles -ZipPath $appZip
-    Write-Host "  Created: $appZip" -ForegroundColor Green
-
-    # wwwroot.zip
-    $wwwrootDir = Join-Path $ReleaseDir "wwwroot"
-    if (Test-Path $wwwrootDir) {
-        $wwwrootZip = Join-Path $outputDir "wwwroot.zip"
-        # Zip the wwwroot directory itself so entries are at root (index.html, assets/, etc.)
-        # The UpdateService expects paths like "wwwroot/index.html" in manifest,
-        # so we create a temp wrapper dir to get the right structure
-        $tempDir = Join-Path $outputDir "_wwwroot_wrap"
-        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-        New-Item -ItemType Directory -Path $tempDir | Out-Null
-        Copy-Item $wwwrootDir (Join-Path $tempDir "wwwroot") -Recurse
-        Create-ZipFromDirectory -SourceDir $tempDir -ZipPath $wwwrootZip
-        Remove-Item $tempDir -Recurse -Force
-        Write-Host "  Created: $wwwrootZip" -ForegroundColor Green
-    }
-
-    # bundled sub-component ZIPs (split to minimize update download size)
-    $bundledDir = Join-Path $ReleaseDir "bundled"
-    if (Test-Path $bundledDir) {
-        $bundledSubs = @(
-            @{ Name = "bundled-llama";   Dirs = @("llama") },
-            @{ Name = "bundled-fonts";   Dirs = @("fonts") },
-            @{ Name = "bundled-plugins"; Dirs = @("bepinex5", "bepinex6", "xunity") }
-        )
-        foreach ($sub in $bundledSubs) {
-            $zipPath = Join-Path $outputDir "$($sub.Name).zip"
-            if (Test-Path $zipPath) { Remove-Item $zipPath }
-            $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
-            try {
-                foreach ($dirName in $sub.Dirs) {
-                    $subDir = Join-Path $bundledDir $dirName
-                    if (-not (Test-Path $subDir)) { continue }
-                    $subBase = (Resolve-Path $subDir).Path
-                    Get-ChildItem -Path $subDir -Recurse -File | ForEach-Object {
-                        $entry = "bundled/$dirName/" + $_.FullName.Substring($subBase.Length + 1).Replace('\', '/')
-                        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
-                    }
-                }
-            } finally { $zip.Dispose() }
-            Write-Host "  Created: $zipPath" -ForegroundColor Green
-        }
-
-        # bundled-misc.zip — root-level files in bundled/ (e.g., script-tag-presets.json)
-        $miscFiles = Get-ChildItem -Path $bundledDir -File
-        if ($miscFiles) {
-            $miscZip = Join-Path $outputDir "bundled-misc.zip"
-            if (Test-Path $miscZip) { Remove-Item $miscZip }
-            $zip = [System.IO.Compression.ZipFile]::Open($miscZip, 'Create')
-            try {
-                foreach ($f in $miscFiles) {
-                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, "bundled/$($f.Name)") | Out-Null
-                }
-            } finally { $zip.Dispose() }
-            Write-Host "  Created: $miscZip" -ForegroundColor Green
-        }
-    }
-}
-
-function Generate-UpdateCheckJson {
-    param([string]$ReleaseDir, [string]$Rid, [string]$Version, [string]$Tag = "")
-    $outputDir = Split-Path $ReleaseDir
-    $assets = [ordered]@{}
-    @("manifest-$Rid.json", "app-$Rid.zip", "wwwroot.zip", "bundled-llama.zip", "bundled-fonts.zip", "bundled-plugins.zip", "bundled-misc.zip") | ForEach-Object {
-        $path = Join-Path $outputDir $_
-        if (Test-Path $path) { $assets[$_] = (Get-Item $path).Length }
-    }
-    $updateCheck = [ordered]@{
-        tag = $(if ($Tag) { $Tag } else { "v$Version" })
-        version = $Version
-        changelog = ""
-        prerelease = $false
-        assets = $assets
-    }
-    $updateCheck | ConvertTo-Json -Depth 3 |
-        Set-Content -Path (Join-Path $outputDir "update-check.json") -Encoding utf8
-    Write-Host "  Generated: update-check.json" -ForegroundColor Green
-}
-
 try {
 
 # Ensure TLS 1.2+ for all HTTPS requests (PowerShell 5.1 defaults to TLS 1.0)
@@ -202,9 +54,6 @@ try {
 $ProgressPreference = 'SilentlyContinue'
 
 $ProjectRoot = $PSScriptRoot
-# Source MSI file harvesting function (shared with CI)
-. (Join-Path $ProjectRoot 'Installer/Generate-InstallerWxs.ps1')
-
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
 $ReleaseRoot = Join-Path $ProjectRoot 'Release'
@@ -216,15 +65,6 @@ $hasEndpoint = Test-Path $EndpointProject
 
 # Generate version: 2.6.{YYYYMMDDHHmm}
 $BuildVersion = "2.6.$(Get-Date -Format 'yyyyMMddHHmm')"
-$VersionPrefix = ($BuildVersion -split '\.')[0..1] -join '.'
-
-# Generate MSI-compatible version: {(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}
-# Constraints: major < 256, minor < 256, build < 65536
-$now = Get-Date
-$msiMajor = ($now.Year - 2024) * 12 + $now.Month
-$msiMinor = $now.Day
-$msiBuild = $now.Hour * 60 + $now.Minute
-$MsiVersion = "$msiMajor.$msiMinor.$msiBuild"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
@@ -232,7 +72,7 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 5 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -500,7 +340,7 @@ if (-not $SkipDownload) {
     Write-Host "  Bundled assets ready." -ForegroundColor Green
 }
 
-# Step: Build frontend
+# ── Step: Build frontend ──
 $currentStep++
 Write-Host ""
 Write-Host "[$currentStep/$stepCount] Building frontend..." -ForegroundColor Yellow
@@ -516,7 +356,7 @@ try {
 }
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
-# Step: Build TranslatorEndpoint (LLMTranslate.dll)
+# ── Step: Build TranslatorEndpoint (LLMTranslate.dll) ──
 if ($hasEndpoint) {
     $currentStep++
     Write-Host ""
@@ -537,13 +377,7 @@ if ($hasEndpoint) {
     }
 }
 
-# ── Step: Build Updater (AOT, win-x64 only) ──
-Write-Host "`n=== Building Updater ===" -ForegroundColor Cyan
-Write-Host "Building Updater for win-x64..." -ForegroundColor Yellow
-dotnet publish Updater/Updater.csproj -c Release -r win-x64 /p:PublishAot=true
-if ($LASTEXITCODE -ne 0) { throw "Updater build failed for win-x64" }
-
-# Clean Release folder
+# ── Step: Prepare Release folder ──
 $currentStep++
 Write-Host ""
 Write-Host "[$currentStep/$stepCount] Preparing Release folder..." -ForegroundColor Yellow
@@ -564,7 +398,7 @@ if (Test-Path $ReleaseRoot) {
 }
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 
-# ── Publish win-x64 ──
+# ── Step: Publish win-x64 ──
 $currentStep++
 $OutputDir = Join-Path $ReleaseRoot $rid
 Write-Host ""
@@ -596,69 +430,16 @@ if (Test-Path $bundledSrc) {
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
 
-# Copy Updater.exe
-$updaterPath = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
-if (Test-Path $updaterPath) {
-    Copy-Item $updaterPath "$OutputDir/" -Force
-    Write-Host "  Copied Updater.exe" -ForegroundColor Green
-}
-
 $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
 Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
 
-# Generate manifest and component ZIPs
-Write-Host "`n--- Generating manifest and component ZIPs for $rid ---" -ForegroundColor Cyan
-Generate-Manifest -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
-Create-ComponentZips -ReleaseDir $OutputDir -Rid $rid
-Generate-UpdateCheckJson -ReleaseDir $OutputDir -Rid $rid -Version $BuildVersion
-
-# Build MSI installer
-$currentStep++
-Write-Host ""
-Write-Host "[$currentStep/$stepCount] Building MSI for $rid..." -ForegroundColor Yellow
-
-$installerProject = Join-Path $ProjectRoot 'Installer\Installer.wixproj'
-if (Test-Path $installerProject) {
-    $generatedDir = Join-Path $ProjectRoot 'Installer\Generated'
-    $harvestedFile = Join-Path $generatedDir "HarvestedFiles.wxs"
-
-    # Generate file listing from publish output
-    Generate-InstallerWxs -ReleaseDir $OutputDir -OutputFile $harvestedFile
-
-    $wixPlatform = 'x64'
-
-    # Build MSI (do NOT set OutputPath — it interferes with WiX file resolution)
-    & dotnet build $installerProject `
-        -c Release `
-        -p:Platform=$wixPlatform `
-        -p:InstallerPlatform=$wixPlatform `
-        -p:AppPublishDir="$OutputDir\" `
-        -p:MsiVersion="$MsiVersion"
-
-    if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
-
-    # Find MSI in WiX default output location (may be in culture subfolder e.g. zh-CN/)
-    $wixOutputDir = Join-Path $ProjectRoot "Installer\bin\$wixPlatform\Release"
-    $msiSrc = Get-ChildItem "$wixOutputDir\*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($msiSrc) {
-        $msiDst = Join-Path $ReleaseRoot "XUnityToolkit-WebUI-v$VersionPrefix-$rid.msi"
-        Move-Item $msiSrc.FullName $msiDst -Force
-        $msiSize = [math]::Round((Get-Item $msiDst).Length / 1MB, 1)
-        Write-Host "  MSI: $msiSize MB -> $msiDst" -ForegroundColor Green
-    }
-} else {
-    Write-Host "  Skipped: Installer project not found" -ForegroundColor DarkYellow
-}
-
-# Summary
+# ── Summary ──
 Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Cyan
 Write-Host ""
 
-$dir = Join-Path $ReleaseRoot $rid
-Write-Host "$rid :" -ForegroundColor Yellow
-Get-ChildItem $dir | ForEach-Object {
+Get-ChildItem $OutputDir | ForEach-Object {
     if ($_.PSIsContainer) {
         $folderSize = [math]::Round(((Get-ChildItem $_.FullName -File -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
         $size = "<DIR> $folderSize MB"
@@ -669,7 +450,7 @@ Get-ChildItem $dir | ForEach-Object {
 }
 Write-Host ""
 
-Write-Host "Output: $ReleaseRoot" -ForegroundColor White
+Write-Host "Output: $OutputDir" -ForegroundColor White
 
 Wait-Exit 0
 
@@ -677,7 +458,6 @@ Wait-Exit 0
     Write-Host ""
     Write-Host "=== BUILD FAILED ===" -ForegroundColor Red
     Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
-    # Show inner exception for network errors (contains actual HTTP status/message)
     if ($_.Exception.InnerException) {
         Write-Host "  Detail: $($_.Exception.InnerException.Message)" -ForegroundColor DarkRed
     }

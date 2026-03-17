@@ -9,6 +9,7 @@ import {
   NProgress,
   NCollapse,
   NCollapseItem,
+  NPopover,
   useMessage,
 } from 'naive-ui'
 import {
@@ -388,31 +389,62 @@ onUnmounted(() => {
       </div>
 
       <!-- Term Audit Stats -->
-      <div v-if="termAuditTotal > 0" class="term-audit-strip">
+      <div v-if="(aiStore.stats?.termMatchedTextCount ?? 0) > 0 || termAuditTotal > 0" class="term-audit-strip">
         <div class="stats-group-label">术语审查</div>
         <div class="metrics-strip">
+          <div class="metric-pill">
+            <div class="metric-data">
+              <span class="metric-value">{{ aiStore.stats?.termMatchedTextCount ?? 0 }}</span>
+              <NPopover trigger="hover" placement="top">
+                <template #trigger>
+                  <span class="metric-label metric-label-help">应用术语</span>
+                </template>
+                <div style="max-width: 240px; font-size: 13px">涉及术语或禁翻词的翻译文本总数</div>
+              </NPopover>
+            </div>
+          </div>
           <div class="metric-pill rate-good">
             <div class="metric-data">
               <span class="metric-value">{{ aiStore.stats?.termAuditPhase1PassCount ?? 0 }}</span>
-              <span class="metric-label">一次通过</span>
+              <NPopover trigger="hover" placement="top">
+                <template #trigger>
+                  <span class="metric-label metric-label-help">自然通过</span>
+                </template>
+                <div style="max-width: 240px; font-size: 13px">在第一阶段（自然翻译模式，不使用占位符）中，LLM 直接正确应用术语的文本数</div>
+              </NPopover>
             </div>
           </div>
           <div class="metric-pill">
             <div class="metric-data">
               <span class="metric-value">{{ aiStore.stats?.termAuditPhase2PassCount ?? 0 }}</span>
-              <span class="metric-label">二次通过</span>
+              <NPopover trigger="hover" placement="top">
+                <template #trigger>
+                  <span class="metric-label metric-label-help">占位符通过</span>
+                </template>
+                <div style="max-width: 240px; font-size: 13px">在第二阶段（使用占位符替换术语）中通过审查的文本数。通常说明 LLM 在自然模式下未能正确应用术语</div>
+              </NPopover>
             </div>
           </div>
           <div class="metric-pill" :class="{ 'rate-warn': (aiStore.stats?.termAuditForceCorrectedCount ?? 0) > 0 }">
             <div class="metric-data">
               <span class="metric-value">{{ aiStore.stats?.termAuditForceCorrectedCount ?? 0 }}</span>
-              <span class="metric-label">强制修正</span>
+              <NPopover trigger="hover" placement="top">
+                <template #trigger>
+                  <span class="metric-label metric-label-help">强制修正</span>
+                </template>
+                <div style="max-width: 240px; font-size: 13px">两阶段审查都未通过后，系统直接将原文替换为术语译文进行强制修正的文本数。强制修正可能导致翻译不够自然</div>
+              </NPopover>
             </div>
           </div>
           <div v-if="termAuditPassRate !== null" class="metric-pill" :class="{ 'rate-good': Number(termAuditPassRate) >= 80, 'rate-warn': Number(termAuditPassRate) < 80 }">
             <div class="metric-data">
               <span class="metric-value">{{ termAuditPassRate }}<small>%</small></span>
-              <span class="metric-label">一次通过率</span>
+              <NPopover trigger="hover" placement="top">
+                <template #trigger>
+                  <span class="metric-label metric-label-help">自然通过率</span>
+                </template>
+                <div style="max-width: 240px; font-size: 13px">自然翻译阶段通过审查的比率。越高说明 LLM 对术语的理解和应用越好</div>
+              </NPopover>
             </div>
           </div>
         </div>
@@ -540,6 +572,12 @@ onUnmounted(() => {
             <div class="recent-meta">
               <span v-if="item.gameId" class="meta-tag game">{{ getGameName(item.gameId) }}</span>
               <span class="meta-tag endpoint">{{ item.endpointName }}</span>
+              <span v-if="item.hasTerms" class="meta-tag term-tag">术语</span>
+              <span v-if="item.hasDnt" class="meta-tag dnt-tag">禁翻</span>
+              <span v-if="item.termAuditResult === 'phase1Pass'" class="meta-tag audit-pass">自然通过</span>
+              <span v-else-if="item.termAuditResult === 'phase2Pass'" class="meta-tag audit-pass">占位符通过</span>
+              <span v-else-if="item.termAuditResult === 'forceCorrected'" class="meta-tag audit-warn">强制修正</span>
+              <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
               <span class="meta-tag">{{ item.tokensUsed }} tok</span>
               <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
               <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
@@ -861,6 +899,11 @@ onUnmounted(() => {
   color: var(--text-3);
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+.metric-label-help {
+  cursor: help;
+  border-bottom: 1px dashed var(--text-3);
 }
 
 /* Section card: position needed for .is-translating::after pseudo-element */
@@ -1306,6 +1349,33 @@ onUnmounted(() => {
 .meta-tag.endpoint {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.meta-tag.term-tag {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 500;
+}
+
+.meta-tag.dnt-tag {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  font-weight: 500;
+}
+
+.meta-tag.audit-pass {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.meta-tag.audit-warn {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.meta-tag.audit-fail {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .meta-tag.time {

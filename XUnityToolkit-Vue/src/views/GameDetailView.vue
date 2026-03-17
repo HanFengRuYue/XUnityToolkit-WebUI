@@ -269,7 +269,7 @@ async function handleLaunch() {
 function handleRemoveGame() {
   dialog.error({
     title: '移除游戏',
-    content: '将从游戏库中移除此游戏（不会删除游戏文件）。确定吗？',
+    content: '将从游戏库中移除此游戏（不会删除游戏文件）。移除后该游戏的术语库、翻译缓存等数据将被清除，重新添加后无法恢复。建议先导出术语库。确定吗？',
     positiveText: '确认移除',
     negativeText: '取消',
     onPositiveClick: async () => {

@@ -305,7 +305,16 @@ const tableColumns = computed<DataTableColumns<TermRow>>(() => {
 
   if (visibleColumns.value.includes('isRegex')) {
     cols.push({
-      title: '正则',
+      title() {
+        return h(NPopover, { trigger: 'hover', placement: 'top' }, {
+          trigger: () => h('span', { style: 'cursor: help; border-bottom: 1px dashed var(--text-3)' }, '正则'),
+          default: () => h('div', { style: 'max-width: 280px; font-size: 13px' }, [
+            h('div', { style: 'font-weight: 600; margin-bottom: 4px' }, '正则表达式匹配'),
+            h('div', '开启后，原文字段将作为正则表达式来匹配游戏文本。适用于需要模糊匹配的场景。'),
+            h('div', { style: 'margin-top: 4px; color: var(--text-3)' }, '注意：正则术语不参与术语审查验证。'),
+          ]),
+        })
+      },
       key: 'isRegex',
       width: 55,
       align: 'center',
@@ -321,7 +330,16 @@ const tableColumns = computed<DataTableColumns<TermRow>>(() => {
 
   if (visibleColumns.value.includes('exactMatch')) {
     cols.push({
-      title: '精确',
+      title() {
+        return h(NPopover, { trigger: 'hover', placement: 'top' }, {
+          trigger: () => h('span', { style: 'cursor: help; border-bottom: 1px dashed var(--text-3)' }, '精确'),
+          default: () => h('div', { style: 'max-width: 280px; font-size: 13px' }, [
+            h('div', { style: 'font-weight: 600; margin-bottom: 4px' }, '精确匹配（词边界）'),
+            h('div', '开启后，仅匹配完整的词，不匹配包含该词的更长文本。'),
+            h('div', { style: 'margin-top: 4px; color: var(--text-3)' }, '例如：开启精确匹配后，术语 "fire" 不会匹配 "firefox"。'),
+          ]),
+        })
+      },
       key: 'exactMatch',
       width: 55,
       align: 'center',

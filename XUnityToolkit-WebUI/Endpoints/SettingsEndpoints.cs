@@ -32,36 +32,28 @@ public static class SettingsEndpoints
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
         });
 
-        group.MapPost("/reset", (AppDataPaths paths, AppSettingsService settingsService, ILogger<AppSettingsService> logger) =>
+        group.MapPost("/reset", (
+            AppDataPaths paths,
+            AppSettingsService settingsService,
+            TermService termService,
+            ScriptTagService scriptTagService,
+            ILogger<AppSettingsService> logger) =>
         {
+            // Invalidate all in-memory caches
             settingsService.InvalidateCache();
+            termService.ClearAllCache();
+            scriptTagService.ClearAllCache();
+
             var errors = new List<string>();
 
-            // Delete settings.json
+            // Delete the entire data root directory (%AppData%\XUnityToolkit\)
+            // This ensures all config, cache, and data files are removed,
+            // including any new directories added by future features.
             TryDelete(() =>
             {
-                if (File.Exists(paths.SettingsFile)) File.Delete(paths.SettingsFile);
-            }, "settings.json", errors);
-
-            // Delete library.json
-            TryDelete(() =>
-            {
-                if (File.Exists(paths.LibraryFile)) File.Delete(paths.LibraryFile);
-            }, "library.json", errors);
-
-            // Delete entire cache directory (includes download cache + icon cache)
-            TryDelete(() =>
-            {
-                if (Directory.Exists(paths.CacheDirectory))
-                    Directory.Delete(paths.CacheDirectory, recursive: true);
-            }, "cache", errors);
-
-            // Delete backups directory
-            TryDelete(() =>
-            {
-                if (Directory.Exists(paths.BackupsDirectory))
-                    Directory.Delete(paths.BackupsDirectory, recursive: true);
-            }, "backups", errors);
+                if (Directory.Exists(paths.Root))
+                    Directory.Delete(paths.Root, recursive: true);
+            }, paths.Root, errors);
 
             // Recreate required directories
             paths.EnsureDirectoriesExist();
@@ -72,7 +64,7 @@ public static class SettingsEndpoints
                 return Results.Ok(ApiResult<object>.Ok(new { partial = true, errors }));
             }
 
-            logger.LogInformation("已重置所有配置和缓存");
+            logger.LogInformation("已重置所有配置和缓存（已删除数据目录 {Root}）", paths.Root);
             return Results.Ok(ApiResult<object>.Ok(new { partial = false }));
         });
 

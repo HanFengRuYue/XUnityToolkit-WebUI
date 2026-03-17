@@ -61,6 +61,14 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
             return cmp != 0 ? cmp : b.Original.Length.CompareTo(a.Original.Length);
         });
 
+        if (logger.IsEnabled(LogLevel.Debug) && matched.Count > 0)
+        {
+            var termList = string.Join(", ", matched.Select(t =>
+                $"[{t.Type}] \"{t.Original}\"" + (t.Type == TermType.Translate ? $"→\"{t.Translation}\"" : "")));
+            logger.LogDebug("术语匹配: {Count}/{Total} 条术语命中 ({TextCount} 段文本): {Terms}",
+                matched.Count, allTerms.Count, sourceTexts.Count, termList);
+        }
+
         return matched;
     }
 
