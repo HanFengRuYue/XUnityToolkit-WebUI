@@ -28,6 +28,7 @@ import {
   CloudOutlined,
   ComputerOutlined,
   SportsEsportsOutlined,
+  CachedOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
@@ -367,52 +368,72 @@ onUnmounted(() => {
     <!-- Pre-Translation Cache Stats -->
     <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" style="animation-delay: 0.06s">
       <div class="section-header">
-        <div class="section-title">
+        <h2 class="section-title">
           <span class="section-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+            <NIcon :size="16"><CachedOutlined /></NIcon>
           </span>
           预翻译缓存
-          <n-tag size="small" type="warning" style="margin-left: 8px">实验性</n-tag>
-        </div>
+          <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
+        </h2>
       </div>
       <div class="metrics-strip">
         <div class="metric-pill">
-          <span class="metric-label">总条目</span>
-          <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
+          <div class="metric-icon">
+            <NIcon :size="14"><CachedOutlined /></NIcon>
+          </div>
+          <div class="metric-data">
+            <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
+            <span class="metric-label">总条目</span>
+          </div>
         </div>
-        <div class="metric-pill">
-          <span class="metric-label">命中</span>
-          <span class="metric-value" style="color: var(--success-color, #18a058)">{{ aiStore.cacheStats.cacheHits }}</span>
+        <div class="metric-pill rate-good">
+          <div class="metric-icon">
+            <NIcon :size="14"><CheckCircleOutlined /></NIcon>
+          </div>
+          <div class="metric-data">
+            <span class="metric-value">{{ aiStore.cacheStats.cacheHits }}</span>
+            <span class="metric-label">命中</span>
+          </div>
         </div>
-        <div class="metric-pill">
-          <span class="metric-label">未命中</span>
-          <span class="metric-value" style="color: var(--error-color, #d03050)">{{ aiStore.cacheStats.cacheMisses }}</span>
+        <div class="metric-pill" :class="{ 'rate-bad': aiStore.cacheStats.cacheMisses > 0 }">
+          <div class="metric-icon">
+            <NIcon :size="14"><ErrorOutlineOutlined /></NIcon>
+          </div>
+          <div class="metric-data">
+            <span class="metric-value">{{ aiStore.cacheStats.cacheMisses }}</span>
+            <span class="metric-label">未命中</span>
+          </div>
         </div>
-        <div class="metric-pill">
-          <span class="metric-label">命中率</span>
-          <span class="metric-value">{{ aiStore.cacheStats.hitRate }}%</span>
+        <div class="metric-pill" :class="{ 'rate-good': aiStore.cacheStats.hitRate > 80, 'rate-warn': aiStore.cacheStats.hitRate <= 80 && aiStore.cacheStats.hitRate > 50, 'rate-bad': aiStore.cacheStats.hitRate <= 50 }">
+          <div class="metric-icon">
+            <NIcon :size="14"><SpeedOutlined /></NIcon>
+          </div>
+          <div class="metric-data">
+            <span class="metric-value">{{ aiStore.cacheStats.hitRate }}<small>%</small></span>
+            <span class="metric-label">命中率</span>
+          </div>
         </div>
       </div>
-      <n-progress
+      <NProgress
         type="line"
         :percentage="aiStore.cacheStats.hitRate"
-        :color="aiStore.cacheStats.hitRate > 50 ? '#18a058' : '#d03050'"
-        style="margin: 12px 0"
+        :color="aiStore.cacheStats.hitRate > 50 ? 'var(--success)' : 'var(--danger)'"
+        class="cache-progress"
       />
-      <n-collapse v-if="aiStore.cacheStats.recentMisses.length > 0">
-        <n-collapse-item title="最近未命中详情" name="misses">
-          <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" style="padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.1)">
-            <div style="display: flex; gap: 8px; font-size: 12px; margin: 2px 0">
-              <span style="color: var(--text-color-3); white-space: nowrap">预翻译键:</span>
-              <code style="word-break: break-all">{{ miss.preTranslatedKey }}</code>
+      <NCollapse v-if="aiStore.cacheStats.recentMisses.length > 0">
+        <NCollapseItem title="最近未命中详情" name="misses">
+          <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" class="cache-miss-item">
+            <div class="cache-miss-row">
+              <span class="cache-miss-label">预翻译键:</span>
+              <code class="cache-miss-code">{{ miss.preTranslatedKey }}</code>
             </div>
-            <div style="display: flex; gap: 8px; font-size: 12px; margin: 2px 0">
-              <span style="color: var(--text-color-3); white-space: nowrap">运行时文本:</span>
-              <code style="word-break: break-all">{{ miss.runtimeText }}</code>
+            <div class="cache-miss-row">
+              <span class="cache-miss-label">运行时文本:</span>
+              <code class="cache-miss-code">{{ miss.runtimeText }}</code>
             </div>
           </div>
-        </n-collapse-item>
-      </n-collapse>
+        </NCollapseItem>
+      </NCollapse>
     </div>
 
     <!-- Recent Translations -->
@@ -1541,6 +1562,43 @@ onUnmounted(() => {
   padding: 2px 10px;
   border-radius: 10px;
   flex-shrink: 0;
+}
+
+/* ===== Cache Stats ===== */
+.cache-progress {
+  margin: 12px 0;
+}
+
+.cache-miss-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cache-miss-item:last-child {
+  border-bottom: none;
+}
+
+.cache-miss-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  margin: 3px 0;
+}
+
+.cache-miss-label {
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cache-miss-code {
+  word-break: break-all;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  background: var(--bg-subtle);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
 /* ===== Responsive ===== */

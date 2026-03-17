@@ -409,21 +409,26 @@ function langLabel(code: string): string {
         </NAlert>
 
         <!-- Pre-Translation Cache Toggle -->
-        <div style="margin-bottom: 16px">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
-            <n-switch v-model:value="enablePreTranslationCache" @update:value="handleToggleCache" />
-            <span>预翻译缓存优化</span>
-            <n-tag size="small" type="warning">实验性</n-tag>
+        <div class="cache-toggle-section">
+          <div class="cache-toggle-row">
+            <NSwitch v-model:value="enablePreTranslationCache" @update:value="handleToggleCache" />
+            <span class="cache-toggle-label">预翻译缓存优化</span>
+            <NTag size="small" type="warning">实验性</NTag>
           </div>
-          <n-alert v-if="enablePreTranslationCache" type="warning" style="margin-bottom: 12px" :bordered="false">
+          <NAlert v-if="enablePreTranslationCache" type="warning" :bordered="false" class="cache-warning">
             这是一个实验性功能。它会修改 XUnity.AutoTranslator 配置并生成正则翻译模式以提高预翻译缓存命中率。效果因游戏而异。如果启用后出现翻译问题，请关闭此功能并重新运行预翻译。
-          </n-alert>
+          </NAlert>
         </div>
 
         <!-- Script Tag Cleaning Rules -->
-        <div v-if="enablePreTranslationCache" class="section-card" style="margin-bottom: 16px">
+        <div v-if="enablePreTranslationCache" class="script-tag-card">
           <div class="section-header">
-            <span class="section-title">脚本指令清洗规则</span>
+            <h3 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><DataObjectOutlined /></NIcon>
+              </span>
+              脚本指令清洗规则
+            </h3>
             <div class="header-actions">
               <NButton size="small" @click="importPresetRules">导入内置规则</NButton>
               <NButton size="small" @click="addCustomRule">+ 添加规则</NButton>
@@ -437,40 +442,39 @@ function langLabel(code: string): string {
             暂无规则。点击「导入内置规则」加载预设，或手动添加自定义规则。
           </div>
 
-          <div v-for="(rule, index) in scriptTagRules" :key="index"
-               style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+          <div v-for="(rule, index) in scriptTagRules" :key="index" class="rule-row">
             <NInput
               v-model:value="rule.pattern"
               placeholder="正则表达式"
               :disabled="rule.isBuiltin"
-              style="flex: 3; font-family: monospace"
+              class="rule-pattern"
               @update:value="scriptTagDirty = true"
             />
             <NSelect
               v-model:value="rule.action"
               :options="actionOptions"
               :disabled="rule.isBuiltin"
-              style="flex: 1; min-width: 140px"
+              class="rule-action"
               @update:value="scriptTagDirty = true"
             />
             <NInput
               v-model:value="rule.description"
               placeholder="说明"
               :disabled="rule.isBuiltin"
-              style="flex: 1.5"
+              class="rule-desc"
               @update:value="scriptTagDirty = true"
             />
             <NButton v-if="!rule.isBuiltin" size="small" quaternary @click="removeScriptTagRule(index)">
               <template #icon><NIcon :size="16"><DeleteOutlined /></NIcon></template>
             </NButton>
-            <NIcon v-else :size="16" style="opacity: 0.5; min-width: 28px; display: flex; justify-content: center">
+            <NIcon v-else :size="16" class="rule-lock-icon">
               <LockClosedOutline />
             </NIcon>
           </div>
 
-          <div v-if="scriptTagRules.length > 0" style="margin-top: 8px; font-size: 12px; opacity: 0.6">
+          <p v-if="scriptTagRules.length > 0" class="rule-hint">
             内置规则随应用更新自动刷新，自定义规则不受影响。需重新运行预翻译以生效。
-          </div>
+          </p>
         </div>
 
         <!-- Action Buttons -->
@@ -682,6 +686,79 @@ function langLabel(code: string): string {
   color: var(--danger);
 }
 
+/* ===== Cache Toggle ===== */
+.cache-toggle-section {
+  margin-bottom: 16px;
+}
+
+.cache-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cache-toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.cache-warning {
+  margin-bottom: 12px;
+}
+
+/* ===== Script Tag Card ===== */
+.script-tag-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-bottom: 16px;
+  transition: border-color 0.3s ease;
+}
+
+.script-tag-card:hover {
+  border-color: var(--border-hover);
+}
+
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rule-pattern {
+  flex: 3;
+  font-family: var(--font-mono);
+}
+
+.rule-action {
+  flex: 1;
+  min-width: 140px;
+}
+
+.rule-desc {
+  flex: 1.5;
+}
+
+.rule-lock-icon {
+  opacity: 0.5;
+  min-width: 28px;
+  display: flex;
+  justify-content: center;
+}
+
+.rule-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
 @media (max-width: 768px) {
   .stat-cards {
     flex-direction: column;
@@ -695,6 +772,13 @@ function langLabel(code: string): string {
   }
   .lang-arrow {
     text-align: center;
+  }
+  .rule-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rule-action {
+    min-width: unset;
   }
 }
 </style>

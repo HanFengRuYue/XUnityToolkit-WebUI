@@ -170,9 +170,9 @@ public sealed class LlmTranslationService(
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
 
-            // Load glossary for the game (if available) — disabled in local mode
+            // Load glossary for the game (if available)
             List<GlossaryEntry>? glossary = null;
-            if (!isLocalMode && !string.IsNullOrEmpty(gameId))
+            if (!string.IsNullOrEmpty(gameId))
             {
                 glossary = await glossaryService.GetAsync(gameId, ct);
                 if (glossary.Count == 0) glossary = null;
@@ -222,28 +222,22 @@ public sealed class LlmTranslationService(
             EnsureSemaphore(maxConc);
             var semaphore = Volatile.Read(ref _semaphore)!; // Acquire-read for ARM safety
 
-            // Apply do-not-translate placeholder substitution
-            Dictionary<string, string>? dntMapping = null;
+            // Glossary placeholders are applied BEFORE DNT to ensure longer glossary
+            // terms take priority. Example: glossary "魔法師"→"大法师" must match before
+            // DNT "魔法" can consume the substring. Both sort longest-first internally;
+            // processing glossary first lets it claim longer spans, then DNT handles the rest.
             IList<string> textsToTranslate = texts;
             string? dntHint = null;
-            if (dntEntries is not null)
-            {
-                var (replaced, mapping) = ApplyDoNotTranslateReplacements(texts, dntEntries);
-                if (mapping.Count > 0)
-                {
-                    textsToTranslate = replaced;
-                    dntMapping = mapping;
-                    dntHint = "\n\n文本中的 {{DNT_x}} 是不可翻译的占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
-                }
-            }
 
             // Apply glossary placeholder substitution for non-regex entries
             // This guarantees glossary translations are used regardless of LLM compliance
             Dictionary<string, string>? glossaryMapping = null;
-            List<GlossaryEntry>? promptGlossary = glossary;
+            // Local mode: skip glossary in system prompt to save context tokens;
+            // placeholder substitution + post-processing still enforce glossary terms.
+            List<GlossaryEntry>? promptGlossary = isLocalMode ? null : glossary;
             if (glossary is not null)
             {
-                var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrEmpty(e.Original)).ToList();
+                var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrWhiteSpace(e.Original)).ToList();
                 if (nonRegexEntries.Count > 0)
                 {
                     var (replaced, mapping) = ApplyGlossaryReplacements(textsToTranslate, nonRegexEntries);
@@ -252,14 +246,23 @@ public sealed class LlmTranslationService(
                         textsToTranslate = replaced;
                         glossaryMapping = mapping;
 
-                        // Keep ALL glossary entries in the system prompt so the LLM
-                        // understands the terminology even when placeholders are used.
-                        // promptGlossary remains = glossary (set at line 231)
-
                         // Tell LLM to preserve glossary placeholders
-                        dntHint = (dntHint ?? "") +
-                            "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+                        dntHint = "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
                     }
+                }
+            }
+
+            // Apply do-not-translate placeholder substitution (on glossary-processed text)
+            Dictionary<string, string>? dntMapping = null;
+            if (dntEntries is not null)
+            {
+                var (replaced, mapping) = ApplyDoNotTranslateReplacements(textsToTranslate, dntEntries);
+                if (mapping.Count > 0)
+                {
+                    textsToTranslate = replaced;
+                    dntMapping = mapping;
+                    dntHint = (dntHint ?? "") +
+                        "\n\n文本中的 {{DNT_x}} 是不可翻译的占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
                 }
             }
 
@@ -782,13 +785,15 @@ public sealed class LlmTranslationService(
 
     // ── Do-not-translate placeholder substitution ──
 
+    // Restore regexes tolerate full-width braces (U+FF5B/U+FF5D) and case variation
+    // because Chinese LLMs (Qwen, GLM, Kimi, DeepSeek) commonly output full-width punctuation.
     private static readonly Regex DntRestoreRegex = new(
-        @"\{{1,2}\s*DNT_(\d+)\s*\}{1,2}",
-        RegexOptions.Compiled);
+        @"[{｛]{1,2}\s*DNT_(\d+)\s*[}｝]{1,2}",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex GlossaryRestoreRegex = new(
-        @"\{{1,2}\s*G_(\d+)\s*\}{1,2}",
-        RegexOptions.Compiled);
+        @"[{｛]{1,2}\s*G_(\d+)\s*[}｝]{1,2}",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Strict full-match patterns: detect texts that are ENTIRELY a single placeholder
     private static readonly Regex FullDntPlaceholderRegex = new(
@@ -990,9 +995,11 @@ public sealed class LlmTranslationService(
 
     private static string ApplyGlossaryPostProcess(string translated, List<GlossaryEntry> glossary)
     {
-        foreach (var entry in glossary)
+        // Sort longest-first to prevent shorter entries from shadowing longer ones
+        // (matches the strategy in ApplyGlossaryReplacements)
+        foreach (var entry in glossary.OrderByDescending(e => e.Original?.Length ?? 0))
         {
-            if (string.IsNullOrEmpty(entry.Original)) continue;
+            if (string.IsNullOrWhiteSpace(entry.Original)) continue;
 
             if (entry.IsRegex)
             {

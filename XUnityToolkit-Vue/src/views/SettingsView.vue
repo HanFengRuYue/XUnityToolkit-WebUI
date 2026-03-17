@@ -927,26 +927,26 @@ onMounted(() => {
 }
 
 .update-status-badge.error-badge {
-  background: color-mix(in srgb, var(--error-color, #d03050) 12%, transparent);
-  color: var(--error-color, #d03050);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
 }
 
 .update-status-badge.latest {
-  background: color-mix(in srgb, var(--success-color, #18a058) 12%, transparent);
-  color: var(--success-color, #18a058);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
 }
 
 .update-divider {
   height: 1px;
-  background: var(--border-color);
+  background: var(--border);
   margin: 16px 0;
 }
 
 .update-details {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
   border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .update-header { margin-bottom: 12px; }
@@ -982,9 +982,9 @@ onMounted(() => {
 .update-progress {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
-  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
+  border: 1px solid var(--border);
 }
 .progress-header { font-size: 14px; margin-bottom: 8px; font-weight: 500; }
 .progress-detail {
@@ -997,8 +997,8 @@ onMounted(() => {
 .update-applying {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
   border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
   display: flex;
   align-items: center;
@@ -1010,9 +1010,9 @@ onMounted(() => {
 .update-ready, .update-error {
   margin-top: 16px;
   padding: 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle, var(--bg-muted)));
-  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1020,8 +1020,8 @@ onMounted(() => {
   font-size: 13px;
 }
 .update-error {
-  background: color-mix(in srgb, var(--error-color, #d03050) 5%, var(--bg-subtle, var(--bg-muted)));
-  border-color: color-mix(in srgb, var(--error-color, #d03050) 20%, transparent);
+  background: color-mix(in srgb, var(--danger) 5%, var(--bg-subtle));
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
 .setting-row {
@@ -1032,7 +1032,7 @@ onMounted(() => {
 }
 .setting-info { flex: 1; }
 .setting-label { font-size: 14px; font-weight: 500; display: block; }
-.setting-description { font-size: 12px; color: var(--text-secondary); display: block; margin-top: 2px; }
+.setting-description { font-size: 12px; color: var(--text-3); display: block; margin-top: 2px; }
 
 /* ===== About Link ===== */
 .about-link {

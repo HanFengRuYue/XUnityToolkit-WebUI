@@ -20,6 +20,9 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Header actions:** Use `.header-actions` (NOT `.header-btn-group`) for button groups in section headers
 - **Typography:** Do NOT use `font-family: monospace` for UI text (version numbers, labels, etc.) — it clashes with the system font; only use monospace inside code blocks or developer-facing output
 - **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match; do NOT set padding on page-level containers (`.main-content` already provides it); do NOT use `max-width` on page containers unless content truly needs constraining; use `gap: 16px` for page-level flex column
+- **CSS variable naming:** NEVER use `--error-color`, `--success-color`, `--border-color`, `--text-secondary`, `--text-color-3` — these don't exist; use `--danger`, `--success`, `--border`, `--text-3` respectively; use `color-mix(in srgb, var(--danger) N%, transparent)` for translucent semantic colors
+- **Component casing:** Always use PascalCase for Naive UI components (`NSwitch`, `NTag`, `NAlert`, `NProgress`, `NCollapse`), not lowercase kebab-case (`n-switch`, `n-tag`)
+- **Inline styles:** Avoid `style="..."` for layout/colors; create proper scoped CSS classes using design system variables; only acceptable for one-off `animation-delay` values
 
 ## Adding a New Page
 
