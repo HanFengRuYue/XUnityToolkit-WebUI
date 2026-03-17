@@ -54,7 +54,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **RouteMeta extension:** `env.d.ts` declares `depth?: number` on `RouteMeta` for TypeScript
 - **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
 - **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
-- After changes: verify with `npx vue-tsc --noEmit` and `npm run build`
+- After changes: verify with `npx vue-tsc --build` and `npm run build`
 - Verify icon: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
 - **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`

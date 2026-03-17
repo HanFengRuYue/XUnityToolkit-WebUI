@@ -32,7 +32,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 cd XUnityToolkit-Vue && npm run dev
 
 # Type-check frontend
-cd XUnityToolkit-Vue && npx vue-tsc --noEmit
+cd XUnityToolkit-Vue && npx vue-tsc --build
 ```
 
 ## Architecture
@@ -111,7 +111,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
 - **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`, `GET/PUT .../pre-translate/regex`
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
-- **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`
+- **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`, `DELETE .../font-replacement/custom-font`
 - **BepInEx Log:** `GET /api/games/{id}/bepinex-log`, `GET .../download` (**not ApiResult**), `POST .../analyze`
 - **Font Generation:** `POST /api/font-generation/upload` (multipart, 50MB), `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}` (**not ApiResult**), `GET .../history`, `DELETE .../{fileName}`, `POST .../install-tmp-font/{gameId}` (installs to `BepInEx/Font/` + patches INI), `GET .../charsets`, `POST .../charset/preview`, `POST .../charset/upload-custom`, `POST .../charset/upload-translation`, `GET .../report/{fileName}`
 - **Plugin Package:** `POST .../plugin-package/export` (ZIP, **not ApiResult**), `POST .../import`
@@ -161,7 +161,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: local build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → Updater (AOT) → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **Versioning:** `build.ps1` auto-generates `2.7.{YYYYMMDDHHmm}` (CI uses `2.7.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
+- **Versioning:** `build.ps1` auto-generates `2.8.{YYYYMMDDHHmm}` (CI uses `2.8.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
 - **Data path:** Always `%AppData%\XUnityToolkit\` (no portable mode); `AppData:Root` config key allows override for dev/test
@@ -214,4 +214,4 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Misc
 
 - **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
-- **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
+- **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/` and `!bundled/script-tag-presets.json`

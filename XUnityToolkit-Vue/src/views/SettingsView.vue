@@ -182,6 +182,7 @@ function handleReset() {
         } else {
           message.success('已重置所有配置')
         }
+        localStorage.clear()
         setTimeout(() => window.location.reload(), 500)
       } catch {
         message.error('重置失败')
