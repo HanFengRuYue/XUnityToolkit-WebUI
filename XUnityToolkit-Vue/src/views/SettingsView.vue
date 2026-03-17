@@ -869,6 +869,7 @@ onMounted(() => {
   flex: 1;
   padding: 20px 24px;
   min-width: 0;
+  transition: padding 0.3s var(--ease-out);
 }
 
 .danger-body .section-header {
@@ -1074,8 +1075,11 @@ onMounted(() => {
 }
 
 /* ===== Collapsed Danger Card ===== */
+.danger-card.is-collapsed {
+  padding: 0;
+}
 .danger-card.is-collapsed .danger-body {
-  padding-bottom: 16px;
+  padding: 16px 24px;
 }
 
 /* ===== Responsive ===== */

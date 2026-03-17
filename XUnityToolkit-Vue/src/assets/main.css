@@ -404,7 +404,7 @@ body::before {
   border-radius: var(--radius-lg);
   padding: 24px;
   animation: slideUp 0.5s var(--ease-out) backwards;
-  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+  transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease, padding 0.3s var(--ease-out);
   box-shadow: var(--shadow-card-rest);
 }
 
@@ -502,9 +502,9 @@ body::before {
   overflow: hidden;
 }
 
-/* Collapsed card reduces bottom padding */
+/* Collapsed card uses balanced compact padding */
 .section-card.is-collapsed {
-  padding-bottom: 0;
+  padding: 18px 24px;
 }
 
 .section-card.is-collapsed .section-header {
