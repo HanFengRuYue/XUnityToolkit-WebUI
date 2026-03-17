@@ -214,8 +214,8 @@ $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint
 $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 
-# Generate version: 2.5.{YYYYMMDDHHmm}
-$BuildVersion = "2.5.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 2.6.{YYYYMMDDHHmm}
+$BuildVersion = "2.6.$(Get-Date -Format 'yyyyMMddHHmm')"
 $VersionPrefix = ($BuildVersion -split '\.')[0..1] -join '.'
 
 # Generate MSI-compatible version: {(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}

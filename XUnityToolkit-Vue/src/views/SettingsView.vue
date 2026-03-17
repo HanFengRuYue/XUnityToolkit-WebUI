@@ -46,7 +46,6 @@ const collapsed = reactive({
   covers: true,
   data: true,
   danger: true,
-  about: true,
 })
 
 const message = useMessage()
@@ -619,69 +618,62 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- About (full width) -->
-    <div class="section-card" :class="{ 'is-collapsed': collapsed.about }" style="animation-delay: 0.35s">
-      <div class="section-header collapsible" @click="collapsed.about = !collapsed.about">
+    <!-- About (full width, non-collapsible) -->
+    <div class="section-card" style="animation-delay: 0.35s">
+      <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon about">
             <NIcon :size="16"><InfoOutlined /></NIcon>
           </span>
           关于
         </h2>
-        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.about }">
-          <ExpandMoreOutlined />
-        </NIcon>
       </div>
-      <div class="section-body" :class="{ collapsed: collapsed.about }">
-        <div class="section-body-inner">
-          <div class="about-grid">
-            <div class="info-card">
-              <div class="info-card-icon tech">
-                <NIcon :size="18"><LayersOutlined /></NIcon>
-              </div>
-              <div class="info-card-content">
-                <span class="info-label">技术栈</span>
-                <span class="info-value">.NET 10 + Vue 3</span>
-              </div>
-            </div>
-            <div class="info-card">
-              <div class="info-card-icon author">
-                <NIcon :size="18"><PersonOutlined /></NIcon>
-              </div>
-              <div class="info-card-content">
-                <span class="info-label">作者</span>
-                <span class="info-value">
-                  <a
-                    href="https://github.com/HanFengRuYue"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="about-link"
-                  >
-                    寒枫如玥
-                    <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
-                  </a>
-                </span>
-              </div>
-            </div>
-            <div class="info-card">
-              <div class="info-card-icon github">
-                <NIcon :size="18"><LogoGithub /></NIcon>
-              </div>
-              <div class="info-card-content">
-                <span class="info-label">源代码</span>
-                <span class="info-value">
-                  <a
-                    href="https://github.com/HanFengRuYue/XUnityToolkit-WebUI"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="about-link"
-                  >
-                    GitHub 仓库
-                    <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
-                  </a>
-                </span>
-              </div>
-            </div>
+      <div class="about-grid">
+        <div class="info-card">
+          <div class="info-card-icon tech">
+            <NIcon :size="18"><LayersOutlined /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">技术栈</span>
+            <span class="info-value">.NET 10 + Vue 3</span>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon author">
+            <NIcon :size="18"><PersonOutlined /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">作者</span>
+            <span class="info-value">
+              <a
+                href="https://github.com/HanFengRuYue"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="about-link"
+              >
+                寒枫如玥
+                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
+              </a>
+            </span>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="info-card-icon github">
+            <NIcon :size="18"><LogoGithub /></NIcon>
+          </div>
+          <div class="info-card-content">
+            <span class="info-label">源代码</span>
+            <span class="info-value">
+              <a
+                href="https://github.com/HanFengRuYue/XUnityToolkit-WebUI"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="about-link"
+              >
+                GitHub 仓库
+                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
+              </a>
+            </span>
           </div>
         </div>
       </div>
