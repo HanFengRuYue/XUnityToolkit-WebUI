@@ -640,6 +640,30 @@ onUnmounted(() => {
         </h2>
       </div>
 
+      <!-- Translation Pipeline Settings -->
+      <div class="pipeline-settings">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">术语审查</span>
+            <span class="setting-description">翻译后自动检查术语是否正确应用</span>
+          </div>
+          <NSwitch
+            :value="aiSettings.termAuditEnabled"
+            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, termAuditEnabled: v } }"
+          />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">自然翻译模式</span>
+            <span class="setting-description">先让 LLM 自然应用术语，失败后回退到占位符方案</span>
+          </div>
+          <NSwitch
+            :value="aiSettings.naturalTranslationMode"
+            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, naturalTranslationMode: v } }"
+          />
+        </div>
+      </div>
+
       <!-- Mode Tabs -->
       <div class="mode-tabs">
         <button
@@ -1440,6 +1464,26 @@ onUnmounted(() => {
   background: var(--accent-soft);
   color: var(--accent);
 }
+
+/* ===== Pipeline Settings ===== */
+.pipeline-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.setting-info { flex: 1; }
+.setting-label { font-size: 14px; font-weight: 500; display: block; }
+.setting-description { font-size: 12px; color: var(--text-3); display: block; margin-top: 2px; }
 
 /* ===== Mode Tabs ===== */
 .mode-tabs {

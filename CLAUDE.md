@@ -18,7 +18,7 @@ dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 # Run backend (serves the web UI on http://127.0.0.1:51821)
 dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
 
-# One-click local build (portable, self-contained, win-x64)
+# One-click local build (self-contained, win-x64, includes Updater)
 .\build.ps1
 .\build.ps1 -SkipDownload    # skip asset downloads
 
@@ -46,7 +46,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game unified term list, translation memory, AI description; real-time stats via SignalR
 - **Unified Term Management:** `TermService` stores per-game term entries at `data/glossaries/{gameId}.json` (migrates legacy DNT entries on first load); each `TermEntry` has `Type` (Translate/DoNotTranslate), `Category`, `Priority`, `CaseSensitive`, `ExactMatch`, `IsRegex`; `TermMatchingService` handles priority-based placeholder substitution; `TermAuditService` verifies term compliance in translations
-- **Enum JSON casing:** `TermType` and `TermCategory` use `CamelCaseJsonStringEnumConverter<T>` (camelCase: `"translate"`, `"doNotTranslate"`, `"character"`); ALL other enums use default PascalCase (`"OpenAI"`, `"NotInstalled"`) — do NOT change global `JsonStringEnumConverter` or add naming policy to it
+- **Enum JSON casing:** `TermType` and `TermCategory` use `CamelCaseJsonStringEnumConverter<T>` (camelCase: `"translate"`, `"doNotTranslate"`, `"character"`); ALL other enums use default PascalCase (`"OpenAI"`, `"NotInstalled"`) — do NOT change global `JsonStringEnumConverter` or add naming policy to it; **converter precedence:** property-level `[JsonConverter]` > `JsonSerializerOptions.Converters` > type-level `[JsonConverter]` — camelCase enums MUST have `[JsonConverter]` on the TermEntry **property** (not just the enum type), otherwise the global PascalCase `JsonStringEnumConverter` in `Program.cs` and service `JsonOptions` overrides the type-level attribute
 - **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
 - **Placeholder substitution order:** Terms sorted by priority (higher first), then by original text length (longer first); translate-type terms produce `{{G_x}}` placeholders, do-not-translate terms produce `{{DNT_x}}`; priority-based ordering ensures important terms claim their spans before lower-priority terms
 - **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
@@ -160,7 +160,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 ### Build & Deploy
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
-- `build.ps1`: local portable build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no Updater, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
+- `build.ps1`: local build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → Updater (AOT) → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - **Versioning:** `build.ps1` auto-generates `2.6.{YYYYMMDDHHmm}` (CI uses `2.6.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)

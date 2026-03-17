@@ -45,7 +45,6 @@ defineOptions({ name: 'SettingsView' })
 const collapsed = reactive({
   covers: true,
   data: true,
-  danger: true,
 })
 
 const message = useMessage()
@@ -375,32 +374,6 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- AI Translation Settings -->
-    <div class="section-card" style="animation-delay: 0.1s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><TuneOutlined /></NIcon>
-          </span>
-          AI 翻译
-        </h2>
-      </div>
-      <div class="setting-row">
-        <div class="setting-info">
-          <span class="setting-label">术语审查</span>
-          <span class="setting-description">翻译后自动检查术语是否正确应用</span>
-        </div>
-        <NSwitch v-model:value="settings.aiTranslation.termAuditEnabled" />
-      </div>
-      <div class="setting-row" style="margin-top: 12px">
-        <div class="setting-info">
-          <span class="setting-label">自然翻译模式</span>
-          <span class="setting-description">先让 LLM 自然应用术语，失败后回退到占位符方案</span>
-        </div>
-        <NSwitch v-model:value="settings.aiTranslation.naturalTranslationMode" />
-      </div>
-    </div>
-
     <!-- Game Covers -->
     <div class="section-card" :class="{ 'is-collapsed': collapsed.covers }" style="animation-delay: 0.15s">
       <div class="section-header collapsible" @click="collapsed.covers = !collapsed.covers">
@@ -479,34 +452,24 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- Danger Zone (full width) -->
-    <div class="section-card danger-card" :class="{ 'is-collapsed': collapsed.danger }" style="animation-delay: 0.25s">
-      <div class="danger-bar"></div>
-      <div class="danger-body">
-        <div class="section-header collapsible" @click="collapsed.danger = !collapsed.danger">
-          <h2 class="section-title">
-            <span class="section-icon danger">
-              <NIcon :size="16"><WarningAmberOutlined /></NIcon>
-            </span>
-            危险区域
-          </h2>
-          <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.danger }">
-            <ExpandMoreOutlined />
-          </NIcon>
+    <!-- Data Reset -->
+    <div class="section-card" style="animation-delay: 0.25s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon danger">
+            <NIcon :size="16"><WarningAmberOutlined /></NIcon>
+          </span>
+          数据重置
+        </h2>
+      </div>
+      <div class="danger-action">
+        <div class="danger-text">
+          <div class="danger-description">重置将删除所有应用数据，包括游戏库、设置、下载缓存和备份。此操作不可撤销。</div>
+          <span class="danger-hint">重置后页面将自动刷新</span>
         </div>
-        <div class="section-body" :class="{ collapsed: collapsed.danger }">
-          <div class="section-body-inner">
-            <div class="danger-action">
-              <div class="danger-text">
-                <div class="danger-description">重置将删除所有应用数据，包括游戏库、设置、下载缓存和备份。此操作不可撤销。</div>
-                <span class="danger-hint">重置后页面将自动刷新</span>
-              </div>
-              <NButton type="error" :loading="resetLoading" ghost @click="handleReset">
-                重置所有配置
-              </NButton>
-            </div>
-          </div>
-        </div>
+        <NButton type="error" :loading="resetLoading" ghost @click="handleReset">
+          重置所有配置
+        </NButton>
       </div>
     </div>
 
@@ -875,35 +838,7 @@ onMounted(() => {
   gap: 10px;
 }
 
-/* ===== Danger Zone ===== */
-.danger-card {
-  flex-direction: row;
-  padding: 0;
-  overflow: hidden;
-  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
-}
-
-.danger-card:hover {
-  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
-}
-
-.danger-bar {
-  width: 4px;
-  flex-shrink: 0;
-  background: var(--danger);
-}
-
-.danger-body {
-  flex: 1;
-  padding: 20px 24px;
-  min-width: 0;
-  transition: padding 0.3s var(--ease-out);
-}
-
-.danger-body .section-header {
-  margin-bottom: 14px;
-}
-
+/* ===== Data Reset ===== */
 .danger-action {
   display: flex;
   align-items: center;
@@ -1102,20 +1037,8 @@ onMounted(() => {
   opacity: 0.8;
 }
 
-/* ===== Collapsed Danger Card ===== */
-.danger-card.is-collapsed {
-  padding: 0;
-}
-.danger-card.is-collapsed .danger-body {
-  padding: 16px 24px;
-}
-
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
-  .danger-body {
-    padding: 16px;
-  }
-
   .about-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
@@ -1143,10 +1066,6 @@ onMounted(() => {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
-  }
-
-  .danger-body {
-    padding: 14px;
   }
 
   .data-path-row {

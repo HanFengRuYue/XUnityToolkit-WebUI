@@ -32,9 +32,11 @@ public enum TermCategory
 
 public sealed record TermEntry
 {
+    [JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermType>))]
     public TermType Type { get; set; } = TermType.Translate;
     public required string Original { get; set; }
     public string? Translation { get; set; }
+    [JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermCategory>))]
     public TermCategory? Category { get; set; }
     public string? Description { get; set; }
     public bool IsRegex { get; set; }

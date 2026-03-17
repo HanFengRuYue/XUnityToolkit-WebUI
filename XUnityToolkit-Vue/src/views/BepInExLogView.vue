@@ -162,7 +162,7 @@ async function handleAnalyze() {
 
 // Render markdown
 function renderMarkdown(md: string): string {
-  return marked.parse(md, { async: false })
+  return marked.parse(md, { async: false }) as string
 }
 
 // Highlight search matches in text
@@ -398,10 +398,15 @@ onMounted(async () => {
 /* Markdown body styles */
 .markdown-body :deep(h1),
 .markdown-body :deep(h2),
-.markdown-body :deep(h3) {
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
   color: var(--text-1);
   margin-top: 16px;
   margin-bottom: 8px;
+}
+
+.markdown-body :deep(h1) {
+  font-size: 20px;
 }
 
 .markdown-body :deep(h2) {
@@ -414,6 +419,10 @@ onMounted(async () => {
   font-size: 14px;
 }
 
+.markdown-body :deep(h4) {
+  font-size: 13px;
+}
+
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
   padding-left: 20px;
@@ -421,6 +430,12 @@ onMounted(async () => {
 }
 
 .markdown-body :deep(li) {
+  margin: 4px 0;
+  line-height: 1.6;
+}
+
+.markdown-body :deep(li > ul),
+.markdown-body :deep(li > ol) {
   margin: 4px 0;
 }
 
@@ -437,11 +452,13 @@ onMounted(async () => {
   padding: 12px 16px;
   border-radius: 6px;
   overflow-x: auto;
+  margin: 8px 0;
 }
 
-.markdown-body :deep(pre) :deep(code) {
+.markdown-body :deep(pre code) {
   background: none;
   padding: 0;
+  font-size: 12px;
 }
 
 .markdown-body :deep(p) {
@@ -450,6 +467,62 @@ onMounted(async () => {
 
 .markdown-body :deep(strong) {
   color: var(--text-1);
+}
+
+.markdown-body :deep(em) {
+  color: var(--text-2);
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 8px 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--bg-subtle);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-2);
+}
+
+.markdown-body :deep(blockquote p) {
+  margin: 4px 0;
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.markdown-body :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.markdown-body :deep(th) {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.markdown-body :deep(tr:nth-child(even)) {
+  background: color-mix(in srgb, var(--bg-subtle) 50%, transparent);
+}
+
+.markdown-body :deep(a) {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.markdown-body :deep(a:hover) {
+  text-decoration: underline;
 }
 
 /* Responsive */
