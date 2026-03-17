@@ -37,6 +37,11 @@
     <Content Include="..\bundled\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\fonts\%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- Copy script tag presets to output directory during build -->
+  <ItemGroup Condition="Exists('..\bundled\script-tag-presets.json')">
+    <Content Include="..\bundled\script-tag-presets.json" CopyToOutputDirectory="PreserveNewest" Link="bundled\script-tag-presets.json" />
+  </ItemGroup>
+
   <!-- Bundled plugin ZIPs and llama.cpp binaries are copied by build.ps1 after publish -->
 
   <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->
