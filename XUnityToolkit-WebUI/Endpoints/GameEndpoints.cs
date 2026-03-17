@@ -443,7 +443,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, TermService termService, ScriptTagService scriptTagService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -475,8 +475,6 @@ public static class GameEndpoints
             var migratedDntFile = dntFile + ".migrated";
             if (File.Exists(migratedDntFile))
                 File.Delete(migratedDntFile);
-            dntService.RemoveCache(id);
-
             // Clean up unified term cache
             termService.RemoveCache(id);
 
@@ -718,7 +716,7 @@ public static class GameEndpoints
 
         group.MapPut("/{id}/glossary", async (
             string id,
-            List<GlossaryEntry> entries,
+            List<GlossaryCompatEntry> entries,
             GameLibraryService library,
             TermService termService) =>
         {
@@ -747,7 +745,7 @@ public static class GameEndpoints
             }).ToList();
 
             await termService.ReplaceByTypeAsync(id, TermType.Translate, newTerms);
-            return Results.Ok(ApiResult<List<GlossaryEntry>>.Ok(entries));
+            return Results.Ok(ApiResult<List<GlossaryCompatEntry>>.Ok(entries));
         });
 
         // Do-not-translate list management (compat proxy → TermService)
@@ -770,7 +768,7 @@ public static class GameEndpoints
 
         group.MapPut("/{id}/do-not-translate", async (
             string id,
-            List<DoNotTranslateEntry> entries,
+            List<DntCompatEntry> entries,
             GameLibraryService library,
             TermService termService) =>
         {
@@ -789,7 +787,7 @@ public static class GameEndpoints
             }).ToList();
 
             await termService.ReplaceByTypeAsync(id, TermType.DoNotTranslate, newTerms);
-            return Results.Ok(ApiResult<List<DoNotTranslateEntry>>.Ok(entries));
+            return Results.Ok(ApiResult<List<DntCompatEntry>>.Ok(entries));
         });
 
         // Game AI description (per-game context for translation)
@@ -863,3 +861,18 @@ public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);
 public record IconSelectRequest(string ImageUrl, int SteamGridDbGameId);
 public record ImportFromGameRequest(string SourceGameId);
+
+// Compat request models for legacy glossary/DNT API shape
+public sealed class GlossaryCompatEntry
+{
+    public string Original { get; set; } = "";
+    public string Translation { get; set; } = "";
+    public bool IsRegex { get; set; }
+    public string? Description { get; set; }
+}
+
+public sealed class DntCompatEntry
+{
+    public string Original { get; set; } = "";
+    public bool CaseSensitive { get; set; } = true;
+}

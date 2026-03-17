@@ -49,7 +49,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
             if (File.Exists(dntFile))
             {
                 var dntJson = await File.ReadAllTextAsync(dntFile, ct);
-                var dntEntries = JsonSerializer.Deserialize<List<DoNotTranslateEntry>>(dntJson, JsonOptions) ?? [];
+                var dntEntries = JsonSerializer.Deserialize<List<LegacyDntEntry>>(dntJson, JsonOptions) ?? [];
 
                 var existingOriginals = new HashSet<string>(
                     entries.Select(e => e.Original), StringComparer.Ordinal);
@@ -233,5 +233,12 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         File.Move(tmpPath, file, overwrite: true);
         _cache[gameId] = entries;
         logger.LogInformation("已保存游戏 {GameId} 的术语库: {Count} 条", gameId, entries.Count);
+    }
+
+    /// <summary>Legacy JSON shape for migrating old do-not-translate files.</summary>
+    private sealed class LegacyDntEntry
+    {
+        public string Original { get; set; } = "";
+        public bool CaseSensitive { get; set; } = true;
     }
 }
