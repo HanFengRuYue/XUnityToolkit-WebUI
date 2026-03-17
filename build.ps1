@@ -60,8 +60,10 @@ $ReleaseRoot = Join-Path $ProjectRoot 'Release'
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
 $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
+$UpdaterProject = Join-Path $ProjectRoot 'Updater\Updater.csproj'
 $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
+$hasUpdater = Test-Path $UpdaterProject
 
 # Generate version: 2.6.{YYYYMMDDHHmm}
 $BuildVersion = "2.6.$(Get-Date -Format 'yyyyMMddHHmm')"
@@ -72,7 +74,7 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -377,6 +379,18 @@ if ($hasEndpoint) {
     }
 }
 
+# ── Step: Build Updater (AOT) ──
+if ($hasUpdater) {
+    $currentStep++
+    Write-Host ""
+    Write-Host "[$currentStep/$stepCount] Building Updater (AOT)..." -ForegroundColor Yellow
+
+    # AOT publish requires its own restore phase — do NOT use --no-restore
+    & dotnet publish $UpdaterProject -c Release -r $rid --nologo -v quiet
+    if ($LASTEXITCODE -ne 0) { throw "Updater build failed" }
+    Write-Host "  Updater.exe build complete." -ForegroundColor Green
+}
+
 # ── Step: Prepare Release folder ──
 $currentStep++
 Write-Host ""
@@ -419,6 +433,17 @@ if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
 @('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {
     Get-ChildItem -Path $OutputDir -Filter $_ -ErrorAction SilentlyContinue |
         Remove-Item -Force
+}
+
+# Copy Updater.exe
+if ($hasUpdater) {
+    $updaterExe = Join-Path $ProjectRoot "Updater\bin\Release\net10.0\$rid\publish\Updater.exe"
+    if (Test-Path $updaterExe) {
+        Copy-Item $updaterExe $OutputDir -Force
+        Write-Host "  Copied Updater.exe." -ForegroundColor DarkGray
+    } else {
+        Write-Host "  [warn] Updater.exe not found at expected path" -ForegroundColor DarkYellow
+    }
 }
 
 # Copy bundled assets (bypass MSBuild — PublishSingleFile drops files with '+' in names)

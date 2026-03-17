@@ -57,8 +57,9 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
 - **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
 - TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
-- **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false })` for synchronous string return
+- **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false }) as string` — `as string` cast required (overload returns `string | Promise<string>`)
 - **Regex match groups:** `match[1]` is `string | undefined` in strict TS — always check `match && match[1]`
+- **Scoped `:deep()` nesting:** Never chain `:deep()` — `.x :deep(a) :deep(b)` silently fails; use `:deep(a b)` for descendant selectors inside a single `:deep()` call
 - **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
 - **`NTabs type="segment"` dark theme:** segment tabs blend into background; override with `:deep(.n-tabs-tab--active)` using `color: var(--accent)`, `background: color-mix(in srgb, var(--accent) 12%, var(--bg-card))`, `border: 1px solid var(--accent-border)`
 - **`NUpload` in flex containers:** NUpload wraps trigger in extra divs that break flex alignment; fix with `:deep(.n-upload), :deep(.n-upload-trigger) { display: flex; align-items: center; }`
