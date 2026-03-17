@@ -27,9 +27,10 @@ import {
   RefreshOutlined,
   DataObjectOutlined,
 } from '@vicons/material'
+import { LockClosedOutline } from '@vicons/ionicons5'
 import { useAssetExtractionStore } from '@/stores/assetExtraction'
-import { gamesApi, settingsApi } from '@/api/games'
-import type { Game } from '@/api/types'
+import { gamesApi, settingsApi, scriptTagApi } from '@/api/games'
+import type { Game, ScriptTagRule, ScriptTagConfig, ScriptTagAction } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,6 +46,17 @@ const toLang = ref('zh')
 const hasAiProvider = ref(false)
 const enablePreTranslationCache = ref(false)
 
+// Script tag cleaning
+const scriptTagRules = ref<ScriptTagRule[]>([])
+const scriptTagPresetVersion = ref(0)
+const scriptTagSaving = ref(false)
+const scriptTagDirty = ref(false)
+
+const actionOptions = [
+  { label: 'Extract (提取文本)', value: 'Extract' as ScriptTagAction },
+  { label: 'Exclude (排除)', value: 'Exclude' as ScriptTagAction },
+]
+
 async function loadCacheSetting() {
   try {
     const res = await fetch('/api/settings')
@@ -53,6 +65,70 @@ async function loadCacheSetting() {
       enablePreTranslationCache.value = json.data.aiTranslation?.enablePreTranslationCache ?? false
     }
   } catch { /* ignore */ }
+}
+
+// ── Script tag cleaning ──
+
+async function loadScriptTags() {
+  try {
+    const res = await scriptTagApi.get(gameId)
+    scriptTagRules.value = res.rules
+    scriptTagPresetVersion.value = res.presetVersion
+    scriptTagDirty.value = false
+  } catch (e) {
+    console.error('Failed to load script tags', e)
+  }
+}
+
+async function handleSaveScriptTags() {
+  scriptTagSaving.value = true
+  try {
+    const config: ScriptTagConfig = {
+      presetVersion: scriptTagPresetVersion.value,
+      rules: scriptTagRules.value,
+    }
+    await scriptTagApi.save(gameId, config)
+    scriptTagDirty.value = false
+    message.success('脚本指令规则已保存')
+  } catch (e: any) {
+    message.error(e?.message || '保存失败')
+  } finally {
+    scriptTagSaving.value = false
+  }
+}
+
+async function importPresetRules() {
+  try {
+    const preset = await scriptTagApi.getPresets()
+    scriptTagRules.value = scriptTagRules.value.filter(r => !r.isBuiltin)
+    const builtinRules: ScriptTagRule[] = preset.rules.map(r => ({
+      pattern: r.pattern,
+      action: r.action,
+      description: r.description,
+      isBuiltin: true,
+    }))
+    scriptTagRules.value.unshift(...builtinRules)
+    scriptTagPresetVersion.value = preset.version
+    scriptTagDirty.value = true
+    message.success(`已导入 ${builtinRules.length} 条内置规则`)
+  } catch (e: any) {
+    message.error(e?.message || '导入失败')
+  }
+}
+
+function addCustomRule() {
+  scriptTagRules.value.push({
+    pattern: '',
+    action: 'Exclude',
+    description: '',
+    isBuiltin: false,
+  })
+  scriptTagDirty.value = true
+}
+
+function removeScriptTagRule(index: number) {
+  scriptTagRules.value.splice(index, 1)
+  scriptTagDirty.value = true
 }
 
 async function handleToggleCache(value: boolean) {
@@ -136,6 +212,7 @@ onMounted(async () => {
       hasAiProvider.value = endpoints.some(e => e.enabled && e.apiKey)
       enablePreTranslationCache.value = settings.aiTranslation?.enablePreTranslationCache ?? false
     } catch { /* ignore */ }
+    await loadScriptTags()
   } catch {
     message.error('加载失败')
   } finally {
@@ -341,6 +418,59 @@ function langLabel(code: string): string {
           <n-alert v-if="enablePreTranslationCache" type="warning" style="margin-bottom: 12px" :bordered="false">
             这是一个实验性功能。它会修改 XUnity.AutoTranslator 配置并生成正则翻译模式以提高预翻译缓存命中率。效果因游戏而异。如果启用后出现翻译问题，请关闭此功能并重新运行预翻译。
           </n-alert>
+        </div>
+
+        <!-- Script Tag Cleaning Rules -->
+        <div v-if="enablePreTranslationCache" class="section-card" style="margin-bottom: 16px">
+          <div class="section-header">
+            <span class="section-title">脚本指令清洗规则</span>
+            <div class="header-actions">
+              <NButton size="small" @click="importPresetRules">导入内置规则</NButton>
+              <NButton size="small" @click="addCustomRule">+ 添加规则</NButton>
+              <NButton size="small" type="primary" :loading="scriptTagSaving" :disabled="!scriptTagDirty" @click="handleSaveScriptTags">
+                保存
+              </NButton>
+            </div>
+          </div>
+
+          <div v-if="scriptTagRules.length === 0" class="empty-hint">
+            暂无规则。点击「导入内置规则」加载预设，或手动添加自定义规则。
+          </div>
+
+          <div v-for="(rule, index) in scriptTagRules" :key="index"
+               style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px">
+            <NInput
+              v-model:value="rule.pattern"
+              placeholder="正则表达式"
+              :disabled="rule.isBuiltin"
+              style="flex: 3; font-family: monospace"
+              @update:value="scriptTagDirty = true"
+            />
+            <NSelect
+              v-model:value="rule.action"
+              :options="actionOptions"
+              :disabled="rule.isBuiltin"
+              style="flex: 1; min-width: 140px"
+              @update:value="scriptTagDirty = true"
+            />
+            <NInput
+              v-model:value="rule.description"
+              placeholder="说明"
+              :disabled="rule.isBuiltin"
+              style="flex: 1.5"
+              @update:value="scriptTagDirty = true"
+            />
+            <NButton v-if="!rule.isBuiltin" size="small" quaternary @click="removeScriptTagRule(index)">
+              <template #icon><NIcon :size="16"><DeleteOutlined /></NIcon></template>
+            </NButton>
+            <NIcon v-else :size="16" style="opacity: 0.5; min-width: 28px; display: flex; justify-content: center">
+              <LockClosedOutline />
+            </NIcon>
+          </div>
+
+          <div v-if="scriptTagRules.length > 0" style="margin-top: 8px; font-size: 12px; opacity: 0.6">
+            内置规则随应用更新自动刷新，自定义规则不受影响。需重新运行预翻译以生效。
+          </div>
         </div>
 
         <!-- Action Buttons -->
