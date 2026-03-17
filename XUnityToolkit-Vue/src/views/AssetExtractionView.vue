@@ -739,7 +739,7 @@ function langLabel(code: string): string {
 }
 
 .script-tag-card.is-collapsed {
-  padding-bottom: 12px;
+  padding: 12px 16px;
 }
 
 .script-tag-card.is-collapsed .section-header {
