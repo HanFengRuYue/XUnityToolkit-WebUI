@@ -645,3 +645,23 @@ export interface CacheMissEntry {
   runtimeText: string
   timestamp: string
 }
+
+// Script Tag Cleaning
+export type ScriptTagAction = 'Extract' | 'Exclude'
+
+export interface ScriptTagRule {
+  pattern: string
+  action: ScriptTagAction
+  description?: string
+  isBuiltin: boolean
+}
+
+export interface ScriptTagConfig {
+  presetVersion: number
+  rules: ScriptTagRule[]
+}
+
+export interface ScriptTagPreset {
+  version: number
+  rules: Omit<ScriptTagRule, 'isBuiltin'>[]
+}
