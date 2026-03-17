@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import {
   NIcon,
   NButton,
@@ -29,6 +29,7 @@ import {
   ComputerOutlined,
   SportsEsportsOutlined,
   CachedOutlined,
+  ExpandMoreOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
@@ -39,6 +40,13 @@ import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 
 defineOptions({ name: 'AiTranslationView' })
+
+const collapsed = reactive({
+  cache: true,
+  recent: true,
+  errors: true,
+  extraction: true,
+})
 
 const aiStore = useAiTranslationStore()
 const gamesStore = useGamesStore()
@@ -366,8 +374,8 @@ onUnmounted(() => {
     </div>
 
     <!-- Pre-Translation Cache Stats -->
-    <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" style="animation-delay: 0.06s">
-      <div class="section-header">
+    <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
+      <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><CachedOutlined /></NIcon>
@@ -375,7 +383,12 @@ onUnmounted(() => {
           预翻译缓存
           <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.cache }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
+      <div class="section-body" :class="{ collapsed: collapsed.cache }">
+        <div class="section-body-inner">
       <div class="metrics-strip">
         <div class="metric-pill">
           <div class="metric-icon">
@@ -434,15 +447,18 @@ onUnmounted(() => {
           </div>
         </NCollapseItem>
       </NCollapse>
+        </div>
+      </div>
     </div>
 
     <!-- Recent Translations -->
     <div
       v-if="(aiStore.stats?.recentTranslations?.length ?? 0) > 0"
       class="section-card"
+      :class="{ 'is-collapsed': collapsed.recent }"
       style="animation-delay: 0.08s"
     >
-      <div class="section-header">
+      <div class="section-header collapsible" @click="collapsed.recent = !collapsed.recent">
         <h2 class="section-title">
           <span class="section-icon history">
             <NIcon :size="16"><HistoryOutlined /></NIcon>
@@ -452,8 +468,13 @@ onUnmounted(() => {
         <span class="recent-count-badge">
           {{ aiStore.stats!.recentTranslations.length }} 条
         </span>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.recent }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
 
+      <div class="section-body" :class="{ collapsed: collapsed.recent }">
+        <div class="section-body-inner">
       <div class="recent-list">
         <div
           v-for="(item, index) in aiStore.stats!.recentTranslations"
@@ -480,15 +501,18 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+        </div>
+      </div>
     </div>
 
     <!-- Error Log -->
     <div
       v-if="(aiStore.stats?.recentErrors?.length ?? 0) > 0"
       class="section-card"
+      :class="{ 'is-collapsed': collapsed.errors }"
       style="animation-delay: 0.09s"
     >
-      <div class="section-header">
+      <div class="section-header collapsible" @click="collapsed.errors = !collapsed.errors">
         <h2 class="section-title">
           <span class="section-icon error-log">
             <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
@@ -496,8 +520,13 @@ onUnmounted(() => {
           错误日志
         </h2>
         <span class="error-count-badge">{{ aiStore.stats!.recentErrors.length }} 条</span>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.errors }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
 
+      <div class="section-body" :class="{ collapsed: collapsed.errors }">
+        <div class="section-body-inner">
       <div class="error-list">
         <div
           v-for="err in [...aiStore.stats!.recentErrors].reverse()"
@@ -510,6 +539,8 @@ onUnmounted(() => {
             <span v-if="err.endpointName">{{ err.endpointName }}</span>
             <span>{{ formatRelativeTime(err.timestamp) }}</span>
           </div>
+        </div>
+      </div>
         </div>
       </div>
     </div>
@@ -554,21 +585,29 @@ onUnmounted(() => {
 
     <!-- Glossary Extraction (cloud mode only) -->
     <Transition name="card-slide">
-      <div class="section-card" style="animation-delay: 0.12s" v-if="settings && !isLocalMode">
-        <div class="section-header">
+      <div class="section-card" :class="{ 'is-collapsed': collapsed.extraction }" style="animation-delay: 0.12s" v-if="settings && !isLocalMode">
+        <div class="section-header collapsible" @click="collapsed.extraction = !collapsed.extraction">
           <h2 class="section-title">
             <span class="section-icon extraction">
               <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
             </span>
             自动术语提取
           </h2>
-          <NSwitch
-            :value="aiSettings.glossaryExtractionEnabled"
-            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
-            size="small"
-          />
+          <div class="header-actions">
+            <NSwitch
+              :value="aiSettings.glossaryExtractionEnabled"
+              @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
+              size="small"
+              @click.stop
+            />
+            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.extraction }">
+              <ExpandMoreOutlined />
+            </NIcon>
+          </div>
         </div>
 
+        <div class="section-body" :class="{ collapsed: collapsed.extraction }">
+          <div class="section-body-inner">
         <div class="extraction-content">
           <p class="extraction-desc">
             翻译过程中自动从原文和译文中提取专有名词、角色名等术语，并加入对应游戏的术语表。
@@ -644,6 +683,8 @@ onUnmounted(() => {
               </div>
             </div>
           </Transition>
+        </div>
+          </div>
         </div>
       </div>
     </Transition>
@@ -1220,6 +1261,7 @@ onUnmounted(() => {
   padding: 1px 0;
   opacity: 0.7;
 }
+
 
 /* ===== Error Log ===== */
 .section-icon.error-log {

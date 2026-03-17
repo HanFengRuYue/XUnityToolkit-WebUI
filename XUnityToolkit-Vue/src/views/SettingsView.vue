@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
@@ -29,6 +29,7 @@ import {
   FileDownloadOutlined,
   FileUploadOutlined,
   StorageOutlined,
+  ExpandMoreOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
@@ -40,6 +41,13 @@ import { marked } from 'marked'
 import { useUpdateStore } from '@/stores/update'
 
 defineOptions({ name: 'SettingsView' })
+
+const collapsed = reactive({
+  covers: true,
+  data: true,
+  danger: true,
+  about: true,
+})
 
 const message = useMessage()
 const dialog = useDialog()
@@ -367,89 +375,110 @@ onMounted(() => {
     </div>
 
     <!-- Game Covers -->
-    <div class="section-card" style="animation-delay: 0.15s">
-      <div class="section-header">
+    <div class="section-card" :class="{ 'is-collapsed': collapsed.covers }" style="animation-delay: 0.15s">
+      <div class="section-header collapsible" @click="collapsed.covers = !collapsed.covers">
         <h2 class="section-title">
           <span class="section-icon covers">
             <NIcon :size="16"><ImageOutlined /></NIcon>
           </span>
           游戏封面
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.covers }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <div class="settings-form">
-        <div class="form-row">
-          <label class="form-label">SteamGridDB API Key</label>
-          <NInput
-            :value="settings.steamGridDbApiKey ?? ''"
-            @update:value="settings.steamGridDbApiKey = $event || undefined"
-            type="password"
-            show-password-on="click"
-            placeholder="输入 SteamGridDB API Key"
-          />
-          <span class="form-hint">
-            免费注册获取：<a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener noreferrer" class="about-link">steamgriddb.com</a>
-            — 用于在游戏库中搜索高清封面图
-          </span>
+      <div class="section-body" :class="{ collapsed: collapsed.covers }">
+        <div class="section-body-inner">
+          <div class="settings-form">
+            <div class="form-row">
+              <label class="form-label">SteamGridDB API Key</label>
+              <NInput
+                :value="settings.steamGridDbApiKey ?? ''"
+                @update:value="settings.steamGridDbApiKey = $event || undefined"
+                type="password"
+                show-password-on="click"
+                placeholder="输入 SteamGridDB API Key"
+              />
+              <span class="form-hint">
+                免费注册获取：<a href="https://www.steamgriddb.com/profile/preferences/api" target="_blank" rel="noopener noreferrer" class="about-link">steamgriddb.com</a>
+                — 用于在游戏库中搜索高清封面图
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Data Management -->
-    <div class="section-card" style="animation-delay: 0.2s">
-      <div class="section-header">
+    <div class="section-card" :class="{ 'is-collapsed': collapsed.data }" style="animation-delay: 0.2s">
+      <div class="section-header collapsible" @click="collapsed.data = !collapsed.data">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><StorageOutlined /></NIcon>
           </span>
           数据管理
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.data }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <div class="settings-form">
-        <div class="form-row">
-          <label class="form-label">
-            <NIcon :size="14" color="var(--text-3)"><FolderOpenOutlined /></NIcon>
-            配置文件夹路径
-          </label>
-          <div class="data-path-row">
-            <span class="data-path-text">{{ dataPath }}</span>
-            <NButton size="small" @click="handleOpenDataFolder">打开文件夹</NButton>
+      <div class="section-body" :class="{ collapsed: collapsed.data }">
+        <div class="section-body-inner">
+          <div class="settings-form">
+            <div class="form-row">
+              <label class="form-label">
+                <NIcon :size="14" color="var(--text-3)"><FolderOpenOutlined /></NIcon>
+                配置文件夹路径
+              </label>
+              <div class="data-path-row">
+                <span class="data-path-text">{{ dataPath }}</span>
+                <NButton size="small" @click="handleOpenDataFolder">打开文件夹</NButton>
+              </div>
+              <span class="form-hint">所有应用配置、游戏库、术语表等数据存储在此文件夹中</span>
+            </div>
+            <div class="data-actions">
+              <NButton :loading="exportLoading" @click="handleExport">
+                <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
+                导出配置
+              </NButton>
+              <NButton :loading="importLoading" @click="handleImport">
+                <template #icon><NIcon><FileUploadOutlined /></NIcon></template>
+                导入配置
+              </NButton>
+            </div>
+            <span class="form-hint">导出不包含 AI 模型文件、生成的字体、日志等大文件。导入会覆盖现有配置。</span>
           </div>
-          <span class="form-hint">所有应用配置、游戏库、术语表等数据存储在此文件夹中</span>
         </div>
-        <div class="data-actions">
-          <NButton :loading="exportLoading" @click="handleExport">
-            <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
-            导出配置
-          </NButton>
-          <NButton :loading="importLoading" @click="handleImport">
-            <template #icon><NIcon><FileUploadOutlined /></NIcon></template>
-            导入配置
-          </NButton>
-        </div>
-        <span class="form-hint">导出不包含 AI 模型文件、生成的字体、日志等大文件。导入会覆盖现有配置。</span>
       </div>
     </div>
 
     <!-- Danger Zone (full width) -->
-    <div class="section-card danger-card" style="animation-delay: 0.25s">
+    <div class="section-card danger-card" :class="{ 'is-collapsed': collapsed.danger }" style="animation-delay: 0.25s">
       <div class="danger-bar"></div>
       <div class="danger-body">
-        <div class="section-header">
+        <div class="section-header collapsible" @click="collapsed.danger = !collapsed.danger">
           <h2 class="section-title">
             <span class="section-icon danger">
               <NIcon :size="16"><WarningAmberOutlined /></NIcon>
             </span>
             危险区域
           </h2>
+          <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.danger }">
+            <ExpandMoreOutlined />
+          </NIcon>
         </div>
-        <div class="danger-action">
-          <div class="danger-text">
-            <div class="danger-description">重置将删除所有应用数据，包括游戏库、设置、下载缓存和备份。此操作不可撤销。</div>
-            <span class="danger-hint">重置后页面将自动刷新</span>
+        <div class="section-body" :class="{ collapsed: collapsed.danger }">
+          <div class="section-body-inner">
+            <div class="danger-action">
+              <div class="danger-text">
+                <div class="danger-description">重置将删除所有应用数据，包括游戏库、设置、下载缓存和备份。此操作不可撤销。</div>
+                <span class="danger-hint">重置后页面将自动刷新</span>
+              </div>
+              <NButton type="error" :loading="resetLoading" ghost @click="handleReset">
+                重置所有配置
+              </NButton>
+            </div>
           </div>
-          <NButton type="error" :loading="resetLoading" ghost @click="handleReset">
-            重置所有配置
-          </NButton>
         </div>
       </div>
     </div>
@@ -591,61 +620,68 @@ onMounted(() => {
     </div>
 
     <!-- About (full width) -->
-    <div class="section-card" style="animation-delay: 0.35s">
-      <div class="section-header">
+    <div class="section-card" :class="{ 'is-collapsed': collapsed.about }" style="animation-delay: 0.35s">
+      <div class="section-header collapsible" @click="collapsed.about = !collapsed.about">
         <h2 class="section-title">
           <span class="section-icon about">
             <NIcon :size="16"><InfoOutlined /></NIcon>
           </span>
           关于
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.about }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <div class="about-grid">
-        <div class="info-card">
-          <div class="info-card-icon tech">
-            <NIcon :size="18"><LayersOutlined /></NIcon>
-          </div>
-          <div class="info-card-content">
-            <span class="info-label">技术栈</span>
-            <span class="info-value">.NET 10 + Vue 3</span>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="info-card-icon author">
-            <NIcon :size="18"><PersonOutlined /></NIcon>
-          </div>
-          <div class="info-card-content">
-            <span class="info-label">作者</span>
-            <span class="info-value">
-              <a
-                href="https://github.com/HanFengRuYue"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="about-link"
-              >
-                寒枫如玥
-                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
-              </a>
-            </span>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="info-card-icon github">
-            <NIcon :size="18"><LogoGithub /></NIcon>
-          </div>
-          <div class="info-card-content">
-            <span class="info-label">源代码</span>
-            <span class="info-value">
-              <a
-                href="https://github.com/HanFengRuYue/XUnityToolkit-WebUI"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="about-link"
-              >
-                GitHub 仓库
-                <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
-              </a>
-            </span>
+      <div class="section-body" :class="{ collapsed: collapsed.about }">
+        <div class="section-body-inner">
+          <div class="about-grid">
+            <div class="info-card">
+              <div class="info-card-icon tech">
+                <NIcon :size="18"><LayersOutlined /></NIcon>
+              </div>
+              <div class="info-card-content">
+                <span class="info-label">技术栈</span>
+                <span class="info-value">.NET 10 + Vue 3</span>
+              </div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-icon author">
+                <NIcon :size="18"><PersonOutlined /></NIcon>
+              </div>
+              <div class="info-card-content">
+                <span class="info-label">作者</span>
+                <span class="info-value">
+                  <a
+                    href="https://github.com/HanFengRuYue"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="about-link"
+                  >
+                    寒枫如玥
+                    <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
+                  </a>
+                </span>
+              </div>
+            </div>
+            <div class="info-card">
+              <div class="info-card-icon github">
+                <NIcon :size="18"><LogoGithub /></NIcon>
+              </div>
+              <div class="info-card-content">
+                <span class="info-label">源代码</span>
+                <span class="info-value">
+                  <a
+                    href="https://github.com/HanFengRuYue/XUnityToolkit-WebUI"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="about-link"
+                  >
+                    GitHub 仓库
+                    <NIcon :size="12" style="margin-left: 4px; vertical-align: middle;"><OpenInNewOutlined /></NIcon>
+                  </a>
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1045,6 +1081,11 @@ onMounted(() => {
   opacity: 0.8;
 }
 
+/* ===== Collapsed Danger Card ===== */
+.danger-card.is-collapsed .danger-body {
+  padding-bottom: 16px;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
   .danger-body {
@@ -1054,6 +1095,18 @@ onMounted(() => {
   .about-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
+  }
+
+  .data-actions {
+    flex-direction: column;
+  }
+  .data-actions :deep(.n-button) {
+    width: 100%;
+  }
+  .setting-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 }
 
@@ -1072,5 +1125,14 @@ onMounted(() => {
     padding: 14px;
   }
 
+  .data-path-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .update-ready, .update-error {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
 }
 </style>
