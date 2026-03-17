@@ -14,6 +14,7 @@ public static class TranslateEndpoints
             GlossaryExtractionService extractionService,
             PreTranslationCacheMonitor cacheMonitor,
             AppSettingsService settingsService,
+            LocalLlmService localLlmService,
             ILogger<LlmTranslationService> logger,
             CancellationToken ct) =>
         {
@@ -21,6 +22,15 @@ public static class TranslateEndpoints
                 return Results.Ok(new TranslateResponse([]));
             if (request.Texts.Count > 500)
                 return Results.BadRequest(ApiResult.Fail("单次请求最多 500 条文本"));
+
+            // Block translation in local mode when local LLM is not running
+            var appSettings = await settingsService.GetAsync(ct);
+            if (string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase)
+                && !localLlmService.IsRunning)
+            {
+                logger.LogWarning("本地模型未运行，拒绝翻译请求");
+                return Results.Json(ApiResult.Fail("本地模型未启动，请先在本地 AI 页面启动模型"), statusCode: 503);
+            }
 
             // Record texts for pre-translation cache monitoring
             if (!string.IsNullOrEmpty(request.GameId))
@@ -38,7 +48,6 @@ public static class TranslateEndpoints
 
                 // Buffer for glossary extraction (fire-and-forget, non-blocking)
                 // Disabled in local mode — local models can't handle extra inference
-                var appSettings = await settingsService.GetAsync(ct);
                 var isLocalMode = string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
                 if (!isLocalMode && !string.IsNullOrEmpty(request.GameId))
                 {
