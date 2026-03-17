@@ -9,6 +9,7 @@ public sealed class PreTranslationCacheMonitor(
     IHubContext<InstallProgressHub> hubContext,
     GameLibraryService gameLibraryService,
     AppSettingsService settingsService,
+    ScriptTagService scriptTagService,
     ILogger<PreTranslationCacheMonitor> logger)
 {
     private volatile string? _activeGameId;
@@ -75,7 +76,7 @@ public sealed class PreTranslationCacheMonitor(
             var eqIdx = XUnityTranslationFormat.FindUnescapedEquals(line);
             if (eqIdx < 0) continue;
             var decoded = XUnityTranslationFormat.Decode(line[..eqIdx]);
-            keys.Add(XUnityTranslationFormat.NormalizeForCache(decoded));
+            keys.Add(scriptTagService.NormalizeForCache(gameId, decoded));
         }
 
         _preTranslatedKeys = keys;
@@ -108,7 +109,7 @@ public sealed class PreTranslationCacheMonitor(
 
         foreach (var text in texts)
         {
-            var normalized = XUnityTranslationFormat.NormalizeForCache(text);
+            var normalized = scriptTagService.NormalizeForCache(gameId, text);
             if (_preTranslatedKeys.Contains(normalized))
             {
                 if (_misses.TryAdd(normalized, text))
