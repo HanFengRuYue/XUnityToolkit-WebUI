@@ -1,7 +1,7 @@
 # Script Tag Cleaning for Pre-Translation Cache
 
 **Date:** 2026-03-17
-**Status:** Draft
+**Status:** Reviewed
 **Scope:** Backend service + API endpoints + frontend UI + global preset system
 
 ## Problem Statement
@@ -56,7 +56,7 @@ ScriptTagService (standalone module)
 ├── Cache:     ConcurrentDictionary<gameId, CompiledRuleSet>
 ├── Interface:
 │   ├── CleanText(gameId, text) → string?
-│   ├── FilterAndCleanAsync(gameId, texts) → (cleanTexts, mapping)
+│   ├── FilterAndCleanAsync(gameId, texts) → cleanTexts
 │   └── NormalizeForCache(gameId, text) → string
 ├── Config:    GetAsync / SaveAsync / RemoveCache
 └── Endpoints: GET/PUT /api/games/{id}/script-tags
@@ -76,11 +76,14 @@ ScriptTagService (standalone module)
 ### Data Model
 
 ```csharp
+// Models/ScriptTagAction.cs
+public enum ScriptTagAction { Extract, Exclude }
+
 // Models/ScriptTagRule.cs
 public sealed class ScriptTagRule
 {
     public string Pattern { get; set; } = "";
-    public string Action { get; set; } = "extract";  // "extract" | "exclude"
+    public ScriptTagAction Action { get; set; } = ScriptTagAction.Extract;
     public string? Description { get; set; }
     public bool IsBuiltin { get; set; }
 }
@@ -93,25 +96,35 @@ public sealed class ScriptTagConfig
 }
 ```
 
+Uses `JsonStringEnumConverter` for serialization, consistent with `DoNotTranslateService`.
+
 ### Storage
 
 - Path: `{appData}/script-tags/{gameId}.json`
 - `AppDataPaths` adds: `ScriptTagsDirectory`, `ScriptTagFile(gameId)`
+- `AppDataPaths.EnsureDirectoriesExist()` must include `ScriptTagsDirectory`
+- `BundledAssetPaths` adds: `ScriptTagPresetsFile` property for `bundled/script-tag-presets.json`
 - Format: JSON, same serialization options as `DoNotTranslateService`
 - Atomic writes: write-to-temp + `File.Move(overwrite: true)`
+- The `script-tags/` directory contains user-configured rules and should be **included** in settings export/import (no exclusion in `SettingsEndpoints.cs`)
+- Game IDs are GUIDs assigned by `GameLibraryService`, so path traversal is not a concern for `ScriptTagFile` path construction
 
-### Compiled Rule Cache
+### Compiled Rule Cache & Concurrency
 
 ```csharp
 private sealed class CompiledRuleSet
 {
-    public required List<(Regex Regex, string Action)> Rules { get; init; }
+    public required List<(Regex Regex, ScriptTagAction Action)> Rules { get; init; }
 }
 
 private readonly ConcurrentDictionary<string, CompiledRuleSet> _compiled = new();
+private readonly SemaphoreSlim _lock = new(1, 1);
 ```
 
-Regex compiled with `RegexOptions.Compiled` and 1-second timeout. Compiled on `SaveAsync` after validation. Lazily compiled on first `GetAsync` if not cached.
+- Regex compiled with `RegexOptions.Compiled` and 1-second timeout.
+- Compiled on `SaveAsync` after validation. Lazily compiled on first `GetAsync` if not cached.
+- `SemaphoreSlim` serializes file I/O (matching `DoNotTranslateService` / `GlossaryService` pattern).
+- After auto-update or save, `_compiled` entry is replaced with newly compiled rules to avoid stale cache.
 
 ### Core Methods
 
@@ -122,12 +135,14 @@ Regex compiled with `RegexOptions.Compiled` and 1-second timeout. Compiled on `S
 4. `extract` action → return `match.Groups[1].Value` (first capture group).
 5. No match → return original text unchanged.
 
-**`FilterAndCleanAsync(string gameId, List<ExtractedText> texts) → (List<string> cleanTexts, Dictionary<string, string> cleanToOriginal)`**
+**`FilterAndCleanAsync(string gameId, List<ExtractedText> texts) → List<string>`**
 1. Load rules for game.
 2. For each text: apply `CleanText`.
 3. `null` results (excluded) are dropped.
-4. Non-null results are collected with clean→original mapping.
+4. Non-null results are collected.
 5. Deduplicate by clean text (different originals may clean to the same text).
+
+Returns only the list of clean texts. The clean→original mapping is not needed because cache keys are written from clean texts directly, and glossary extraction buffering at `PreTranslationService` uses the clean text (which is what XUnity sees at runtime).
 
 **`NormalizeForCache(string gameId, string text) → string`**
 ```csharp
@@ -144,14 +159,14 @@ Rich text stripping first (matches XUnity's runtime preprocessing), then script 
 {
   "version": 1,
   "rules": [
-    { "pattern": "^(?:stk|tk|ts|FTK),[^,]*,(.+)$", "action": "extract", "description": "Dialogue prefix (stk/tk/ts/FTK,N,text)" },
-    { "pattern": "^%%,[^,]*,(.*),#\\w+,?$",          "action": "extract", "description": "Choice button (%%,N,text,#link)" },
-    { "pattern": "^\\$\\w+",                          "action": "exclude", "description": "System command ($command)" },
-    { "pattern": "^#\\w+$",                           "action": "exclude", "description": "Label (#anchor)" },
-    { "pattern": "^Voice_",                            "action": "exclude", "description": "Voice trigger (Voice_*)" },
-    { "pattern": "^@",                                 "action": "exclude", "description": "Event identifier (@event)" },
-    { "pattern": "^n\\d+,#PL,",                        "action": "exclude", "description": "Numbered menu (n1,#PL,...)" },
-    { "pattern": "^as\\d+,",                           "action": "exclude", "description": "Greeting data (as3,...)" }
+    { "pattern": "^(?:stk|tk|ts|FTK),[^,]*,(.+)$", "action": "Extract", "description": "对话前缀 (stk/tk/ts/FTK,N,文本)" },
+    { "pattern": "^%%,[^,]*,(.*),#\\w+,?$",          "action": "Extract", "description": "选项按钮 (%%,N,文本,#标签)" },
+    { "pattern": "^\\$\\w+",                          "action": "Exclude", "description": "系统指令 ($命令)" },
+    { "pattern": "^#\\w+$",                           "action": "Exclude", "description": "纯标签 (#锚点)" },
+    { "pattern": "^Voice_",                            "action": "Exclude", "description": "语音触发 (Voice_*)" },
+    { "pattern": "^@",                                 "action": "Exclude", "description": "事件标识 (@事件)" },
+    { "pattern": "^n\\d+,#PL,",                        "action": "Exclude", "description": "编号菜单 (n1,#PL,...)" },
+    { "pattern": "^as\\d+,",                           "action": "Exclude", "description": "问候数据 (as3,...)" }
   ]
 }
 ```
@@ -160,15 +175,25 @@ As more games are adapted, rules are appended and `version` is incremented. Rule
 
 **Auto-update logic** (in `GetAsync`):
 ```
-if (stored.PresetVersion < bundled.Version) {
+if (no stored config file exists) {
+    Return preset rules as defaults (IsBuiltin = true) in-memory only.
+    Do NOT write to disk — file is only created when user explicitly saves via PUT.
+}
+
+if (stored config exists AND stored.PresetVersion < bundled.Version) {
     Remove all stored rules where IsBuiltin == true
     Insert new preset rules with IsBuiltin = true
     Preserve all rules where IsBuiltin == false
     Update PresetVersion, write back to file
+    Replace _compiled entry with newly compiled rules
 }
 ```
 
+This avoids creating `script-tags/{gameId}.json` files for games where the feature is never explicitly used.
+
 ### API Endpoints
+
+All three endpoints live in a new `ScriptTagEndpoints.cs` file, consistent with feature-grouped endpoint files (`FontGenerationEndpoints.cs`, `FontReplacementEndpoints.cs`).
 
 ```
 GET  /api/script-tag-presets          → { version: int, rules: ScriptTagRule[] }
@@ -178,8 +203,8 @@ PUT  /api/games/{id}/script-tags      → ScriptTagConfig (validated)
 
 **PUT validation:**
 - `Pattern` non-empty
-- `Action` is `"extract"` or `"exclude"`
-- `extract` rules must have at least one capture group `(...)`
+- `Action` is a valid `ScriptTagAction` enum value
+- `Extract` rules must have at least one capture group `(...)`
 - Regex compiles without error (1-second timeout)
 - Maximum 100 rules
 - `IsBuiltin` flag on submitted rules is ignored server-side (only preset import sets it)
@@ -195,12 +220,12 @@ var textList = texts.Select(t => t.Text).ToList();
 
 **After**:
 ```csharp
-var (cleanTexts, cleanToOriginal) = await scriptTagService.FilterAndCleanAsync(gameId, texts);
+var cleanTexts = await scriptTagService.FilterAndCleanAsync(gameId, texts);
 // cleanTexts → sent to LLM (clean text only)
 // status.TotalTexts = cleanTexts.Count (reflects actual translation work)
 ```
 
-Batch loop sends `cleanTexts` to LLM. `translations` dictionary keys are clean texts. Cache writing uses clean texts directly as keys.
+Batch loop sends `cleanTexts` to LLM. `translations` dictionary keys are clean texts. Cache writing uses clean texts directly as keys. Glossary extraction buffering uses clean text (matches what XUnity sees at runtime).
 
 #### 2. `PreTranslationService.WriteTranslationCacheAsync`
 
@@ -218,7 +243,7 @@ var originalKey = enableCacheOptimization
     : original;
 ```
 
-Since input is already cleaned by `FilterAndClean`, this is a safety net (rich text stripping + idempotent script tag cleaning).
+Since input is already cleaned by `FilterAndClean`, this is a safety net (rich text stripping + script tag cleaning, which is a no-op for already-cleaned text since patterns are prefix-anchored).
 
 #### 3. `PreTranslationCacheMonitor.LoadCache` (line 78)
 
@@ -303,9 +328,11 @@ builder.Services.AddSingleton<ScriptTagService>();
 
 **Types** (`src/api/types.ts`):
 ```typescript
+export type ScriptTagAction = 'Extract' | 'Exclude'
+
 export interface ScriptTagRule {
   pattern: string
-  action: 'extract' | 'exclude'
+  action: ScriptTagAction
   description?: string
   isBuiltin: boolean
 }
@@ -346,12 +373,22 @@ export const getScriptTagPresets = () =>
 
 **`IsGameText` filter coverage**: Instruction-prefixed lines (`tk,1,...`, `%%,-1,...`, `$Go_link,...`, `#BTN_A01`) all pass through the filter. This is acceptable because `ScriptTagService` handles the cleaning/exclusion at pre-translation time.
 
+## Build & Git Notes
+
+- **Preset file**: `bundled/script-tag-presets.json` must be tracked in git. Since `bundled/*` is gitignored, add negation `!bundled/script-tag-presets.json` to `.gitignore` (same pattern as `!bundled/fonts/`).
+- **Publish**: `build.ps1` must copy `bundled/script-tag-presets.json` to publish output (same as bundled fonts).
+
+## Translation Editor Interaction
+
+Previously cached translations (written before script tag rules were configured) will have instruction-code-polluted keys. These old entries coexist harmlessly in the cache file but won't be matched by XUnity at runtime. Users should **re-run pre-translation** after configuring script tag rules to generate clean cache entries.
+
 ## Sync Points (for CLAUDE.md)
 
 - **ScriptTagRule/ScriptTagConfig fields**: Sync 2 places: `Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
 - **Per-game data cleanup**: `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete `scriptTagFile` + call `RemoveCache`
 - **`NormalizeForCache` call sites**: 3 places must all use `ScriptTagService.NormalizeForCache(gameId, text)`: `WriteTranslationCacheAsync`, `LoadCache`, `RecordTexts`
 - **Adding preset rules**: Update `bundled/script-tag-presets.json`, increment `version`
+- **Endpoint file**: `ScriptTagEndpoints.cs` hosts all 3 endpoints (preset + per-game)
 
 ## Future Extensibility
 
