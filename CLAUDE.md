@@ -101,6 +101,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
 - **Glossary:** `GET/PUT /api/games/{id}/glossary` | **Description:** `GET/PUT .../description`
 - **Do-Not-Translate:** `GET/PUT /api/games/{id}/do-not-translate`
+- **Script Tags:** `GET /api/script-tag-presets`, `GET/PUT /api/games/{id}/script-tags`
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
 - **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`, `GET/PUT .../pre-translate/regex`
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
@@ -128,6 +129,10 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
 - **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
 - **Adding DoNotTranslateEntry fields:** Sync 2 places: `Models/DoNotTranslateEntry.cs`, `src/api/types.ts`
+- **ScriptTagRule/ScriptTagConfig fields:** Sync 2 places: `Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
+- **Per-game data cleanup (script tags):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete `scriptTagFile` + call `scriptTagService.RemoveCache`
+- **`NormalizeForCache` call sites:** 3 places must all use `ScriptTagService.NormalizeForCache(gameId, text)`: `WriteTranslationCacheAsync`, `LoadCache`, `RecordTexts`
+- **Adding preset rules:** Update `bundled/script-tag-presets.json`, increment `version`
 - **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
 - **PreTranslationCacheStats fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
