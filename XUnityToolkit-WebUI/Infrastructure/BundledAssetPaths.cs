@@ -13,6 +13,7 @@ public sealed class BundledAssetPaths
     public string XUnityDirectory => Path.Combine(_root, "xunity");
     public string LlamaDirectory => Path.Combine(_root, "llama");
     public string FontsDirectory => Path.Combine(_root, "fonts");
+    public string ScriptTagPresetsFile => Path.Combine(_root, "script-tag-presets.json");
 
     public string? FindBepInEx5Zip(string archPattern)
     {
