@@ -25,9 +25,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
 - **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
-- **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache`
+- **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache` (e.g., `termService.RemoveCache`, `scriptTagService.RemoveCache`)
 - **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
-- **`ScriptTagService` DI:** `AddSingleton`; follows `DoNotTranslateService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
+- **`ScriptTagService` DI:** `AddSingleton`; follows `TermService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
 - Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
 - **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
 
@@ -41,8 +41,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 
 ## Glossary Extraction
 
-- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → filter DNT → merge; depends on `DoNotTranslateService` to exclude DNT words from extraction (both via prompt hint and hard filter before merge)
-- **GlossaryEntry model:** `Original`, `Translation`, `IsRegex`, `Description` (nullable)
+- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → filter DNT terms → merge; depends on `TermService` to exclude DoNotTranslate-type terms from extraction (both via prompt hint and hard filter before merge)
+- **TermEntry model:** `Type` (Translate/DoNotTranslate), `Original`, `Translation`, `Category`, `Description`, `IsRegex`, `CaseSensitive`, `ExactMatch`, `Priority`
 - **Critical:** settings check (async) BEFORE buffer drain — otherwise pairs lost when disabled
 - `TryTriggerExtraction` is synchronous (hot-path); async work deferred to `DrainAndExtractAsync`
 - DLL must send `gameId` in `POST /api/translate` — requires `[LLMTranslate] GameId` in INI
@@ -66,12 +66,13 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Batch mode:** entire batch as one LLM call; JSON array I/O
 - **Translation memory:** per-game volatile; cloud `ContextSize` (10, max 100), local `LocalContextSize` (0, max 10)
 - **Game description:** `Game.AiDescription`; `_descriptionCache` invalidated by `PUT /description`; truncated to 500 chars
-- **SystemPrompt order:** template → description → glossary → memory → dntHint → [texts]
+- **Multi-phase pipeline:** Phase 1 (natural, cloud only) sends unmodified text with terms in structured prompt; Phase 2 applies placeholder substitution; Phase 3 force-corrects audit failures; `TermAuditService` verifies compliance between phases; `NaturalTranslationMode` and `TermAuditEnabled` control phases
+- **SystemPrompt order:** template → description → terms → memory → [texts]
 - **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
 - **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 - **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
 - **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results must also skip `ApplyGlossaryPostProcess` (marked via `preComputed` dictionary)
-- **Prompt glossary:** In cloud mode, ALL glossary entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptGlossary` is set to `null` to save context tokens; glossary enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
+- **Prompt terms:** In cloud mode, ALL translate-type term entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptTerms` is set to `null` to save context tokens; term enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
 - **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
 
 ## Pre-Translation Cache Monitor

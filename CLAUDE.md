@@ -44,15 +44,16 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
-- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game glossary, translation memory, AI description, do-not-translate list; real-time stats via SignalR
-- **Do-Not-Translate:** `DoNotTranslateService` stores per-game lists at `data/do-not-translate/{gameId}.json`; `LlmTranslationService` replaces matched words with `{{DNT_x}}` placeholders before LLM calls, restores after; prompt hint tells LLM to preserve placeholders; entries sorted longest-first; per-entry case sensitivity
-- **Placeholder substitution order:** Glossary first → DNT second; glossary runs on original text so longer glossary terms claim their spans before shorter DNT entries can consume substrings (e.g., glossary "魔法師" matches before DNT "魔法")
+- **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game unified term list, translation memory, AI description; real-time stats via SignalR
+- **Unified Term Management:** `TermService` stores per-game term entries at `data/glossaries/{gameId}.json` (migrates legacy DNT entries on first load); each `TermEntry` has `Type` (Translate/DoNotTranslate), `Category`, `Priority`, `CaseSensitive`, `ExactMatch`, `IsRegex`; `TermMatchingService` handles priority-based placeholder substitution; `TermAuditService` verifies term compliance in translations
+- **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
+- **Placeholder substitution order:** Terms sorted by priority (higher first), then by original text length (longer first); translate-type terms produce `{{G_x}}` placeholders, do-not-translate terms produce `{{DNT_x}}`; priority-based ordering ensures important terms claim their spans before lower-priority terms
 - **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
 - **Pre-computed placeholder texts:** Texts entirely replaced by a single placeholder are resolved before the LLM call (pre-computed); they bypass both the LLM and all post-processing steps (`ApplyGlossaryPostProcess`, placeholder restoration) since their results are final; the `preComputed` dictionary tracks these indices
 - **Pre-translation cache optimization:** `PreTranslationCacheMonitor` tracks cache hit/miss when `EnablePreTranslationCache` is on; lazy-loads via `EnsureCacheAsync` on first `POST /api/translate` per game (double-checked locking with `_loadAttemptedForGameId` + `SemaphoreSlim`); `PreTranslationService` normalizes cache keys (rich text tag stripping) and generates `_PreTranslated_Regex.txt` with `sr:` splitter patterns; XUnity config optimized for whitespace tolerance (`CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars`); custom regex patterns stored at `{dataRoot}/cache/pre-translation-regex/{gameId}.txt`
 - **Script tag cleaning:** `ScriptTagService` strips game-specific instruction codes (e.g., `tk,N,text`, `%%,N,text,#BTN`) from pre-translation cache keys and LLM input; `NormalizeForCache` now has two layers: `XUnityTranslationFormat` (rich text) → `ScriptTagService` (script tags); per-game rules at `{dataRoot}/script-tags/{gameId}.json`; global versioned presets at `bundled/script-tag-presets.json` with auto-update via `IsBuiltin` flag
 - **XUnity regex translations:** Cache files support `r:"pattern"=replacement` (standard regex, substring replace by default unless anchored with `^$`) and `sr:"pattern"=$1$2` (splitter regex, auto-anchored, translates each capture group independently then reassembles); `sr:` groups must be translatable text — number-only groups waste translation calls; use `TemplateAllNumberAway=True` for number patterns instead
-- **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, batch size=1, disables glossary extraction; glossary placeholder substitution + post-processing still active in local mode (system prompt glossary skipped to save context tokens)
+- **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, batch size=1, disables glossary extraction; term placeholder substitution + post-processing still active in local mode (system prompt terms skipped to save context tokens)
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
 - **Backup/Restore:** `BackupService` creates per-game `BackupManifest` for clean uninstallation; manifests at `{dataRoot}/backups/{gameId}.json`
 - **Font Replacement:** `FontReplacementService` uses AssetsTools.NET to scan and replace TMP_FontAsset in game `.assets` and bundle files; field-level replacement preserves PPtr references; automatic Addressables CRC clearing; backups at `{dataRoot}/font-backups/{gameId}/`; custom fonts at `{dataRoot}/custom-fonts/{gameId}/`
@@ -72,8 +73,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Error messages to clients:** Never return `ex.Message` from generic `catch (Exception)` blocks — use safe static messages; `ex.Message` from typed catches (`HttpRequestException`, `InvalidOperationException`) is acceptable
 - **Global exception handler:** Middleware in `Program.cs` catches unhandled `/api` exceptions, logs full details server-side, returns generic error to client
 - **Settings validation:** Clamp numeric settings in `SettingsEndpoints` (Port, ContextSize, Temperature, etc.)
-- **Input size limits:** Enforce maximum counts on list endpoints (glossary 5000, DNT 10000, translate texts 500, raw config 512 KB)
-- **Regex validation:** Validate glossary `IsRegex` entries with `new Regex(..., timeout: 1s)` before saving
+- **Input size limits:** Enforce maximum counts on list endpoints (terms 10000 (unified), translate texts 500, raw config 512 KB)
+- **Regex validation:** Validate term `IsRegex` entries with `new Regex(..., timeout: 1s)` before saving
 - **Atomic file writes:** Use write-to-temp + `File.Move(overwrite: true)` for critical data files (settings, library, manifests)
 - **SignalR error messages:** Do not broadcast internal file paths in `_error` fields; use `Path.GetFileName()` or generic messages
 
@@ -101,8 +102,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `.../download` (model) + `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
-- **Glossary:** `GET/PUT /api/games/{id}/glossary` | **Description:** `GET/PUT .../description`
-- **Do-Not-Translate:** `GET/PUT /api/games/{id}/do-not-translate`
+- **Terms:** `GET/PUT /api/games/{id}/terms` — unified term CRUD (replaces separate glossary/DNT); `POST /api/games/{id}/terms/import-from-game` — cross-game import | **Description:** `GET/PUT .../description`
+- **Glossary (compat):** `GET/PUT /api/games/{id}/glossary` — legacy shim, reads/writes via TermService
+- **Do-Not-Translate (compat):** `GET/PUT /api/games/{id}/do-not-translate` — legacy shim, reads/writes via TermService
 - **Script Tags:** `GET /api/script-tag-presets`, `GET/PUT /api/games/{id}/script-tags`
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
 - **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`, `GET/PUT .../pre-translate/regex`
@@ -129,13 +131,14 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 
 - **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
-- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`
-- **Adding DoNotTranslateEntry fields:** Sync 2 places: `Models/DoNotTranslateEntry.cs`, `src/api/types.ts`
+- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`; includes `TermAuditEnabled`, `NaturalTranslationMode`
+- **Adding TermEntry fields:** Sync 2 places: `Models/TermEntry.cs`, `src/api/types.ts`
 - **ScriptTagRule/ScriptTagConfig fields:** Sync 2 places: `Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
 - **Per-game data cleanup (script tags):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete `scriptTagFile` + call `scriptTagService.RemoveCache`
+- **Per-game data cleanup (terms):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete glossary file + call `termService.RemoveCache`
 - **`NormalizeForCache` call sites:** 3 places must all use `ScriptTagService.NormalizeForCache(gameId, text)`: `WriteTranslationCacheAsync`, `LoadCache`, `RecordTexts`
 - **Adding preset rules:** Update `bundled/script-tag-presets.json`, increment `version`
-- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
+- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`; includes term audit stats (auditPass/auditFail/auditCorrected)
 - **PreTranslationCacheStats fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
