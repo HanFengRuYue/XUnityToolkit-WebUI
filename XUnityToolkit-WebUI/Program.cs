@@ -139,6 +139,7 @@ builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<GlossaryService>();
 builder.Services.AddSingleton<DoNotTranslateService>();
+builder.Services.AddSingleton<ScriptTagService>();
 builder.Services.AddSingleton<LlmTranslationService>();
 builder.Services.AddSingleton<GlossaryExtractionService>();
 builder.Services.AddSingleton<AssetExtractionService>();
@@ -270,12 +271,23 @@ var hubContext = app.Services.GetRequiredService<IHubContext<InstallProgressHub>
 fileLoggerProvider.LogBroadcast = entry =>
     _ = hubContext.Clients.Group("logs").SendAsync("logEntry", entry);
 
-// Initialize AI translation enabled state from settings
+// Initialize AI translation enabled state from settings + cleanup stale local endpoint
 try
 {
     var settingsService = app.Services.GetRequiredService<AppSettingsService>();
     var settings = settingsService.GetAsync().GetAwaiter().GetResult();
     app.Services.GetRequiredService<LlmTranslationService>().Enabled = settings.AiTranslation.Enabled;
+
+    // Local LLM is never running on fresh startup — disable any stale local endpoint
+    var localEndpoint = settings.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
+    if (localEndpoint is { Enabled: true })
+    {
+        settingsService.UpdateAsync(s =>
+        {
+            var ep = s.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
+            if (ep is not null) ep.Enabled = false;
+        }).GetAwaiter().GetResult();
+    }
 }
 catch
 {
