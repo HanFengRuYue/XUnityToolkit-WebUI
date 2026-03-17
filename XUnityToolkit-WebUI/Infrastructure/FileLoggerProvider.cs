@@ -15,7 +15,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
     private readonly string _filePath;
     private readonly string _sessionTimestamp;
     internal readonly LogLevel _minLevel;
-    private readonly StreamWriter _writer;
+    private StreamWriter _writer;
     private readonly Lock _lock = new();
     private const int MaxLogFiles = 10;
 
@@ -88,6 +88,34 @@ internal sealed class FileLoggerProvider : ILoggerProvider
             _recentEntries.TryDequeue(out _);
 
         try { LogBroadcast?.Invoke(entry); } catch { /* never crash */ }
+    }
+
+    /// <summary>
+    /// Temporarily close the log file so external operations (e.g. deleting the data directory) can proceed.
+    /// Must be paired with <see cref="ResumeFileLog"/>. Thread-safe: holds <see cref="_lock"/> for the duration.
+    /// </summary>
+    internal void SuspendFileLog()
+    {
+        _lock.Enter();
+        try { _writer.Dispose(); } catch { /* best effort */ }
+    }
+
+    /// <summary>
+    /// Reopen the log file after a <see cref="SuspendFileLog"/> call.
+    /// Creates the logs directory if it was deleted.
+    /// </summary>
+    internal void ResumeFileLog()
+    {
+        try
+        {
+            Directory.CreateDirectory(_logsDirectory);
+            _writer = new StreamWriter(_filePath, append: true, Encoding.UTF8) { AutoFlush = true };
+        }
+        catch { /* logging should never crash the app */ }
+        finally
+        {
+            _lock.Exit();
+        }
     }
 
     internal string FilePath => _filePath;

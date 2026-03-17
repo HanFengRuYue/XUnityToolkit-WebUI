@@ -50,7 +50,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
 - **Placeholder substitution order:** Terms sorted by priority (higher first), then by original text length (longer first); translate-type terms produce `{{G_x}}` placeholders, do-not-translate terms produce `{{DNT_x}}`; priority-based ordering ensures important terms claim their spans before lower-priority terms
 - **Translation post-processing order:** Glossary restore → Glossary post-process → DNT restore; **DNT restoration MUST happen AFTER glossary post-processing** — otherwise `ApplyGlossaryPostProcess` (which does `string.Replace` of glossary originals in translated text) will replace restored DNT words with glossary translations, undoing the do-not-translate intent
-- **Pre-computed placeholder texts:** Texts entirely replaced by a single placeholder are resolved before the LLM call (pre-computed); they bypass both the LLM and all post-processing steps (`ApplyGlossaryPostProcess`, placeholder restoration) since their results are final; the `preComputed` dictionary tracks these indices
+- **Pre-computed placeholder texts:** Texts entirely replaced by a single placeholder are resolved before the LLM call (pre-computed); they bypass the LLM call and `ApplyGlossaryPostProcess` (results are final from term mapping), but still participate in term audit and count toward phase2Pass stats; the `preComputed` dictionary tracks these indices
 - **Pre-translation cache optimization:** `PreTranslationCacheMonitor` tracks cache hit/miss when `EnablePreTranslationCache` is on; lazy-loads via `EnsureCacheAsync` on first `POST /api/translate` per game (double-checked locking with `_loadAttemptedForGameId` + `SemaphoreSlim`); `PreTranslationService` normalizes cache keys (rich text tag stripping) and generates `_PreTranslated_Regex.txt` with `sr:` splitter patterns; XUnity config optimized for whitespace tolerance (`CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars`); custom regex patterns stored at `{dataRoot}/cache/pre-translation-regex/{gameId}.txt`
 - **Script tag cleaning:** `ScriptTagService` strips game-specific instruction codes (e.g., `tk,N,text`, `%%,N,text,#BTN`) from pre-translation cache keys and LLM input; `NormalizeForCache` now has two layers: `XUnityTranslationFormat` (rich text) → `ScriptTagService` (script tags); per-game rules at `{dataRoot}/script-tags/{gameId}.json`; global versioned presets at `bundled/script-tag-presets.json` with auto-update via `IsBuiltin` flag
 - **XUnity regex translations:** Cache files support `r:"pattern"=replacement` (standard regex, substring replace by default unless anchored with `^$`) and `sr:"pattern"=$1$2` (splitter regex, auto-anchored, translates each capture group independently then reassembles); `sr:` groups must be translatable text — number-only groups waste translation calls; use `TemplateAllNumberAway=True` for number patterns instead
@@ -152,52 +152,65 @@ cd XUnityToolkit-Vue && npx vue-tsc --noEmit
 - **AppSettings.ReceivePreReleaseUpdates:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue` (settings default + NSwitch)
 - **Adding BuiltInModelInfo fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **LocalLlmDownloadProgress fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
-- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Updater/Program.cs` (MsiProductCode, InstallDir); `DataPath` key written by MSI for `RemoveFolderEx` cleanup only — app no longer reads it; key path: `HKCU\Software\XUnityToolkit`
 - **DataPathInfo:** Sync 2 places: `Endpoints/SettingsEndpoints.cs` (record), `src/api/types.ts`
 - **Adding AppDataPaths directories:** Also update export exclusion list in `SettingsEndpoints.cs` `/export` endpoint if the new directory contains large/regeneratable/machine-specific data
-- **Installer license:** `Installer/License.rtf` must match project root `LICENSE` (copyright holder, license type)
+- **Log level sync points:** `Program.cs` `AddFilter` + `FileLoggerProvider` constructor `minLevel` + frontend `LogView.vue` `selectedLevels` + `levelDefs` — all four must agree when changing log level thresholds
 
-### Build & Deploy
+### Build
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: local build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → Updater (AOT) → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
 - **Versioning:** `build.ps1` auto-generates `2.6.{YYYYMMDDHHmm}` (CI uses `2.6.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
-- **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
-- **MSI Installer:** `Installer/Installer.wixproj` (WixToolset.Sdk); per-user install to `%LocalAppData%\Programs\`; `build.ps1` auto-generates `Installer/Generated/HarvestedFiles.wxs` from publish output; MSI version: `{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}` (all segments within MSI limits: major<256, minor<256, build<65536)
-- **MSI + Updater coexistence:** Updater.exe syncs `DisplayVersion`/`InstallDate` in HKCU Uninstall key after delta update via P/Invoke (AOT-safe)
 - **Data path:** Always `%AppData%\XUnityToolkit\` (no portable mode); `AppData:Root` config key allows override for dev/test
-- **Updater AOT P/Invoke:** `DllImport`/`const`/`static readonly` cannot be used in top-level statements — must wrap in `partial class Program`; cannot use `Microsoft.Win32.Registry` — must P/Invoke advapi32.dll directly
 - **AppDataPaths config write-back:** After modifying `appDataRoot` source in `Program.cs`, **must** execute `builder.Configuration["AppData:Root"] = appDataRoot` — otherwise `AppDataPaths` (reads `IConfiguration` via DI) won't pick up the new value
-- **WiX build artifact cleanup:** WiX produces `.wixpdb` files in `OutputPath`; must clean up after moving MSI, otherwise they pollute release ZIPs
-- **CI shared PowerShell functions:** Extract to standalone `.ps1` files (e.g., `Installer/Generate-InstallerWxs.ps1`); both `build.ps1` and CI source via `. ./path/to/script.ps1`
-- **WiX gotcha — reserved properties:** `PublishDir` and `SourceDir` are reserved by MSBuild/WiX SDK and get silently overridden; use custom names (e.g., `AppPublishDir`) and pass via `-p:AppPublishDir=...`
-- **WiX gotcha — path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
-- **WiX gotcha — per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE false positives; `SuppressValidation=true` skips all ICE checks (also faster builds)
-- **WiX gotcha — WixUI variable overrides:** `WixUILicenseRtf` etc. must be `<WixVariable>` in `.wxs`, NOT `<String>` in `.wxl` — localization strings don't work for WixUI variable overrides in WiX v5
-- **WiX gotcha — MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
-- **WiX gotcha — v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
-- **WiX gotcha — DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI
-- **WiX UI extension:** `WixToolset.UI.wixext` ships with built-in `zh-CN` localization; only need custom `.wxl` for app-specific strings (launch checkbox text, license path); Chinese text in `.wxs` must use `!(loc.StringId)` to avoid codepage errors
-- **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled-llama.zip`, `bundled-fonts.zip`, `bundled-plugins.zip`, `bundled-misc.zip`
 - **Bundled assets:** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity auto-detect latest versions via API; llama.cpp pinned to b8354 (update `$llamaTag` in build.ps1/build.yml to change); CUDA 12.4; copied post-publish
 - **TMP fonts:** `bundled/fonts/` (tracked in git); release build uses `build.ps1` post-publish `Copy-Item`
 - **PowerShell ZIP:** Do NOT use `Compress-Archive` (broken on PowerShell 7.5.5 — module load error); use `[System.IO.Compression.ZipFile]` instead
-- **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
-- **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`
-- **CI/CD:** GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
+- **Update manifest:** `manifest-{rid}.json` generated per release with SHA256 hashes; component ZIPs: `app-{rid}.zip`, `wwwroot.zip`, `bundled-llama.zip`, `bundled-fonts.zip`, `bundled-plugins.zip`, `bundled-misc.zip`
+- Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
+- Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
+- Logs: `{dataRoot}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
+- Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing
+
+### Updater & MSI Installer
+
+- **Updater:** `Updater/Updater.csproj` (net10.0, PublishAot); win-x64 only; `--data-dir` CLI arg directs log/backup paths to `paths.Root`
+- **Updater AOT P/Invoke:** `DllImport`/`const`/`static readonly` cannot be used in top-level statements — must wrap in `partial class Program`; cannot use `Microsoft.Win32.Registry` — must P/Invoke advapi32.dll directly
+- **MSI Installer:** `Installer/Installer.wixproj` (WixToolset.Sdk); per-user install to `%LocalAppData%\Programs\`; `build.ps1` auto-generates `Installer/Generated/HarvestedFiles.wxs` from publish output; MSI version: `{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}` (all segments within MSI limits: major<256, minor<256, build<65536)
+- **MSI + Updater coexistence:** Updater.exe syncs `DisplayVersion`/`InstallDate` in HKCU Uninstall key after delta update via P/Invoke (AOT-safe)
+- **MSI registry keys:** Written by MSI (`Components.wxs`), read by `Updater/Program.cs` (MsiProductCode, InstallDir); `DataPath` key written by MSI for `RemoveFolderEx` cleanup only — app no longer reads it; key path: `HKCU\Software\XUnityToolkit`
+- **Installer license:** `Installer/License.rtf` must match project root `LICENSE` (copyright holder, license type)
+
+### WiX Gotchas
+
+- **Reserved properties:** `PublishDir` and `SourceDir` are reserved by MSBuild/WiX SDK and get silently overridden; use custom names (e.g., `AppPublishDir`) and pass via `-p:AppPublishDir=...`
+- **Path resolution:** WiX resolves `Source` paths relative to `.wixproj` directory, NOT CWD; use `IsPathRooted` in `.wixproj` to handle both absolute and relative inputs; do NOT set `-p:OutputPath` on WiX builds (interferes with file resolution)
+- **Per-user ICE errors:** Per-user installs (`Scope="perUser"`) trigger ICE false positives; `SuppressValidation=true` skips all ICE checks (also faster builds)
+- **WixUI variable overrides:** `WixUILicenseRtf` etc. must be `<WixVariable>` in `.wxs`, NOT `<String>` in `.wxl` — localization strings don't work for WixUI variable overrides in WiX v5
+- **MSI codepage:** MSI database codepage defaults to 1252 (Western); Chinese characters in MSI internal strings (e.g., `DowngradeErrorMessage`) cause WIX0311 error; use English for MSI-level strings
+- **v5 element syntax:** `<String>` uses `Value` attribute (not inner text); `<Publish>` uses `Condition` attribute (not inner text); inner text is obsolete in WiX v5
+- **DefaultLanguage output path:** Setting `<DefaultLanguage>zh-CN</DefaultLanguage>` causes MSI output to culture subfolder (e.g., `bin/x64/Release/zh-CN/`); `build.ps1` uses `-Recurse` to find MSI
+- **WiX UI extension:** `WixToolset.UI.wixext` ships with built-in `zh-CN` localization; only need custom `.wxl` for app-specific strings (launch checkbox text, license path); Chinese text in `.wxs` must use `!(loc.StringId)` to avoid codepage errors
+- **Build artifact cleanup:** WiX produces `.wixpdb` files in `OutputPath`; must clean up after moving MSI, otherwise they pollute release ZIPs
+- **CI shared PowerShell functions:** Extract to standalone `.ps1` files (e.g., `Installer/Generate-InstallerWxs.ps1`); both `build.ps1` and CI source via `. ./path/to/script.ps1`
+
+### CI/CD
+
+- GitHub Actions; `build.yml` (reusable), `release.yml` (tag `v*`), `dep-check.yml` (daily update check → auto pre-release)
+- **.NET 10 preview in CI:** `setup-dotnet@v5` with `dotnet-quality: 'preview'`
 - **CI parallel builds:** `build.yml` uses PowerShell `Start-Job` for intra-step parallelism — npm ci runs in background during asset download; frontend/TranslatorEndpoint build in parallel (Updater AOT runs as separate step — AOT publish needs its own restore, `--no-restore` breaks it); main ZIP created in background during component ZIP creation
-- **CI gotcha — AOT and `--no-restore`:** `dotnet publish` with AOT requires its own restore phase to populate `PrivateSdkAssemblies` ItemGroup; standalone `dotnet restore` + `--no-restore` publish fails with `PrivateSdkAssemblies is required`
 - **CI NuGet cache:** `actions/cache@v4` on `~/.nuget/packages` keyed by `hashFiles('**/*.csproj')`; explicit `dotnet restore` before parallel builds, then `--no-restore` on all subsequent dotnet commands
 - **CI component ZIPs:** Use `ZipFileExtensions.CreateEntryFromFile` with path prefix directly — do NOT create temp wrapper directories with `Copy-Item` (wastes I/O on large bundled assets)
 - **CI version tracking:** `.github/deps.json` stores last-known versions; `dep-check.yml` compares upstream
 - **CI cannot call `build.ps1`** — `Wait-Exit` blocks in non-interactive; workflow replicates logic inline; changes must be manually synced between `build.ps1` and `build.yml`
 - **dep-check.yml** only tracks BepInEx 5/6 and XUnity versions — llama.cpp is pinned and not auto-checked
-- **.NET 10 preview in CI:** `setup-dotnet@v5` with `dotnet-quality: 'preview'`
+- **CI gotcha — AOT and `--no-restore`:** `dotnet publish` with AOT requires its own restore phase to populate `PrivateSdkAssemblies` ItemGroup; standalone `dotnet restore` + `--no-restore` publish fails with `PrivateSdkAssemblies is required`
 - **CI gotcha — `$GITHUB_OUTPUT`:** multiline values corrupt format; use heredoc (`key<<EOF`) or `jq -c` for JSON
 - **CI gotcha — `gh release create --notes`:** backticks in `${{ }}` become bash command substitution; use `--notes-file` instead
-- Stop backend before build: `taskkill //f //im XUnityToolkit-WebUI.exe`
-- Default system prompt: Chinese, 7 rules; `{from}`/`{to}` replaced; `{0}` etc. literal
-- Logs: `{dataRoot}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`; 500-entry ring buffer + `LogBroadcast`
-- Screenshot cleanup: delete project root `*.png` and `.playwright-mcp/` after testing
+
+### Misc
+
+- **gitignore:** `docs/` is gitignored; use `git add -f` when committing spec/plan documents
+- **gitignore negation:** `bundled/` (directory pattern) blocks child negations; use `bundled/*` (wildcard) to allow `!bundled/fonts/`

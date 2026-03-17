@@ -178,7 +178,7 @@ public sealed class GlossaryExtractionService(
                 endpoint, systemPrompt, userContent, 0.1, CancellationToken.None);
 
             // Parse result and filter out do-not-translate words
-            var entries = ParseExtractionResult(content);
+            var entries = ParseExtractionResult(content, logger);
             if (dntEntries.Count > 0)
             {
                 entries = entries.Where(e => !dntEntries.Any(d =>
@@ -281,7 +281,7 @@ public sealed class GlossaryExtractionService(
         ["general"] = TermCategory.General,
     };
 
-    private static List<TermEntry> ParseExtractionResult(string content)
+    private static List<TermEntry> ParseExtractionResult(string content, ILogger? log = null)
     {
         var json = content.Trim();
 
@@ -325,8 +325,10 @@ public sealed class GlossaryExtractionService(
             }
             return result;
         }
-        catch
+        catch (Exception ex)
         {
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
+            log?.LogDebug(ex, "术语提取结果JSON解析失败: \"{Preview}\"", preview);
             return [];
         }
     }

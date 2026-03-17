@@ -397,6 +397,12 @@ public sealed class LlmTranslationService(
                             textsToTranslate = replaced;
                             glossaryMapping = mapping;
                             dntHint = "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+
+                            if (logger.IsEnabled(LogLevel.Debug))
+                            {
+                                var mappingStr = string.Join(", ", mapping.Select(kv => $"{kv.Key}→\"{kv.Value}\""));
+                                logger.LogDebug("术语占位符替换: {Count} 条映射: {Mapping}", mapping.Count, mappingStr);
+                            }
                         }
                     }
                 }
@@ -412,6 +418,12 @@ public sealed class LlmTranslationService(
                         dntMapping = mapping;
                         dntHint = (dntHint ?? "") +
                             "\n\n文本中的 {{DNT_x}} 是不可翻译的占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+
+                        if (logger.IsEnabled(LogLevel.Debug))
+                        {
+                            var mappingStr = string.Join(", ", mapping.Select(kv => $"{kv.Key}→\"{kv.Value}\""));
+                            logger.LogDebug("禁翻占位符替换: {Count} 条映射: {Mapping}", mapping.Count, mappingStr);
+                        }
                     }
                 }
 
@@ -456,6 +468,12 @@ public sealed class LlmTranslationService(
                         llmTexts.Add(text);
                         llmIndexMap.Add(i);
                     }
+                }
+
+                if (logger.IsEnabled(LogLevel.Debug) && preComputed.Count > 0)
+                {
+                    logger.LogDebug("预计算占位符: {Count} 段文本跳过LLM（全为单个占位符直接替换）",
+                        preComputed.Count);
                 }
 
                 // Call LLM only for texts that actually need translation
@@ -511,19 +529,34 @@ public sealed class LlmTranslationService(
 
                 // Restore glossary placeholders (for partial-placeholder texts from LLM)
                 if (glossaryMapping is not null)
+                {
                     phase2Translations = RestoreGlossaryPlaceholders(phase2Translations, glossaryMapping);
+                    if (logger.IsEnabled(LogLevel.Debug))
+                        logger.LogDebug("术语占位符恢复完成: {Count} 条映射已还原", glossaryMapping.Count);
+                }
 
                 // Apply glossary post-processing BEFORE DNT restoration
-                for (int i = 0; i < phase2Translations.Count; i++)
+                if (glossary is not null)
                 {
-                    if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
-                    if (glossary is not null)
-                        phase2Translations[i] = ApplyGlossaryPostProcess(phase2Translations[i], glossary);
+                    int postProcessCount = 0;
+                    for (int i = 0; i < phase2Translations.Count; i++)
+                    {
+                        if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
+                        var before = phase2Translations[i];
+                        phase2Translations[i] = ApplyGlossaryPostProcess(phase2Translations[i], glossary, logger);
+                        if (before != phase2Translations[i]) postProcessCount++;
+                    }
+                    if (logger.IsEnabled(LogLevel.Debug) && postProcessCount > 0)
+                        logger.LogDebug("术语后处理: {Count} 段译文被修正", postProcessCount);
                 }
 
                 // Restore do-not-translate placeholders AFTER glossary post-processing
                 if (dntMapping is not null)
+                {
                     phase2Translations = RestoreDoNotTranslatePlaceholders(phase2Translations, dntMapping);
+                    if (logger.IsEnabled(LogLevel.Debug))
+                        logger.LogDebug("禁翻占位符恢复完成: {Count} 条映射已还原", dntMapping.Count);
+                }
 
                 // Write Phase 2 results back and optionally audit
                 for (int p2i = 0; p2i < phase2Indices.Count; p2i++)
@@ -531,7 +564,7 @@ public sealed class LlmTranslationService(
                     var originalIdx = phase2Indices[p2i];
                     var translated = phase2Translations[p2i];
 
-                    if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 } && !preComputed.ContainsKey(p2i))
+                    if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                     {
                         var relevantTerms = termMatchingService.FindMatchedTerms(
                             matchedTerms, [texts[originalIdx]]);
@@ -924,7 +957,7 @@ public sealed class LlmTranslationService(
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallOpenAiCompatRawAsync(ep, systemPrompt, userContent, ai.Temperature, baseUrl, ct);
-        return (ParseTranslationArray(content, texts.Count), tokens);
+        return (ParseTranslationArray(content, texts.Count, logger), tokens);
     }
 
     // ── Claude ──
@@ -983,7 +1016,7 @@ public sealed class LlmTranslationService(
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
-        return (ParseTranslationArray(content, texts.Count), tokens);
+        return (ParseTranslationArray(content, texts.Count, logger), tokens);
     }
 
     // ── Gemini ──
@@ -1040,7 +1073,7 @@ public sealed class LlmTranslationService(
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
-        return (ParseTranslationArray(content, texts.Count), tokens);
+        return (ParseTranslationArray(content, texts.Count, logger), tokens);
     }
 
     // ── Do-not-translate placeholder substitution ──
@@ -1314,7 +1347,8 @@ public sealed class LlmTranslationService(
 
     // ── Glossary post-processing ──
 
-    private static string ApplyGlossaryPostProcess(string translated, List<TermEntry> glossary)
+    private static string ApplyGlossaryPostProcess(string translated, List<TermEntry> glossary,
+        ILogger? log = null)
     {
         // Sort longest-first to prevent shorter entries from shadowing longer ones
         // (matches the strategy in ApplyGlossaryReplacements)
@@ -1329,9 +1363,9 @@ public sealed class LlmTranslationService(
                     translated = Regex.Replace(translated, entry.Original, entry.Translation ?? "",
                         RegexOptions.None, TimeSpan.FromMilliseconds(100));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Invalid regex — skip silently
+                    log?.LogDebug(ex, "术语后处理正则失败: /{Pattern}/", entry.Original);
                 }
             }
             else
@@ -1357,7 +1391,8 @@ public sealed class LlmTranslationService(
 
     // ── Response parsing ──
 
-    private static IList<string> ParseTranslationArray(string content, int expectedCount)
+    private static IList<string> ParseTranslationArray(string content, int expectedCount,
+        ILogger? log = null)
     {
         var json = content.Trim();
 
@@ -1390,9 +1425,10 @@ public sealed class LlmTranslationService(
             if (result is not null)
                 return result;
         }
-        catch
+        catch (Exception ex)
         {
-            // Fall through to fallback
+            var preview = content.Length > 200 ? content[..200] + "..." : content;
+            log?.LogDebug(ex, "LLM响应JSON解析失败，回退到原文: \"{Preview}\"", preview);
         }
 
         // Fallback: return raw content for all slots

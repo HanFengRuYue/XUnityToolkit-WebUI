@@ -5,6 +5,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 ## Core
 
 - **No migration code:** Project is pre-stable — no backward-compat migrations or old-format converters
+- **Key infrastructure services:** `GameLibraryService` (in-memory game library CRUD), `AppSettingsService` (settings cache), `ConfigurationService` (INI read/write/patch), `UnityDetectionService` (game detection), `GameImageService` (icon/cover/background management)
 - `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
 - **Data storage:** `%AppData%\XUnityToolkit\` for all runtime data; `AppDataPaths` centralizes paths; shipped assets (`bundled/`, `wwwroot/`) stay at program root
 - **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
@@ -27,10 +28,14 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
 - **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache` (e.g., `termService.RemoveCache`, `scriptTagService.RemoveCache`)
 - **Service cache clearing:** `TermService.ClearAllCache()` and `ScriptTagService.ClearAllCache()` clear all in-memory caches; used by settings reset (`POST /api/settings/reset`); `RemoveCache(gameId)` clears single game
+- **Settings reset log suspension:** `POST /api/settings/reset` calls `FileLoggerProvider.SuspendFileLog()` before deleting data directory (releases log file handle), then `ResumeFileLog()` in `finally`; do NOT replace whole-directory deletion with per-subdirectory deletion (previously caused incomplete cleanup)
 - **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
 - **`ScriptTagService` DI:** `AddSingleton`; follows `TermService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
+- **Log level config:** `Program.cs` has two-layer filtering: `AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)` (ASP.NET pipeline) + `FileLoggerProvider(logsDirectory, LogLevel.Debug)` (provider); both must be ≤ desired level or logs are silently dropped
+- **Static method logging pattern:** Static methods can't access `ILogger` — either pass `ILogger? log = null` parameter and use `log?.LogDebug(...)`, or add logging at the instance-method call site where `logger` is available; prefer call-site logging when only aggregate info (counts, before/after) is needed
 - Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
 - **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
+- **`Lock` type API (.NET 9+):** Use `_lock.Enter()`/`_lock.Exit()` — do NOT use `Monitor.Enter(_lock)`/`Monitor.Exit(_lock)` (CS9216 warning; `Lock` is not `object`-based)
 
 ## INI Configuration
 
@@ -72,7 +77,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
 - **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 - **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
-- **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results must also skip `ApplyGlossaryPostProcess` (marked via `preComputed` dictionary)
+- **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results skip `ApplyGlossaryPostProcess` but still go through term audit (counted as phase2Pass); `preComputed` dictionary tracks these indices
 - **Prompt terms:** In cloud mode, ALL translate-type term entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptTerms` is set to `null` to save context tokens; term enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
 - **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
 

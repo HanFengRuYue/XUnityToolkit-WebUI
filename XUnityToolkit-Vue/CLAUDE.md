@@ -8,6 +8,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - Scoped `<style scoped>`; use CSS variables from `main.css`
 - Icons: `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`
 - API client: `api.get`, `api.post`, `api.put`, `api.del` (NOT `.delete` — JS reserved word); import from `@/api/client` (NOT `@/api` — it's a directory, Vite fails with EISDIR)
+- API layer: `src/api/client.ts` (axios wrapper), `src/api/types.ts` (shared types), `src/api/games.ts` (game API methods)
 
 ## Design System
 
@@ -27,7 +28,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 ## Adding a New Page
 
 - **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
-- **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`
+- **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`; sub-pages include `TermEditorView`, `TranslationEditorView`, `ConfigEditorView`, `AssetExtractionView`, `FontReplacementView`, `BepInExLogView`
 - **TermEditorView:** Unified term editor (replaces old GlossaryEditorView); filter chip bar for type (translate/doNotTranslate) and category; NDataTable with virtual scroll, inline editing, column visibility control; single `useAutoSave` instance; JSON/CSV import/export; cross-game import via modal
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
 - SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
@@ -38,8 +39,9 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Scoped → global CSS:** Scoped styles (`.class[data-v-xxx]`) have higher specificity than global (`.class`); when extracting shared styles to `main.css`, must REMOVE scoped duplicates or they'll override; page-specific overrides stay in scoped with just the differing properties
 - **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232
 - **KeepAlive:** Top-level views (Library, AiTranslation, FontGenerator, Log, Settings) are cached via `<KeepAlive :include>` in AppShell; each MUST have `defineOptions({ name: 'XxxView' })` after imports
+- **LogView level sync:** `selectedLevels` (default selection) and `levelDefs` (filter pill definitions) must both include a level for it to appear and be active; `levelClass()` styling must also have a matching CSS class (e.g., `.level-dbg`)
 - **Install state recovery:** `startInstall`/`startUninstall` must query backend `GET /api/games/{id}/status` as fallback — Pinia store state is lost on page reload while backend install continues running
-- Use composables (`src/composables/`) for complex multi-step UI flows
+- Use composables (`src/composables/`) for complex multi-step UI flows; `useAddGameFlow` (add-game wizard), `useAutoSave` (debounced auto-save)
 - **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
 - **ConfigPanel** auto-saves internally (2s), no `save` event
 - Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard; `NDialogOptions.onPositiveClick`: returning a `Promise` keeps dialog open until resolved — fire-and-forget long async work (e.g., `() => { doWork() }`) to close immediately
