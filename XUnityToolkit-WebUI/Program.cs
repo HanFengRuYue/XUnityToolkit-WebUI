@@ -246,6 +246,7 @@ app.MapTranslateEndpoints();
 app.MapImageEndpoints();
 app.MapLogEndpoints();
 app.MapAssetEndpoints();
+app.MapScriptTagEndpoints();
 app.MapTranslationEditorEndpoints();
 app.MapPluginPackageEndpoints();
 app.MapFontReplacementEndpoints();
