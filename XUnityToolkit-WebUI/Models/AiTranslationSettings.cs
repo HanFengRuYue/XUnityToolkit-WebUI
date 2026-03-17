@@ -44,6 +44,9 @@ public sealed class AiTranslationSettings
 
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
+    public bool TermAuditEnabled { get; set; } = true;
+    public bool NaturalTranslationMode { get; set; } = true;
+
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }
     public string? GlossaryExtractionEndpointId { get; set; }

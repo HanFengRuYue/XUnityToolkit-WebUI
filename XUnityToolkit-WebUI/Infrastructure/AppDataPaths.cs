@@ -25,6 +25,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CustomFontsDirectory => Path.Combine(_root, "custom-fonts");
     public string FontGenerationUploadsDirectory => Path.Combine(_root, "font-generation", "uploads");
     public string GeneratedFontsDirectory => Path.Combine(_root, "generated-fonts");
+    [Obsolete("Migrated to glossaries/. Kept for migration path.")]
     public string DoNotTranslateDirectory => Path.Combine(_root, "do-not-translate");
     public string ScriptTagsDirectory => Path.Combine(_root, "script-tags");
     public string PreTranslationRegexDirectory => Path.Combine(CacheDirectory, "pre-translation-regex");

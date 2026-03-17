@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, GlossaryEntry, DoNotTranslateEntry, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -61,6 +61,12 @@ export const gamesApi = {
   getDoNotTranslate: (id: string) => api.get<DoNotTranslateEntry[]>(`/api/games/${id}/do-not-translate`),
   saveDoNotTranslate: (id: string, entries: DoNotTranslateEntry[]) =>
     api.put<DoNotTranslateEntry[]>(`/api/games/${id}/do-not-translate`, entries),
+
+  // Unified term management
+  getTerms: (id: string) => api.get<TermEntry[]>(`/api/games/${id}/terms`),
+  saveTerms: (id: string, entries: TermEntry[]) => api.put(`/api/games/${id}/terms`, entries),
+  importTermsFromGame: (id: string, sourceGameId: string) =>
+    api.post<{ added: number; skipped: number }>(`/api/games/${id}/terms/import-from-game`, { sourceGameId }),
 
   getDescription: (id: string) => api.get<string | null>(`/api/games/${id}/description`),
   saveDescription: (id: string, description: string | null) =>

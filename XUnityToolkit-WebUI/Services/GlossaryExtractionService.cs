@@ -10,8 +10,7 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class GlossaryExtractionService(
     LlmTranslationService translationService,
-    GlossaryService glossaryService,
-    DoNotTranslateService doNotTranslateService,
+    TermService termService,
     AppSettingsService settingsService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<GlossaryExtractionService> logger)
@@ -163,14 +162,14 @@ public sealed class GlossaryExtractionService(
                 return;
             }
 
-            // Load existing glossary for dedup context
-            var existingGlossary = await glossaryService.GetAsync(gameId);
-
-            // Load do-not-translate list to exclude from extraction
-            var dntEntries = await doNotTranslateService.GetAsync(gameId);
+            // Load existing terms for dedup context and DNT filtering
+            var allTerms = await termService.GetAsync(gameId);
+            var existingGlossary = allTerms.Where(t => t.Type == TermType.Translate).ToList();
+            var dntEntries = allTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
 
             // Build prompt
             var systemPrompt = BuildExtractionSystemPrompt(existingGlossary, dntEntries);
+
             var userContent = BuildUserContent(pairs);
 
             // Call LLM
@@ -190,8 +189,8 @@ public sealed class GlossaryExtractionService(
             }
             if (entries.Count == 0) return;
 
-            // Merge into glossary (atomic dedup + save)
-            var added = await glossaryService.MergeAsync(gameId, entries);
+            var added = entries.Count;
+            await termService.MergeAsync(gameId, entries);
             if (added > 0)
             {
                 Interlocked.Add(ref _totalExtracted, added);
@@ -232,8 +231,8 @@ public sealed class GlossaryExtractionService(
         return enabled[0];
     }
 
-    private static string BuildExtractionSystemPrompt(List<GlossaryEntry> existingGlossary,
-        List<DoNotTranslateEntry> dntEntries)
+    private static string BuildExtractionSystemPrompt(List<TermEntry> existingGlossary,
+        List<TermEntry> dntEntries)
     {
         var sb = new StringBuilder(ExtractionPrompt);
 
@@ -265,7 +264,7 @@ public sealed class GlossaryExtractionService(
         return JsonSerializer.Serialize(items);
     }
 
-    private static List<GlossaryEntry> ParseExtractionResult(string content)
+    private static List<TermEntry> ParseExtractionResult(string content)
     {
         var json = content.Trim();
 
@@ -283,7 +282,7 @@ public sealed class GlossaryExtractionService(
             var arr = JsonNode.Parse(json)?.AsArray();
             if (arr is null) return [];
 
-            var result = new List<GlossaryEntry>();
+            var result = new List<TermEntry>();
             foreach (var item in arr)
             {
                 var original = item?["original"]?.GetValue<string>();
@@ -291,8 +290,9 @@ public sealed class GlossaryExtractionService(
                 if (!string.IsNullOrWhiteSpace(original) && !string.IsNullOrWhiteSpace(translation))
                 {
                     var description = item?["description"]?.GetValue<string>();
-                    result.Add(new GlossaryEntry
+                    result.Add(new TermEntry
                     {
+                        Type = TermType.Translate,
                         Original = original,
                         Translation = translation,
                         IsRegex = false,

@@ -925,7 +925,7 @@ onUnmounted(() => stopWatch())
               </div>
               <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <div class="tool-item" @click="router.push(`/games/${gameId}/glossary-editor`)">
+            <div class="tool-item" @click="router.push(`/games/${gameId}/term-editor`)">
               <div class="tool-item-icon">
                 <NIcon :size="18"><MenuBookOutlined /></NIcon>
               </div>
