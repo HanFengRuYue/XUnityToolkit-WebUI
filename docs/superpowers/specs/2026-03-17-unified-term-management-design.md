@@ -30,7 +30,7 @@ Replaces both `GlossaryEntry` and `DoNotTranslateEntry`.
 | `isRegex` | `bool` | `false` | Whether `original` is a regex pattern |
 | `caseSensitive` | `bool` | `true` | Case-sensitive matching |
 | `exactMatch` | `bool` | `false` | Whole-word boundary matching |
-| `priority` | `int` | `0` | Higher value = applied first |
+| `priority` | `int` | `0` | Higher value = applied first; when equal, longer `original` applied first |
 
 ### TermCategory Enum
 
@@ -60,6 +60,14 @@ export interface TermEntry {
 - Unified file: `{appDataRoot}/glossaries/{gameId}.json`
 - Old DNT files at `{appDataRoot}/do-not-translate/{gameId}.json` migrated on first load, renamed to `.migrated`
 
+### ExactMatch Implementation
+
+When `exactMatch=true` and `isRegex=false`:
+
+- **Western text**: wrap `original` in `\b` word boundaries, match via regex
+- **CJK text**: check that the character before and after the match is not the same Unicode category (Han/Katakana/Hiragana). Implementation: build a regex pattern that asserts the match is not preceded/followed by same-class characters using lookahead/lookbehind: `(?<![\\p{IsCJKUnifiedIdeographs}\\p{IsHiragana}\\p{IsKatakana}])TERM(?![\\p{IsCJKUnifiedIdeographs}\\p{IsHiragana}\\p{IsKatakana}])` for CJK terms
+- **Mixed detection**: if `original` contains any CJK character, use CJK boundary logic; otherwise use `\b`
+
 ## Backend Architecture
 
 ### TermService
@@ -67,7 +75,7 @@ export interface TermEntry {
 Replaces `GlossaryService` + `DoNotTranslateService`.
 
 - `ConcurrentDictionary<string, List<TermEntry>>` + `SemaphoreSlim` caching (same pattern as current)
-- `GetAsync(gameId)` — lazy load with double-checked locking; on first load, auto-migrates any old DNT file
+- `GetAsync(gameId)` — lazy load with double-checked locking; on first load, auto-migrates any old DNT file. **Migration runs inside the `_lock` semaphore** to prevent race conditions with concurrent first-access requests
 - `SaveAsync(gameId, entries)` — atomic write (temp file + `File.Move`)
 - `MergeAsync(gameId, newEntries)` — for auto-extraction; dedup by `original`
 - `RemoveCache(gameId)` — cache eviction (fixes current glossary cleanup bug)
@@ -75,10 +83,11 @@ Replaces `GlossaryService` + `DoNotTranslateService`.
 
 ### Data Migration
 
-- Triggered lazily on first `GetAsync` per game
+- Triggered lazily on first `GetAsync` per game, **within the `_lock` semaphore**
 - Reads `do-not-translate/{gameId}.json`, converts entries to `type=doNotTranslate`, merges into glossary file
 - Deduplicates by `original` (ordinal)
 - Renames old file to `{gameId}.json.migrated`
+- `DoNotTranslateDirectory` constant in `AppDataPaths` kept as `[Obsolete]` for migration path; `EnsureDirectoriesExist` continues creating it until a future version removes migration code
 
 ### API Endpoints
 
@@ -88,11 +97,11 @@ Replaces `GlossaryService` + `DoNotTranslateService`.
 | `PUT` | `/api/games/{id}/terms` | Saves term list; max 10000 entries; validates regex with 1s timeout |
 | `POST` | `/api/games/{id}/terms/import-from-game` | Body: `{ sourceGameId }`; returns `{ added, skipped }` |
 | `GET` | `/api/games/{id}/glossary` | **Compat proxy** — filters `type=translate`, maps to old `GlossaryEntry` shape |
-| `PUT` | `/api/games/{id}/glossary` | **Compat proxy** — converts to `TermEntry`, merges with existing DNT entries |
+| `PUT` | `/api/games/{id}/glossary` | **Compat proxy** — read-modify-write under `_lock`: load all terms, replace `translate` entries with submitted ones, preserve `doNotTranslate` entries, save |
 | `GET` | `/api/games/{id}/do-not-translate` | **Compat proxy** — filters `type=doNotTranslate` |
-| `PUT` | `/api/games/{id}/do-not-translate` | **Compat proxy** — converts to `TermEntry`, merges with existing translate entries |
+| `PUT` | `/api/games/{id}/do-not-translate` | **Compat proxy** — read-modify-write under `_lock`: load all terms, replace `doNotTranslate` entries, preserve `translate` entries, save |
 
-Compat proxies support `TranslationEditorView` and other existing callers during transition. To be removed in a future version.
+Compat proxies support `TranslationEditorView` and other existing callers during transition. The read-modify-write operations for compat PUT endpoints hold the `_lock` semaphore for the entire cycle to prevent data loss from concurrent writes. To be removed in a future version.
 
 ### Game Deletion Cleanup
 
@@ -157,12 +166,13 @@ Source text sent unmodified (no placeholders).
 
 ### Phase 2 — Placeholder Fallback
 
-Only triggered when Phase 1 audit fails.
+Only triggered when Phase 1 audit fails. **Re-batches all failed segments** from Phase 1 into a single LLM call for efficiency.
 
 - All matched terms replaced with `{{G_N}}` (translate) or `{{DNT_N}}` (doNotTranslate) placeholders
 - Ordered by `priority` descending, then by `original` length descending
 - LLM translates placeholder-embedded text
 - Post-processing restores placeholders: glossary restore → glossary post-process → DNT restore
+- **Pre-computed placeholder optimization preserved**: texts entirely replaced by a single placeholder bypass the LLM (same as current behavior)
 
 ### Phase 3 — Force Correction
 
@@ -181,7 +191,9 @@ Checks applied after both Phase 1 and Phase 2:
 | `doNotTranslate` | Original preservation | `original` appears in output (respecting `caseSensitive`) |
 | `isRegex=true` | Skip | Cannot reliably verify regex-based terms |
 
-Audit is per-text-segment in batch mode. Segments that pass Phase 1 are kept; only failed segments proceed to Phase 2.
+**Audit limitations**: simple string containment check. May produce false positives for common words or false negatives for substring matches. This is acceptable as a pragmatic first implementation — the audit is a safety net, not a guarantee. Phase 3 force correction handles remaining failures.
+
+Audit is per-text-segment in batch mode. Segments that pass Phase 1 are kept; only failed segments proceed to Phase 2 (re-batched into a single LLM call).
 
 ### Token Budget Control
 
@@ -238,10 +250,10 @@ Broadcast via SignalR to `ai-translation` group.
 1. **Page header**: back button + title "术语管理" + auto-save badge
 2. **Toolbar**: Clear / Import / Export / Import from Game / Save buttons
 3. **Filter chip bar**:
-   - Group 1 (type): `All(N)` | `Translate(N)` | `DoNotTranslate(N)`
+   - Group 1 (type): `全部(N)` | `翻译术语(N)` | `禁止翻译(N)`
    - Separator
-   - Group 2 (category): `Character(N)` | `Location(N)` | `Item(N)` | `Skill(N)` | `Organization(N)` | `General(N)`
-   - Combinable: e.g., "Translate" + "Character" shows only translate entries with character category
+   - Group 2 (category): `角色名(N)` | `地名(N)` | `物品名(N)` | `技能名(N)` | `组织名(N)` | `通用(N)`
+   - Combinable: e.g., "翻译术语" + "角色名" shows only translate entries with character category
 4. **Search bar**: search across original, translation, description
 5. **Add row**: type select + original input + translation input + category select + add button
 6. **Data table**: NDataTable with virtual scroll
@@ -269,13 +281,15 @@ Broadcast via SignalR to `ai-translation` group.
 
 ### Drag-and-Drop Sorting
 
-- `vuedraggable` (SortableJS) or HTML5 drag API
-- Drag changes array order, triggers auto-save
-- Disabled when search/filter is active
+- Use move-up/move-down buttons or manual priority number editing (NDataTable virtual scroll is incompatible with `vuedraggable` since only visible rows are rendered — dragging outside viewport is unreliable)
+- When filter/search is active, sorting controls are disabled
 
 ### Import/Export
 
-- **Import**: JSON (auto-converts old format) and CSV/TSV (auto-detect delimiter by file extension)
+- **Import**: JSON (auto-converts old `GlossaryEntry[]` and `DoNotTranslateEntry[]` formats) and CSV/TSV
+  - CSV column order: `type, original, translation, category, description, isRegex, caseSensitive, exactMatch, priority`
+  - TSV uses tab delimiter; CSV uses comma; auto-detected by file extension (`.csv` / `.tsv`)
+  - First row is header (matched by column name, order-independent)
 - **Export**: User chooses JSON or CSV; filename `{gameName}_术语库.{json|csv}`
 - **Import from Game**: NModal listing all games; calls `POST .../terms/import-from-game`; shows "Added X, skipped Y duplicates"
 
@@ -296,32 +310,40 @@ Broadcast via SignalR to `ai-translation` group.
 |----------|--------|
 | `Models/TermEntry.cs` | New, replaces `GlossaryEntry.cs` + `DoNotTranslateEntry.cs` |
 | `Services/TermService.cs` | New, replaces `GlossaryService.cs` + `DoNotTranslateService.cs` |
-| `Services/GlossaryExtractionService.cs` | Call `TermService.MergeAsync`, set `type=translate` on extracted entries |
-| `Services/LlmTranslationService.cs` | Call `TermService`; implement multi-phase pipeline + term audit |
+| `Services/GlossaryExtractionService.cs` | Call `TermService.MergeAsync` (set `type=translate`); change `GetAsync` calls from both old services to `TermService.GetAsync` + filter by type; update `BuildExtractionSystemPrompt` to accept `List<TermEntry>` |
+| `Services/LlmTranslationService.cs` | Call `TermService`; implement multi-phase pipeline + term audit; preserve pre-computed placeholder optimization |
 | `Endpoints/GameEndpoints.cs` | New endpoints + compat proxies + game deletion cleanup |
-| `Infrastructure/AppDataPaths.cs` | Remove `DoNotTranslate` directory constant (deprecated after migration) |
+| `Infrastructure/AppDataPaths.cs` | Mark `DoNotTranslateDirectory` as `[Obsolete]`; keep for migration |
 | `Program.cs` DI | Register `TermService` replacing two old services |
 | `Models/AiTranslationSettings.cs` | Add `TermAuditEnabled`, `NaturalTranslationMode` |
 | `Models/TranslationStats.cs` | Add `termAuditPhase1PassCount`, `termAuditPhase2PassCount`, `termAuditForceCorrectedCount` |
-| `src/api/types.ts` | `TermEntry` replaces `GlossaryEntry` + `DoNotTranslateEntry`; new stats fields |
+| `src/api/types.ts` | `TermEntry` replaces `GlossaryEntry` + `DoNotTranslateEntry`; new stats fields; new settings fields |
 | `src/api/games.ts` | New API methods `getTerms`/`saveTerms`/`importTermsFromGame` |
 | `src/views/TermEditorView.vue` | New, replaces `GlossaryEditorView.vue` |
+| `src/views/GameDetailView.vue` | Update navigation link from `/glossary-editor` to `/term-editor` |
 | `src/views/TranslationEditorView.vue` | Migrate to new API (or use compat proxy during transition) |
 | `src/views/AiTranslationView.vue` | Display new audit stats; new settings toggles |
 | `src/views/SettingsView.vue` | New AI translation settings for term audit |
 | `src/router/index.ts` | Route rename + old route redirect |
+| `Endpoints/SettingsEndpoints.cs` | Export/import: handle unified storage; old `do-not-translate/` dirs in imported ZIPs mapped to new format |
+
+## Input Size Limits
+
+- Unified PUT max: **10000 entries** (replaces old separate limits of glossary 5000 + DNT 10000)
+- CLAUDE.md to be updated to reflect this change
 
 ## Backward Compatibility
 
-- Old `GET/PUT .../glossary` and `GET/PUT .../do-not-translate` endpoints retained as compat proxies
+- Old `GET/PUT .../glossary` and `GET/PUT .../do-not-translate` endpoints retained as compat proxies (thread-safe read-modify-write)
 - Old DNT files auto-migrated on first access, renamed to `.migrated`
 - Old JSON import format auto-detected and converted
 - Cleanup plan: remove compat endpoints and old type definitions in a future version
 
 ## What Does NOT Change
 
-- `GlossaryExtractionService` extraction logic and LLM prompts (only caller changes)
+- `GlossaryExtractionService` extraction logic and LLM prompts (only caller and type changes)
 - `PreTranslationService` (uses `LlmTranslationService` indirectly)
 - `useAutoSave` composable
 - SignalR broadcast patterns (new stats fields added, existing unchanged)
 - Backup/restore logic
+- Pre-computed placeholder optimization (texts entirely replaced by a single placeholder bypass LLM)
