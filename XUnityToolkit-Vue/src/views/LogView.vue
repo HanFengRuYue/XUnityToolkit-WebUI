@@ -19,7 +19,7 @@ defineOptions({ name: 'LogView' })
 
 const logStore = useLogStore()
 
-const selectedLevels = ref<Set<string>>(new Set(['INF', 'WRN', 'ERR', 'CRI']))
+const selectedLevels = ref<Set<string>>(new Set(['DBG', 'INF', 'WRN', 'ERR', 'CRI']))
 const keyword = ref('')
 const autoScroll = ref(true)
 const loading = ref(false)
@@ -34,6 +34,7 @@ interface LevelDef {
 }
 
 const levelDefs: LevelDef[] = [
+  { key: 'DBG', label: 'DEBUG', icon: BugReportOutlined, colorVar: '--text-3' },
   { key: 'INF', label: 'INFO', icon: InfoOutlined, colorVar: '--accent' },
   { key: 'WRN', label: 'WARN', icon: WarningAmberOutlined, colorVar: '--warning' },
   { key: 'ERR', label: 'ERROR', icon: BugReportOutlined, colorVar: '--danger' },

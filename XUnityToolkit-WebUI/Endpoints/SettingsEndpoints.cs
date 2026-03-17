@@ -37,6 +37,7 @@ public static class SettingsEndpoints
             AppSettingsService settingsService,
             TermService termService,
             ScriptTagService scriptTagService,
+            FileLoggerProvider fileLoggerProvider,
             ILogger<AppSettingsService> logger) =>
         {
             // Invalidate all in-memory caches
@@ -46,17 +47,23 @@ public static class SettingsEndpoints
 
             var errors = new List<string>();
 
-            // Delete the entire data root directory (%AppData%\XUnityToolkit\)
-            // This ensures all config, cache, and data files are removed,
-            // including any new directories added by future features.
-            TryDelete(() =>
+            // Suspend file logging so the log file handle is released,
+            // allowing the entire data directory to be deleted cleanly.
+            fileLoggerProvider.SuspendFileLog();
+            try
             {
-                if (Directory.Exists(paths.Root))
-                    Directory.Delete(paths.Root, recursive: true);
-            }, paths.Root, errors);
-
-            // Recreate required directories
-            paths.EnsureDirectoriesExist();
+                TryDelete(() =>
+                {
+                    if (Directory.Exists(paths.Root))
+                        Directory.Delete(paths.Root, recursive: true);
+                }, paths.Root, errors);
+            }
+            finally
+            {
+                // Recreate directories and reopen log file
+                paths.EnsureDirectoriesExist();
+                fileLoggerProvider.ResumeFileLog();
+            }
 
             if (errors.Count > 0)
             {

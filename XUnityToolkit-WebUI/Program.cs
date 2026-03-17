@@ -56,11 +56,11 @@ builder.Logging.AddSimpleConsole(options =>
 });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
-builder.Logging.AddFilter("XUnityToolkit_WebUI", LogLevel.Information);
+builder.Logging.AddFilter("XUnityToolkit_WebUI", LogLevel.Debug);
 
 // 文件日志：写入程序目录/logs/，每次启动创建新日志文件，保留最近 10 个
 var logsDirectory = Path.Combine(appDataRoot, "logs");
-var fileLoggerProvider = new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logsDirectory);
+var fileLoggerProvider = new XUnityToolkit_WebUI.Infrastructure.FileLoggerProvider(logsDirectory, LogLevel.Debug);
 builder.Logging.AddProvider(fileLoggerProvider);
 builder.Services.AddSingleton<FileLoggerProvider>(_ => fileLoggerProvider);
 
