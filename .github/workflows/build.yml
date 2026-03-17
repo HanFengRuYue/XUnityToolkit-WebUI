@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "2.5.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "2.6.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

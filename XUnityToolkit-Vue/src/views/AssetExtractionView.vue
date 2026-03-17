@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -26,6 +26,7 @@ import {
   DeleteOutlined,
   RefreshOutlined,
   DataObjectOutlined,
+  ExpandMoreOutlined,
 } from '@vicons/material'
 import { LockClosedOutline } from '@vicons/ionicons5'
 import { useAssetExtractionStore } from '@/stores/assetExtraction'
@@ -45,6 +46,10 @@ const fromLang = ref('ja')
 const toLang = ref('zh')
 const hasAiProvider = ref(false)
 const enablePreTranslationCache = ref(false)
+
+const collapsed = reactive({
+  scriptTags: true,
+})
 
 // Script tag cleaning
 const scriptTagRules = ref<ScriptTagRule[]>([])
@@ -420,61 +425,70 @@ function langLabel(code: string): string {
           </NAlert>
         </div>
 
-        <!-- Script Tag Cleaning Rules -->
-        <div v-if="enablePreTranslationCache" class="script-tag-card">
-          <div class="section-header">
+        <!-- Script Tag Cleaning Rules (collapsible) -->
+        <div v-if="enablePreTranslationCache" class="script-tag-card" :class="{ 'is-collapsed': collapsed.scriptTags }">
+          <div class="section-header collapsible" @click="collapsed.scriptTags = !collapsed.scriptTags">
             <h3 class="section-title">
               <span class="section-icon">
                 <NIcon :size="16"><DataObjectOutlined /></NIcon>
               </span>
               脚本指令清洗规则
+              <NTag v-if="scriptTagRules.length > 0" size="small" :bordered="false" style="margin-left: 8px">
+                {{ scriptTagRules.length }} 条
+              </NTag>
             </h3>
-            <div class="header-actions">
+            <div class="header-actions" @click.stop>
               <NButton size="small" @click="importPresetRules">导入内置规则</NButton>
               <NButton size="small" @click="addCustomRule">+ 添加规则</NButton>
               <NButton size="small" type="primary" :loading="scriptTagSaving" :disabled="!scriptTagDirty" @click="handleSaveScriptTags">
                 保存
               </NButton>
             </div>
-          </div>
-
-          <div v-if="scriptTagRules.length === 0" class="empty-hint">
-            暂无规则。点击「导入内置规则」加载预设，或手动添加自定义规则。
-          </div>
-
-          <div v-for="(rule, index) in scriptTagRules" :key="index" class="rule-row">
-            <NInput
-              v-model:value="rule.pattern"
-              placeholder="正则表达式"
-              :disabled="rule.isBuiltin"
-              class="rule-pattern"
-              @update:value="scriptTagDirty = true"
-            />
-            <NSelect
-              v-model:value="rule.action"
-              :options="actionOptions"
-              :disabled="rule.isBuiltin"
-              class="rule-action"
-              @update:value="scriptTagDirty = true"
-            />
-            <NInput
-              v-model:value="rule.description"
-              placeholder="说明"
-              :disabled="rule.isBuiltin"
-              class="rule-desc"
-              @update:value="scriptTagDirty = true"
-            />
-            <NButton v-if="!rule.isBuiltin" size="small" quaternary @click="removeScriptTagRule(index)">
-              <template #icon><NIcon :size="16"><DeleteOutlined /></NIcon></template>
-            </NButton>
-            <NIcon v-else :size="16" class="rule-lock-icon">
-              <LockClosedOutline />
+            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.scriptTags }">
+              <ExpandMoreOutlined />
             </NIcon>
           </div>
+          <div class="section-body" :class="{ collapsed: collapsed.scriptTags }">
+            <div class="section-body-inner">
+              <div v-if="scriptTagRules.length === 0" class="empty-hint">
+                暂无规则。点击「导入内置规则」加载预设，或手动添加自定义规则。
+              </div>
 
-          <p v-if="scriptTagRules.length > 0" class="rule-hint">
-            内置规则随应用更新自动刷新，自定义规则不受影响。需重新运行预翻译以生效。
-          </p>
+              <div v-for="(rule, index) in scriptTagRules" :key="index" class="rule-row">
+                <NInput
+                  v-model:value="rule.pattern"
+                  placeholder="正则表达式"
+                  :disabled="rule.isBuiltin"
+                  class="rule-pattern"
+                  @update:value="scriptTagDirty = true"
+                />
+                <NSelect
+                  v-model:value="rule.action"
+                  :options="actionOptions"
+                  :disabled="rule.isBuiltin"
+                  class="rule-action"
+                  @update:value="scriptTagDirty = true"
+                />
+                <NInput
+                  v-model:value="rule.description"
+                  placeholder="说明"
+                  :disabled="rule.isBuiltin"
+                  class="rule-desc"
+                  @update:value="scriptTagDirty = true"
+                />
+                <NButton v-if="!rule.isBuiltin" size="small" quaternary @click="removeScriptTagRule(index)">
+                  <template #icon><NIcon :size="16"><DeleteOutlined /></NIcon></template>
+                </NButton>
+                <NIcon v-else :size="16" class="rule-lock-icon">
+                  <LockClosedOutline />
+                </NIcon>
+              </div>
+
+              <p v-if="scriptTagRules.length > 0" class="rule-hint">
+                内置规则随应用更新自动刷新，自定义规则不受影响。需重新运行预翻译以生效。
+              </p>
+            </div>
+          </div>
         </div>
 
         <!-- Action Buttons -->
@@ -708,7 +722,7 @@ function langLabel(code: string): string {
   margin-bottom: 12px;
 }
 
-/* ===== Script Tag Card ===== */
+/* ===== Script Tag Card (collapsible) ===== */
 .script-tag-card {
   display: flex;
   flex-direction: column;
@@ -717,11 +731,36 @@ function langLabel(code: string): string {
   border-radius: var(--radius-md);
   padding: 16px;
   margin-bottom: 16px;
-  transition: border-color 0.3s ease;
+  transition: border-color 0.3s ease, padding 0.2s ease;
 }
 
 .script-tag-card:hover {
   border-color: var(--border-hover);
+}
+
+.script-tag-card.is-collapsed {
+  padding-bottom: 12px;
+}
+
+.script-tag-card.is-collapsed .section-header {
+  margin-bottom: 0;
+}
+
+.script-tag-card .section-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 0.3s ease, opacity 0.2s ease;
+}
+
+.script-tag-card .section-body.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.script-tag-card .section-body-inner {
+  overflow: hidden;
+  padding-top: 4px;
 }
 
 .rule-row {
@@ -772,6 +811,17 @@ function langLabel(code: string): string {
   }
   .lang-arrow {
     text-align: center;
+  }
+  .script-tag-card .section-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .script-tag-card .header-actions {
+    width: 100%;
+    order: 1;
+  }
+  .script-tag-card .collapse-chevron {
+    order: 0;
   }
   .rule-row {
     flex-direction: column;
