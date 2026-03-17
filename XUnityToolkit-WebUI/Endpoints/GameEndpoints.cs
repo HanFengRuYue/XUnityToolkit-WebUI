@@ -113,6 +113,9 @@ public static class GameEndpoints
             UnityDetectionService detection,
             PluginDetectionService pluginDetection,
             GameImageService imageService,
+            XUnityInstallerService xUnityInstaller,
+            ConfigurationService configService,
+            AppSettingsService appSettingsService,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.FolderPath))
@@ -220,6 +223,24 @@ public static class GameEndpoints
                 game.DetectedFrameworks = frameworks.Count > 0 ? frameworks : null;
                 game.SteamAppId = steamAppId;
                 await library.UpdateAsync(game);
+
+                // Sync GameId in INI when re-adding a game with existing plugins
+                if (installState == InstallState.FullyInstalled &&
+                    xUnityInstaller.IsTranslatorEndpointInstalled(folderPath))
+                {
+                    var configPath = configService.GetConfigPath(folderPath);
+                    if (File.Exists(configPath))
+                    {
+                        var settings = await appSettingsService.GetAsync(ct);
+                        var port = settings.AiTranslation.Port;
+                        await configService.PatchSectionAsync(folderPath, "LLMTranslate",
+                            new Dictionary<string, string>
+                            {
+                                ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+                                ["GameId"] = game.Id
+                            }, ct);
+                    }
+                }
 
                 // Auto-fetch cover from Steam CDN (best effort)
                 if (steamAppId.HasValue && !imageService.HasCover(game.Id))
