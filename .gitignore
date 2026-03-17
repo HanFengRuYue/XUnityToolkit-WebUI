@@ -27,6 +27,7 @@ Installer/Generated/
 bundled/*
 # But track TMP fonts (required for CJK text rendering in Unity games)
 !bundled/fonts/
+!bundled/script-tag-presets.json
 
 # TranslatorEndpoint reference DLLs (required for building LLMTranslate.dll)
 # TranslatorEndpoint/libs/

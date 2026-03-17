@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "rules": [
+    { "pattern": "^(?:stk|tk|ts|FTK),[^,]*,(.+)$", "action": "Extract", "description": "对话前缀 (stk/tk/ts/FTK,N,文本)" },
+    { "pattern": "^%%,[^,]*,(.*),#\\w+,?$", "action": "Extract", "description": "选项按钮 (%%,N,文本,#标签)" },
+    { "pattern": "^\\$\\w+", "action": "Exclude", "description": "系统指令 ($命令)" },
+    { "pattern": "^#\\w+$", "action": "Exclude", "description": "纯标签 (#锚点)" },
+    { "pattern": "^Voice_", "action": "Exclude", "description": "语音触发 (Voice_*)" },
+    { "pattern": "^@", "action": "Exclude", "description": "事件标识 (@事件)" },
+    { "pattern": "^n\\d+,#PL,", "action": "Exclude", "description": "编号菜单 (n1,#PL,...)" },
+    { "pattern": "^as\\d+,", "action": "Exclude", "description": "问候数据 (as3,...)" }
+  ]
+}
