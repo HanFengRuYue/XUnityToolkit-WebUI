@@ -15,6 +15,9 @@ public sealed class LlmTranslationService(
     AppSettingsService settingsService,
     GlossaryService glossaryService,
     DoNotTranslateService doNotTranslateService,
+    TermService termService,
+    TermMatchingService termMatchingService,
+    TermAuditService termAuditService,
     GameLibraryService gameLibraryService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<LlmTranslationService> logger)
@@ -61,6 +64,11 @@ public sealed class LlmTranslationService(
     private long _totalResponseTimeMs;
     private long _totalRequests;
     private bool _enabled = true;
+
+    // ── Term audit stats ──
+    private long _termAuditPhase1PassCount;
+    private long _termAuditPhase2PassCount;
+    private long _termAuditForceCorrectedCount;
 
     // ── Per-endpoint runtime stats ──
     private readonly ConcurrentDictionary<string, EndpointStats> _endpointStats = new();
@@ -122,7 +130,12 @@ public sealed class LlmTranslationService(
             TotalErrors: Interlocked.Read(ref _totalErrors),
             RecentErrors: _recentErrors.ToArray(),
             CurrentGameId: Volatile.Read(ref _currentGameId)
-        );
+        )
+        {
+            TermAuditPhase1PassCount = (int)Interlocked.Read(ref _termAuditPhase1PassCount),
+            TermAuditPhase2PassCount = (int)Interlocked.Read(ref _termAuditPhase2PassCount),
+            TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount)
+        };
     }
 
     /// <summary>
@@ -170,25 +183,47 @@ public sealed class LlmTranslationService(
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
 
-            // Load glossary for the game (if available)
-            List<GlossaryEntry>? glossary = null;
+            // Load unified terms
+            List<TermEntry>? allTerms = null;
+            List<TermEntry>? matchedTerms = null;
             if (!string.IsNullOrEmpty(gameId))
             {
-                glossary = await glossaryService.GetAsync(gameId, ct);
-                if (glossary.Count == 0) glossary = null;
+                allTerms = await termService.GetAsync(gameId, ct);
+                if (allTerms.Count > 0)
+                    matchedTerms = termMatchingService.FindMatchedTerms(allTerms, texts.ToList());
             }
 
-            // Load do-not-translate list (applies in both cloud and local mode)
+            // Derive legacy glossary/DNT from unified terms for backward compat in helper methods
+            List<GlossaryEntry>? glossary = null;
             List<DoNotTranslateEntry>? dntEntries = null;
-            if (!string.IsNullOrEmpty(gameId))
+            if (matchedTerms is { Count: > 0 })
             {
-                dntEntries = await doNotTranslateService.GetAsync(gameId, ct);
-                if (dntEntries.Count == 0) dntEntries = null;
+                var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
+                if (translateTerms.Count > 0)
+                {
+                    glossary = translateTerms.Select(t => new GlossaryEntry
+                    {
+                        Original = t.Original,
+                        Translation = t.Translation ?? "",
+                        IsRegex = t.IsRegex,
+                        Description = t.Description
+                    }).ToList();
+                }
+
+                var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
+                if (dntTerms.Count > 0)
+                {
+                    dntEntries = dntTerms.Select(t => new DoNotTranslateEntry
+                    {
+                        Original = t.Original,
+                        CaseSensitive = t.CaseSensitive
+                    }).ToList();
+                }
             }
 
             if (logger.IsEnabled(LogLevel.Debug))
-                logger.LogDebug("翻译上下文: gameId={GameId}, 术语表={GlossaryCount}条, 禁翻表={DntCount}条, 文本数={TextCount}",
-                    gameId ?? "(空)", glossary?.Count ?? 0, dntEntries?.Count ?? 0, texts.Count);
+                logger.LogDebug("翻译上下文: gameId={GameId}, 术语={TermCount}条(匹配={MatchedCount}条), 文本数={TextCount}",
+                    gameId ?? "(空)", allTerms?.Count ?? 0, matchedTerms?.Count ?? 0, texts.Count);
 
             // Load per-game description (cached in-memory, no disk I/O)
             string? gameDescription = null;
@@ -222,159 +257,338 @@ public sealed class LlmTranslationService(
             EnsureSemaphore(maxConc);
             var semaphore = Volatile.Read(ref _semaphore)!; // Acquire-read for ARM safety
 
-            // Glossary placeholders are applied BEFORE DNT to ensure longer glossary
-            // terms take priority. Example: glossary "魔法師"→"大法师" must match before
-            // DNT "魔法" can consume the substring. Both sort longest-first internally;
-            // processing glossary first lets it claim longer spans, then DNT handles the rest.
-            IList<string> textsToTranslate = texts;
-            string? dntHint = null;
+            // ═══════════════════════════════════════════════════════════
+            // Multi-phase translation pipeline
+            // Phase 1: Natural translation (terms in system prompt, no placeholders)
+            // Phase 2: Placeholder-based translation (existing logic)
+            // Phase 3: Force correction for segments that still fail audit
+            // ═══════════════════════════════════════════════════════════
 
-            // Apply glossary placeholder substitution for non-regex entries
-            // This guarantees glossary translations are used regardless of LLM compliance
-            Dictionary<string, string>? glossaryMapping = null;
-            // Local mode: skip glossary in system prompt to save context tokens;
-            // placeholder substitution + post-processing still enforce glossary terms.
-            List<GlossaryEntry>? promptGlossary = isLocalMode ? null : glossary;
-            if (glossary is not null)
-            {
-                var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrWhiteSpace(e.Original)).ToList();
-                if (nonRegexEntries.Count > 0)
-                {
-                    var (replaced, mapping) = ApplyGlossaryReplacements(textsToTranslate, nonRegexEntries);
-                    if (mapping.Count > 0)
-                    {
-                        textsToTranslate = replaced;
-                        glossaryMapping = mapping;
-
-                        // Tell LLM to preserve glossary placeholders
-                        dntHint = "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
-                    }
-                }
-            }
-
-            // Apply do-not-translate placeholder substitution (on glossary-processed text)
-            Dictionary<string, string>? dntMapping = null;
-            if (dntEntries is not null)
-            {
-                var (replaced, mapping) = ApplyDoNotTranslateReplacements(textsToTranslate, dntEntries);
-                if (mapping.Count > 0)
-                {
-                    textsToTranslate = replaced;
-                    dntMapping = mapping;
-                    dntHint = (dntHint ?? "") +
-                        "\n\n文本中的 {{DNT_x}} 是不可翻译的占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
-                }
-            }
-
-            // Pre-compute results for texts that are ENTIRELY a single placeholder.
-            // These don't need LLM — we already know the answer. Sending {{G_0}} to the
-            // LLM wastes tokens and risks the LLM "translating" the placeholder.
-            var preComputed = new Dictionary<int, string>();
-            var llmTexts = new List<string>();
-            var llmIndexMap = new List<int>(); // llmTexts index → original index
-
-            for (int i = 0; i < textsToTranslate.Count; i++)
-            {
-                var text = textsToTranslate[i];
-                string? directResult = null;
-
-                if (glossaryMapping is not null)
-                {
-                    var gm = FullGlossaryPlaceholderRegex.Match(text);
-                    if (gm.Success)
-                    {
-                        var key = $"{{{{G_{gm.Groups[1].Value}}}}}";
-                        if (glossaryMapping.TryGetValue(key, out var val))
-                            directResult = val;
-                    }
-                }
-
-                if (directResult is null && dntMapping is not null)
-                {
-                    var dm = FullDntPlaceholderRegex.Match(text);
-                    if (dm.Success)
-                    {
-                        var key = $"{{{{DNT_{dm.Groups[1].Value}}}}}";
-                        if (dntMapping.TryGetValue(key, out var val))
-                            directResult = val;
-                    }
-                }
-
-                if (directResult is not null)
-                {
-                    preComputed[i] = directResult;
-                }
-                else
-                {
-                    llmTexts.Add(text);
-                    llmIndexMap.Add(i);
-                }
-            }
-
-            // Call LLM only for texts that actually need translation
             long tokens = 0;
             double ms = 0;
             string endpointName = "";
-            IList<string> batchResult;
+            var translations = new List<string>(new string[texts.Count]);
+            var phase1Resolved = new HashSet<int>(); // indices resolved by Phase 1
 
-            if (llmTexts.Count > 0)
+            // ── Phase 1: Natural Translation Mode ──
+            // Send source texts unmodified to LLM with terms in structured prompt format.
+            // Only when NaturalTranslationMode is enabled, matched terms exist, and token budget allows.
+            var usePhase1 = ai.NaturalTranslationMode
+                && !isLocalMode
+                && matchedTerms is { Count: > 0 };
+
+            if (usePhase1)
             {
-                if (isLocalMode && llmTexts.Count > 1)
+                // Token budget check: term tokens ≤ 70% of remaining context
+                var termTokens = termMatchingService.EstimateTermTokens(matchedTerms!);
+                var systemPromptEstimate = termMatchingService.EstimateTokenCount(ai.SystemPrompt) + 200; // base prompt overhead
+                var sourceEstimate = texts.Sum(t => termMatchingService.EstimateTokenCount(t));
+                var outputReserve = sourceEstimate; // rough: output ≈ input size
+                var contextBudget = ai.ContextSize > 0 ? ai.ContextSize : 4096;
+                var remainingContext = contextBudget - systemPromptEstimate - sourceEstimate - outputReserve;
+                var tokenBudgetOk = termTokens <= remainingContext * 0.7;
+
+                if (tokenBudgetOk)
                 {
-                    // Local mode: translate one text at a time to avoid overloading the local model
-                    var singleResults = new List<string>(llmTexts.Count);
-                    foreach (var text in llmTexts)
+                    // Build natural-mode system prompt with structured term list
+                    var naturalPrompt = BuildSystemPromptWithTerms(
+                        ai.SystemPrompt, from, to, matchedTerms!, gameDescription, memoryContext);
+
+                    // Local mode: skip glossary in system prompt — not applicable here since usePhase1 excludes local mode
+                    List<GlossaryEntry>? nullGlossary = null;
+
+                    // Send unmodified source texts to LLM
+                    if (texts.Count > 0)
                     {
-                        var (r, t, m, e) = await TranslateBatchAsync(
-                            new List<string> { text }, from, to, ai, enabledEndpoints, promptGlossary,
-                            gameDescription, memoryContext, dntHint, semaphore, ct);
-                        singleResults.Add(r[0]);
-                        tokens += t;
-                        ms += m;
-                        endpointName = e;
+                        var (p1Result, p1Tokens, p1Ms, p1Endpoint) = await TranslateBatchAsync(
+                            texts, from, to, ai, enabledEndpoints, nullGlossary,
+                            gameDescription, memoryContext, null, semaphore, ct,
+                            overrideSystemPrompt: naturalPrompt);
+                        tokens += p1Tokens;
+                        ms += p1Ms;
+                        endpointName = p1Endpoint;
+
+                        // Audit Phase 1 results if enabled
+                        for (int i = 0; i < texts.Count; i++)
+                        {
+                            var translated = i < p1Result.Count ? p1Result[i] : texts[i];
+
+                            if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
+                            {
+                                // Find terms relevant to this specific text
+                                var relevantTerms = termMatchingService.FindMatchedTerms(
+                                    matchedTerms, [texts[i]]);
+                                if (relevantTerms.Count > 0)
+                                {
+                                    var audit = termAuditService.AuditTranslation(translated, relevantTerms);
+                                    if (audit.Passed)
+                                    {
+                                        translations[i] = translated;
+                                        phase1Resolved.Add(i);
+                                        Interlocked.Increment(ref _termAuditPhase1PassCount);
+                                    }
+                                    // else: leave for Phase 2
+                                    continue;
+                                }
+                            }
+
+                            // No audit or no relevant terms — accept Phase 1 result
+                            translations[i] = translated;
+                            phase1Resolved.Add(i);
+                        }
                     }
-                    batchResult = singleResults;
+
+                    if (logger.IsEnabled(LogLevel.Debug))
+                        logger.LogDebug("Phase 1 自然翻译: {Resolved}/{Total} 段通过审查",
+                            phase1Resolved.Count, texts.Count);
+                }
+            }
+
+            // ── Phase 2: Placeholder-based translation ──
+            // For segments not resolved by Phase 1 (or if Phase 1 was skipped entirely)
+            var phase2Indices = new List<int>();
+            for (int i = 0; i < texts.Count; i++)
+            {
+                if (!phase1Resolved.Contains(i))
+                    phase2Indices.Add(i);
+            }
+
+            var phase2Resolved = new HashSet<int>();
+
+            if (phase2Indices.Count > 0)
+            {
+                // Collect texts for Phase 2
+                var phase2SourceTexts = phase2Indices.Select(i => texts[i]).ToList();
+
+                // Glossary placeholders are applied BEFORE DNT to ensure longer glossary
+                // terms take priority. Example: glossary "魔法師"→"大法师" must match before
+                // DNT "魔法" can consume the substring.
+                IList<string> textsToTranslate = phase2SourceTexts;
+                string? dntHint = null;
+
+                // Apply glossary placeholder substitution for non-regex entries
+                Dictionary<string, string>? glossaryMapping = null;
+                // Local mode: skip glossary in system prompt to save context tokens;
+                // placeholder substitution + post-processing still enforce glossary terms.
+                List<GlossaryEntry>? promptGlossary = isLocalMode ? null : glossary;
+                if (glossary is not null)
+                {
+                    var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrWhiteSpace(e.Original)).ToList();
+                    if (nonRegexEntries.Count > 0)
+                    {
+                        var (replaced, mapping) = ApplyGlossaryReplacements(textsToTranslate, nonRegexEntries);
+                        if (mapping.Count > 0)
+                        {
+                            textsToTranslate = replaced;
+                            glossaryMapping = mapping;
+                            dntHint = "\n\n文本中的 {{G_x}} 是术语占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+                        }
+                    }
+                }
+
+                // Apply do-not-translate placeholder substitution (on glossary-processed text)
+                Dictionary<string, string>? dntMapping = null;
+                if (dntEntries is not null)
+                {
+                    var (replaced, mapping) = ApplyDoNotTranslateReplacements(textsToTranslate, dntEntries);
+                    if (mapping.Count > 0)
+                    {
+                        textsToTranslate = replaced;
+                        dntMapping = mapping;
+                        dntHint = (dntHint ?? "") +
+                            "\n\n文本中的 {{DNT_x}} 是不可翻译的占位符，请在翻译结果中原样保留，不要修改、翻译或删除。";
+                    }
+                }
+
+                // Pre-compute results for texts that are ENTIRELY a single placeholder.
+                var preComputed = new Dictionary<int, string>(); // index within phase2SourceTexts → result
+                var llmTexts = new List<string>();
+                var llmIndexMap = new List<int>(); // llmTexts idx → phase2SourceTexts idx
+
+                for (int i = 0; i < textsToTranslate.Count; i++)
+                {
+                    var text = textsToTranslate[i];
+                    string? directResult = null;
+
+                    if (glossaryMapping is not null)
+                    {
+                        var gm = FullGlossaryPlaceholderRegex.Match(text);
+                        if (gm.Success)
+                        {
+                            var key = $"{{{{G_{gm.Groups[1].Value}}}}}";
+                            if (glossaryMapping.TryGetValue(key, out var val))
+                                directResult = val;
+                        }
+                    }
+
+                    if (directResult is null && dntMapping is not null)
+                    {
+                        var dm = FullDntPlaceholderRegex.Match(text);
+                        if (dm.Success)
+                        {
+                            var key = $"{{{{DNT_{dm.Groups[1].Value}}}}}";
+                            if (dntMapping.TryGetValue(key, out var val))
+                                directResult = val;
+                        }
+                    }
+
+                    if (directResult is not null)
+                    {
+                        preComputed[i] = directResult;
+                    }
+                    else
+                    {
+                        llmTexts.Add(text);
+                        llmIndexMap.Add(i);
+                    }
+                }
+
+                // Call LLM only for texts that actually need translation
+                IList<string> batchResult;
+
+                if (llmTexts.Count > 0)
+                {
+                    if (isLocalMode && llmTexts.Count > 1)
+                    {
+                        var singleResults = new List<string>(llmTexts.Count);
+                        foreach (var text in llmTexts)
+                        {
+                            var (r, t, m, e) = await TranslateBatchAsync(
+                                new List<string> { text }, from, to, ai, enabledEndpoints, promptGlossary,
+                                gameDescription, memoryContext, dntHint, semaphore, ct);
+                            singleResults.Add(r[0]);
+                            tokens += t;
+                            ms += m;
+                            endpointName = e;
+                        }
+                        batchResult = singleResults;
+                    }
+                    else
+                    {
+                        IList<string> p2Result;
+                        long p2Tokens;
+                        double p2Ms;
+                        string p2Endpoint;
+                        (p2Result, p2Tokens, p2Ms, p2Endpoint) = await TranslateBatchAsync(
+                            llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
+                            gameDescription, memoryContext, dntHint, semaphore, ct);
+                        batchResult = p2Result;
+                        tokens += p2Tokens;
+                        ms += p2Ms;
+                        endpointName = p2Endpoint;
+                    }
                 }
                 else
                 {
-                    (batchResult, tokens, ms, endpointName) = await TranslateBatchAsync(
-                        llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
-                        gameDescription, memoryContext, dntHint, semaphore, ct);
+                    batchResult = [];
+                }
+
+                // Merge LLM results with pre-computed results
+                var phase2Translations = new List<string>(textsToTranslate.Count);
+                int llmIdx = 0;
+                for (int i = 0; i < textsToTranslate.Count; i++)
+                {
+                    if (preComputed.TryGetValue(i, out var direct))
+                        phase2Translations.Add(direct);
+                    else
+                        phase2Translations.Add(batchResult[llmIdx++]);
+                }
+
+                // Restore glossary placeholders (for partial-placeholder texts from LLM)
+                if (glossaryMapping is not null)
+                    phase2Translations = RestoreGlossaryPlaceholders(phase2Translations, glossaryMapping);
+
+                // Apply glossary post-processing BEFORE DNT restoration
+                for (int i = 0; i < phase2Translations.Count; i++)
+                {
+                    if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
+                    if (glossary is not null)
+                        phase2Translations[i] = ApplyGlossaryPostProcess(phase2Translations[i], glossary);
+                }
+
+                // Restore do-not-translate placeholders AFTER glossary post-processing
+                if (dntMapping is not null)
+                    phase2Translations = RestoreDoNotTranslatePlaceholders(phase2Translations, dntMapping);
+
+                // Write Phase 2 results back and optionally audit
+                for (int p2i = 0; p2i < phase2Indices.Count; p2i++)
+                {
+                    var originalIdx = phase2Indices[p2i];
+                    var translated = phase2Translations[p2i];
+
+                    if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 } && !preComputed.ContainsKey(p2i))
+                    {
+                        var relevantTerms = termMatchingService.FindMatchedTerms(
+                            matchedTerms, [texts[originalIdx]]);
+                        if (relevantTerms.Count > 0)
+                        {
+                            var audit = termAuditService.AuditTranslation(translated, relevantTerms);
+                            if (audit.Passed)
+                            {
+                                Interlocked.Increment(ref _termAuditPhase2PassCount);
+                                phase2Resolved.Add(originalIdx);
+                            }
+                            // else: leave for Phase 3 force correction
+                        }
+                        else
+                        {
+                            phase2Resolved.Add(originalIdx);
+                        }
+                    }
+                    else
+                    {
+                        phase2Resolved.Add(originalIdx);
+                    }
+
+                    translations[originalIdx] = translated;
                 }
             }
-            else
+
+            // ── Phase 3: Force Correction ──
+            // For segments that failed both Phase 1 and Phase 2 audit
+            if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
             {
-                batchResult = [];
+                for (int i = 0; i < texts.Count; i++)
+                {
+                    if (phase1Resolved.Contains(i) || phase2Resolved.Contains(i))
+                        continue;
+
+                    // This segment failed audit in previous phases — apply force correction
+                    var translated = translations[i];
+                    if (string.IsNullOrEmpty(translated))
+                        continue;
+
+                    var relevantTerms = termMatchingService.FindMatchedTerms(
+                        matchedTerms, [texts[i]]);
+
+                    foreach (var term in relevantTerms)
+                    {
+                        if (term.IsRegex) continue;
+
+                        var comparison = term.CaseSensitive
+                            ? StringComparison.Ordinal
+                            : StringComparison.OrdinalIgnoreCase;
+
+                        switch (term.Type)
+                        {
+                            case TermType.Translate when !string.IsNullOrEmpty(term.Translation):
+                                if (!translated.Contains(term.Translation, comparison))
+                                    translated = translated.Replace(term.Original, term.Translation);
+                                break;
+
+                            case TermType.DoNotTranslate:
+                                if (!translated.Contains(term.Original, comparison))
+                                    logger.LogWarning(
+                                        "Phase 3 强制修正: 禁翻词 '{Original}' 在翻译结果中缺失，无法自动修正",
+                                        term.Original);
+                                break;
+                        }
+                    }
+
+                    translations[i] = translated;
+                    Interlocked.Increment(ref _termAuditForceCorrectedCount);
+                }
             }
-
-            // Merge LLM results with pre-computed results
-            var translations = new List<string>(textsToTranslate.Count);
-            int llmIdx = 0;
-            for (int i = 0; i < textsToTranslate.Count; i++)
-            {
-                if (preComputed.TryGetValue(i, out var direct))
-                    translations.Add(direct);
-                else
-                    translations.Add(batchResult[llmIdx++]);
-            }
-
-            // Restore glossary placeholders (for partial-placeholder texts from LLM)
-            if (glossaryMapping is not null)
-                translations = RestoreGlossaryPlaceholders(translations, glossaryMapping);
-
-            // Apply glossary post-processing BEFORE DNT restoration — if DNT words are restored first,
-            // the glossary post-process (which does string.Replace on translated text) can accidentally
-            // replace restored DNT words with glossary translations, undoing the do-not-translate intent.
-            for (int i = 0; i < translations.Count; i++)
-            {
-                if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
-                if (glossary is not null)
-                    translations[i] = ApplyGlossaryPostProcess(translations[i], glossary);
-            }
-
-            // Restore do-not-translate placeholders AFTER glossary post-processing
-            if (dntMapping is not null)
-                translations = RestoreDoNotTranslatePlaceholders(translations, dntMapping);
 
             // Guard: empty translations cause XUnity.AutoTranslator to count as errors;
             // 5 consecutive errors trigger automatic translator shutdown.
@@ -416,7 +630,8 @@ public sealed class LlmTranslationService(
         AiTranslationSettings ai, List<ApiEndpointConfig> endpoints,
         List<GlossaryEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext,
-        string? dntHint, SemaphoreSlim semaphore, CancellationToken ct)
+        string? dntHint, SemaphoreSlim semaphore, CancellationToken ct,
+        string? overrideSystemPrompt = null)
     {
         var textCount = texts.Count;
         Interlocked.Add(ref _queued, textCount);
@@ -452,7 +667,8 @@ public sealed class LlmTranslationService(
             var sw = Stopwatch.StartNew();
 
             var (result, tokens) = await CallProviderAsync(
-                chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct);
+                chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
+                overrideSystemPrompt);
             sw.Stop();
 
             var elapsedMs = sw.Elapsed.TotalMilliseconds;
@@ -538,26 +754,27 @@ public sealed class LlmTranslationService(
         ApiEndpointConfig endpoint, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<GlossaryEntry>? glossary, string? gameDescription,
-        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct)
+        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        string? overrideSystemPrompt = null)
     {
         return endpoint.Provider switch
         {
             LlmProvider.OpenAI => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
             LlmProvider.DeepSeek => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
             LlmProvider.Qwen => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
             LlmProvider.GLM => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
             LlmProvider.Kimi => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
             LlmProvider.Custom => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, endpoint.ApiBaseUrl, ct),
+                gameDescription, memoryContext, dntHint, endpoint.ApiBaseUrl, ct, overrideSystemPrompt),
             LlmProvider.Claude => await CallClaudeAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, ct),
+                gameDescription, memoryContext, dntHint, ct, overrideSystemPrompt),
             LlmProvider.Gemini => await CallGeminiAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, ct),
+                gameDescription, memoryContext, dntHint, ct, overrideSystemPrompt),
             _ => throw new NotSupportedException($"未支持的 LLM 提供商: {endpoint.Provider}")
         };
     }
@@ -663,9 +880,11 @@ public sealed class LlmTranslationService(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<GlossaryEntry>? glossary, string? gameDescription,
-        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, string baseUrl, CancellationToken ct)
+        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, string baseUrl, CancellationToken ct,
+        string? overrideSystemPrompt = null)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
+        var systemPrompt = overrideSystemPrompt
+            ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallOpenAiCompatRawAsync(ep, systemPrompt, userContent, ai.Temperature, baseUrl, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -720,9 +939,11 @@ public sealed class LlmTranslationService(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<GlossaryEntry>? glossary, string? gameDescription,
-        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct)
+        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        string? overrideSystemPrompt = null)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
+        var systemPrompt = overrideSystemPrompt
+            ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -775,9 +996,11 @@ public sealed class LlmTranslationService(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<GlossaryEntry>? glossary, string? gameDescription,
-        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct)
+        IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        string? overrideSystemPrompt = null)
     {
-        var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
+        var systemPrompt = overrideSystemPrompt
+            ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (ParseTranslationArray(content, texts.Count), tokens);
@@ -987,6 +1210,67 @@ public sealed class LlmTranslationService(
 
         if (!string.IsNullOrEmpty(dntHint))
             sb.Append(dntHint);
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build system prompt for Phase 1 natural translation mode.
+    /// Includes matched terms in structured format instead of placeholder hints.
+    /// </summary>
+    private static string BuildSystemPromptWithTerms(string template, string from, string to,
+        List<TermEntry> matchedTerms, string? gameDescription = null,
+        IList<TranslationMemoryEntry>? memoryContext = null)
+    {
+        var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
+
+        if (!string.IsNullOrWhiteSpace(gameDescription))
+        {
+            sb.Append("\n\n游戏背景：\n");
+            sb.Append(gameDescription);
+        }
+
+        var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
+        var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
+
+        if (translateTerms.Count > 0)
+        {
+            sb.Append("\n\n术语表（翻译时必须严格使用以下译文）：\n");
+            foreach (var term in translateTerms)
+            {
+                if (term.IsRegex)
+                    sb.Append($"  正则匹配: /{term.Original}/ → {term.Translation}");
+                else
+                    sb.Append($"  {term.Original} → {term.Translation}");
+
+                if (!string.IsNullOrWhiteSpace(term.Description))
+                    sb.Append($"（{term.Description}）");
+
+                sb.Append('\n');
+            }
+        }
+
+        if (dntTerms.Count > 0)
+        {
+            sb.Append("\n\n禁止翻译（必须原样保留）：\n");
+            foreach (var term in dntTerms)
+            {
+                sb.Append($"  - {term.Original}");
+                if (!string.IsNullOrWhiteSpace(term.Description))
+                    sb.Append($"（{term.Description}）");
+                sb.Append('\n');
+            }
+        }
+
+        if (memoryContext is { Count: > 0 })
+        {
+            sb.Append("\n\n以下是近期翻译示例（供参考，保持风格一致）：\n");
+            foreach (var entry in memoryContext)
+            {
+                sb.Append($"  {from}: {entry.Original}\n");
+                sb.Append($"  {to}: {entry.Translated}\n");
+            }
+        }
 
         return sb.ToString();
     }
