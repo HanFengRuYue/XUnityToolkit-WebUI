@@ -26,6 +26,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
 - **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache`
+- **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
+- **`ScriptTagService` DI:** `AddSingleton`; follows `DoNotTranslateService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
 - Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
 - **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
 
@@ -144,6 +146,8 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **GPU monitoring:** nvidia-smi polled every 3s when CUDA running
 - **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
 - Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
+- **Endpoint lifecycle:** `RegisterEndpointAsync` sets `Enabled=true` on `StartAsync` (after health check); `UnregisterEndpointAsync` sets `Enabled=false` on `StopAsync`; **startup cleanup** in `Program.cs` forces `Enabled=false` for `ApiKey=="local"` endpoints (local LLM never runs on fresh start; guards against crash-orphaned state)
+- **Translation gate:** `POST /api/translate` injects `LocalLlmService` and blocks requests when `ActiveMode=="local" && !IsRunning` (503); this prevents XUnity error accumulation (5 consecutive errors → translator shutdown)
 - Settings: `data/local-llm-settings.json`; mirror settings unified in `AppSettings`
 
 ## BepInEx Installation (Bundled)
