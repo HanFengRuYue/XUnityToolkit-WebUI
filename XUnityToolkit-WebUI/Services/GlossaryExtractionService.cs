@@ -10,8 +10,7 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class GlossaryExtractionService(
     LlmTranslationService translationService,
-    GlossaryService glossaryService,
-    DoNotTranslateService doNotTranslateService,
+    TermService termService,
     AppSettingsService settingsService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<GlossaryExtractionService> logger)
@@ -163,14 +162,14 @@ public sealed class GlossaryExtractionService(
                 return;
             }
 
-            // Load existing glossary for dedup context
-            var existingGlossary = await glossaryService.GetAsync(gameId);
-
-            // Load do-not-translate list to exclude from extraction
-            var dntEntries = await doNotTranslateService.GetAsync(gameId);
+            // Load existing terms for dedup context and DNT filtering
+            var allTerms = await termService.GetAsync(gameId);
+            var existingGlossary = allTerms.Where(t => t.Type == TermType.Translate).ToList();
+            var dntEntries = allTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
 
             // Build prompt
             var systemPrompt = BuildExtractionSystemPrompt(existingGlossary, dntEntries);
+
             var userContent = BuildUserContent(pairs);
 
             // Call LLM
@@ -190,8 +189,18 @@ public sealed class GlossaryExtractionService(
             }
             if (entries.Count == 0) return;
 
-            // Merge into glossary (atomic dedup + save)
-            var added = await glossaryService.MergeAsync(gameId, entries);
+            // Convert to TermEntry and merge into term store
+            var newTermEntries = entries.Select(e => new TermEntry
+            {
+                Type = TermType.Translate,
+                Original = e.Original,
+                Translation = e.Translation,
+                IsRegex = e.IsRegex,
+                Description = e.Description
+            }).ToList();
+
+            var added = newTermEntries.Count;
+            await termService.MergeAsync(gameId, newTermEntries);
             if (added > 0)
             {
                 Interlocked.Add(ref _totalExtracted, added);
@@ -232,8 +241,8 @@ public sealed class GlossaryExtractionService(
         return enabled[0];
     }
 
-    private static string BuildExtractionSystemPrompt(List<GlossaryEntry> existingGlossary,
-        List<DoNotTranslateEntry> dntEntries)
+    private static string BuildExtractionSystemPrompt(List<TermEntry> existingGlossary,
+        List<TermEntry> dntEntries)
     {
         var sb = new StringBuilder(ExtractionPrompt);
 
