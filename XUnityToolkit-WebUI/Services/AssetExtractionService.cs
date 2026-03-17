@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -8,6 +9,27 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed partial class AssetExtractionService(ILogger<AssetExtractionService> logger)
 {
+    /// <summary>
+    /// Common legacy encodings for games. Tried in order when UTF-8 validation fails.
+    /// Scoring picks the best match based on decoded Unicode character quality.
+    /// </summary>
+    private static readonly Encoding[] LegacyEncodings;
+
+    static AssetExtractionService()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        LegacyEncodings =
+        [
+            Encoding.GetEncoding(932),  // Shift-JIS (Japanese)
+            Encoding.GetEncoding(936),  // GBK (Simplified Chinese)
+            Encoding.GetEncoding(950),  // Big5 (Traditional Chinese)
+            Encoding.GetEncoding(949),  // EUC-KR (Korean)
+            Encoding.GetEncoding(51932), // EUC-JP (Japanese)
+            Encoding.GetEncoding(1251), // Windows-1251 (Cyrillic/Russian)
+            Encoding.GetEncoding(1252), // Windows-1252 (Western European)
+        ];
+    }
+
     private static readonly Lazy<byte[]> ClassDataTpk = new(() =>
     {
         using var stream = Assembly.GetExecutingAssembly()
@@ -279,7 +301,15 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
             {
                 var texBase = manager.GetBaseField(afileInst, texInfo);
                 var name = texBase["m_Name"].AsString;
-                var script = texBase["m_Script"].AsString;
+
+                // Use AsByteArray to get raw bytes (works for both String and ByteArray
+                // value types in AssetsTools.NET v3), then detect encoding.
+                // Unity stores TextAsset raw file bytes without encoding conversion,
+                // so m_Script may be Shift-JIS or other non-UTF-8 encoding.
+                var scriptBytes = texBase["m_Script"].AsByteArray;
+                var script = scriptBytes.Length > 0
+                    ? DecodeTextBytes(scriptBytes)
+                    : string.Empty;
 
                 if (!string.IsNullOrWhiteSpace(script))
                 {
@@ -497,6 +527,89 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
             return "en";
 
         return "en";
+    }
+
+    /// <summary>
+    /// Decode raw bytes from a TextAsset with automatic encoding detection.
+    /// Unity stores TextAsset file bytes as-is without encoding conversion,
+    /// so the data may be Shift-JIS, GBK, Big5, EUC-KR, or other legacy encodings.
+    /// </summary>
+    private static string DecodeTextBytes(byte[] bytes)
+    {
+        // Check BOM
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            return Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            return Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+        if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            return Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+
+        // Try strict UTF-8 decoding (rejects invalid byte sequences)
+        try
+        {
+            var utf8Strict = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+            return utf8Strict.GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Not valid UTF-8, try legacy encodings
+        }
+
+        // Try all legacy encodings and pick the one that produces the highest-quality text.
+        // Each encoding decodes the same bytes differently; scoring based on recognized
+        // Unicode character ranges identifies the correct encoding.
+        string? bestResult = null;
+        int bestScore = int.MinValue;
+
+        foreach (var encoding in LegacyEncodings)
+        {
+            var decoded = encoding.GetString(bytes);
+            var score = ScoreDecodedText(decoded);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestResult = decoded;
+            }
+        }
+
+        return bestResult ?? Encoding.UTF8.GetString(bytes);
+    }
+
+    /// <summary>
+    /// Score decoded text by counting recognized Unicode characters.
+    /// Script-specific characters (kana, hangul, cyrillic) score higher than shared CJK
+    /// because they uniquely identify the correct encoding.
+    /// </summary>
+    private static int ScoreDecodedText(string text)
+    {
+        int score = 0;
+        foreach (var ch in text)
+        {
+            if (ch == '\uFFFD') { score -= 10; continue; } // Replacement character
+            if (char.IsControl(ch) && ch is not '\n' and not '\r' and not '\t')
+            {
+                score -= 5;
+                continue;
+            }
+
+            // Script-specific characters — strong encoding indicators
+            if (ch is >= '\u3040' and <= '\u309F') score += 3;      // Hiragana (Japanese)
+            else if (ch is >= '\u30A0' and <= '\u30FF') score += 3;  // Katakana (Japanese)
+            else if (ch is >= '\uAC00' and <= '\uD7AF') score += 3;  // Hangul syllables (Korean)
+            else if (ch is >= '\u1100' and <= '\u11FF') score += 3;  // Hangul Jamo (Korean)
+            else if (ch is >= '\u0400' and <= '\u04FF') score += 3;  // Cyrillic (Russian etc.)
+            else if (ch is >= '\u00C0' and <= '\u024F') score += 2;  // Latin Extended (accented)
+
+            // CJK ideographs — shared by Chinese/Japanese/Korean
+            else if (ch is >= '\u4E00' and <= '\u9FFF') score += 2;  // CJK Unified
+            else if (ch is >= '\u3400' and <= '\u4DBF') score += 2;  // CJK Extension A
+
+            // CJK punctuation and fullwidth forms
+            else if (ch is >= '\u3000' and <= '\u303F') score += 1;  // CJK Symbols
+            else if (ch is >= '\uFF00' and <= '\uFFEF') score += 1;  // Fullwidth Forms
+        }
+
+        return score;
     }
 
     [GeneratedRegex(@"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase)]

@@ -24,7 +24,10 @@ public static class TranslateEndpoints
 
             // Record texts for pre-translation cache monitoring
             if (!string.IsNullOrEmpty(request.GameId))
+            {
+                await cacheMonitor.EnsureCacheAsync(request.GameId, request.To ?? "zh", ct);
                 cacheMonitor.RecordTexts(request.GameId, request.Texts);
+            }
 
             try
             {

@@ -72,6 +72,12 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Prompt glossary:** ALL glossary entries (including non-regex) must remain in system prompt even when placeholders are used — do NOT filter `promptGlossary` to regex-only; removing non-regex entries from prompt eliminates the LLM's awareness of terminology AND breaks `ApplyGlossaryPostProcess` fallback
 - **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
 
+## Pre-Translation Cache Monitor
+
+- **Lazy loading:** `EnsureCacheAsync(gameId, toLang, ct)` called from `POST /api/translate`; reads `_PreTranslated.txt` once per game; `_loadAttemptedForGameId` prevents repeated attempts (even if file missing); `UnloadCache()` resets attempt tracking
+- **Hot-path guard:** After initial load, `EnsureCacheAsync` is a single `volatile` read — no lock contention on steady state
+- **Dependencies:** `GameLibraryService` + `AppSettingsService` (both in-memory cached); `GetByIdAsync` only called on game change, not per-request
+
 ## Asset Extraction (AssetsTools.NET)
 
 - `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` both in `AssetsTools.NET.Extra`; IL2CPP: fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
