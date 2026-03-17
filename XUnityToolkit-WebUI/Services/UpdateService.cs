@@ -48,6 +48,11 @@ public sealed class UpdateService(
     private string? _resolvedTag;
     private DateTime _lastCheckTime = DateTime.MinValue;
 
+    private static string GetPackageZipName(string package, string rid)
+    {
+        return package == "app" ? $"app-{rid}.zip" : $"{package}.zip";
+    }
+
     private static string GetCurrentRid()
     {
         var arch = RuntimeInformation.ProcessArchitecture;
@@ -263,7 +268,7 @@ public sealed class UpdateService(
             long downloadSize = 0;
             foreach (var pkg in changedPackages)
             {
-                var zipName = pkg == "app" ? $"app-{rid}.zip" : $"{pkg}.zip";
+                var zipName = GetPackageZipName(pkg, rid);
                 if (_resolvedTag is not null)
                 {
                     // CDN/Atom path: use UpdateCheckInfo.Assets
@@ -374,7 +379,7 @@ public sealed class UpdateService(
             {
                 token.ThrowIfCancellationRequested();
 
-                var zipName = pkg == "app" ? $"app-{rid}.zip" : $"{pkg}.zip";
+                var zipName = GetPackageZipName(pkg, rid);
                 string downloadUrl;
                 if (_resolvedTag is not null)
                 {

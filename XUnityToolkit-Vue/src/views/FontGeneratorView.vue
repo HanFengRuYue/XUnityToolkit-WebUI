@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   NButton, NIcon, NUpload, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
@@ -8,6 +8,7 @@ import {
 import {
   FontDownloadOutlined, UploadFileOutlined, SettingsOutlined, DownloadOutlined,
   DeleteOutlined, SwapHorizOutlined, TextFieldsOutlined, AssessmentOutlined,
+  ExpandMoreOutlined,
 } from '@vicons/material'
 import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
 import { api } from '@/api/client'
@@ -18,6 +19,10 @@ import type {
 } from '@/api/types'
 
 defineOptions({ name: 'FontGeneratorView' })
+
+const collapsed = reactive({
+  charset: true,
+})
 
 const message = useMessage()
 
@@ -472,15 +477,20 @@ onBeforeUnmount(async () => {
     </div>
 
     <!-- Character Set Card -->
-    <div class="section-card" style="animation-delay: 0.15s">
-      <div class="section-header">
+    <div class="section-card" :class="{ 'is-collapsed': collapsed.charset }" style="animation-delay: 0.15s">
+      <div class="section-header collapsible" @click="collapsed.charset = !collapsed.charset">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><TextFieldsOutlined /></NIcon>
           </span>
           字符集配置
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.charset }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
+      <div class="section-body" :class="{ collapsed: collapsed.charset }">
+        <div class="section-body-inner">
 
       <!-- Built-in charsets -->
       <div class="charset-section-label">内置字符集</div>
@@ -593,6 +603,9 @@ onBeforeUnmount(async () => {
         >
           开始生成
         </NButton>
+      </div>
+
+        </div>
       </div>
     </div>
 
@@ -990,14 +1003,15 @@ onBeforeUnmount(async () => {
   .charset-grid {
     grid-template-columns: 1fr;
   }
+  .font-item :deep(.n-space) {
+    flex-wrap: wrap;
+    width: 100%;
+  }
 }
 
 @media (max-width: 480px) {
   .upload-area {
     padding: 16px 12px;
-  }
-  .font-item :deep(.n-space) {
-    flex-wrap: wrap;
   }
 }
 

@@ -63,7 +63,10 @@ function Generate-Manifest {
 
         $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
         $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
-                   elseif ($relativePath -match '^bundled/') { "bundled" }
+                   elseif ($relativePath -match '^bundled/llama/') { "bundled-llama" }
+                   elseif ($relativePath -match '^bundled/fonts/') { "bundled-fonts" }
+                   elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity)/') { "bundled-plugins" }
+                   elseif ($relativePath -match '^bundled/') { "bundled-misc" }
                    else { "app" }
 
         $manifest.files[$relativePath] = @{
@@ -128,17 +131,45 @@ function Create-ComponentZips {
         Write-Host "  Created: $wwwrootZip" -ForegroundColor Green
     }
 
-    # bundled.zip
+    # bundled sub-component ZIPs (split to minimize update download size)
     $bundledDir = Join-Path $ReleaseDir "bundled"
     if (Test-Path $bundledDir) {
-        $bundledZip = Join-Path $outputDir "bundled.zip"
-        $tempDir = Join-Path $outputDir "_bundled_wrap"
-        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
-        New-Item -ItemType Directory -Path $tempDir | Out-Null
-        Copy-Item $bundledDir (Join-Path $tempDir "bundled") -Recurse
-        Create-ZipFromDirectory -SourceDir $tempDir -ZipPath $bundledZip
-        Remove-Item $tempDir -Recurse -Force
-        Write-Host "  Created: $bundledZip" -ForegroundColor Green
+        $bundledSubs = @(
+            @{ Name = "bundled-llama";   Dirs = @("llama") },
+            @{ Name = "bundled-fonts";   Dirs = @("fonts") },
+            @{ Name = "bundled-plugins"; Dirs = @("bepinex5", "bepinex6", "xunity") }
+        )
+        foreach ($sub in $bundledSubs) {
+            $zipPath = Join-Path $outputDir "$($sub.Name).zip"
+            if (Test-Path $zipPath) { Remove-Item $zipPath }
+            $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
+            try {
+                foreach ($dirName in $sub.Dirs) {
+                    $subDir = Join-Path $bundledDir $dirName
+                    if (-not (Test-Path $subDir)) { continue }
+                    $subBase = (Resolve-Path $subDir).Path
+                    Get-ChildItem -Path $subDir -Recurse -File | ForEach-Object {
+                        $entry = "bundled/$dirName/" + $_.FullName.Substring($subBase.Length + 1).Replace('\', '/')
+                        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
+                    }
+                }
+            } finally { $zip.Dispose() }
+            Write-Host "  Created: $zipPath" -ForegroundColor Green
+        }
+
+        # bundled-misc.zip — root-level files in bundled/ (e.g., script-tag-presets.json)
+        $miscFiles = Get-ChildItem -Path $bundledDir -File
+        if ($miscFiles) {
+            $miscZip = Join-Path $outputDir "bundled-misc.zip"
+            if (Test-Path $miscZip) { Remove-Item $miscZip }
+            $zip = [System.IO.Compression.ZipFile]::Open($miscZip, 'Create')
+            try {
+                foreach ($f in $miscFiles) {
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, "bundled/$($f.Name)") | Out-Null
+                }
+            } finally { $zip.Dispose() }
+            Write-Host "  Created: $miscZip" -ForegroundColor Green
+        }
     }
 }
 
@@ -146,7 +177,7 @@ function Generate-UpdateCheckJson {
     param([string]$ReleaseDir, [string]$Rid, [string]$Version, [string]$Tag = "")
     $outputDir = Split-Path $ReleaseDir
     $assets = [ordered]@{}
-    @("manifest-$Rid.json", "app-$Rid.zip", "wwwroot.zip", "bundled.zip") | ForEach-Object {
+    @("manifest-$Rid.json", "app-$Rid.zip", "wwwroot.zip", "bundled-llama.zip", "bundled-fonts.zip", "bundled-plugins.zip", "bundled-misc.zip") | ForEach-Object {
         $path = Join-Path $outputDir $_
         if (Test-Path $path) { $assets[$_] = (Get-Item $path).Length }
     }

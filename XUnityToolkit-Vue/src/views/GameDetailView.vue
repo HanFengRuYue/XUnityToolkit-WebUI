@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, h, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, h, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -38,6 +38,7 @@ import {
   WallpaperOutlined,
   FontDownloadOutlined,
   ArticleOutlined,
+  ExpandMoreOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -56,6 +57,8 @@ const IconPickerModal = defineAsyncComponent(
 const BackgroundPickerModal = defineAsyncComponent(
   () => import('@/components/library/BackgroundPickerModal.vue')
 )
+
+const collapsed = reactive({ config: true, description: true, tools: false })
 
 const route = useRoute()
 const router = useRouter()
@@ -816,20 +819,27 @@ onUnmounted(() => stopWatch())
     </div>
 
     <!-- Translation Config Card (Unity only, separate full-width card) -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
-      <div class="section-header">
+    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.config }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
+      <div class="section-header collapsible" @click="collapsed.config = !collapsed.config">
         <h2 class="section-title">
           <span class="section-icon translate">
             <NIcon :size="16"><TranslateOutlined /></NIcon>
           </span>
           翻译配置
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.config }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <ConfigPanel
-        :config="config"
-        :disabled="!isInstalled"
-        :game-id="gameId"
-      />
+      <div class="section-body" :class="{ collapsed: collapsed.config }">
+        <div class="section-body-inner">
+          <ConfigPanel
+            :config="config"
+            :disabled="!isInstalled"
+            :game-id="gameId"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- AI Translation Engine Card (only when fully installed) -->
@@ -879,62 +889,79 @@ onUnmounted(() => stopWatch())
       </div>
     </div>
 
-    <!-- Asset Extraction & Pre-Translation Card -->
-    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
-      <div class="section-header">
+    <!-- Game Tools Card -->
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :class="{ 'is-collapsed': collapsed.tools }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
+      <div class="section-header collapsible" @click="collapsed.tools = !collapsed.tools">
         <h2 class="section-title">
           <span class="section-icon">
-            <NIcon :size="16"><DataObjectOutlined /></NIcon>
+            <NIcon :size="16"><ExtensionOutlined /></NIcon>
           </span>
-          资产提取与预翻译
+          游戏工具
         </h2>
-        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/asset-extraction`)">
-          打开
-        </NButton>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.tools }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <p class="asset-extraction-desc">
-        从游戏资产中提取文本，自动检测游戏语言，并使用 AI 进行预翻译。预翻译的结果会写入翻译缓存，游戏启动时即可使用。
-      </p>
+      <div class="section-body" :class="{ collapsed: collapsed.tools }">
+        <div class="section-body-inner">
+          <div class="tool-list">
+            <div class="tool-item" @click="router.push(`/games/${gameId}/asset-extraction`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><DataObjectOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">资产提取与预翻译</span>
+                <span class="tool-item-desc">从游戏资产中提取文本，使用 AI 进行预翻译</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="tool-item" @click="router.push(`/games/${gameId}/translation-editor`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><DriveFileRenameOutlineOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">译文编辑器</span>
+                <span class="tool-item-desc">可视化编辑翻译条目，支持导入和导出翻译文件</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="tool-item" @click="router.push(`/games/${gameId}/glossary-editor`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><MenuBookOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">AI 翻译术语库</span>
+                <span class="tool-item-desc">管理专用术语表，自动注入翻译提示词</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="tool-item" @click="router.push(`/games/${gameId}/font-replacement`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><FontDownloadOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">字体替换</span>
+                <span class="tool-item-desc">修改游戏资产中的 TMP 字体，支持扫描和还原</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div v-if="hasBepInEx" class="tool-item" @click="router.push(`/games/${gameId}/bepinex-log`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><ArticleOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">BepInEx 日志</span>
+                <span class="tool-item-desc">查看运行日志，支持搜索、过滤和 AI 分析</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <!-- Translation Editor Card -->
-    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><DriveFileRenameOutlineOutlined /></NIcon>
-          </span>
-          译文编辑器
-        </h2>
-        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/translation-editor`)">
-          打开
-        </NButton>
-      </div>
-      <p class="asset-extraction-desc">
-        可视化编辑游戏的自动翻译文件，修改、新增或删除翻译条目，支持导入和导出翻译文件。
-      </p>
-    </div>
-
-    <!-- Glossary Editor Card -->
-    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><MenuBookOutlined /></NIcon>
-          </span>
-          AI 翻译术语库
-        </h2>
-        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/glossary-editor`)">
-          打开
-        </NButton>
-      </div>
-      <p class="asset-extraction-desc">
-        管理该游戏的专用术语表，术语会自动注入翻译提示词并对结果进行后处理替换，支持导入和导出。
-      </p>
-    </div>
-
-    <!-- Font Replacement Card -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.5s' : '0.45s' }">
+    <!-- Font Replacement Card (non-installed Unity games only) -->
+    <div v-if="game.isUnityGame && !isInstalled" class="section-card" :style="{ animationDelay: '0.2s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -951,47 +978,36 @@ onUnmounted(() => stopWatch())
       </p>
     </div>
 
-    <!-- BepInEx Log Card -->
-    <div v-if="hasBepInEx" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.55s' : '0.5s' }">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><ArticleOutlined /></NIcon>
-          </span>
-          BepInEx 日志
-        </h2>
-        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/bepinex-log`)">
-          打开
-        </NButton>
-      </div>
-      <p class="asset-extraction-desc">
-        查看 BepInEx 运行日志，检查插件加载状态和翻译引擎工作情况。支持日志搜索、过滤、导出和 AI 智能分析。
-      </p>
-    </div>
-
     <!-- AI Description Card (available for all Unity games, even before install) -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.6s' : '0.55s' }">
-      <div class="section-header">
+    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.description }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
+      <div class="section-header collapsible" @click="collapsed.description = !collapsed.description">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><DescriptionOutlined /></NIcon>
           </span>
           游戏背景描述
         </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.description }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
-      <p class="ai-description-hint">
-        为该游戏填写背景信息（类型、世界观、角色等），AI 翻译时会自动参考，提升翻译的准确性和一致性。
-      </p>
-      <NInput
-        v-model:value="aiDescription"
-        type="textarea"
-        :rows="4"
-        placeholder="例如：这是一款日式 RPG 游戏，背景设定在中世纪奇幻世界。主角是一名年轻的剑士，同伴包括女法师艾拉和精灵弓手雷恩..."
-      />
+      <div class="section-body" :class="{ collapsed: collapsed.description }">
+        <div class="section-body-inner">
+          <p class="ai-description-hint">
+            为该游戏填写背景信息（类型、世界观、角色等），AI 翻译时会自动参考，提升翻译的准确性和一致性。
+          </p>
+          <NInput
+            v-model:value="aiDescription"
+            type="textarea"
+            :rows="4"
+            placeholder="例如：这是一款日式 RPG 游戏，背景设定在中世纪奇幻世界。主角是一名年轻的剑士，同伴包括女法师艾拉和精灵弓手雷恩..."
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Plugin Package Card -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.65s' : '0.6s' }">
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -1786,6 +1802,76 @@ onUnmounted(() => stopWatch())
   font-size: 13px;
   color: var(--text-2);
   line-height: 1.6;
+}
+
+/* ===== Tool List ===== */
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tool-item:hover {
+  border-color: var(--accent-border);
+  background: var(--bg-subtle-hover);
+  transform: translateX(4px);
+}
+
+.tool-item-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.tool-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tool-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.tool-item-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.tool-item-arrow {
+  color: var(--text-3);
+  flex-shrink: 0;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.2s ease;
+}
+
+.tool-item:hover .tool-item-arrow {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 /* ===== Responsive ===== */

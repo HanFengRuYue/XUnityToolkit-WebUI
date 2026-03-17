@@ -453,6 +453,64 @@ body::before {
   color: var(--warning);
 }
 
+/* ===== Collapsible Section ===== */
+.section-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.section-header.collapsible:hover {
+  opacity: 0.85;
+}
+
+.collapse-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--text-3);
+  transition: transform 0.3s var(--ease-out), color 0.2s ease, background 0.2s ease;
+  transform: rotate(0deg);
+  flex-shrink: 0;
+}
+
+.collapse-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.section-header.collapsible:hover .collapse-chevron {
+  color: var(--text-2);
+  background: var(--bg-subtle);
+}
+
+.section-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s var(--ease-out), opacity 0.25s ease;
+  opacity: 1;
+}
+
+.section-body.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.section-body-inner {
+  overflow: hidden;
+}
+
+/* Collapsed card reduces bottom padding */
+.section-card.is-collapsed {
+  padding-bottom: 0;
+}
+
+.section-card.is-collapsed .section-header {
+  margin-bottom: 0;
+}
+
 /* ===== Shared Utilities ===== */
 .header-actions {
   display: flex;

@@ -497,7 +497,10 @@ jobs:
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
               $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
               $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
-                         elseif ($relativePath -match '^bundled/') { "bundled" }
+                         elseif ($relativePath -match '^bundled/llama/') { "bundled-llama" }
+                         elseif ($relativePath -match '^bundled/fonts/') { "bundled-fonts" }
+                         elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity)/') { "bundled-plugins" }
+                         elseif ($relativePath -match '^bundled/') { "bundled-misc" }
                          else { "app" }
               $manifest.files[$relativePath] = @{
                   hash = "sha256:$hash"
@@ -510,7 +513,7 @@ jobs:
 
           # Generate update-check.json for CDN-based update checks
           $ucAssets = [ordered]@{}
-          @("manifest-$rid.json", "app-$rid.zip", "wwwroot.zip", "bundled.zip") | ForEach-Object {
+          @("manifest-$rid.json", "app-$rid.zip", "wwwroot.zip", "bundled-llama.zip", "bundled-fonts.zip", "bundled-plugins.zip", "bundled-misc.zip") | ForEach-Object {
             $p = "Release/$_"
             if (Test-Path $p) { $ucAssets[$_] = (Get-Item $p).Length }
           }
@@ -556,20 +559,45 @@ jobs:
             Write-Host "Created wwwroot.zip"
           }
 
-          # bundled ZIP — direct entry creation with prefix (no temp directory copy)
+          # bundled sub-component ZIPs (split to minimize update download size)
           $bundledDir = Join-Path $releaseDir "bundled"
           if (Test-Path $bundledDir) {
-            $bundledZip = "Release/bundled.zip"
-            if (Test-Path $bundledZip) { Remove-Item $bundledZip }
-            $zip = [System.IO.Compression.ZipFile]::Open($bundledZip, 'Create')
-            try {
-              $bundledBase = (Resolve-Path $bundledDir).Path
-              Get-ChildItem -Path $bundledDir -Recurse -File | ForEach-Object {
-                $entry = "bundled/" + $_.FullName.Substring($bundledBase.Length + 1).Replace('\', '/')
-                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
-              }
-            } finally { $zip.Dispose() }
-            Write-Host "Created bundled.zip"
+            $bundledSubs = @(
+              @{ Name = "bundled-llama";   Dirs = @("llama") },
+              @{ Name = "bundled-fonts";   Dirs = @("fonts") },
+              @{ Name = "bundled-plugins"; Dirs = @("bepinex5", "bepinex6", "xunity") }
+            )
+            foreach ($sub in $bundledSubs) {
+              $zipPath = "Release/$($sub.Name).zip"
+              if (Test-Path $zipPath) { Remove-Item $zipPath }
+              $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
+              try {
+                foreach ($dirName in $sub.Dirs) {
+                  $subDir = Join-Path $bundledDir $dirName
+                  if (-not (Test-Path $subDir)) { continue }
+                  $subBase = (Resolve-Path $subDir).Path
+                  Get-ChildItem -Path $subDir -Recurse -File | ForEach-Object {
+                    $entry = "bundled/$dirName/" + $_.FullName.Substring($subBase.Length + 1).Replace('\', '/')
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
+                  }
+                }
+              } finally { $zip.Dispose() }
+              Write-Host "Created $($sub.Name).zip"
+            }
+
+            # bundled-misc.zip — root-level files in bundled/ (e.g., script-tag-presets.json)
+            $miscFiles = Get-ChildItem -Path $bundledDir -File
+            if ($miscFiles) {
+              $miscZip = "Release/bundled-misc.zip"
+              if (Test-Path $miscZip) { Remove-Item $miscZip }
+              $zip = [System.IO.Compression.ZipFile]::Open($miscZip, 'Create')
+              try {
+                foreach ($f in $miscFiles) {
+                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, "bundled/$($f.Name)") | Out-Null
+                }
+              } finally { $zip.Dispose() }
+              Write-Host "Created bundled-misc.zip"
+            }
           }
 
           # Wait for main ZIP background job
@@ -656,7 +684,10 @@ jobs:
             Release/manifest-win-x64.json
             Release/app-win-x64.zip
             Release/wwwroot.zip
-            Release/bundled.zip
+            Release/bundled-llama.zip
+            Release/bundled-fonts.zip
+            Release/bundled-plugins.zip
+            Release/bundled-misc.zip
             Release/update-check.json
             Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.msi
           retention-days: 3
@@ -741,7 +772,10 @@ jobs:
             components/manifest-win-x64.json \
             components/app-win-x64.zip \
             components/wwwroot.zip \
-            components/bundled.zip \
+            components/bundled-llama.zip \
+            components/bundled-fonts.zip \
+            components/bundled-plugins.zip \
+            components/bundled-misc.zip \
             --clobber \
             --repo "${{ github.repository }}"
 
@@ -764,7 +798,10 @@ jobs:
           MANIFEST_SIZE=$(stat -c%s components/manifest-win-x64.json 2>/dev/null || echo 0)
           APP_SIZE=$(stat -c%s components/app-win-x64.zip 2>/dev/null || echo 0)
           WWWROOT_SIZE=$(stat -c%s components/wwwroot.zip 2>/dev/null || echo 0)
-          BUNDLED_SIZE=$(stat -c%s components/bundled.zip 2>/dev/null || echo 0)
+          LLAMA_SIZE=$(stat -c%s components/bundled-llama.zip 2>/dev/null || echo 0)
+          FONTS_SIZE=$(stat -c%s components/bundled-fonts.zip 2>/dev/null || echo 0)
+          PLUGINS_SIZE=$(stat -c%s components/bundled-plugins.zip 2>/dev/null || echo 0)
+          MISC_SIZE=$(stat -c%s components/bundled-misc.zip 2>/dev/null || echo 0)
 
           # Build JSON (jq for proper escaping)
           jq -n \
@@ -775,7 +812,10 @@ jobs:
             --argjson manifest_size "$MANIFEST_SIZE" \
             --argjson app_size "$APP_SIZE" \
             --argjson wwwroot_size "$WWWROOT_SIZE" \
-            --argjson bundled_size "$BUNDLED_SIZE" \
+            --argjson llama_size "$LLAMA_SIZE" \
+            --argjson fonts_size "$FONTS_SIZE" \
+            --argjson plugins_size "$PLUGINS_SIZE" \
+            --argjson misc_size "$MISC_SIZE" \
             '{
               tag: $tag,
               version: $version,
@@ -785,7 +825,10 @@ jobs:
                 "manifest-win-x64.json": $manifest_size,
                 "app-win-x64.zip": $app_size,
                 "wwwroot.zip": $wwwroot_size,
-                "bundled.zip": $bundled_size
+                "bundled-llama.zip": $llama_size,
+                "bundled-fonts.zip": $fonts_size,
+                "bundled-plugins.zip": $plugins_size,
+                "bundled-misc.zip": $misc_size
               }
             }' > update-check.json
 
