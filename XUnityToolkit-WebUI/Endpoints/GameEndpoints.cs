@@ -13,17 +13,17 @@ public static class GameEndpoints
     {
         var group = app.MapGroup("/api/games");
 
-        group.MapGet("/", async (GameLibraryService library) =>
+        group.MapGet("/", async (GameLibraryService library, GameImageService imageService) =>
         {
             var games = await library.GetAllAsync();
-            return Results.Ok(ApiResult<List<Game>>.Ok(games));
+            return Results.Ok(ApiResult<List<Game>>.Ok(games.WithImageFlags(imageService)));
         });
 
-        group.MapGet("/{id}", async (string id, GameLibraryService library) =>
+        group.MapGet("/{id}", async (string id, GameLibraryService library, GameImageService imageService) =>
         {
             var game = await library.GetByIdAsync(id);
             return game is not null
-                ? Results.Ok(ApiResult<Game>.Ok(game))
+                ? Results.Ok(ApiResult<Game>.Ok(game.WithImageFlags(imageService)))
                 : Results.NotFound(ApiResult<Game>.Fail("Game not found."));
         });
 
@@ -80,7 +80,7 @@ public static class GameEndpoints
             return Results.File(pngBytes, "image/png");
         });
 
-        group.MapPost("/", async (AddGameRequest request, GameLibraryService library) =>
+        group.MapPost("/", async (AddGameRequest request, GameLibraryService library, GameImageService imageService) =>
         {
             if (string.IsNullOrWhiteSpace(request.GamePath))
                 return Results.BadRequest(ApiResult<Game>.Fail("Game path is required."));
@@ -98,7 +98,7 @@ public static class GameEndpoints
             try
             {
                 var game = await library.AddAsync(name, gamePath, request.ExecutableName);
-                return Results.Created($"/api/games/{game.Id}", ApiResult<Game>.Ok(game));
+                return Results.Created($"/api/games/{game.Id}", ApiResult<Game>.Ok(game.WithImageFlags(imageService)));
             }
             catch (InvalidOperationException ex)
             {
@@ -232,7 +232,7 @@ public static class GameEndpoints
                     ApiResult<AddGameResponse>.Ok(new AddGameResponse
                     {
                         NeedsExeSelection = false,
-                        Game = game
+                        Game = game.WithImageFlags(imageService)
                     }));
             }
             catch (InvalidOperationException ex)
@@ -241,7 +241,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapPut("/{id}", async (string id, UpdateGameRequest request, GameLibraryService library) =>
+        group.MapPut("/{id}", async (string id, UpdateGameRequest request, GameLibraryService library, GameImageService imageService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult<Game>.Fail("Game not found."));
@@ -255,7 +255,7 @@ public static class GameEndpoints
                 game.ExecutableName = request.ExecutableName;
             }
             var updated = await library.UpdateAsync(game);
-            return Results.Ok(ApiResult<Game>.Ok(updated));
+            return Results.Ok(ApiResult<Game>.Ok(updated.WithImageFlags(imageService)));
         });
 
         // Upload custom icon
@@ -828,6 +828,7 @@ public static class GameEndpoints
             string id,
             ModFrameworkType framework,
             GameLibraryService library,
+            GameImageService imageService,
             PluginDetectionService pluginDetection) =>
         {
             var game = await library.GetByIdAsync(id);
@@ -848,8 +849,25 @@ public static class GameEndpoints
             game.DetectedFrameworks = frameworks.Count > 0 ? frameworks : null;
             await library.UpdateAsync(game);
 
-            return Results.Ok(ApiResult<Game>.Ok(game));
+            return Results.Ok(ApiResult<Game>.Ok(game.WithImageFlags(imageService)));
         });
+    }
+}
+
+public static class GameImageExtensions
+{
+    public static Game WithImageFlags(this Game game, GameImageService imageService)
+    {
+        game.HasCover = imageService.HasCover(game.Id);
+        game.HasBackground = imageService.HasBackground(game.Id);
+        return game;
+    }
+
+    public static List<Game> WithImageFlags(this List<Game> games, GameImageService imageService)
+    {
+        foreach (var game in games)
+            game.WithImageFlags(imageService);
+        return games;
     }
 }
 

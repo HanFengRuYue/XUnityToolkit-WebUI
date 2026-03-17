@@ -21,7 +21,8 @@ const emit = defineEmits<{
 
 const coverLoaded = ref(false)
 const coverError = ref(false)
-const coverUrl = computed(() => `${gamesApi.getCoverUrl(props.game.id)}?t=${props.game.updatedAt}`)
+const noCover = computed(() => props.game.hasCover === false)
+const coverUrl = computed(() => noCover.value ? '' : `${gamesApi.getCoverUrl(props.game.id)}?t=${props.game.updatedAt}`)
 const iconUrl = computed(() => `${gamesApi.getIconUrl(props.game.id)}?t=${props.game.updatedAt}`)
 
 // Reset loading state when cover URL changes (e.g. after cover update, rename)
@@ -96,10 +97,11 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
     <!-- Cover Area -->
     <div class="card-cover">
       <!-- Shimmer placeholder -->
-      <div v-if="!coverLoaded && !coverError" class="cover-shimmer"></div>
+      <div v-if="!noCover && !coverLoaded && !coverError" class="cover-shimmer"></div>
 
       <!-- Cover image from SteamGridDB or uploaded -->
       <img
+        v-if="!noCover"
         :src="coverUrl"
         :alt="game.name"
         class="cover-img"
@@ -110,7 +112,7 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
       />
 
       <!-- Fallback: gradient + icon -->
-      <div v-if="coverError" class="cover-fallback" :style="{ background: getPlaceholderGradient(game.name) }">
+      <div v-if="noCover || coverError" class="cover-fallback" :style="{ background: getPlaceholderGradient(game.name) }">
         <div class="fallback-icon-wrapper">
           <img
             :src="iconUrl"

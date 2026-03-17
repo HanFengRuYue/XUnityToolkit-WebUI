@@ -99,7 +99,11 @@ const iconContextMenuOptions = [
 
 const iconUrl = computed(() => game.value ? `/api/games/${gameId}/icon?t=${game.value.updatedAt}` : '')
 const bgTimestamp = ref(Date.now())
-const backgroundUrl = computed(() => game.value ? `${gamesApi.getBackgroundUrl(gameId)}?t=${bgTimestamp.value}` : '')
+const noBackground = computed(() => game.value?.hasBackground === false)
+const backgroundUrl = computed(() => {
+  if (!game.value || noBackground.value) return ''
+  return `${gamesApi.getBackgroundUrl(gameId)}?t=${bgTimestamp.value}`
+})
 const heroBgLoaded = ref(false)
 const heroScrollY = ref(0)
 
@@ -336,6 +340,7 @@ async function handleIconContextMenuSelect(key: string) {
   } else if (key === 'delete-background') {
     try {
       await gamesApi.deleteBackground(gameId)
+      if (game.value) game.value.hasBackground = false
       heroBgLoaded.value = false
       bgTimestamp.value = Date.now()
       message.success('背景图已删除')
@@ -353,6 +358,7 @@ async function handleIconSaved() {
 }
 
 function handleBackgroundSaved() {
+  if (game.value) game.value.hasBackground = true
   bgTimestamp.value = Date.now()
   heroBgLoaded.value = false
 }
@@ -504,6 +510,7 @@ onUnmounted(() => stopWatch())
     <!-- Hero Background -->
     <div class="hero-backdrop" :class="{ 'hero-visible': heroBgLoaded }">
       <img
+        v-if="!noBackground"
         :src="backgroundUrl"
         class="hero-bg-img"
         alt=""

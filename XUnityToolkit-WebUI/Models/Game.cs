@@ -26,4 +26,8 @@ public sealed class Game
     public int? SteamGridDbGameId { get; set; }
     public DateTime? LastPlayedAt { get; set; }
     public string? AiDescription { get; set; }
+
+    // Computed at API response time — not authoritative in library.json
+    public bool HasCover { get; set; }
+    public bool HasBackground { get; set; }
 }
