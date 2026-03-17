@@ -71,7 +71,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 - **`CallLlmRawAsync`:** public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
 - **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results must also skip `ApplyGlossaryPostProcess` (marked via `preComputed` dictionary)
-- **Prompt glossary:** ALL glossary entries (including non-regex) must remain in system prompt even when placeholders are used — do NOT filter `promptGlossary` to regex-only; removing non-regex entries from prompt eliminates the LLM's awareness of terminology AND breaks `ApplyGlossaryPostProcess` fallback
+- **Prompt glossary:** In cloud mode, ALL glossary entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptGlossary` is set to `null` to save context tokens; glossary enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
 - **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
 
 ## Pre-Translation Cache Monitor
