@@ -35,10 +35,14 @@ const router = createRouter({
       meta: { depth: 3 },
     },
     {
-      path: '/games/:id/glossary-editor',
-      name: 'glossary-editor',
-      component: () => import('@/views/GlossaryEditorView.vue'),
+      path: '/games/:id/term-editor',
+      name: 'term-editor',
+      component: () => import('@/views/TermEditorView.vue'),
       meta: { depth: 3 },
+    },
+    {
+      path: '/games/:id/glossary-editor',
+      redirect: (to: any) => `/games/${to.params.id}/term-editor`,
     },
     {
       path: '/games/:id/font-replacement',
