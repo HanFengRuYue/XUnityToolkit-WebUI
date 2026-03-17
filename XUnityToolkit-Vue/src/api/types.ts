@@ -171,6 +171,8 @@ export interface AiTranslationSettings {
   glossaryExtractionEnabled: boolean
   glossaryExtractionEndpointId?: string
   enablePreTranslationCache: boolean
+  termAuditEnabled: boolean
+  naturalTranslationMode: boolean
 }
 
 export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
@@ -229,6 +231,9 @@ export interface TranslationStats {
   totalErrors: number
   recentErrors: TranslationError[]
   currentGameId?: string
+  termAuditPhase1PassCount: number
+  termAuditPhase2PassCount: number
+  termAuditForceCorrectedCount: number
 }
 
 export interface AiEndpointStatus {
@@ -305,14 +310,33 @@ export interface EndpointTestResult {
   responseTimeMs: number
 }
 
-export interface GlossaryEntry {
+// ── Unified Term Management ──
+
+export type TermType = 'translate' | 'doNotTranslate'
+export type TermCategory = 'character' | 'location' | 'item' | 'skill' | 'organization' | 'general'
+
+export interface TermEntry {
+  type: TermType
+  original: string
+  translation?: string
+  category?: TermCategory
+  description?: string
+  isRegex: boolean
+  caseSensitive: boolean
+  exactMatch: boolean
+  priority: number
+}
+
+/** @deprecated Use TermEntry instead */
+export type GlossaryEntry = {
   original: string
   translation: string
   isRegex: boolean
   description?: string
 }
 
-export interface DoNotTranslateEntry {
+/** @deprecated Use TermEntry instead */
+export type DoNotTranslateEntry = {
   original: string
   caseSensitive: boolean
 }
