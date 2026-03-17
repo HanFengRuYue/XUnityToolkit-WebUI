@@ -50,6 +50,8 @@ export interface Game {
   steamGridDbGameId?: number
   lastPlayedAt?: string
   aiDescription?: string
+  hasCover?: boolean
+  hasBackground?: boolean
 }
 
 export interface AddGameResponse {
