@@ -7,17 +7,54 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class PreTranslationCacheMonitor(
     IHubContext<InstallProgressHub> hubContext,
+    GameLibraryService gameLibraryService,
+    AppSettingsService settingsService,
     ILogger<PreTranslationCacheMonitor> logger)
 {
     private volatile string? _activeGameId;
+    private volatile string? _loadAttemptedForGameId;
     private HashSet<string> _preTranslatedKeys = [];
     private readonly ConcurrentDictionary<string, string> _misses = new();
     private long _newTexts;
     private long _lastBroadcastTicks;
     private System.Threading.Timer? _summaryTimer;
+    private readonly SemaphoreSlim _loadLock = new(1, 1);
 
     private const int MaxRecentMisses = 50;
     private readonly ConcurrentQueue<CacheMissEntry> _recentMisses = new();
+
+    public async Task EnsureCacheAsync(string gameId, string toLang, CancellationToken ct)
+    {
+        if (_loadAttemptedForGameId == gameId) return;
+
+        await _loadLock.WaitAsync(ct);
+        try
+        {
+            if (_loadAttemptedForGameId == gameId) return;
+
+            var settings = await settingsService.GetAsync(ct);
+            if (!settings.AiTranslation.EnablePreTranslationCache)
+            {
+                if (_activeGameId is not null) UnloadCache();
+                _loadAttemptedForGameId = gameId;
+                return;
+            }
+
+            var game = await gameLibraryService.GetByIdAsync(gameId, ct);
+            if (game is null)
+            {
+                _loadAttemptedForGameId = gameId;
+                return;
+            }
+
+            LoadCache(gameId, game.GamePath, toLang);
+            _loadAttemptedForGameId = gameId;
+        }
+        finally
+        {
+            _loadLock.Release();
+        }
+    }
 
     public void LoadCache(string gameId, string gamePath, string toLang)
     {
@@ -52,6 +89,7 @@ public sealed class PreTranslationCacheMonitor(
     {
         var prev = _activeGameId;
         _activeGameId = null;
+        _loadAttemptedForGameId = null;
         _preTranslatedKeys = [];
         _misses.Clear();
         Interlocked.Exchange(ref _newTexts, 0);
