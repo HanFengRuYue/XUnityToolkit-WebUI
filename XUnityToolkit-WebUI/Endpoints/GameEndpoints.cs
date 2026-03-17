@@ -443,7 +443,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, DoNotTranslateService dntService, ScriptTagService scriptTagService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -466,6 +466,12 @@ public static class GameEndpoints
             if (File.Exists(dntFile))
                 File.Delete(dntFile);
             dntService.RemoveCache(id);
+
+            // Clean up script tag rules
+            var scriptTagFile = appDataPaths.ScriptTagFile(id);
+            if (File.Exists(scriptTagFile))
+                File.Delete(scriptTagFile);
+            scriptTagService.RemoveCache(id);
 
             return Results.Ok(ApiResult.Ok());
         });
