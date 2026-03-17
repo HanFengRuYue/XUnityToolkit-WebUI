@@ -28,7 +28,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 
 - **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
 - **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`
-- **GlossaryEditorView:** NTabs with "术语表" and "禁翻表" tabs; each tab has independent auto-save, import/export, search, and clear-all; adding a new per-game text management feature → add as a new NTabPane here
+- **TermEditorView:** Unified term editor (replaces old GlossaryEditorView); filter chip bar for type (translate/doNotTranslate) and category; NDataTable with virtual scroll, inline editing, column visibility control; single `useAutoSave` instance; JSON/CSV import/export; cross-game import via modal
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
 - SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
 
@@ -62,7 +62,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
 - **`NTabs type="segment"` dark theme:** segment tabs blend into background; override with `:deep(.n-tabs-tab--active)` using `color: var(--accent)`, `background: color-mix(in srgb, var(--accent) 12%, var(--bg-card))`, `border: 1px solid var(--accent-border)`
 - **`NUpload` in flex containers:** NUpload wraps trigger in extra divs that break flex alignment; fix with `:deep(.n-upload), :deep(.n-upload-trigger) { display: flex; align-items: center; }`
-- **Cross-page glossary access:** Other views (e.g., TranslationEditorView) can add entries to glossary via `gamesApi.getGlossary` → check duplicate → `unshift` → `gamesApi.saveGlossary`; no shared Pinia store — each page fetches/saves independently
+- **Cross-page term access:** Other views (e.g., TranslationEditorView) can add entries via `gamesApi.getTerms` → check duplicate → `unshift` → `gamesApi.saveTerms`; no shared Pinia store — each page fetches/saves independently
 - **Bulk clear pattern:** "Clear all" = set reactive array to `[]`; for auto-save views (GlossaryEditor) this triggers auto-save of empty array; for manual-save views (TranslationEditor) it marks dirty state; always use `dialog.warning` confirmation
 
 ## Game Detail Background Image
