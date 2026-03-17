@@ -12,6 +12,7 @@ public sealed class PreTranslationService(
     GlossaryExtractionService extractionService,
     AppSettingsService settingsService,
     GameLibraryService gameLibrary,
+    ScriptTagService scriptTagService,
     AppDataPaths appDataPaths,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<PreTranslationService> logger)
@@ -110,7 +111,10 @@ public sealed class PreTranslationService(
         await BroadcastStatus(gameId, status);
 
         var translations = new ConcurrentDictionary<string, string>();
-        var textList = texts.Select(t => t.Text).ToList();
+        var textList = await scriptTagService.FilterAndCleanAsync(gameId, texts, ct);
+        logger.LogInformation("脚本标签清洗: {Original} 条提取文本 → {Cleaned} 条翻译文本, 游戏 {GameId}",
+            texts.Count, textList.Count, gameId);
+        status.TotalTexts = textList.Count;
 
         // Read max concurrency from settings — forced to 1 in local mode
         var settings = await settingsService.GetAsync(ct);
@@ -210,7 +214,7 @@ public sealed class PreTranslationService(
         foreach (var (original, translation) in translations)
         {
             var originalKey = enableCacheOptimization
-                ? XUnityTranslationFormat.NormalizeForCache(original)
+                ? scriptTagService.NormalizeForCache(gameId, original)
                 : original;
             if (string.IsNullOrEmpty(originalKey)) continue;
 
