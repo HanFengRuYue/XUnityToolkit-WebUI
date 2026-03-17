@@ -189,18 +189,8 @@ public sealed class GlossaryExtractionService(
             }
             if (entries.Count == 0) return;
 
-            // Convert to TermEntry and merge into term store
-            var newTermEntries = entries.Select(e => new TermEntry
-            {
-                Type = TermType.Translate,
-                Original = e.Original,
-                Translation = e.Translation,
-                IsRegex = e.IsRegex,
-                Description = e.Description
-            }).ToList();
-
-            var added = newTermEntries.Count;
-            await termService.MergeAsync(gameId, newTermEntries);
+            var added = entries.Count;
+            await termService.MergeAsync(gameId, entries);
             if (added > 0)
             {
                 Interlocked.Add(ref _totalExtracted, added);
@@ -274,7 +264,7 @@ public sealed class GlossaryExtractionService(
         return JsonSerializer.Serialize(items);
     }
 
-    private static List<GlossaryEntry> ParseExtractionResult(string content)
+    private static List<TermEntry> ParseExtractionResult(string content)
     {
         var json = content.Trim();
 
@@ -292,7 +282,7 @@ public sealed class GlossaryExtractionService(
             var arr = JsonNode.Parse(json)?.AsArray();
             if (arr is null) return [];
 
-            var result = new List<GlossaryEntry>();
+            var result = new List<TermEntry>();
             foreach (var item in arr)
             {
                 var original = item?["original"]?.GetValue<string>();
@@ -300,8 +290,9 @@ public sealed class GlossaryExtractionService(
                 if (!string.IsNullOrWhiteSpace(original) && !string.IsNullOrWhiteSpace(translation))
                 {
                     var description = item?["description"]?.GetValue<string>();
-                    result.Add(new GlossaryEntry
+                    result.Add(new TermEntry
                     {
+                        Type = TermType.Translate,
                         Original = original,
                         Translation = translation,
                         IsRegex = false,

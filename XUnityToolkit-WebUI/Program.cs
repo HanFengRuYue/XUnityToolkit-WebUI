@@ -137,8 +137,6 @@ builder.Services.AddSingleton<TmpFontService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
-builder.Services.AddSingleton<GlossaryService>();
-builder.Services.AddSingleton<DoNotTranslateService>();
 builder.Services.AddSingleton<TermService>();
 builder.Services.AddSingleton<TermMatchingService>();
 builder.Services.AddSingleton<TermAuditService>();

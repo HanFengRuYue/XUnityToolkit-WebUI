@@ -13,8 +13,6 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class LlmTranslationService(
     IHttpClientFactory httpClientFactory,
     AppSettingsService settingsService,
-    GlossaryService glossaryService,
-    DoNotTranslateService doNotTranslateService,
     TermService termService,
     TermMatchingService termMatchingService,
     TermAuditService termAuditService,
@@ -193,32 +191,18 @@ public sealed class LlmTranslationService(
                     matchedTerms = termMatchingService.FindMatchedTerms(allTerms, texts.ToList());
             }
 
-            // Derive legacy glossary/DNT from unified terms for backward compat in helper methods
-            List<GlossaryEntry>? glossary = null;
-            List<DoNotTranslateEntry>? dntEntries = null;
+            // Split matched terms into glossary (Translate) and DNT lists
+            List<TermEntry>? glossary = null;
+            List<TermEntry>? dntEntries = null;
             if (matchedTerms is { Count: > 0 })
             {
                 var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
                 if (translateTerms.Count > 0)
-                {
-                    glossary = translateTerms.Select(t => new GlossaryEntry
-                    {
-                        Original = t.Original,
-                        Translation = t.Translation ?? "",
-                        IsRegex = t.IsRegex,
-                        Description = t.Description
-                    }).ToList();
-                }
+                    glossary = translateTerms;
 
                 var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
                 if (dntTerms.Count > 0)
-                {
-                    dntEntries = dntTerms.Select(t => new DoNotTranslateEntry
-                    {
-                        Original = t.Original,
-                        CaseSensitive = t.CaseSensitive
-                    }).ToList();
-                }
+                    dntEntries = dntTerms;
             }
 
             if (logger.IsEnabled(LogLevel.Debug))
@@ -295,7 +279,7 @@ public sealed class LlmTranslationService(
                         ai.SystemPrompt, from, to, matchedTerms!, gameDescription, memoryContext);
 
                     // Local mode: skip glossary in system prompt — not applicable here since usePhase1 excludes local mode
-                    List<GlossaryEntry>? nullGlossary = null;
+                    List<TermEntry>? nullGlossary = null;
 
                     // Send unmodified source texts to LLM
                     if (texts.Count > 0)
@@ -370,7 +354,7 @@ public sealed class LlmTranslationService(
                 Dictionary<string, string>? glossaryMapping = null;
                 // Local mode: skip glossary in system prompt to save context tokens;
                 // placeholder substitution + post-processing still enforce glossary terms.
-                List<GlossaryEntry>? promptGlossary = isLocalMode ? null : glossary;
+                List<TermEntry>? promptGlossary = isLocalMode ? null : glossary;
                 if (glossary is not null)
                 {
                     var nonRegexEntries = glossary.Where(e => !e.IsRegex && !string.IsNullOrWhiteSpace(e.Original)).ToList();
@@ -628,7 +612,7 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string> translations, long tokens, double ms, string endpointName)> TranslateBatchAsync(
         IList<string> texts, string from, string to,
         AiTranslationSettings ai, List<ApiEndpointConfig> endpoints,
-        List<GlossaryEntry>? glossary, string? gameDescription,
+        List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext,
         string? dntHint, SemaphoreSlim semaphore, CancellationToken ct,
         string? overrideSystemPrompt = null)
@@ -753,7 +737,7 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string> translations, long tokens)> CallProviderAsync(
         ApiEndpointConfig endpoint, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string? gameDescription,
+        List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
         string? overrideSystemPrompt = null)
     {
@@ -879,7 +863,7 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallOpenAiCompatAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string? gameDescription,
+        List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, string baseUrl, CancellationToken ct,
         string? overrideSystemPrompt = null)
     {
@@ -938,7 +922,7 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallClaudeAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string? gameDescription,
+        List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
         string? overrideSystemPrompt = null)
     {
@@ -995,7 +979,7 @@ public sealed class LlmTranslationService(
     private async Task<(IList<string>, long)> CallGeminiAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
-        List<GlossaryEntry>? glossary, string? gameDescription,
+        List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
         string? overrideSystemPrompt = null)
     {
@@ -1028,7 +1012,7 @@ public sealed class LlmTranslationService(
         RegexOptions.Compiled);
 
     private static (List<string> replacedTexts, Dictionary<string, string> mapping)
-        ApplyDoNotTranslateReplacements(IList<string> texts, List<DoNotTranslateEntry> entries)
+        ApplyDoNotTranslateReplacements(IList<string> texts, List<TermEntry> entries)
     {
         var sorted = entries
             .Where(e => !string.IsNullOrWhiteSpace(e.Original))
@@ -1109,7 +1093,7 @@ public sealed class LlmTranslationService(
     // ── Glossary placeholder substitution ──
 
     private static (List<string> replacedTexts, Dictionary<string, string> mapping)
-        ApplyGlossaryReplacements(IList<string> texts, List<GlossaryEntry> nonRegexEntries)
+        ApplyGlossaryReplacements(IList<string> texts, List<TermEntry> nonRegexEntries)
     {
         var sorted = nonRegexEntries
             .OrderByDescending(e => e.Original.Length)
@@ -1136,7 +1120,7 @@ public sealed class LlmTranslationService(
                     {
                         placeholder = $"{{{{G_{nextIndex}}}}}";
                         originalToPlaceholder[entry.Original] = placeholder;
-                        mapping[placeholder] = entry.Translation;
+                        mapping[placeholder] = entry.Translation ?? "";
                         nextIndex++;
                     }
 
@@ -1170,7 +1154,7 @@ public sealed class LlmTranslationService(
     // ── System prompt + glossary injection ──
 
     private static string BuildSystemPrompt(string template, string from, string to,
-        List<GlossaryEntry>? glossary, string? gameDescription = null,
+        List<TermEntry>? glossary, string? gameDescription = null,
         IList<TranslationMemoryEntry>? memoryContext = null, string? dntHint = null)
     {
         var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
@@ -1277,7 +1261,7 @@ public sealed class LlmTranslationService(
 
     // ── Glossary post-processing ──
 
-    private static string ApplyGlossaryPostProcess(string translated, List<GlossaryEntry> glossary)
+    private static string ApplyGlossaryPostProcess(string translated, List<TermEntry> glossary)
     {
         // Sort longest-first to prevent shorter entries from shadowing longer ones
         // (matches the strategy in ApplyGlossaryReplacements)
@@ -1289,7 +1273,7 @@ public sealed class LlmTranslationService(
             {
                 try
                 {
-                    translated = Regex.Replace(translated, entry.Original, entry.Translation,
+                    translated = Regex.Replace(translated, entry.Original, entry.Translation ?? "",
                         RegexOptions.None, TimeSpan.FromMilliseconds(100));
                 }
                 catch
@@ -1299,7 +1283,7 @@ public sealed class LlmTranslationService(
             }
             else
             {
-                translated = translated.Replace(entry.Original, entry.Translation);
+                translated = translated.Replace(entry.Original, entry.Translation ?? "");
             }
         }
         return translated;
