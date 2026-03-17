@@ -38,7 +38,7 @@ import {
   RestartAltOutlined,
 } from '@vicons/material'
 import { gamesApi, translationEditorApi } from '@/api/games'
-import type { Game, TranslationEntry, GlossaryEntry } from '@/api/types'
+import type { Game, TranslationEntry, TermEntry } from '@/api/types'
 
 interface TranslationRow extends TranslationEntry {
   _id: number
@@ -353,17 +353,21 @@ async function handleAddToGlossary(row: TranslationRow) {
   if (!row.original.trim() || !row.translation.trim()) return
   addingToGlossary.value = true
   try {
-    const glossary = await gamesApi.getGlossary(gameId)
-    if (glossary.some((e: GlossaryEntry) => e.original === row.original)) {
+    const terms = await gamesApi.getTerms(gameId)
+    if (terms.some((e: TermEntry) => e.original === row.original)) {
       message.warning('该原文在术语库中已存在')
       return
     }
-    glossary.unshift({
+    terms.unshift({
+      type: 'translate',
       original: row.original,
       translation: row.translation,
       isRegex: false,
+      caseSensitive: true,
+      exactMatch: false,
+      priority: 0,
     })
-    await gamesApi.saveGlossary(gameId, glossary)
+    await gamesApi.saveTerms(gameId, terms)
     message.success('已添加到术语库')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '添加失败')

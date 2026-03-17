@@ -81,6 +81,8 @@ const settings = ref<AppSettings>({
     glossaryExtractionEnabled: false,
     glossaryExtractionEndpointId: undefined,
     enablePreTranslationCache: false,
+    termAuditEnabled: true,
+    naturalTranslationMode: true,
   },
   steamGridDbApiKey: undefined,
   libraryViewMode: 'grid',
@@ -370,6 +372,32 @@ onMounted(() => {
           />
           <span class="form-hint">加速 AI 模型下载（留空使用官方地址）</span>
         </div>
+      </div>
+    </div>
+
+    <!-- AI Translation Settings -->
+    <div class="section-card" style="animation-delay: 0.1s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><TuneOutlined /></NIcon>
+          </span>
+          AI 翻译
+        </h2>
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
+          <span class="setting-label">术语审查</span>
+          <span class="setting-description">翻译后自动检查术语是否正确应用</span>
+        </div>
+        <NSwitch v-model:value="settings.aiTranslation.termAuditEnabled" />
+      </div>
+      <div class="setting-row" style="margin-top: 12px">
+        <div class="setting-info">
+          <span class="setting-label">自然翻译模式</span>
+          <span class="setting-description">先让 LLM 自然应用术语，失败后回退到占位符方案</span>
+        </div>
+        <NSwitch v-model:value="settings.aiTranslation.naturalTranslationMode" />
       </div>
     </div>
 
