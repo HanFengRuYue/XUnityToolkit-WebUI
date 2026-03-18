@@ -29,6 +29,16 @@ public sealed class AppDataPaths(IConfiguration config)
     public string DoNotTranslateDirectory => Path.Combine(_root, "do-not-translate");
     public string ScriptTagsDirectory => Path.Combine(_root, "script-tags");
     public string PreTranslationRegexDirectory => Path.Combine(CacheDirectory, "pre-translation-regex");
+    public string TranslationMemoryDirectory => Path.Combine(_root, "translation-memory");
+    public string DynamicPatternsDirectory => Path.Combine(_root, "dynamic-patterns");
+    public string TermCandidatesDirectory => Path.Combine(_root, "term-candidates");
+
+    public string TranslationMemoryFile(string gameId) =>
+        Path.Combine(TranslationMemoryDirectory, $"{gameId}.json");
+    public string DynamicPatternsFile(string gameId) =>
+        Path.Combine(DynamicPatternsDirectory, $"{gameId}.json");
+    public string TermCandidatesFile(string gameId) =>
+        Path.Combine(TermCandidatesDirectory, $"{gameId}.json");
     public string FontGenerationCharsetUploadsDirectory =>
         Path.Combine(_root, "font-generation", "uploads", "charset");
     public string FontGenerationTranslationUploadsDirectory =>
@@ -98,5 +108,8 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTranslationUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTempDirectory);
+        Directory.CreateDirectory(TranslationMemoryDirectory);
+        Directory.CreateDirectory(DynamicPatternsDirectory);
+        Directory.CreateDirectory(TermCandidatesDirectory);
     }
 }

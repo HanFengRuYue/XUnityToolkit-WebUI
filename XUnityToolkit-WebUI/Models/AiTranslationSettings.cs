@@ -47,6 +47,20 @@ public sealed class AiTranslationSettings
     public bool TermAuditEnabled { get; set; } = true;
     public bool NaturalTranslationMode { get; set; } = true;
 
+    // Translation Memory
+    public bool EnableTranslationMemory { get; set; } = true;
+    public int FuzzyMatchThreshold { get; set; } = 85;
+
+    // LLM Pattern Analysis (pre-translation phase)
+    public bool EnableLlmPatternAnalysis { get; set; } = true;
+
+    // Multi-Round Translation (default ON = 2 rounds)
+    public bool EnableMultiRoundTranslation { get; set; } = true;
+
+    // Auto Term Extraction
+    public bool EnableAutoTermExtraction { get; set; } = true;
+    public bool AutoApplyExtractedTerms { get; set; }
+
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }
     public string? GlossaryExtractionEndpointId { get; set; }

@@ -24,6 +24,12 @@ public sealed record TranslationStats(
     public int TermAuditPhase2PassCount { get; init; }
     /// <summary>Texts that needed Phase 3 force correction.</summary>
     public int TermAuditForceCorrectedCount { get; init; }
+    public int TranslationMemoryHits { get; init; }
+    public int TranslationMemoryFuzzyHits { get; init; }
+    public int TranslationMemoryPatternHits { get; init; }
+    public int TranslationMemoryMisses { get; init; }
+    public int DynamicPatternCount { get; init; }
+    public int ExtractedTermCount { get; init; }
 }
 
 public sealed record RecentTranslation(
@@ -47,6 +53,11 @@ public sealed record RecentTranslation(
     /// "phase2Pass"=placeholder-pass, "forceCorrected"=force-corrected, "failed"=audit failed
     /// </summary>
     public string? TermAuditResult { get; init; }
+
+    /// <summary>
+    /// Translation source: null=LLM, "tmExact", "tmFuzzy", "tmPattern"
+    /// </summary>
+    public string? TranslationSource { get; init; }
 };
 
 public sealed record TranslationError(
