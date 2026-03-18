@@ -268,15 +268,23 @@ Write XUnity cache files + regex cache
 
 ### 3.2 Auto Term Extraction (TermExtractionService)
 
-**Extraction timing:** During Round 1 translation, as additional instruction in translation prompt.
+**Extraction timing:** After Round 1 translation completes, as a **separate dedicated LLM call** (not inline in translation prompt — avoids changing the critical translation output format).
 
-**Prompt strategy:** Append to translation system prompt:
-> "While translating, also extract proper nouns from the source text and output as JSON: character names (Character), location names (Location), item names (Item), skill names (Skill), organization names (Organization). Format: `[{"original": "source", "translation": "target", "category": "Character"}]`"
+**Flow:**
+1. Round 1 translates texts normally (existing format, unchanged)
+2. After Round 1, send source+translation pairs to LLM in batches for extraction
+3. Extraction prompt asks for structured JSON output only
+
+**Extraction prompt:**
+> "Below are source texts and their translations from a game. Extract proper nouns and output as JSON array:
+> `[{"original": "source term", "translation": "translated term", "category": "Character|Location|Item|Skill|Organization"}]`
+> Only output the JSON array, nothing else."
 
 **Output parsing:**
-- LLM returns: translation result + separator + term JSON
-- Parse term candidates, deduplicate, merge with existing term table
-- Auto-mark: `Source = "AI"`, `Type = Translate`, `Priority = 0` (lower than user-added terms)
+- Parse JSON array from LLM response
+- Deduplicate candidates, merge with existing term table
+- Auto-mark: `Source = TermSource.AI`, `Type = Translate`, `Priority = 0` (lower than user-added terms)
+- **Fallback:** If extraction call fails or returns unparseable JSON, log warning and continue without extracted terms (non-blocking)
 
 **Deduplication strategy:**
 - If `Original` already exists in term table → skip (never overwrite user-configured terms)
@@ -412,11 +420,11 @@ int ExtractedTermCount { get; set; }             // AI-extracted terms
 
 ## SignalR Events
 
-Reuse existing `ai-translation` group, new events:
-- `translationMemoryHit` — broadcast on TM hit (for real-time frontend stats)
-- `patternAnalysisProgress` — LLM pattern analysis progress (pre-translation phase)
-- `termExtractionComplete` — term extraction finished, candidates ready for review
-- `roundProgress` — which round is currently executing (round 1/2)
+New events (see "SignalR Group Assignments" section below for group details):
+- `translationMemoryHit` — broadcast on TM hit (for real-time frontend stats) → `ai-translation` group
+- `patternAnalysisProgress` — LLM pattern analysis progress → `pre-translation-{gameId}` group
+- `termExtractionComplete` — term extraction finished, candidates ready for review → `pre-translation-{gameId}` group
+- `roundProgress` — which round is currently executing (round 1/2) → `pre-translation-{gameId}` group
 
 ## Frontend Changes
 
@@ -471,11 +479,143 @@ Reuse existing `ai-translation` group, new events:
 
 ## New Services
 
-| Service | Responsibility |
-|---------|----------------|
-| `TranslationMemoryService` | TM storage, loading, exact/fuzzy/pattern matching, persistence |
-| `DynamicPatternService` | Template variable detection, LLM pattern analysis, regex generation |
-| `TermExtractionService` | LLM-based term extraction, candidate management, merge with term table |
+| Service | Responsibility | DI Lifetime |
+|---------|----------------|-------------|
+| `TranslationMemoryService` | TM storage, loading, exact/fuzzy/pattern matching, persistence | `AddSingleton` |
+| `DynamicPatternService` | Template variable detection, LLM pattern analysis, regex generation | `AddSingleton` |
+| `TermExtractionService` | LLM-based term extraction, candidate management, merge with term table | `AddSingleton` |
+
+All three services registered as singletons in `Program.cs`, consistent with existing services (e.g., `TermService`, `PreTranslationService`).
+
+## Relationship to Existing GlossaryExtractionService
+
+The codebase already has `GlossaryExtractionService` which performs **runtime** LLM-based term extraction from translated text pairs (called during AI translation toggle). The new `TermExtractionService` operates during **pre-translation batch mode** with a different approach (inline extraction in the translation prompt).
+
+**Coexistence strategy:**
+- `GlossaryExtractionService` continues to handle runtime extraction (when AI translation is toggled on)
+- `TermExtractionService` handles pre-translation batch extraction (Round 1)
+- Both write to the same term table via `TermService`, using the same deduplication logic (skip if `Original` already exists)
+- No conflict: runtime extraction runs only during live translation; batch extraction runs only during pre-translation
+- Long-term: consider consolidating shared extraction logic into a base class or shared utility
+
+## Model Changes
+
+### TermEntry — New `Source` Field
+
+Add `Source` property to `TermEntry` to distinguish user-added vs AI-extracted terms:
+
+```csharp
+public enum TermSource { User, AI, Import }
+
+// On TermEntry:
+public TermSource Source { get; set; } = TermSource.User;
+```
+
+**Sync points for new field:**
+- `Models/TermEntry.cs` — add property + enum
+- `src/api/types.ts` — add TypeScript type
+- `TermSource` enum uses PascalCase (default convention, no `CamelCaseJsonStringEnumConverter`)
+
+## Infrastructure Changes
+
+### AppDataPaths Additions
+
+New properties and helpers in `AppDataPaths`:
+
+```csharp
+public string TranslationMemoryDirectory => Path.Combine(Root, "translation-memory");
+public string DynamicPatternsDirectory => Path.Combine(Root, "dynamic-patterns");
+public string TermCandidatesDirectory => Path.Combine(Root, "term-candidates");
+
+public string TranslationMemoryFile(string gameId) => Path.Combine(TranslationMemoryDirectory, $"{gameId}.json");
+public string DynamicPatternsFile(string gameId) => Path.Combine(DynamicPatternsDirectory, $"{gameId}.json");
+public string TermCandidatesFile(string gameId) => Path.Combine(TermCandidatesDirectory, $"{gameId}.json");
+```
+
+All three directories registered in `EnsureDirectoriesExist()`.
+
+### Export Exclusion
+
+`translation-memory/` directory should be **excluded** from data export (`SettingsEndpoints.cs` `/export` endpoint) — it is regeneratable from retranslation. `dynamic-patterns/` and `term-candidates/` should also be excluded (regeneratable).
+
+## Response Format Constraints
+
+### `POST /api/translate` Returns Raw Response
+
+`POST /api/translate` returns `TranslateResponse` directly (not wrapped in `ApiResult<T>`) because the TranslatorEndpoint DLL calls it directly. Phase 0 TM hits must produce the exact same `TranslateResponse` shape as LLM results — no special wrapper or different format.
+
+## Term Extraction Output Format
+
+### Separate LLM Call (Not Inline)
+
+To avoid changing the critical translation output format, term extraction uses a **separate LLM call** after Round 1 translation completes (not inline in the translation prompt):
+
+1. Round 1 translates texts normally (existing format, no output changes)
+2. After Round 1, a dedicated extraction call sends source+translation pairs to the LLM
+3. Extraction prompt asks for structured JSON output only
+4. This avoids any risk of corrupting the translation response parsing
+
+**Extraction prompt:**
+> "Below are source texts and their translations from a game. Extract proper nouns and output as JSON array:
+> `[{"original": "source term", "translation": "translated term", "category": "Character|Location|Item|Skill|Organization"}]`
+> Only output the JSON array, nothing else."
+
+**Fallback:** If extraction call fails or returns unparseable JSON, log warning and continue with Round 2 without extracted terms (non-blocking).
+
+## Performance Considerations
+
+### Fuzzy Match Budget
+
+Edit distance computation against all entries in length buckets could be expensive for large TM stores. Mitigations:
+
+1. **Length bucketing** reduces candidate pool (±20% range)
+2. **Time budget:** If a length bucket has >500 entries, skip fuzzy matching for that text (fall through to LLM). Exact match and dynamic pattern match are always O(1)/O(N_patterns) and run regardless.
+3. **Early termination:** Abort Levenshtein computation if partial distance already exceeds threshold
+4. **Runtime vs batch:** Fuzzy matching runs in both runtime and pre-translation. For runtime `POST /api/translate`, the time budget is strict (skip if slow). For pre-translation batch, the budget can be relaxed.
+
+### Expected Performance
+
+- Exact match: O(1) hash lookup — microseconds
+- Dynamic pattern match: O(N_patterns) regex — typically <100 patterns, sub-millisecond
+- Fuzzy match: O(bucket_size × text_length) — bounded by 500-entry cap, typically <10ms
+- Total Phase 0 overhead: <15ms per text, far less than LLM round-trip (seconds)
+
+## Term Review UX During Pre-Translation
+
+### Non-Blocking Review Flow
+
+Pre-translation is a long-running background operation. The term review step is handled as follows:
+
+1. Round 1 completes → extracted terms saved to `term-candidates/{gameId}.json`
+2. `termExtractionComplete` SignalR event sent to `pre-translation-{gameId}` group
+3. Pre-translation **pauses** and enters `AwaitingTermReview` status
+4. **If user is present:** frontend shows term review modal, user reviews and confirms → `POST /api/games/{id}/term-candidates/apply` → Round 2 starts
+5. **If user navigates away:** pre-translation auto-resumes after 5-minute timeout, auto-applying all extracted terms
+6. **If `AutoApplyExtractedTerms=true`:** no pause, auto-apply immediately, proceed to Round 2
+
+The `GET /api/games/{id}/pre-translate/status` response includes the `AwaitingTermReview` state so the frontend can detect and show the review UI when the user returns.
+
+## SignalR Group Assignments
+
+Corrected group assignments for new events:
+
+| Event | Group | Reason |
+|-------|-------|--------|
+| `translationMemoryHit` | `ai-translation` | Runtime translation stats |
+| `patternAnalysisProgress` | `pre-translation-{gameId}` | Pre-translation phase |
+| `termExtractionComplete` | `pre-translation-{gameId}` | Pre-translation phase |
+| `roundProgress` | `pre-translation-{gameId}` | Pre-translation phase |
+
+## CLAUDE.md Updates Required
+
+After implementation, update CLAUDE.md with:
+- New service descriptions (`TranslationMemoryService`, `DynamicPatternService`, `TermExtractionService`)
+- New data paths (`translation-memory/`, `dynamic-patterns/`, `term-candidates/`)
+- New per-game cleanup items in `DELETE /api/games/{id}`
+- New sync points for `AiTranslationSettings`, `TranslationStats`, `TermEntry.Source`
+- New API endpoints
+- Multi-round translation pipeline description
+- Export exclusion list updates
 
 ## Data Files
 
