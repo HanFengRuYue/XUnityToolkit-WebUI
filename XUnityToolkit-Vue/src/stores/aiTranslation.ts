@@ -12,7 +12,7 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
   let connection: signalR.HubConnection | null = null
 
   async function connect() {
-    if (connection?.state === signalR.HubConnectionState.Connected) return
+    if (connection && connection.state !== signalR.HubConnectionState.Disconnected) return
 
     connection = new signalR.HubConnectionBuilder()
       .withUrl('/hubs/install')

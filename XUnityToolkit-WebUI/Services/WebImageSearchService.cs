@@ -228,11 +228,12 @@ public sealed partial class WebImageSearchService(
 
         // Collect thumbnail URLs for pairing
         var thumbMatches = GoogleThumbRegex().Matches(html);
+        var thumbsSeen = new HashSet<string>();
         var thumbs = new List<string>();
         foreach (Match m in thumbMatches)
         {
             var thumbUrl = m.Groups[1].Value.Replace("\\u003d", "=").Replace("\\u0026", "&");
-            if (!thumbs.Contains(thumbUrl))
+            if (thumbsSeen.Add(thumbUrl))
                 thumbs.Add(thumbUrl);
         }
 

@@ -53,12 +53,12 @@ public static class DxgiGpuDetector
             try
             {
                 var factoryVtable = Marshal.ReadIntPtr(factoryPtr);
+                // IDXGIFactory1 vtable slot 12 = EnumAdapters1 (hoist out of loop)
+                var enumAdapters1 = Marshal.GetDelegateForFunctionPointer<EnumAdapters1Delegate>(
+                    Marshal.ReadIntPtr(factoryVtable, 12 * IntPtr.Size));
 
                 for (uint i = 0; ; i++)
                 {
-                    // IDXGIFactory1 vtable slot 12 = EnumAdapters1
-                    var enumAdapters1 = Marshal.GetDelegateForFunctionPointer<EnumAdapters1Delegate>(
-                        Marshal.ReadIntPtr(factoryVtable, 12 * IntPtr.Size));
                     hr = enumAdapters1(factoryPtr, i, out var adapterPtr);
                     if (hr < 0) break; // DXGI_ERROR_NOT_FOUND
 
