@@ -576,7 +576,7 @@ public sealed class FontReplacementService(
                     foreach (var entry in replacedFiles)
                     {
                         var backupPath = Path.Combine(backupDir, entry.BackupFileName);
-                        if (File.Exists(backupPath) && !File.Exists(entry.OriginalPath + ".bak"))
+                        if (File.Exists(backupPath))
                         {
                             try { File.Copy(backupPath, entry.OriginalPath, overwrite: true); }
                             catch (Exception rollbackEx)

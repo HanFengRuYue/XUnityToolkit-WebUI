@@ -268,6 +268,8 @@ public sealed class TermExtractionService(
     public void ClearAllCache()
     {
         _cache.Clear();
+        foreach (var sem in _locks.Values)
+            sem.Dispose();
         _locks.Clear();
     }
 

@@ -288,6 +288,8 @@ public sealed partial class DynamicPatternService(
     public void ClearAllCache()
     {
         _cache.Clear();
+        foreach (var sem in _locks.Values)
+            sem.Dispose();
         _locks.Clear();
     }
 

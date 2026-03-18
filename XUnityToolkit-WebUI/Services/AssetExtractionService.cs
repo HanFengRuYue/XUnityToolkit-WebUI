@@ -1082,7 +1082,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
     /// </summary>
     private static string DetectLanguage(IList<string> texts)
     {
-        if (texts.Count == 0) return "ja"; // Default
+        if (texts.Count == 0) return "en"; // Default
 
         int japanese = 0, chinese = 0, korean = 0, latin = 0, cyrillic = 0;
         int totalChars = 0;

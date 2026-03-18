@@ -105,6 +105,8 @@ public static class AssetEndpoints
             AppDataPaths paths,
             CancellationToken ct) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             // Pre-flight: check AI provider configuration
             var settings = await settingsService.GetAsync(ct);
             var ai = settings.AiTranslation;

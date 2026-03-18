@@ -368,7 +368,11 @@ public sealed class TranslationMemoryService(
             bucket.Lock.Enter();
             try
             {
-                candidates.AddRange(bucket.Entries);
+                var remaining = FuzzyCandidateBudget - candidates.Count;
+                if (remaining >= bucket.Entries.Count)
+                    candidates.AddRange(bucket.Entries);
+                else
+                    candidates.AddRange(bucket.Entries.Take(remaining));
             }
             finally
             {

@@ -33,6 +33,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
 - **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache` (e.g., `termService.RemoveCache`, `scriptTagService.RemoveCache`)
 - **Service cache clearing:** `TermService.ClearAllCache()`, `ScriptTagService.ClearAllCache()`, `TranslationMemoryService.ClearAllCache()`, `DynamicPatternService.ClearAllCache()`, `TermExtractionService.ClearAllCache()` clear all in-memory caches; used by settings reset (`POST /api/settings/reset`) and settings import (`POST /api/settings/import`); `RemoveCache(gameId)` clears single game
+- **`ClearAllCache` dispose invariant:** Services with per-game `ConcurrentDictionary<string, SemaphoreSlim>` locks MUST dispose all semaphores in `ClearAllCache()` (iterate `.Values` → `.Dispose()` → `.Clear()`); matches `RemoveCache` pattern
 - **Settings import cache invalidation:** `POST /api/settings/import` must call all `*Service.ClearAllCache()` methods after extracting files (same set as `/reset`); imported files overwrite disk but in-memory caches are stale otherwise
 - **Settings reset log suspension:** `POST /api/settings/reset` calls `FileLoggerProvider.SuspendFileLog()` before deleting data directory (releases log file handle), then `ResumeFileLog()` in `finally`; do NOT replace whole-directory deletion with per-subdirectory deletion (previously caused incomplete cleanup)
 - **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
@@ -65,6 +66,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 
 - **Hot-path:** `POST /api/translate` receives 100+ req/s; all I/O must use in-memory caches, never disk per request
 - `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks; **local mode batch splitting:** `TranslateAsync` loops single-text `TranslateBatchAsync` calls so `_translating` shows 1 (not batch size)
+- **Semaphore release guard:** `finally` blocks that release a semaphore MUST check `if (semaphoreAcquired)` — unconditional `Release()` after timeout/cancellation corrupts the semaphore count; same applies to stat counters like `_translating`
 - **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
 - `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
 - **Stats counters unit:** `_queued` and `_translating` count API requests (±1 per `TranslateBatchAsync` call); `_totalReceived` and `_totalTranslated` count individual texts; `MaxConcurrency` in `TranslationStats` reflects `_currentMaxConcurrency`
@@ -88,6 +90,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
 - **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
 - **`CallLlmRawAsync`:** `Task<(string content, long tokens)> CallLlmRawAsync(ApiEndpointConfig endpoint, string systemPrompt, string userContent, double temperature, CancellationToken ct)` — returns tuple, must destructure `var (content, _) = await ...`; public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`, `DynamicPatternService`, `TermExtractionService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
+- **Gemini auth:** Use `x-goog-api-key` HTTP header, NOT URL query parameter `?key=` — URL params leak in exception messages, logs, and HTTP traces
 - **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results skip `ApplyGlossaryPostProcess` but still go through term audit (counted as phase2Pass); `preComputed` dictionary tracks these indices
 - **Prompt terms:** In cloud mode, ALL translate-type term entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptTerms` is set to `null` to save context tokens; term enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
 - **Term prompt annotation:** `AppendTermAnnotation` formats Category (`GetCategoryLabel` → 角色/地点/物品/技能/组织/通用) + Description; Phase 1 uses full-width `（）`, Phase 2 uses half-width `()`; both phases include category and description in term listings sent to LLM
@@ -99,6 +102,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Lazy loading:** `EnsureCacheAsync(gameId, toLang, ct)` called from `POST /api/translate`; reads `_PreTranslated.txt` once per game; `_loadAttemptedForGameId` prevents repeated attempts (even if file missing); `UnloadCache()` resets attempt tracking
 - **Hot-path guard:** After initial load, `EnsureCacheAsync` is a single `volatile` read — no lock contention on steady state
 - **Dependencies:** `GameLibraryService` + `AppSettingsService` (both in-memory cached); `GetByIdAsync` only called on game change, not per-request
+- **IDisposable:** `PreTranslationCacheMonitor` implements `IDisposable` — disposes `_summaryTimer` and `_loadLock` on shutdown
 
 ## Asset Extraction (AssetsTools.NET)
 

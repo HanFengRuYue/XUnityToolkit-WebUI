@@ -162,11 +162,8 @@ export const useUpdateStore = defineStore('update', () => {
       pollForRestart()
     } catch (err) {
       if (restartPollTimer) { clearInterval(restartPollTimer); restartPollTimer = null }
-      state.value = prevState
       error.value = err instanceof Error ? err.message : '应用更新失败'
-      if (error.value) {
-        state.value = 'Error'
-      }
+      state.value = error.value ? 'Error' : prevState
       console.error('Apply update failed:', err)
     }
   }

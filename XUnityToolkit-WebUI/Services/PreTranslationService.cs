@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Infrastructure;
@@ -7,7 +8,7 @@ using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
 
-public sealed class PreTranslationService(
+public sealed partial class PreTranslationService(
     LlmTranslationService translationService,
     AppSettingsService settingsService,
     GameLibraryService gameLibrary,
@@ -43,9 +44,17 @@ public sealed class PreTranslationService(
         return _statuses.GetOrAdd(gameId, id => new PreTranslationStatus { GameId = id });
     }
 
+    [GeneratedRegex(@"^[a-zA-Z0-9_\-]{1,20}$")]
+    private static partial Regex SafeLanguageCodeRegex();
+
     public async Task<PreTranslationStatus> StartPreTranslationAsync(
         string gameId, List<ExtractedText> texts, string fromLang, string toLang)
     {
+        if (!SafeLanguageCodeRegex().IsMatch(toLang))
+            throw new ArgumentException("无效的目标语言代码");
+        if (!SafeLanguageCodeRegex().IsMatch(fromLang))
+            throw new ArgumentException("无效的源语言代码");
+
         var gameLock = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
         await gameLock.WaitAsync();
         try
