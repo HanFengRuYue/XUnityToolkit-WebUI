@@ -161,7 +161,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: local build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → Updater (AOT) → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **Versioning:** `build.ps1` auto-generates `2.8.{YYYYMMDDHHmm}` (CI uses `2.8.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
+- **Versioning:** `build.ps1` auto-generates `2.9.{YYYYMMDDHHmm}` (CI uses `2.9.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
 - **Data path:** Always `%AppData%\XUnityToolkit\` (no portable mode); `AppData:Root` config key allows override for dev/test
