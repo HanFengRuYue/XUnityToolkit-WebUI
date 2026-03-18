@@ -924,9 +924,12 @@ public sealed class LlmTranslationService(
         finally
         {
             // Only release semaphore and decrement translating if we actually acquired it
-            Interlocked.Decrement(ref _translating);
-            semaphore.Release();
-            _ = BroadcastStats();
+            if (semaphoreAcquired)
+            {
+                Interlocked.Decrement(ref _translating);
+                semaphore.Release();
+                _ = BroadcastStats();
+            }
         }
     }
 
@@ -1178,7 +1181,7 @@ public sealed class LlmTranslationService(
         var baseUrl = string.IsNullOrWhiteSpace(ep.ApiBaseUrl)
             ? "https://generativelanguage.googleapis.com/v1beta"
             : ep.ApiBaseUrl;
-        var endpoint = $"{baseUrl.TrimEnd('/')}/models/{model}:generateContent?key={ep.ApiKey}";
+        var endpoint = $"{baseUrl.TrimEnd('/')}/models/{model}:generateContent";
 
         var combinedContent = systemPrompt + "\n\n" + userContent;
         var body = new
@@ -1192,6 +1195,7 @@ public sealed class LlmTranslationService(
         {
             Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
         };
+        req.Headers.TryAddWithoutValidation("x-goog-api-key", ep.ApiKey);
 
         var resp = await client.SendAsync(req, ct);
         var json = await resp.Content.ReadAsStringAsync(ct);
@@ -1850,10 +1854,11 @@ public sealed class LlmTranslationService(
         var baseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
             ? "https://generativelanguage.googleapis.com/v1beta"
             : apiBaseUrl;
-        var endpoint = $"{baseUrl.TrimEnd('/')}/models?key={apiKey}";
+        var endpoint = $"{baseUrl.TrimEnd('/')}/models";
 
         var client = httpClientFactory.CreateClient("LLM");
         using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        req.Headers.TryAddWithoutValidation("x-goog-api-key", apiKey);
 
         var resp = await client.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode) return [];

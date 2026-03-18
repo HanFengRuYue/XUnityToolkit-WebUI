@@ -10,7 +10,7 @@ public sealed class PreTranslationCacheMonitor(
     GameLibraryService gameLibraryService,
     AppSettingsService settingsService,
     ScriptTagService scriptTagService,
-    ILogger<PreTranslationCacheMonitor> logger)
+    ILogger<PreTranslationCacheMonitor> logger) : IDisposable
 {
     private volatile string? _activeGameId;
     private volatile string? _loadAttemptedForGameId;
@@ -164,5 +164,11 @@ public sealed class PreTranslationCacheMonitor(
         logger.LogInformation(
             "预翻译缓存统计: 总计={Total}, 命中={Hits}, 未命中={Misses}, 命中率={Rate}%",
             stats.TotalPreTranslated, stats.CacheHits, stats.CacheMisses, stats.HitRate);
+    }
+
+    public void Dispose()
+    {
+        _summaryTimer?.Dispose();
+        _loadLock.Dispose();
     }
 }

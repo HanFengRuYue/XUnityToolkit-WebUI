@@ -198,7 +198,8 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
                             break;
                         }
                     }
-                    return f with { OriginalPath = Path.Combine(game.GamePath, relativePath) };
+                    var fullPath = PathSecurity.SafeJoin(game.GamePath, relativePath);
+                    return f with { OriginalPath = fullPath };
                 }).ToList();
 
                 var updatedCatalogFiles = newManifest.CatalogFiles.Select(c =>
@@ -215,7 +216,8 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
                             break;
                         }
                     }
-                    return c with { OriginalPath = Path.Combine(game.GamePath, relativePath) };
+                    var fullPath = PathSecurity.SafeJoin(game.GamePath, relativePath);
+                    return c with { OriginalPath = fullPath };
                 }).ToList();
 
                 newManifest = newManifest with

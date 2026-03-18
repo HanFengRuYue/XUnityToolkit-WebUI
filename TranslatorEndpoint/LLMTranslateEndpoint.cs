@@ -23,7 +23,7 @@ namespace LLMTranslate
         private string _translateUrl = DefaultUrl + "/api/translate";
         private int _maxConcurrency = 10;
         private int _maxTranslationsPerRequest = 10;
-        private bool _debugMode = true;
+        private bool _debugMode = false;
         private string _gameId = "";
 
         public override string Id
@@ -60,7 +60,7 @@ namespace LLMTranslate
             if (_maxTranslationsPerRequest < 1) _maxTranslationsPerRequest = 1;
             if (_maxTranslationsPerRequest > 50) _maxTranslationsPerRequest = 50;
 
-            _debugMode = context.GetOrCreateSetting<bool>(ConfigSection, ConfigDebugModeKey, true);
+            _debugMode = context.GetOrCreateSetting<bool>(ConfigSection, ConfigDebugModeKey, false);
             _gameId = context.GetOrCreateSetting<string>(ConfigSection, ConfigGameIdKey, "");
 
             _translateUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate";

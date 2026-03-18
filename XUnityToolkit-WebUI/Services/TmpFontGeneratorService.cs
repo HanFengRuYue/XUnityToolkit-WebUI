@@ -147,7 +147,7 @@ public sealed class TmpFontGeneratorService(
         catch (Exception ex)
         {
             logger.LogError(ex, "字体生成失败");
-            return new FontGenerationResult(false, null, null, 0, 0, 0, ex.Message);
+            return new FontGenerationResult(false, null, null, 0, 0, 0, "字体生成失败，请检查字体文件格式");
         }
         finally
         {

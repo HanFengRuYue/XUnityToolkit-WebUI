@@ -97,7 +97,6 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
             return 0;
 
         var cjkCount = 0;
-        var westernChars = 0;
         var inWord = false;
         var wordCount = 0;
 
@@ -118,7 +117,6 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
                 {
                     inWord = true;
                 }
-                westernChars++;
             }
             else
             {

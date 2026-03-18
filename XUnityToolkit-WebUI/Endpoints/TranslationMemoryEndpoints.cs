@@ -77,6 +77,8 @@ public static class TranslationMemoryEndpoints
             PreTranslationService preTranslationService,
             CancellationToken ct) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var count = await extractionService.ApplyCandidatesAsync(id, request.Originals, ct);
             // Resume paused pre-translation if waiting for term review
             preTranslationService.ResumeAfterTermReview(id);

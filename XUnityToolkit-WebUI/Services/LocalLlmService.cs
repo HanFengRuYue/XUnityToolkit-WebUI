@@ -705,6 +705,7 @@ public sealed class LocalLlmService(
                 ? appSettings.HfMirrorUrl.TrimEnd('/')
                 : "https://huggingface.co";
             url = $"{mirrorBase}/{entry.HuggingFaceRepo}/resolve/main/{entry.HuggingFaceFile}";
+            PathSecurity.ValidateExternalUrl(url);
             fileName = entry.HuggingFaceFile;
             _downloadModelScopeState[entry.Id] = false;
         }
