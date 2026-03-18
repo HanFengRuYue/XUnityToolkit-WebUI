@@ -30,6 +30,8 @@ public enum TermCategory
     General
 }
 
+public enum TermSource { User, AI, Import }
+
 public sealed record TermEntry
 {
     [JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermType>))]
@@ -43,4 +45,5 @@ public sealed record TermEntry
     public bool CaseSensitive { get; set; } = true;
     public bool ExactMatch { get; set; }
     public int Priority { get; set; }
+    public TermSource Source { get; set; } = TermSource.User;
 }
