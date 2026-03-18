@@ -98,6 +98,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
 - Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
 - **Language detection:** Proportion-based; Latin >80% → English immediately; non-Latin needs ≥50 chars AND ≥2% of total; Japanese requires kana ≥5% of CJK+kana; default is `"en"` (not `"ja"`); `IsGameText` is heuristic exclusion filter
+- **`IsGameText` path filter:** Path detection requires no-space heuristic — `text.Contains('/') && text.Contains('.') && !text.Contains(' ')` for Unix paths; `text.Contains(":\\")` for Windows paths; natural text with `/` and `.` (rich text closing tags like `</b>`, dialogue with periods) preserved; backslash paths also require no spaces
+- **`CollectStrings` depth:** Recursion limit is 20 (supports deeply nested frameworks like GameCreator 2)
+- **GameCreator 2 support:** `DetectGameCreatorDialogueType` identifies Dialogue/Quest/Actor/Stat types; type-specific extraction with `GameCreator:{Type}:{Name}` source tags; `DetectAndLogTemplateVariables` scans for `{Variable}` patterns (e.g., `{PC}`, `{M}`) and logs DNT term suggestions
 - XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
 - **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
 

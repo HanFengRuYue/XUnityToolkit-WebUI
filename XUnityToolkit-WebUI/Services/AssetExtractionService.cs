@@ -202,6 +202,9 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         logger.LogInformation("提取完成: {Total} 条文本 (去重后 {Unique} 条), 来自 {Files} 个文件",
             allTexts.Count, uniqueTexts.Count, totalFilesScanned);
 
+        // Detect template variables (e.g. {PC}, {M}, {D}) — log for user to configure DNT terms
+        DetectAndLogTemplateVariables(uniqueTexts);
+
         progressData.Phase = "detecting";
         progress?.Report(progressData);
 
@@ -349,6 +352,19 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                 }
 
                 var name = mbBase["m_Name"].IsDummy ? "(unnamed)" : mbBase["m_Name"].AsString;
+
+                // Check for GameCreator Dialogue — extract dialogue nodes specifically
+                var gcDialogueType = DetectGameCreatorDialogueType(mbBase);
+                if (gcDialogueType != null)
+                {
+                    var gcTexts = ExtractGameCreatorTexts(mbBase, gcDialogueType, name, fileName);
+                    texts.AddRange(gcTexts);
+                    if (gcTexts.Count > 0)
+                        logger.LogDebug("检测到 GameCreator {Type}，提取了 {Count} 条文本: {Name}",
+                            gcDialogueType, gcTexts.Count, name);
+                    continue;
+                }
+
                 var strings = new List<string>();
                 CollectStrings(mbBase, strings, depth: 0);
 
@@ -373,7 +389,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     private static void CollectStrings(AssetTypeValueField field, List<string> results, int depth)
     {
-        if (depth > 10 || field.IsDummy) return;
+        if (depth > 20 || field.IsDummy) return;
 
         if (field.TemplateField.ValueType == AssetValueType.String)
         {
@@ -468,6 +484,302 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         return results;
     }
 
+    // ── GameCreator 2 Detection & Extraction ──────────────────────────────
+
+    /// <summary>
+    /// Detect whether a MonoBehaviour is a GameCreator 2 type.
+    /// Returns the detected type name ("Dialogue", "Quest", "Actor", "Item", "Stat") or null.
+    /// GameCreator stores dialogue trees, quest definitions, character data, and inventory items
+    /// as ScriptableObjects with characteristic field structures.
+    /// </summary>
+    private static string? DetectGameCreatorDialogueType(AssetTypeValueField mbBase)
+    {
+        // Dialogue: has m_Story field containing dialogue node tree
+        var mStory = mbBase["m_Story"];
+        if (!mStory.IsDummy)
+        {
+            var mNodes = mStory["m_Nodes"];
+            if (!mNodes.IsDummy)
+                return "Dialogue";
+        }
+
+        // Quest: has m_Tasks array with quest task definitions
+        var mTasks = mbBase["m_Tasks"];
+        if (!mTasks.IsDummy)
+        {
+            // Distinguish from other types that might have m_Tasks — check for quest-specific fields
+            var mTitle = mbBase["m_Title"];
+            var mDescription = mbBase["m_Description"];
+            if (!mTitle.IsDummy || !mDescription.IsDummy)
+                return "Quest";
+        }
+
+        // Actor: has m_ActorName or m_PrimaryActorName (GameCreator Dialogue Actor)
+        if (!mbBase["m_ActorName"].IsDummy || !mbBase["m_PrimaryActorName"].IsDummy)
+            return "Actor";
+
+        // Stat/Attribute/StatusEffect: has m_Acronym (unique to GC stats)
+        if (!mbBase["m_Acronym"].IsDummy && !mbBase["m_Title"].IsDummy)
+            return "Stat";
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extract text from a GameCreator 2 MonoBehaviour with type-specific source tagging.
+    /// Falls back to generic CollectStrings but with better source categorization.
+    /// </summary>
+    private List<ExtractedText> ExtractGameCreatorTexts(
+        AssetTypeValueField mbBase, string gcType, string name, string assetFileName)
+    {
+        var results = new List<ExtractedText>();
+
+        switch (gcType)
+        {
+            case "Dialogue":
+                ExtractGameCreatorDialogue(mbBase, name, assetFileName, results);
+                break;
+            case "Quest":
+                ExtractGameCreatorQuest(mbBase, name, assetFileName, results);
+                break;
+            case "Actor":
+                ExtractGameCreatorActor(mbBase, name, assetFileName, results);
+                break;
+            default:
+                // For Stat and other types, use generic collection with GC source tag
+                var strings = new List<string>();
+                CollectStrings(mbBase, strings, depth: 0);
+                foreach (var str in strings)
+                    results.Add(new ExtractedText
+                    {
+                        Text = str,
+                        Source = $"GameCreator:{gcType}:{name}",
+                        AssetFile = assetFileName
+                    });
+                break;
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Extract dialogue text from GameCreator Dialogue ScriptableObject.
+    /// Walks m_Story.m_Nodes to extract all dialogue content, choices, and instruction text.
+    /// </summary>
+    private void ExtractGameCreatorDialogue(
+        AssetTypeValueField mbBase, string name, string assetFileName, List<ExtractedText> results)
+    {
+        var mStory = mbBase["m_Story"];
+        if (mStory.IsDummy) return;
+
+        // Extract from m_Nodes array — each node contains dialogue text
+        foreach (var node in GetArrayElements(mStory["m_Nodes"]))
+        {
+            // Direct text content fields
+            foreach (var fieldName in new[] { "m_Content", "m_ContentChoice", "m_Text", "m_Message", "m_Tag" })
+            {
+                var field = node[fieldName];
+                if (!field.IsDummy && field.TemplateField.ValueType == AssetValueType.String)
+                {
+                    var text = field.AsString;
+                    if (IsGameText(text))
+                        results.Add(new ExtractedText
+                        {
+                            Text = text,
+                            Source = $"GameCreator:Dialogue:{name}",
+                            AssetFile = assetFileName
+                        });
+                }
+            }
+
+            // Array text fields (choices, random values)
+            foreach (var arrayFieldName in new[] { "m_Values", "m_ValuesChoices", "m_ValuesRandom" })
+            {
+                var arrayField = node[arrayFieldName];
+                if (arrayField.IsDummy) continue;
+                foreach (var elem in GetArrayElements(arrayField))
+                {
+                    if (elem.TemplateField.ValueType == AssetValueType.String)
+                    {
+                        var text = elem.AsString;
+                        if (IsGameText(text))
+                            results.Add(new ExtractedText
+                            {
+                                Text = text,
+                                Source = $"GameCreator:Dialogue:{name}",
+                                AssetFile = assetFileName
+                            });
+                    }
+                }
+            }
+
+            // Recursively collect from nested instructions (m_InstructionsOnStart, m_InstructionsOnEnd, etc.)
+            foreach (var instrFieldName in new[] { "m_InstructionsOnStart", "m_InstructionsOnEnd", "m_Instructions", "m_Conditions" })
+            {
+                var instrField = node[instrFieldName];
+                if (!instrField.IsDummy)
+                {
+                    var instrStrings = new List<string>();
+                    CollectStrings(instrField, instrStrings, depth: 0);
+                    foreach (var str in instrStrings)
+                        results.Add(new ExtractedText
+                        {
+                            Text = str,
+                            Source = $"GameCreator:Dialogue:{name}",
+                            AssetFile = assetFileName
+                        });
+                }
+            }
+        }
+
+        // Also collect any top-level strings we might have missed
+        var topStrings = new List<string>();
+        CollectGameCreatorRemainingStrings(mbBase, topStrings, results);
+        foreach (var str in topStrings)
+            results.Add(new ExtractedText
+            {
+                Text = str,
+                Source = $"GameCreator:Dialogue:{name}",
+                AssetFile = assetFileName
+            });
+    }
+
+    /// <summary>
+    /// Extract quest text from GameCreator Quest ScriptableObject.
+    /// Extracts title, description, and recursively walks task trees.
+    /// </summary>
+    private void ExtractGameCreatorQuest(
+        AssetTypeValueField mbBase, string name, string assetFileName, List<ExtractedText> results)
+    {
+        // Extract top-level quest fields
+        foreach (var fieldName in new[] { "m_Title", "m_Description", "m_Completion" })
+        {
+            var field = mbBase[fieldName];
+            if (!field.IsDummy && field.TemplateField.ValueType == AssetValueType.String)
+            {
+                var text = field.AsString;
+                if (IsGameText(text))
+                    results.Add(new ExtractedText
+                    {
+                        Text = text,
+                        Source = $"GameCreator:Quest:{name}",
+                        AssetFile = assetFileName
+                    });
+            }
+        }
+
+        // Recursively extract from tasks
+        ExtractGameCreatorTasks(mbBase["m_Tasks"], name, assetFileName, results, depth: 0);
+
+        // Collect any remaining strings (instructions, conditions, etc.)
+        var remaining = new List<string>();
+        CollectGameCreatorRemainingStrings(mbBase, remaining, results);
+        foreach (var str in remaining)
+            results.Add(new ExtractedText
+            {
+                Text = str,
+                Source = $"GameCreator:Quest:{name}",
+                AssetFile = assetFileName
+            });
+    }
+
+    /// <summary>
+    /// Recursively extract task text from GameCreator quest task trees.
+    /// </summary>
+    private void ExtractGameCreatorTasks(
+        AssetTypeValueField tasksField, string name, string assetFileName,
+        List<ExtractedText> results, int depth)
+    {
+        if (tasksField.IsDummy || depth > 5) return;
+
+        foreach (var task in GetArrayElements(tasksField))
+        {
+            foreach (var fieldName in new[] { "m_Title", "m_Description", "m_Completion", "m_Text" })
+            {
+                var field = task[fieldName];
+                if (!field.IsDummy && field.TemplateField.ValueType == AssetValueType.String)
+                {
+                    var text = field.AsString;
+                    if (IsGameText(text))
+                        results.Add(new ExtractedText
+                        {
+                            Text = text,
+                            Source = $"GameCreator:Quest:{name}",
+                            AssetFile = assetFileName
+                        });
+                }
+            }
+
+            // Sub-tasks (recursive)
+            ExtractGameCreatorTasks(task["m_Tasks"], name, assetFileName, results, depth + 1);
+
+            // Instructions within tasks
+            foreach (var instrFieldName in new[] { "m_InstructionsOnStart", "m_InstructionsOnEnd", "m_InstructionsOnComplete", "m_Instructions" })
+            {
+                var instrField = task[instrFieldName];
+                if (!instrField.IsDummy)
+                {
+                    var instrStrings = new List<string>();
+                    CollectStrings(instrField, instrStrings, depth: 0);
+                    foreach (var str in instrStrings)
+                        results.Add(new ExtractedText
+                        {
+                            Text = str,
+                            Source = $"GameCreator:Quest:{name}",
+                            AssetFile = assetFileName
+                        });
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extract character data from GameCreator Actor ScriptableObject.
+    /// </summary>
+    private static void ExtractGameCreatorActor(
+        AssetTypeValueField mbBase, string name, string assetFileName, List<ExtractedText> results)
+    {
+        foreach (var fieldName in new[]
+        {
+            "m_ActorName", "m_ActorDescription",
+            "m_PrimaryActorName", "m_PrimaryActorDescription",
+            "m_AlternateActorName", "m_AlternateActorDescription"
+        })
+        {
+            var field = mbBase[fieldName];
+            if (!field.IsDummy && field.TemplateField.ValueType == AssetValueType.String)
+            {
+                var text = field.AsString;
+                if (IsGameText(text))
+                    results.Add(new ExtractedText
+                    {
+                        Text = text,
+                        Source = $"GameCreator:Actor:{name}",
+                        AssetFile = assetFileName
+                    });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collect remaining strings from a GameCreator MonoBehaviour that weren't caught
+    /// by type-specific extraction. Skips strings already found in results.
+    /// </summary>
+    private static void CollectGameCreatorRemainingStrings(
+        AssetTypeValueField mbBase, List<string> remaining, List<ExtractedText> alreadyFound)
+    {
+        var existingTexts = new HashSet<string>(alreadyFound.Select(t => t.Text));
+        var allStrings = new List<string>();
+        CollectStrings(mbBase, allStrings, depth: 0);
+        foreach (var str in allStrings)
+        {
+            if (!existingTexts.Contains(str))
+                remaining.Add(str);
+        }
+    }
+
+    // ── End GameCreator 2 ───────────────────────────────────────────────
+
     /// <summary>
     /// Get array elements from an AssetsTools.NET array field.
     /// Arrays have structure: field -> "Array" child -> actual elements.
@@ -506,9 +818,11 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         if (string.IsNullOrWhiteSpace(text)) return false;
         if (text.Length < 2 || text.Length > 2000) return false;
 
-        // Skip paths
-        if (text.Contains('/') && (text.Contains('.') || text.Contains('\\'))) return false;
-        if (text.Contains(":\\")) return false;
+        // Skip file paths — require path-like structure, not just presence of / and .
+        // Natural text often contains both (e.g., "Yes/No.", "<b>bold</b> text.", "2.1% bonus")
+        if (text.Contains(":\\") || text.StartsWith("\\\\")) return false; // Windows/UNC paths
+        if (text.Contains('\\') && !text.Contains(' ')) return false; // Backslash paths without spaces
+        if (text.Contains('/') && text.Contains('.') && !text.Contains(' ')) return false; // Unix-like paths
 
         // Skip GUIDs
         if (GuidPattern().IsMatch(text)) return false;
@@ -729,4 +1043,29 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     [GeneratedRegex(@"^[A-Za-z0-9+/=]{40,}$")]
     private static partial Regex Base64LikePattern();
+
+    [GeneratedRegex(@"\{[A-Za-z_]\w{0,15}\}")]
+    private static partial Regex TemplateVariablePattern();
+
+    /// <summary>
+    /// Detect template variable patterns (e.g., {PC}, {M}, {D}) in extracted texts
+    /// and log them so the user knows to configure DoNotTranslate terms.
+    /// </summary>
+    private void DetectAndLogTemplateVariables(List<ExtractedText> texts)
+    {
+        var variables = new HashSet<string>();
+
+        foreach (var text in texts)
+        {
+            foreach (Match match in TemplateVariablePattern().Matches(text.Text))
+                variables.Add(match.Value);
+        }
+
+        if (variables.Count > 0)
+        {
+            logger.LogInformation(
+                "检测到 {Count} 个模板变量: {Variables}。建议为这些变量添加「不翻译」术语以在翻译中保留原文",
+                variables.Count, string.Join(", ", variables.Order()));
+        }
+    }
 }
