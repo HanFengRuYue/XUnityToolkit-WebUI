@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onDeactivated } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onActivated, onBeforeUnmount, onDeactivated } from 'vue'
 import {
   NButton, NIcon, NUpload, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
@@ -384,7 +384,12 @@ async function cleanupConnection() {
   connection = null
 }
 
+onActivated(() => {
+  window.addEventListener('resize', checkMobile)
+})
+
 onDeactivated(async () => {
+  window.removeEventListener('resize', checkMobile)
   await cleanupConnection()
 })
 

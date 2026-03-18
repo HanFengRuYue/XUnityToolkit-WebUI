@@ -347,11 +347,13 @@ public sealed class UpdateService(
             || (_resolvedTag is null && _releaseAssets is null))
             throw new InvalidOperationException("没有可用的更新");
 
-        if (_downloadCts is not null)
+        var newCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (Interlocked.CompareExchange(ref _downloadCts, newCts, null) is not null)
+        {
+            newCts.Dispose();
             throw new InvalidOperationException("下载已在进行中");
-
-        _downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var token = _downloadCts.Token;
+        }
+        var token = newCts.Token;
 
         var stagingDir = Path.Combine(paths.Root, "update-staging");
         var filesDir = Path.Combine(stagingDir, "files");

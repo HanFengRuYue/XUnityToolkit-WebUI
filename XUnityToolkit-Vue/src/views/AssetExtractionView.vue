@@ -65,13 +65,6 @@ const actionOptions = [
   { label: 'Exclude (排除)', value: 'Exclude' as ScriptTagAction },
 ]
 
-async function loadCacheSetting() {
-  try {
-    const settings = await settingsApi.get()
-    enablePreTranslationCache.value = settings.aiTranslation?.enablePreTranslationCache ?? false
-  } catch { /* ignore */ }
-}
-
 // ── Script tag cleaning ──
 
 async function loadScriptTags() {

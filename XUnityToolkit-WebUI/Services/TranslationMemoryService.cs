@@ -222,7 +222,7 @@ public sealed class TranslationMemoryService(
 
     public void ClearAllCache()
     {
-        foreach (var gameId in _debounceTimers.Keys)
+        foreach (var gameId in _debounceTimers.Keys.ToList())
             CancelDebounceTimer(gameId);
         _stores.Clear();
         foreach (var kvp in _persistLocks)
@@ -281,11 +281,15 @@ public sealed class TranslationMemoryService(
     {
         _dirtyTimestamps[gameId] = DateTime.UtcNow.Ticks;
 
-        // Cancel existing timer
-        CancelDebounceTimer(gameId);
-
+        // Cancel existing timer and atomically swap in new CTS
         var cts = new CancellationTokenSource();
+        var old = _debounceTimers.GetValueOrDefault(gameId);
         _debounceTimers[gameId] = cts;
+        if (old is not null)
+        {
+            try { old.Cancel(); } catch (ObjectDisposedException) { }
+            old.Dispose();
+        }
         var token = cts.Token;
 
         _ = Task.Run(async () =>

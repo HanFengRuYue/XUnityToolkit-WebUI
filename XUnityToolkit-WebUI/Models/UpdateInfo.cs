@@ -88,15 +88,20 @@ public sealed class GitHubRelease
 {
     [JsonPropertyName("tag_name")]
     public required string TagName { get; set; }
+    [JsonPropertyName("body")]
     public string? Body { get; set; }
+    [JsonPropertyName("prerelease")]
     public bool Prerelease { get; set; }
+    [JsonPropertyName("assets")]
     public List<GitHubAsset> Assets { get; set; } = [];
 }
 
 public sealed class GitHubAsset
 {
+    [JsonPropertyName("name")]
     public required string Name { get; set; }
     [JsonPropertyName("browser_download_url")]
     public required string BrowserDownloadUrl { get; set; }
+    [JsonPropertyName("size")]
     public long Size { get; set; }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onUnmounted, onDeactivated, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
 import {
   NIcon,
   NButton,
@@ -267,7 +267,7 @@ onDeactivated(() => {
   aiStore.disconnect()
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   aiStore.disconnect()
 })
 </script>

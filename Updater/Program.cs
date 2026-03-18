@@ -439,7 +439,7 @@ partial class Program
         int size = 520;
         char[] buffer = new char[260];
         int result = RegQueryValueEx(hKey, name, nint.Zero, out type, buffer, ref size);
-        if (result != 0 || type != REG_SZ) return null;
+        if (result != 0 || type != REG_SZ || size < 2) return null;
         return new string(buffer, 0, (size / 2) - 1);
     }
 

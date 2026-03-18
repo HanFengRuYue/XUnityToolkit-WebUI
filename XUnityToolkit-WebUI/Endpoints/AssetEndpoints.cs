@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
@@ -123,12 +124,17 @@ public static class AssetEndpoints
             if (extractResult is null || extractResult.Texts.Count == 0)
                 return Results.BadRequest(ApiResult.Fail("没有可翻译的文本"));
 
+            var fromLang = request.FromLang ?? extractResult.DetectedLanguage ?? "ja";
+            var toLang = request.ToLang ?? "zh";
+            if (!Regex.IsMatch(fromLang, @"^[a-zA-Z0-9_\-]{1,20}$"))
+                return Results.BadRequest(ApiResult.Fail("无效的源语言代码"));
+            if (!Regex.IsMatch(toLang, @"^[a-zA-Z0-9_\-]{1,20}$"))
+                return Results.BadRequest(ApiResult.Fail("无效的目标语言代码"));
+
             try
             {
                 var status = await preTranslation.StartPreTranslationAsync(
-                    id, extractResult.Texts,
-                    request.FromLang ?? extractResult.DetectedLanguage ?? "ja",
-                    request.ToLang ?? "zh");
+                    id, extractResult.Texts, fromLang, toLang);
 
                 return Results.Ok(ApiResult<PreTranslationStatus>.Ok(status));
             }

@@ -696,6 +696,9 @@ public static class GameEndpoints
             string id,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var entries = await termService.GetAsync(id);
             return Results.Ok(ApiResult<List<TermEntry>>.Ok(entries));
         });
@@ -705,6 +708,9 @@ public static class GameEndpoints
             List<TermEntry> entries,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             if (entries.Count > 10000)
                 return Results.BadRequest(ApiResult.Fail("术语条目不能超过 10000 条。"));
 
@@ -725,6 +731,9 @@ public static class GameEndpoints
             ImportFromGameRequest request,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var (added, skipped) = await termService.ImportFromGameAsync(id, request.SourceGameId);
             return Results.Ok(ApiResult<object>.Ok(new { added, skipped }));
         });

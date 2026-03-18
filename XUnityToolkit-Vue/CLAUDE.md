@@ -33,6 +33,8 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
 - SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
 - **SignalR in KeepAlive views:** NEVER create `HubConnection` at module/script level — always create inside `onMounted` and clean up in BOTH `onDeactivated` AND `onBeforeUnmount` (KeepAlive views are deactivated, not unmounted — `onBeforeUnmount` alone won't fire); extract cleanup into a shared function to avoid duplication; type `let connection: HubConnection | null = null` and assign in `onMounted`
+- **Window listeners in KeepAlive views:** `window.addEventListener` in `onMounted` must pair with `removeEventListener` in BOTH `onDeactivated` AND `onBeforeUnmount`; re-add in `onActivated` — otherwise listener stays active when view is deactivated, or accumulates on re-activation
+- **`onBeforeUnmount` not `onUnmounted`:** Always use `onBeforeUnmount` (not `onUnmounted`) for cleanup — `onUnmounted` fires after the component is already destroyed, too late for safe teardown; `onUnmounted` also never fires for KeepAlive views during normal navigation
 
 ## Patterns & Gotchas
 

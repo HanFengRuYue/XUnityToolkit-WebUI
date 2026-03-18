@@ -140,9 +140,10 @@ public static class FontReplacementEndpoints
                         File.Delete(existing);
                 }
 
-                await using var stream = File.Create(destPath);
-                await file.CopyToAsync(stream);
-                stream.Close();
+                {
+                    await using var stream = File.Create(destPath);
+                    await file.CopyToAsync(stream);
+                }
 
                 if (!fontReplacementService.ValidateCustomFont(destPath))
                 {
@@ -157,6 +158,9 @@ public static class FontReplacementEndpoints
         // DELETE .../custom-font
         group.MapDelete("/custom-font", (string id, AppDataPaths appDataPaths) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var customDir = appDataPaths.GetCustomFontDirectory(id);
             if (Directory.Exists(customDir))
             {
