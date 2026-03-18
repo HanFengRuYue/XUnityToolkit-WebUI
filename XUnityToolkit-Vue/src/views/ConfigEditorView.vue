@@ -249,6 +249,16 @@ function handleBack() {
     height: calc(100vh - 94px);
   }
 
+  .editor-toolbar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .toolbar-left {
+    flex: 1;
+    min-width: 0;
+  }
+
   .toolbar-title {
     font-size: 12px;
   }
@@ -256,6 +266,12 @@ function handleBack() {
   .config-textarea {
     font-size: 12px;
     padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar-title {
+    display: none;
   }
 }
 </style>

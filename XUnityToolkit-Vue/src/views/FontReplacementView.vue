@@ -483,9 +483,26 @@ onBeforeUnmount(async () => {
 
 @media (max-width: 480px) {
   .status-row {
+    flex-direction: column;
+    align-items: flex-start;
     padding: 8px 10px;
     gap: 8px;
   }
+
+  .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .header-actions :deep(.n-upload),
+  .header-actions :deep(.n-upload-trigger) {
+    width: 100%;
+  }
+
+  .header-actions :deep(.n-button) {
+    flex: 1;
+  }
+
   :deep(.n-data-table) {
     font-size: 12px;
   }
