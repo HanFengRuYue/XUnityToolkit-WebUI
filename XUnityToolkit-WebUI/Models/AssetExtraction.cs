@@ -34,6 +34,10 @@ public sealed class PreTranslationStatus
     public int TranslatedTexts { get; set; }
     public int FailedTexts { get; set; }
     public string? Error { get; set; }
+    public int CurrentRound { get; set; }
+    public string? CurrentPhase { get; set; } // "patternAnalysis", "round1", "termReview", "round2", "writingCache"
+    public int ExtractedTermCount { get; set; }
+    public int DynamicPatternCount { get; set; }
 }
 
 public enum PreTranslationState
@@ -42,5 +46,6 @@ public enum PreTranslationState
     Running,
     Completed,
     Failed,
-    Cancelled
+    Cancelled,
+    AwaitingTermReview
 }
