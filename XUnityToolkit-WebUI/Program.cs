@@ -147,6 +147,8 @@ builder.Services.AddSingleton<AssetExtractionService>();
 builder.Services.AddSingleton<PreTranslationService>();
 builder.Services.AddSingleton<PreTranslationCacheMonitor>();
 builder.Services.AddSingleton<TranslationMemoryService>();
+builder.Services.AddSingleton<DynamicPatternService>();
+builder.Services.AddSingleton<TermExtractionService>();
 builder.Services.AddSingleton<PluginPackageService>();
 builder.Services.AddSingleton<FontReplacementService>();
 builder.Services.AddSingleton<TmpFontGeneratorService>();
