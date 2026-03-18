@@ -37,6 +37,9 @@ public static class SettingsEndpoints
             AppSettingsService settingsService,
             TermService termService,
             ScriptTagService scriptTagService,
+            TranslationMemoryService tmService,
+            DynamicPatternService dynamicPatternService,
+            TermExtractionService extractionService,
             FileLoggerProvider fileLoggerProvider,
             ILogger<AppSettingsService> logger) =>
         {
@@ -44,6 +47,9 @@ public static class SettingsEndpoints
             settingsService.InvalidateCache();
             termService.ClearAllCache();
             scriptTagService.ClearAllCache();
+            tmService.ClearAllCache();
+            dynamicPatternService.ClearAllCache();
+            extractionService.ClearAllCache();
 
             var errors = new List<string>();
 
@@ -114,6 +120,7 @@ public static class SettingsEndpoints
                 "models", "llama", "generated-fonts", "logs",
                 "update-staging", "update-backup", "update-temp",
                 "backups", "font-backups", "custom-fonts",
+                "translation-memory", "dynamic-patterns", "term-candidates",
             };
             // font-generation/temp and font-generation/uploads are excluded separately
             var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
