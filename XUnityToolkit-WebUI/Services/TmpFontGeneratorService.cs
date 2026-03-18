@@ -21,6 +21,7 @@ public sealed class TmpFontGeneratorService(
     TmpFontService tmpFontService,
     CharacterSetService characterSetService,
     AppDataPaths appDataPaths,
+    SystemTrayService trayService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<TmpFontGeneratorService> logger)
 {
@@ -429,6 +430,9 @@ public sealed class TmpFontGeneratorService(
 
                 logger.LogInformation("字体生成完成: {FontName}, {Count} 个字形, {Pages} 页 Atlas, 耗时 {Ms}ms, 输出: {Path}",
                     fontName, allGlyphs.Count, atlasPages.Count, stopwatch.ElapsedMilliseconds, outputPath);
+
+                trayService.ShowNotification("字体生成完成",
+                    $"「{fontName}」已生成, {allGlyphs.Count} 个字形");
 
                 return result;
             }

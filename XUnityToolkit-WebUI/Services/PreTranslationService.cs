@@ -14,6 +14,7 @@ public sealed class PreTranslationService(
     GameLibraryService gameLibrary,
     ScriptTagService scriptTagService,
     AppDataPaths appDataPaths,
+    SystemTrayService trayService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<PreTranslationService> logger)
 {
@@ -174,6 +175,9 @@ public sealed class PreTranslationService(
 
         status.State = PreTranslationState.Completed;
         await BroadcastStatus(gameId, status);
+
+        trayService.ShowNotification("预翻译完成",
+            $"「{game.Name}」已翻译 {translations.Count}/{textList.Count} 条文本");
     }
 
     /// <summary>
