@@ -355,7 +355,16 @@ const tableColumns = computed<DataTableColumns<TermRow>>(() => {
 
   if (visibleColumns.value.includes('caseSensitive')) {
     cols.push({
-      title: '大小写',
+      title() {
+        return h(NPopover, { trigger: 'hover', placement: 'top' }, {
+          trigger: () => h('span', { style: 'cursor: help; border-bottom: 1px dashed var(--text-3)' }, '大小写'),
+          default: () => h('div', { style: 'max-width: 280px; font-size: 13px' }, [
+            h('div', { style: 'font-weight: 600; margin-bottom: 4px' }, '大小写敏感'),
+            h('div', '开启后，匹配时区分大小写。'),
+            h('div', { style: 'margin-top: 4px; color: var(--text-3)' }, '例如：开启后，术语 "Light" 不会匹配 "light" 或 "LIGHT"。'),
+          ]),
+        })
+      },
       key: 'caseSensitive',
       width: 60,
       align: 'center',
