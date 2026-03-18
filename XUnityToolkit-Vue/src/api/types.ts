@@ -175,6 +175,12 @@ export interface AiTranslationSettings {
   enablePreTranslationCache: boolean
   termAuditEnabled: boolean
   naturalTranslationMode: boolean
+  enableTranslationMemory: boolean
+  fuzzyMatchThreshold: number
+  enableLlmPatternAnalysis: boolean
+  enableMultiRoundTranslation: boolean
+  enableAutoTermExtraction: boolean
+  autoApplyExtractedTerms: boolean
 }
 
 export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
@@ -214,6 +220,7 @@ export interface RecentTranslation {
   hasDnt?: boolean
   /** null=no audit, "phase1Pass", "phase2Pass", "forceCorrected", "failed" */
   termAuditResult?: string | null
+  translationSource?: string | null
 }
 
 export interface TranslationError {
@@ -241,6 +248,12 @@ export interface TranslationStats {
   termAuditPhase1PassCount: number
   termAuditPhase2PassCount: number
   termAuditForceCorrectedCount: number
+  translationMemoryHits: number
+  translationMemoryFuzzyHits: number
+  translationMemoryPatternHits: number
+  translationMemoryMisses: number
+  dynamicPatternCount: number
+  extractedTermCount: number
 }
 
 export interface AiEndpointStatus {
@@ -321,6 +334,7 @@ export interface EndpointTestResult {
 
 export type TermType = 'translate' | 'doNotTranslate'
 export type TermCategory = 'character' | 'location' | 'item' | 'skill' | 'organization' | 'general'
+export type TermSource = 'User' | 'AI' | 'Import'
 
 export interface TermEntry {
   type: TermType
@@ -332,6 +346,7 @@ export interface TermEntry {
   caseSensitive: boolean
   exactMatch: boolean
   priority: number
+  source?: TermSource
 }
 
 /** @deprecated Use TermEntry instead */
@@ -421,7 +436,7 @@ export interface AssetExtractionResult {
   extractedAt: string
 }
 
-export type PreTranslationState = 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Cancelled'
+export type PreTranslationState = 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'AwaitingTermReview'
 
 export interface PreTranslationStatus {
   gameId: string
@@ -430,6 +445,40 @@ export interface PreTranslationStatus {
   translatedTexts: number
   failedTexts: number
   error?: string
+  currentRound: number
+  currentPhase?: string
+  extractedTermCount: number
+  dynamicPatternCount: number
+}
+
+export interface TranslationMemoryStats {
+  entryCount: number
+  exactHits: number
+  fuzzyHits: number
+  patternHits: number
+  misses: number
+}
+
+export interface DynamicPattern {
+  originalTemplate: string
+  translatedTemplate: string
+  source: string
+}
+
+export interface DynamicPatternStore {
+  patterns: DynamicPattern[]
+}
+
+export interface TermCandidate {
+  original: string
+  translation: string
+  category: TermCategory
+  frequency: number
+}
+
+export interface TermCandidateStore {
+  candidates: TermCandidate[]
+  extractedAt: string
 }
 
 export interface TranslationEntry {
