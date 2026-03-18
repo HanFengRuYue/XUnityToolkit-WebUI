@@ -25,9 +25,9 @@ public static class BepInExLogEndpoints
                 var response = await logService.ReadLogAsync(game);
                 return Results.Ok(ApiResult<BepInExLogResponse>.Ok(response));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.BadRequest(ApiResult.Fail($"读取日志失败: {ex.Message}"));
+                return Results.BadRequest(ApiResult.Fail("读取日志失败"));
             }
         });
 
@@ -69,9 +69,9 @@ public static class BepInExLogEndpoints
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.BadRequest(ApiResult.Fail($"AI 分析失败: {ex.Message}"));
+                return Results.BadRequest(ApiResult.Fail("AI 分析失败"));
             }
         });
     }

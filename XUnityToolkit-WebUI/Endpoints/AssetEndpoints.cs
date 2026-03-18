@@ -51,18 +51,18 @@ public static class AssetEndpoints
 
                 return Results.Ok(ApiResult<AssetExtractionResult>.Ok(result));
             }
-            catch (DirectoryNotFoundException ex)
+            catch (DirectoryNotFoundException)
             {
-                return Results.BadRequest(ApiResult.Fail(ex.Message));
+                return Results.BadRequest(ApiResult.Fail("游戏资产目录不存在"));
             }
-            catch (FileNotFoundException ex)
+            catch (FileNotFoundException)
             {
-                return Results.BadRequest(ApiResult.Fail(ex.Message));
+                return Results.BadRequest(ApiResult.Fail("游戏资产文件不存在"));
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "资产提取失败: 游戏 {GameId}", id);
-                return Results.Json(ApiResult.Fail($"提取失败: {ex.Message}"), statusCode: 500);
+                return Results.Json(ApiResult.Fail("资产提取失败"), statusCode: 500);
             }
         });
 
@@ -72,6 +72,8 @@ public static class AssetEndpoints
             AppDataPaths paths,
             CancellationToken ct) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var cachePath = paths.ExtractedTextsFile(id);
             if (!File.Exists(cachePath))
                 return Results.Ok(ApiResult<AssetExtractionResult?>.Ok(null));
@@ -86,6 +88,8 @@ public static class AssetEndpoints
             string id,
             AppDataPaths paths) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var cachePath = paths.ExtractedTextsFile(id);
             if (File.Exists(cachePath))
                 File.Delete(cachePath);
@@ -155,6 +159,8 @@ public static class AssetEndpoints
             string id,
             AppDataPaths paths) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var file = paths.PreTranslationRegexFile(id);
             if (!File.Exists(file))
                 return Results.Ok(ApiResult<string>.Ok(""));
@@ -168,14 +174,19 @@ public static class AssetEndpoints
             RegexPatternsRequest request,
             AppDataPaths paths) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+            if ((request.Patterns ?? "").Length > 512 * 1024)
+                return Results.BadRequest(ApiResult.Fail("正则模式内容不能超过 512 KB"));
+
             foreach (var line in (request.Patterns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
             {
                 var trimmed = line.Trim();
                 if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("//")) continue;
                 if (!trimmed.StartsWith("sr:") && !trimmed.StartsWith("r:"))
-                    return Results.Ok(ApiResult.Fail("每行必须以 sr: 或 r: 开头，或为 // 注释"));
+                    return Results.BadRequest(ApiResult.Fail("每行必须以 sr: 或 r: 开头，或为 // 注释"));
                 if (!trimmed.Contains('='))
-                    return Results.Ok(ApiResult.Fail($"模式缺少 = 分隔符: {trimmed}"));
+                    return Results.BadRequest(ApiResult.Fail($"模式缺少 = 分隔符: {trimmed}"));
 
                 var patternStart = trimmed.IndexOf('"') + 1;
                 var patternEnd = trimmed.IndexOf('"', patternStart);
@@ -183,11 +194,12 @@ public static class AssetEndpoints
                 {
                     var pattern = trimmed[patternStart..patternEnd];
                     try { _ = new System.Text.RegularExpressions.Regex(pattern, default, TimeSpan.FromSeconds(1)); }
-                    catch (Exception ex) { return Results.Ok(ApiResult.Fail($"无效的正则表达式: {ex.Message}")); }
+                    catch (System.Text.RegularExpressions.RegexParseException ex) { return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {ex.Message}")); }
                 }
             }
 
             var file = paths.PreTranslationRegexFile(id);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             await File.WriteAllTextAsync(file, request.Patterns ?? "");
             return Results.Ok(ApiResult.Ok());
         });

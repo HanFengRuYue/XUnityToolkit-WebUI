@@ -56,7 +56,9 @@ public sealed class AppDataPaths(IConfiguration config)
         Path.Combine(GlossariesDirectory, $"{gameId}.json");
 
     public string DoNotTranslateFile(string gameId) =>
+#pragma warning disable CS0618 // Obsolete — migration path usage
         Path.Combine(DoNotTranslateDirectory, $"{gameId}.json");
+#pragma warning restore CS0618
 
     public string PreTranslationRegexFile(string gameId) =>
         Path.Combine(PreTranslationRegexDirectory, $"{gameId}.txt");
@@ -102,7 +104,9 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CustomFontsDirectory);
         Directory.CreateDirectory(FontGenerationUploadsDirectory);
         Directory.CreateDirectory(GeneratedFontsDirectory);
+#pragma warning disable CS0618 // Obsolete — migration path usage
         Directory.CreateDirectory(DoNotTranslateDirectory);
+#pragma warning restore CS0618
         Directory.CreateDirectory(ScriptTagsDirectory);
         Directory.CreateDirectory(PreTranslationRegexDirectory);
         Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);

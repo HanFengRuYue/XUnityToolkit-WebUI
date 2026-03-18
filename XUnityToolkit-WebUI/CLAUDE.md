@@ -21,13 +21,19 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Update check three-layer strategy:** CDN (`update-check.json` asset) → Atom Feed (`/releases.atom`) → GitHub API fallback; when extracting methods that throw `InvalidOperationException` (e.g., rate limit), caller **must** still set `_status` to Error and broadcast via SignalR — otherwise status gets stuck at `Checking`
 - **Mirror:** `AppSettings.HfMirrorUrl`; HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
 - **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
+- **Fire-and-forget SignalR invariant:** When fire-and-forget `Task.Run` wraps an async service call and the frontend resets state via a SignalR completion event, the endpoint handler MUST broadcast completion on failure/cancel paths too — services may only broadcast on success; otherwise frontend state gets permanently stuck; always wrap the entire body in `try/catch` with error broadcast in `catch`
+- **SignalR error broadcast:** In fire-and-forget `catch (Exception ex)` blocks that broadcast errors via SignalR, use static error messages (e.g., `"字体生成失败，请检查字体文件格式"`), NOT `ex.Message` — log the exception server-side via `ILogger` instead
+- **Endpoint return pattern:** Always wrap return values with `Results.Ok(ApiResult<T>.Ok(...))` — returning `ApiResult<T>` directly (without `Results.Ok()`) bypasses configured `JsonSerializerOptions` and may produce different enum casing
+- **Validation error HTTP codes:** Always use `Results.BadRequest(ApiResult.Fail(...))` for input validation failures — never `Results.Ok(ApiResult.Fail(...))` (returns 200 on error, confusing clients)
+- **Update endpoint error codes:** `/api/update/apply` pre-condition failures (active operations) → 409 Conflict; download/apply service errors → 500; `InvalidOperationException` from check → 400
 - **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
 - `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
 - P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
 - **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
 - **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
 - **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache` (e.g., `termService.RemoveCache`, `scriptTagService.RemoveCache`)
-- **Service cache clearing:** `TermService.ClearAllCache()`, `ScriptTagService.ClearAllCache()`, `TranslationMemoryService.ClearAllCache()`, `DynamicPatternService.ClearAllCache()`, `TermExtractionService.ClearAllCache()` clear all in-memory caches; used by settings reset (`POST /api/settings/reset`); `RemoveCache(gameId)` clears single game
+- **Service cache clearing:** `TermService.ClearAllCache()`, `ScriptTagService.ClearAllCache()`, `TranslationMemoryService.ClearAllCache()`, `DynamicPatternService.ClearAllCache()`, `TermExtractionService.ClearAllCache()` clear all in-memory caches; used by settings reset (`POST /api/settings/reset`) and settings import (`POST /api/settings/import`); `RemoveCache(gameId)` clears single game
+- **Settings import cache invalidation:** `POST /api/settings/import` must call all `*Service.ClearAllCache()` methods after extracting files (same set as `/reset`); imported files overwrite disk but in-memory caches are stale otherwise
 - **Settings reset log suspension:** `POST /api/settings/reset` calls `FileLoggerProvider.SuspendFileLog()` before deleting data directory (releases log file handle), then `ResumeFileLog()` in `finally`; do NOT replace whole-directory deletion with per-subdirectory deletion (previously caused incomplete cleanup)
 - **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
 - **`ScriptTagService` DI:** `AddSingleton`; follows `TermService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
@@ -36,6 +42,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
 - **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
 - **`Lock` type API (.NET 9+):** Use `_lock.Enter()`/`_lock.Exit()` — do NOT use `Monitor.Enter(_lock)`/`Monitor.Exit(_lock)` (CS9216 warning; `Lock` is not `object`-based)
+- **Per-game locking pattern:** Services with per-game data files (`TranslationMemoryService`, `DynamicPatternService`) use `ConcurrentDictionary<string, SemaphoreSlim>` for per-game locks — do NOT use a single global `SemaphoreSlim` for multi-game services
 
 ## INI Configuration
 
@@ -60,12 +67,15 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks; **local mode batch splitting:** `TranslateAsync` loops single-text `TranslateBatchAsync` calls so `_translating` shows 1 (not batch size)
 - **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
 - `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors
-- **Stats counters unit:** `_queued`, `_translating`, `_totalReceived`, `_totalTranslated` must ALL count individual texts (not batches/HTTP requests)
+- **Stats counters unit:** `_queued` and `_translating` count API requests (±1 per `TranslateBatchAsync` call); `_totalReceived` and `_totalTranslated` count individual texts; `MaxConcurrency` in `TranslationStats` reflects `_currentMaxConcurrency`
 - **RecordError:** `LlmTranslationService.RecordError` is sole site — endpoint catch must NOT double-count
 - `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
 - **Plugin concurrency:** DLL 10x10 = 100 texts; Mono >15 connections deadlocks — batch instead
 - **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
-- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10 (local mode: batch=1, parallelism=1); CAS-throttled 200ms progress
+- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10 (local mode: batch=1, parallelism=1); CAS-throttled 200ms progress; `catch (OperationCanceledException) when (ct.IsCancellationRequested)` guards prevent HTTP `TaskCanceledException` from aborting entire operation — **always use `when` guard** in `Parallel.ForEachAsync` bodies
+- **`when` guard in sequential LLM loops:** `DynamicPatternService`/`TermExtractionService` batch loops also require `catch (OperationCanceledException) when (ct.IsCancellationRequested)` — bare `catch (OperationCanceledException) { throw; }` catches HTTP timeout `TaskCanceledException` and aborts all remaining batches on a single timeout
+- **LLM retry:** `TranslateBatchAsync` retries transient errors (`TaskCanceledException`, `HttpRequestException`, `TimeoutException`) up to 2 times with exponential backoff (2s, 4s); retry loop is inside semaphore-acquired block; `IsTransientError` helper determines retryability
+- **TM debounced persistence:** `TranslationMemoryService.Add()` is synchronous (in-memory); persistence debounced 5s via `ScheduleDebouncedPersist`; `FlushAsync` for immediate persist after batch completion; per-game `SemaphoreSlim` locks (not global)
 
 ## AI Translation Context
 
@@ -146,6 +156,9 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **`HashSet<int>` not `HashSet<char>`:** CJK Extension B (U+20000+) requires supplementary plane support; `char` is 16-bit; use `int` codepoints throughout pipeline; `StringInfo.GetTextElementEnumerator()` for surrogate pair handling
 - **Disk-temp SDF bitmaps:** For large charsets (70K+ chars), SDF bitmaps saved to `data/font-generation/temp/{sessionId}/` during rendering, read back per-page during compositing, cleaned up in `finally`
 - **CharacterSetService:** singleton; depends on `AppDataPaths`, `GameLibraryService`; `ResolveCharactersAsync` merges built-in + custom TXT + translation file sources; superset warnings from `BuiltinCharsets.SupersetOf`; translation file path resolved from game INI `[Files] OutputFile` + `[General] Language`
+- **Always-included charsets:** `ResolveCharactersAsync` unconditionally unions `Ascii()` + `CommonPunctuation()` into every generated font; `CommonPunctuation()` covers CJK Symbols & Punctuation (U+3000–U+303F), CJK Compatibility Forms (U+FE30–U+FE4F), Fullwidth ASCII (U+FF01–U+FF60), and select General Punctuation (dashes, quotes, ellipsis); adding new always-included ranges: add to `CommonPunctuation()` in `BuiltinCharsets.cs` + mirror in fallback path of `TmpFontGeneratorService.GenerateAsync`
+- **Zero-size glyph GlyphRect:** Glyphs with `BitmapWidth==0 || BitmapHeight==0` (space, control chars) MUST have GlyphRect `{0,0,0,0}` — `BitmapWidth - 2*padding` produces negative values that TMP rejects; zero-size glyphs skip atlas packing but are included in GlyphTable/CharacterTable for valid metrics
+- **FT_Load/Render failure tracking:** `FT_Load_Glyph`/`FT_Render_Glyph` failures MUST add the character to `missingChars` — bare `continue` silently drops characters from both the font and the report
 - **Install as TMP font:** `POST /install-tmp-font/{gameId}` copies generated bundle to `{GamePath}/BepInEx/Font/{fontName}` (preserves actual name, strips `.bundle` ext) and patches `[Behaviour] FallbackFontTextMeshPro`; uses `TmpFontService.InstallCustomFont`
 - **`TmpFontService` API:** `InstallFont(gamePath, gameInfo)` returns `string?` config path (e.g. `"BepInEx/Font/SourceHanSans_U2022"`), null if unavailable; `InstallCustomFont(gamePath, srcPath, destFileName)` static method for generated fonts; `RemoveFont` deletes all files in `BepInEx/Font/`; no `FontFileName`/`ConfigValue` constants
 - **`FallbackFontTextMeshPro` config:** NOT in `ApplyOptimalDefaultsAsync` defaults; set by `InstallOrchestrator` after font install and by `POST /{id}/tmp-font` endpoint

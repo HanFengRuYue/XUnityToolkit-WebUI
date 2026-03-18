@@ -10,14 +10,17 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class TranslationMemoryService(
     AppDataPaths paths,
     ScriptTagService scriptTagService,
-    ILogger<TranslationMemoryService> logger)
+    ILogger<TranslationMemoryService> logger) : IDisposable
 {
     private const int MaxEntriesPerGame = 100_000;
     private const int FuzzyCandidateBudget = 500;
     private const double LengthToleranceRatio = 0.20;
+    private const int DebounceDelayMs = 5000;
 
     private readonly ConcurrentDictionary<string, TranslationMemoryStore> _stores = new();
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _persistLocks = new();
+    private readonly ConcurrentDictionary<string, long> _dirtyTimestamps = new();
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceTimers = new();
 
     // Hit stats
     private long _exactHits;
@@ -52,7 +55,8 @@ public sealed class TranslationMemoryService(
         var store = _stores.GetOrAdd(gameId, _ => new TranslationMemoryStore());
         if (store.LoadAttempted) return;
 
-        await _lock.WaitAsync(ct);
+        var gameLock = _persistLocks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await gameLock.WaitAsync(ct);
         try
         {
             if (store.LoadAttempted) return;
@@ -61,7 +65,7 @@ public sealed class TranslationMemoryService(
         }
         finally
         {
-            _lock.Release();
+            gameLock.Release();
         }
     }
 
@@ -109,15 +113,15 @@ public sealed class TranslationMemoryService(
     }
 
     /// <summary>
-    /// Add translation entries to the TM and persist to disk.
+    /// Add translation entries to the TM in-memory and schedule debounced persistence.
+    /// Synchronous — safe to call from fire-and-forget contexts.
     /// </summary>
-    public async Task AddAsync(
+    public void Add(
         string gameId,
         IList<string> originals,
         IList<string> translations,
         int round,
-        bool isFinal,
-        CancellationToken ct = default)
+        bool isFinal)
     {
         if (originals.Count == 0 || originals.Count != translations.Count) return;
 
@@ -158,9 +162,42 @@ public sealed class TranslationMemoryService(
         // Evict if over limit (LRU by TranslatedAt)
         EvictIfNeeded(store);
 
-        await PersistAsync(gameId, store, ct);
+        ScheduleDebouncedPersist(gameId);
         logger.LogDebug("翻译记忆库 {GameId}: 添加 {Count} 条（总计 {Total}）",
             gameId, added, store.ExactIndex.Count);
+    }
+
+    /// <summary>
+    /// Async wrapper for backward compatibility (e.g., existing AddAsync call sites).
+    /// </summary>
+    public Task AddAsync(
+        string gameId,
+        IList<string> originals,
+        IList<string> translations,
+        int round,
+        bool isFinal,
+        CancellationToken ct = default)
+    {
+        Add(gameId, originals, translations, round, isFinal);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Cancel any pending debounce timer and immediately persist the TM for the given game.
+    /// </summary>
+    public async Task FlushAsync(string gameId, CancellationToken ct = default)
+    {
+        // Cancel pending debounce
+        if (_debounceTimers.TryRemove(gameId, out var cts))
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+
+        if (!_dirtyTimestamps.TryRemove(gameId, out _)) return;
+
+        if (_stores.TryGetValue(gameId, out var store))
+            await PersistAsync(gameId, store, ct);
     }
 
     /// <summary>
@@ -175,12 +212,27 @@ public sealed class TranslationMemoryService(
         logger.LogDebug("翻译记忆库 {GameId}: 加载 {Count} 个动态模式", gameId, patterns.Count);
     }
 
-    public void RemoveCache(string gameId) => _stores.TryRemove(gameId, out _);
+    public void RemoveCache(string gameId)
+    {
+        CancelDebounceTimer(gameId);
+        _stores.TryRemove(gameId, out _);
+        if (_persistLocks.TryRemove(gameId, out var sem))
+            sem.Dispose();
+    }
 
-    public void ClearAllCache() => _stores.Clear();
+    public void ClearAllCache()
+    {
+        foreach (var gameId in _debounceTimers.Keys)
+            CancelDebounceTimer(gameId);
+        _stores.Clear();
+        foreach (var kvp in _persistLocks)
+            kvp.Value.Dispose();
+        _persistLocks.Clear();
+    }
 
     public async Task DeleteAsync(string gameId, CancellationToken ct = default)
     {
+        CancelDebounceTimer(gameId);
         _stores.TryRemove(gameId, out _);
         var file = paths.TranslationMemoryFile(gameId);
         if (File.Exists(file))
@@ -203,6 +255,68 @@ public sealed class TranslationMemoryService(
             Interlocked.Read(ref _fuzzyHits),
             Interlocked.Read(ref _misses)
         );
+    }
+
+    public void Dispose()
+    {
+        // Flush all dirty stores synchronously on shutdown
+        foreach (var gameId in _dirtyTimestamps.Keys)
+        {
+            CancelDebounceTimer(gameId);
+            if (_dirtyTimestamps.TryRemove(gameId, out _) && _stores.TryGetValue(gameId, out var store))
+            {
+                try { PersistAsync(gameId, store, CancellationToken.None).GetAwaiter().GetResult(); }
+                catch (Exception ex) { logger.LogError(ex, "关闭时保存翻译记忆库失败: {GameId}", gameId); }
+            }
+        }
+
+        foreach (var kvp in _persistLocks)
+            kvp.Value.Dispose();
+        _persistLocks.Clear();
+    }
+
+    // ── Debounce infrastructure ──
+
+    private void ScheduleDebouncedPersist(string gameId)
+    {
+        _dirtyTimestamps[gameId] = DateTime.UtcNow.Ticks;
+
+        // Cancel existing timer
+        CancelDebounceTimer(gameId);
+
+        var cts = new CancellationTokenSource();
+        _debounceTimers[gameId] = cts;
+        var token = cts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(DebounceDelayMs, token);
+                if (token.IsCancellationRequested) return;
+
+                if (!_dirtyTimestamps.TryRemove(gameId, out _)) return;
+                if (_stores.TryGetValue(gameId, out var store))
+                    await PersistAsync(gameId, store, CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                // Debounce cancelled — new write or flush will handle persistence
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "防抖保存翻译记忆库失败: {GameId}", gameId);
+            }
+        });
+    }
+
+    private void CancelDebounceTimer(string gameId)
+    {
+        if (_debounceTimers.TryRemove(gameId, out var cts))
+        {
+            try { cts.Cancel(); } catch { /* already disposed */ }
+            cts.Dispose();
+        }
     }
 
     // ── Pattern matching ──
@@ -449,6 +563,9 @@ public sealed class TranslationMemoryService(
                     {
                         bucket.Entries.RemoveAll(e =>
                             string.Equals(e.NormalizedKey ?? e.Original, key, StringComparison.Ordinal));
+                        // Clean up empty buckets to prevent unbounded growth
+                        if (bucket.Entries.Count == 0)
+                            store.LengthBuckets.TryRemove(normalizedLen, out _);
                     }
                     finally
                     {
@@ -490,7 +607,8 @@ public sealed class TranslationMemoryService(
 
     private async Task PersistAsync(string gameId, TranslationMemoryStore store, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        var gameLock = _persistLocks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await gameLock.WaitAsync(ct);
         try
         {
             var entries = store.ExactIndex.Values
@@ -510,7 +628,7 @@ public sealed class TranslationMemoryService(
         }
         finally
         {
-            _lock.Release();
+            gameLock.Release();
         }
     }
 }

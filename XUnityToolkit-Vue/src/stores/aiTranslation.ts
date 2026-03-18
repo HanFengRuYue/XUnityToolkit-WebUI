@@ -31,6 +31,10 @@ export const useAiTranslationStore = defineStore('aiTranslation', () => {
       cacheStats.value = data
     })
 
+    connection.onreconnected(async () => {
+      try { await connection?.invoke('JoinAiTranslationGroup') } catch { /* ignore */ }
+    })
+
     await connection.start()
     await connection.invoke('JoinAiTranslationGroup')
   }

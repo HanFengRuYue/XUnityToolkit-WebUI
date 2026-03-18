@@ -20,8 +20,9 @@ public class CharacterSetService(
         var breakdown = new Dictionary<string, int>();
         var warnings = new List<string>();
 
-        // Always include ASCII
+        // Always include ASCII and common punctuation
         merged.UnionWith(BuiltinCharsets.Ascii());
+        merged.UnionWith(BuiltinCharsets.CommonPunctuation());
 
         // Built-in sets
         var selectedSupersets = new HashSet<string>();

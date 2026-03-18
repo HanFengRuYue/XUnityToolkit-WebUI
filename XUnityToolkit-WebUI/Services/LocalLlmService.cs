@@ -43,7 +43,7 @@ public sealed class LocalLlmService(
     private volatile int _gpuUtilization;
     private volatile int _gpuVramUsed;   // MB
     private volatile int _gpuVramTotal;  // MB — -1 means never polled yet
-    private CancellationTokenSource? _gpuPollCts;
+    private volatile CancellationTokenSource? _gpuPollCts;
 
     // ── llama.cpp binary constants ──
 
@@ -77,7 +77,9 @@ public sealed class LocalLlmService(
             WriteIndented = true,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         });
-        await File.WriteAllTextAsync(paths.LocalLlmSettingsFile, json, ct);
+        var tmpPath = paths.LocalLlmSettingsFile + ".tmp";
+        await File.WriteAllTextAsync(tmpPath, json, ct);
+        File.Move(tmpPath, paths.LocalLlmSettingsFile, overwrite: true);
     }
 
     /// <summary>Merges user-editable fields without overwriting Models/PausedDownloads.</summary>
@@ -389,7 +391,7 @@ public sealed class LocalLlmService(
         catch (Exception ex)
         {
             _state = LocalLlmServerState.Failed;
-            _error = ex.Message;
+            _error = "启动 llama-server 失败，请查看日志获取详情";
             logger.LogError(ex, "启动 llama-server 失败");
             await BroadcastStatus();
             return GetStatus();
@@ -449,21 +451,24 @@ public sealed class LocalLlmService(
 
     private async void OnProcessExited(object? sender, EventArgs e)
     {
-        if (_state == LocalLlmServerState.Stopping || _state == LocalLlmServerState.Idle)
-            return;
-
-        StopGpuPolling();
-        _state = LocalLlmServerState.Failed;
-        _error = "llama-server 进程意外退出";
-        try { _process?.Dispose(); } catch { /* ignore */ }
-        _process = null;
-        logger.LogWarning("llama-server 进程意外退出");
         try
         {
+            if (_state == LocalLlmServerState.Stopping || _state == LocalLlmServerState.Idle)
+                return;
+
+            StopGpuPolling();
+            _state = LocalLlmServerState.Failed;
+            _error = "llama-server 进程意外退出";
+            try { _process?.Dispose(); } catch { /* ignore */ }
+            _process = null;
+            logger.LogWarning("llama-server 进程意外退出");
             await UnregisterEndpointAsync(default);
             await BroadcastStatus();
         }
-        catch { /* ignore broadcast errors */ }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "OnProcessExited 处理失败");
+        }
     }
 
     private async Task<bool> WaitForHealthAsync(int port, CancellationToken ct)
@@ -502,9 +507,9 @@ public sealed class LocalLlmService(
 
     private void StopGpuPolling()
     {
-        _gpuPollCts?.Cancel();
-        _gpuPollCts?.Dispose();
-        _gpuPollCts = null;
+        var cts = Interlocked.Exchange(ref _gpuPollCts, null);
+        cts?.Cancel();
+        cts?.Dispose();
         _gpuUtilization = 0;
         _gpuVramUsed = 0;
         _gpuVramTotal = 0;
@@ -526,9 +531,10 @@ public sealed class LocalLlmService(
 
     private async Task PollGpuOnceAsync(CancellationToken ct)
     {
+        Process? proc = null;
         try
         {
-            using var proc = new Process
+            proc = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
@@ -556,9 +562,18 @@ public sealed class LocalLlmService(
                 await BroadcastStatus();
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Kill orphaned process on cancellation
+            try { if (proc is { HasExited: false }) proc.Kill(); } catch { /* ignore */ }
+        }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "nvidia-smi 轮询失败");
+        }
+        finally
+        {
+            proc?.Dispose();
         }
     }
 

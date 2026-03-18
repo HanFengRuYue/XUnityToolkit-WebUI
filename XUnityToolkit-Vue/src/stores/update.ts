@@ -32,7 +32,7 @@ export const useUpdateStore = defineStore('update', () => {
   }
 
   async function connectHub() {
-    if (connection) return
+    if (connection && connection.state !== signalR.HubConnectionState.Disconnected) return
 
     connection = new signalR.HubConnectionBuilder()
       .withUrl('/hubs/install')
@@ -57,6 +57,10 @@ export const useUpdateStore = defineStore('update', () => {
       state.value = 'Available'
     })
 
+    connection.onreconnected(async () => {
+      try { await connection?.invoke('JoinUpdateGroup') } catch { /* ignore */ }
+    })
+
     try {
       await connection.start()
       await connection.invoke('JoinUpdateGroup')
@@ -66,6 +70,10 @@ export const useUpdateStore = defineStore('update', () => {
   }
 
   async function disconnectHub() {
+    if (restartPollTimer) {
+      clearInterval(restartPollTimer)
+      restartPollTimer = null
+    }
     if (!connection) return
     try {
       await connection.invoke('LeaveUpdateGroup')
@@ -106,7 +114,7 @@ export const useUpdateStore = defineStore('update', () => {
       checkResult.value = await updateApi.check()
       if (checkResult.value.updateAvailable) {
         availableInfo.value = {
-          version: checkResult.value.newVersion!,
+          version: checkResult.value.newVersion ?? 'unknown',
           changelog: checkResult.value.changelog,
           downloadSize: checkResult.value.downloadSize,
           changedPackages: checkResult.value.changedPackages,
@@ -153,6 +161,7 @@ export const useUpdateStore = defineStore('update', () => {
       // Server will shut down and restart — poll for reconnection
       pollForRestart()
     } catch (err) {
+      if (restartPollTimer) { clearInterval(restartPollTimer); restartPollTimer = null }
       state.value = prevState
       error.value = err instanceof Error ? err.message : '应用更新失败'
       if (error.value) {

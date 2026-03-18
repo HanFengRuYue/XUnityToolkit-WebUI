@@ -35,7 +35,9 @@ public sealed class PreTranslationStatus
     public int FailedTexts { get; set; }
     public string? Error { get; set; }
     public int CurrentRound { get; set; }
-    public string? CurrentPhase { get; set; } // "patternAnalysis", "round1", "termReview", "round2", "writingCache"
+    public string? CurrentPhase { get; set; } // "round1", "patternAnalysis", "termExtraction", "termReview", "round2", "writeCache"
+    public int PhaseProgress { get; set; }  // current batch within non-translation phases
+    public int PhaseTotal { get; set; }     // total batches within non-translation phases
     public int ExtractedTermCount { get; set; }
     public int DynamicPatternCount { get; set; }
 }

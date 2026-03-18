@@ -120,6 +120,7 @@ public sealed class TmpFontGeneratorService(
             {
                 var set = BuiltinCharsets.GB2312();
                 set.UnionWith(BuiltinCharsets.Ascii());
+                set.UnionWith(BuiltinCharsets.CommonPunctuation());
                 chars = set.OrderBy(c => c).ToList();
             }
         }
@@ -269,10 +270,24 @@ public sealed class TmpFontGeneratorService(
                     }
 
                     error = FT_Load_Glyph(face, glyphIndex, FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING);
-                    if (error != FT_Error.FT_Err_Ok) continue;
+                    if (error != FT_Error.FT_Err_Ok)
+                    {
+                        missingChars.Add(chars[i]);
+                        _current = i + 1;
+                        BroadcastProgress("sdf", i + 1, chars.Count,
+                            $"正在生成 SDF 位图 [{modeLabel}] ({i + 1}/{chars.Count})...");
+                        continue;
+                    }
 
                     error = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
-                    if (error != FT_Error.FT_Err_Ok) continue;
+                    if (error != FT_Error.FT_Err_Ok)
+                    {
+                        missingChars.Add(chars[i]);
+                        _current = i + 1;
+                        BroadcastProgress("sdf", i + 1, chars.Count,
+                            $"正在生成 SDF 位图 [{modeLabel}] ({i + 1}/{chars.Count})...");
+                        continue;
+                    }
 
                     ref var bitmap = ref face->glyph->bitmap;
                     ref var metrics = ref face->glyph->metrics;
@@ -536,10 +551,21 @@ public sealed class TmpFontGeneratorService(
                 m["m_HorizontalAdvance"].AsFloat = g.Advance;
 
                 var gr = entry["m_GlyphRect"];
-                gr["m_X"].AsInt = g.AtlasX + padding;                  // Inner glyph position
-                gr["m_Y"].AsInt = g.AtlasY + padding;                  // Inner glyph position
-                gr["m_Width"].AsInt = g.BitmapWidth - 2 * padding;     // Unpadded glyph width
-                gr["m_Height"].AsInt = g.BitmapHeight - 2 * padding;   // Unpadded glyph height
+                if (g.BitmapWidth > 0 && g.BitmapHeight > 0)
+                {
+                    gr["m_X"].AsInt = g.AtlasX + padding;                  // Inner glyph position
+                    gr["m_Y"].AsInt = g.AtlasY + padding;                  // Inner glyph position
+                    gr["m_Width"].AsInt = g.BitmapWidth - 2 * padding;     // Unpadded glyph width
+                    gr["m_Height"].AsInt = g.BitmapHeight - 2 * padding;   // Unpadded glyph height
+                }
+                else
+                {
+                    // Zero-size glyphs (space, control chars): no visual region
+                    gr["m_X"].AsInt = 0;
+                    gr["m_Y"].AsInt = 0;
+                    gr["m_Width"].AsInt = 0;
+                    gr["m_Height"].AsInt = 0;
+                }
 
                 entry["m_Scale"].AsFloat = 1.0f;
                 entry["m_AtlasIndex"].AsInt = g.AtlasIndex;

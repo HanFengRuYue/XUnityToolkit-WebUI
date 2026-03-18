@@ -18,7 +18,7 @@ public static class UpdateEndpoints
             }
             catch (InvalidOperationException ex)
             {
-                return Results.Ok(ApiResult.Fail(ex.Message));
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
         });
 
@@ -37,11 +37,11 @@ public static class UpdateEndpoints
             }
             catch (OperationCanceledException)
             {
-                return Results.Ok(ApiResult.Fail("下载已取消"));
+                return Results.BadRequest(ApiResult.Fail("下载已取消"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.Ok(ApiResult.Fail(ex.Message));
+                return Results.Json(ApiResult.Fail("下载更新失败"), statusCode: 500);
             }
         });
 
@@ -62,24 +62,24 @@ public static class UpdateEndpoints
         {
             // Pre-apply safety checks
             if (installOrchestrator.HasActiveOperation)
-                return Results.Ok(ApiResult.Fail("有正在进行的安装/卸载操作，请先完成或取消"));
+                return Results.Json(ApiResult.Fail("有正在进行的安装/卸载操作，请先完成或取消"), statusCode: 409);
             if (translationService.HasPendingTranslations)
-                return Results.Ok(ApiResult.Fail("有正在进行的 AI 翻译任务，请先停止"));
+                return Results.Json(ApiResult.Fail("有正在进行的 AI 翻译任务，请先停止"), statusCode: 409);
             if (localLlmService.IsRunning)
-                return Results.Ok(ApiResult.Fail("本地 LLM 服务正在运行，请先停止"));
+                return Results.Json(ApiResult.Fail("本地 LLM 服务正在运行，请先停止"), statusCode: 409);
             if (fontGenService.IsGenerating)
-                return Results.Ok(ApiResult.Fail("字体生成正在进行中，请先取消"));
+                return Results.Json(ApiResult.Fail("字体生成正在进行中，请先取消"), statusCode: 409);
             if (preTranslationService.IsPreTranslating)
-                return Results.Ok(ApiResult.Fail("预翻译正在进行中，请先取消"));
+                return Results.Json(ApiResult.Fail("预翻译正在进行中，请先取消"), statusCode: 409);
 
             try
             {
                 var message = await updateService.ApplyUpdateAsync(ct);
                 return Results.Ok(ApiResult<string>.Ok(message));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.Ok(ApiResult.Fail(ex.Message));
+                return Results.Json(ApiResult.Fail("应用更新失败"), statusCode: 500);
             }
         });
 

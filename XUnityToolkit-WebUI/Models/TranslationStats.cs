@@ -28,6 +28,8 @@ public sealed record TranslationStats(
     public int TranslationMemoryFuzzyHits { get; init; }
     public int TranslationMemoryPatternHits { get; init; }
     public int TranslationMemoryMisses { get; init; }
+    /// <summary>Current max concurrency (API request slots).</summary>
+    public int MaxConcurrency { get; init; }
     public int DynamicPatternCount { get; init; }
     public int ExtractedTermCount { get; init; }
 }

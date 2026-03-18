@@ -67,11 +67,8 @@ const actionOptions = [
 
 async function loadCacheSetting() {
   try {
-    const res = await fetch('/api/settings')
-    const json = await res.json()
-    if (json.success) {
-      enablePreTranslationCache.value = json.data.aiTranslation?.enablePreTranslationCache ?? false
-    }
+    const settings = await settingsApi.get()
+    enablePreTranslationCache.value = settings.aiTranslation?.enablePreTranslationCache ?? false
   } catch { /* ignore */ }
 }
 
@@ -98,8 +95,8 @@ async function handleSaveScriptTags() {
     await scriptTagApi.save(gameId, config)
     scriptTagDirty.value = false
     message.success('脚本指令规则已保存')
-  } catch (e: any) {
-    message.error(e?.message || '保存失败')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '保存失败')
   } finally {
     scriptTagSaving.value = false
   }
@@ -119,8 +116,8 @@ async function importPresetRules() {
     scriptTagPresetVersion.value = preset.version
     scriptTagDirty.value = true
     message.success(`已导入 ${builtinRules.length} 条内置规则`)
-  } catch (e: any) {
-    message.error(e?.message || '导入失败')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '导入失败')
   }
 }
 
@@ -141,17 +138,12 @@ function removeScriptTagRule(index: number) {
 
 async function handleToggleCache(value: boolean) {
   try {
-    const res = await fetch('/api/settings')
-    const json = await res.json()
-    if (json.success) {
-      json.data.aiTranslation.enablePreTranslationCache = value
-      await fetch('/api/settings', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(json.data)
-      })
-    }
-  } catch { /* ignore */ }
+    const settings = await settingsApi.get()
+    settings.aiTranslation.enablePreTranslationCache = value
+    await settingsApi.save(settings)
+  } catch {
+    message.error('保存缓存设置失败')
+  }
 }
 
 const langOptions = [
@@ -170,8 +162,8 @@ const termReviewLoading = ref(false)
 
 // Phase tracking
 const phases = [
-  { key: 'patternAnalysis', label: '模式分析' },
   { key: 'round1', label: '第一轮翻译' },
+  { key: 'patternAnalysis', label: '模式分析' },
   { key: 'termExtraction', label: '术语提取' },
   { key: 'termReview', label: '术语审核' },
   { key: 'round2', label: '第二轮润色' },
@@ -208,9 +200,28 @@ const isAwaitingTermReview = computed(() =>
   store.preTranslationStatus?.state === 'AwaitingTermReview'
 )
 
+const isPhaseWithBatchProgress = computed(() => {
+  const phase = store.preTranslationStatus?.currentPhase
+  return (phase === 'patternAnalysis' || phase === 'termExtraction')
+    && (store.preTranslationStatus?.phaseTotal ?? 0) > 0
+})
+
 const preTranslationProgress = computed(() => {
   const s = store.preTranslationStatus
   if (!s || s.totalTexts === 0) return 0
+
+  const phase = s.currentPhase
+  // For LLM analysis phases, use phaseProgress/phaseTotal
+  if ((phase === 'patternAnalysis' || phase === 'termExtraction') && s.phaseTotal > 0) {
+    return Math.round(s.phaseProgress / s.phaseTotal * 100)
+  }
+
+  // For writeCache, show indeterminate (99%) while active
+  if (phase === 'writeCache' && s.state === 'Running') {
+    return 99
+  }
+
+  // For translation rounds, use translatedTexts/totalTexts
   return Math.round((s.translatedTexts + s.failedTexts) / s.totalTexts * 100)
 })
 
@@ -252,7 +263,7 @@ onMounted(async () => {
       fromLang.value = store.extractionResult.detectedLanguage
     }
     await store.fetchPreTranslationStatus(gameId)
-    if (isPreTranslating.value) {
+    if (isPreTranslating.value || isAwaitingTermReview.value) {
       await store.connect(gameId)
     }
     // Check if AI providers are configured
@@ -279,7 +290,7 @@ watch(() => store.preTranslationStatus?.state, (newState) => {
 watch(() => store.termExtractionComplete, (val) => {
   if (val) {
     loadTermCandidates()
-    store.termExtractionComplete = false
+    store.resetTermExtractionComplete()
   }
 })
 
@@ -350,13 +361,13 @@ async function handleApplyTerms(originals: string[] | null) {
   }
 }
 
-function handleApplySelected() {
+async function handleApplySelected() {
   const selected = Array.from(termCandidateSelected.value)
-  handleApplyTerms(selected)
+  await handleApplyTerms(selected)
 }
 
-function handleSkipTerms() {
-  handleApplyTerms([])
+async function handleSkipTerms() {
+  await handleApplyTerms([])
 }
 
 function toggleTermCandidate(original: string, checked: boolean) {
@@ -595,7 +606,7 @@ function langLabel(code: string): string {
         <!-- Action Buttons -->
         <div class="action-row">
           <NButton
-            v-if="!isPreTranslating"
+            v-if="!isPreTranslating && !isAwaitingTermReview"
             type="primary"
             :disabled="!hasAiProvider"
             @click="handleStartPreTranslation"
@@ -659,10 +670,18 @@ function langLabel(code: string): string {
             :border-radius="10"
           />
           <div class="progress-stats">
-            <span>{{ store.preTranslationStatus.translatedTexts }} / {{ store.preTranslationStatus.totalTexts }}</span>
-            <span v-if="store.preTranslationStatus.failedTexts > 0" class="failed-count">
-              {{ store.preTranslationStatus.failedTexts }} 失败
-            </span>
+            <template v-if="isPhaseWithBatchProgress">
+              <span>{{ store.preTranslationStatus.phaseProgress }} / {{ store.preTranslationStatus.phaseTotal }} 批次</span>
+            </template>
+            <template v-else-if="store.preTranslationStatus.currentPhase === 'writeCache' && store.preTranslationStatus.state === 'Running'">
+              <span>写入缓存中...</span>
+            </template>
+            <template v-else>
+              <span>{{ store.preTranslationStatus.translatedTexts }} / {{ store.preTranslationStatus.totalTexts }}</span>
+              <span v-if="store.preTranslationStatus.failedTexts > 0" class="failed-count">
+                {{ store.preTranslationStatus.failedTexts }} 失败
+              </span>
+            </template>
           </div>
 
           <NAlert

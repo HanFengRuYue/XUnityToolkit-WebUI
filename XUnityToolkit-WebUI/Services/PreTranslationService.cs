@@ -9,7 +9,6 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class PreTranslationService(
     LlmTranslationService translationService,
-    GlossaryExtractionService extractionService,
     AppSettingsService settingsService,
     GameLibraryService gameLibrary,
     ScriptTagService scriptTagService,
@@ -18,7 +17,6 @@ public sealed class PreTranslationService(
     DynamicPatternService dynamicPatternService,
     TermExtractionService termExtractionService,
     TranslationMemoryService translationMemoryService,
-    TermService termService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<PreTranslationService> logger)
 {
@@ -88,7 +86,7 @@ public sealed class PreTranslationService(
                 {
                     logger.LogError(ex, "预翻译失败: 游戏 {GameId}", gameId);
                     status.State = PreTranslationState.Failed;
-                    status.Error = ex.Message;
+                    status.Error = "预翻译过程中发生内部错误，请查看日志获取详情";
                     await BroadcastStatus(gameId, status);
                 }
                 finally
@@ -148,32 +146,18 @@ public sealed class PreTranslationService(
         var maxConc = isLocalMode ? 1 : Math.Clamp(aiSettings.MaxConcurrency, 1, 100);
         var batchSize = isLocalMode ? 1 : 10;
 
-        // ── Phase: Pattern Analysis ──
-        status.CurrentPhase = "patternAnalysis";
-        await BroadcastStatus(gameId, status);
-
-        // Template variable detection (regex-based, zero LLM cost)
+        // ── Pre-Round 1: Template variable detection (regex-based, zero LLM cost) ──
         var templateVars = dynamicPatternService.DetectTemplateVariables(textList);
         logger.LogInformation("模板变量检测: 发现 {Count} 条含模板变量的文本, 游戏 {GameId}",
             templateVars.Count, gameId);
 
-        await BroadcastEvent(gameId, "patternAnalysisProgress",
-            new { phase = "patternAnalysis", progress = 50 });
-
-        // LLM dynamic pattern analysis (if enabled and we have enough texts)
         var dynamicPatternCount = 0;
-        if (aiSettings.EnableLlmPatternAnalysis && textList.Count > 0)
-        {
-            // We'll run LLM pattern analysis after Round 1 when we have translation pairs
-            logger.LogDebug("LLM 动态模式分析将在 Round 1 完成后执行, 游戏 {GameId}", gameId);
-        }
-
-        await BroadcastEvent(gameId, "patternAnalysisProgress",
-            new { phase = "patternAnalysis", progress = 100 });
 
         // ── Round 1: Batch Translation ──
         status.CurrentRound = 1;
         status.CurrentPhase = "round1";
+        status.PhaseProgress = 0;
+        status.PhaseTotal = 0;
         await BroadcastStatus(gameId, status);
         await BroadcastEvent(gameId, "roundProgress",
             new { gameId, round = 1, phase = "translating" });
@@ -194,17 +178,11 @@ public sealed class PreTranslationService(
                     for (int i = 0; i < batchList.Count; i++)
                     {
                         translations[batchList[i]] = results[i];
-
-                        // Buffer for glossary extraction
-                        if (!string.IsNullOrEmpty(gameId))
-                            extractionService.BufferTranslation(gameId, batchList[i], results[i]);
                     }
-                    if (!string.IsNullOrEmpty(gameId))
-                        extractionService.TryTriggerExtraction(gameId);
 
                     Interlocked.Add(ref round1Counters.Translated, batchList.Count);
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     Interlocked.Add(ref round1Counters.Failed, batch.Length);
@@ -226,16 +204,28 @@ public sealed class PreTranslationService(
         if (aiSettings.EnableLlmPatternAnalysis && translations.Count > 0)
         {
             ct.ThrowIfCancellationRequested();
+            status.CurrentPhase = "patternAnalysis";
+            status.PhaseProgress = 0;
+            status.PhaseTotal = 0;
+            await BroadcastStatus(gameId, status);
             try
             {
                 var pairs = translations
                     .Select(kv => (Original: kv.Key, Translation: kv.Value))
                     .ToList();
-                dynamicPatternCount = await dynamicPatternService.AnalyzeDynamicFragmentsAsync(gameId, pairs, ct);
+                logger.LogInformation("开始模式分析: {Count} 对翻译, 游戏 {GameId}", pairs.Count, gameId);
+                dynamicPatternCount = await dynamicPatternService.AnalyzeDynamicFragmentsAsync(
+                    gameId, pairs, ct,
+                    onBatchProgress: (done, total) =>
+                    {
+                        status.PhaseProgress = done;
+                        status.PhaseTotal = total;
+                        _ = BroadcastStatus(gameId, status);
+                    });
                 status.DynamicPatternCount = dynamicPatternCount;
                 await BroadcastStatus(gameId, status);
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "LLM 动态模式分析失败, 游戏 {GameId}", gameId);
@@ -247,15 +237,25 @@ public sealed class PreTranslationService(
         if (aiSettings.EnableAutoTermExtraction && translations.Count > 0)
         {
             ct.ThrowIfCancellationRequested();
-            await BroadcastEvent(gameId, "roundProgress",
-                new { gameId, round = 1, phase = "extracting" });
+            status.CurrentPhase = "termExtraction";
+            status.PhaseProgress = 0;
+            status.PhaseTotal = 0;
+            await BroadcastStatus(gameId, status);
 
             try
             {
                 var pairs = translations
                     .Select(kv => (original: kv.Key, translation: kv.Value))
                     .ToList();
-                var candidates = await termExtractionService.ExtractFromPairsAsync(gameId, pairs, ct);
+                logger.LogInformation("开始术语提取: {Count} 对翻译, 游戏 {GameId}", pairs.Count, gameId);
+                var candidates = await termExtractionService.ExtractFromPairsAsync(
+                    gameId, pairs, ct,
+                    onBatchProgress: (done, total) =>
+                    {
+                        status.PhaseProgress = done;
+                        status.PhaseTotal = total;
+                        _ = BroadcastStatus(gameId, status);
+                    });
                 extractedTermCount = candidates.Count;
                 status.ExtractedTermCount = extractedTermCount;
                 await BroadcastStatus(gameId, status);
@@ -268,16 +268,17 @@ public sealed class PreTranslationService(
                     // Term review gate: pause if manual review is required
                     if (!aiSettings.AutoApplyExtractedTerms)
                     {
+                        // Create and store TCS BEFORE broadcasting — otherwise
+                        // ResumeAfterTermReview can fire before TCS exists (race condition)
+                        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        _termReviewCompletions[gameId] = tcs;
+
                         status.State = PreTranslationState.AwaitingTermReview;
                         status.CurrentPhase = "termReview";
                         await BroadcastStatus(gameId, status);
 
                         logger.LogInformation("等待术语审核: {Count} 条候选术语, 游戏 {GameId}",
                             extractedTermCount, gameId);
-
-                        // Wait for user to resume or timeout after 5 minutes
-                        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                        _termReviewCompletions[gameId] = tcs;
 
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                         timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
@@ -313,7 +314,7 @@ public sealed class PreTranslationService(
                     }
                 }
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "术语提取失败, 游戏 {GameId}", gameId);
@@ -327,6 +328,8 @@ public sealed class PreTranslationService(
 
             status.CurrentRound = 2;
             status.CurrentPhase = "round2";
+            status.PhaseProgress = 0;
+            status.PhaseTotal = 0;
             await BroadcastStatus(gameId, status);
             await BroadcastEvent(gameId, "roundProgress",
                 new { gameId, round = 2, phase = "translating" });
@@ -358,7 +361,7 @@ public sealed class PreTranslationService(
 
                         Interlocked.Add(ref round2Counters.Translated, batchList.Count);
                     }
-                    catch (OperationCanceledException) { throw; }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                     catch (Exception ex)
                     {
                         Interlocked.Add(ref round2Counters.Failed, batch.Length);
@@ -380,7 +383,9 @@ public sealed class PreTranslationService(
         }
 
         // ── Write Cache Files ──
-        status.CurrentPhase = "writingCache";
+        status.CurrentPhase = "writeCache";
+        status.PhaseProgress = 0;
+        status.PhaseTotal = 0;
         await BroadcastStatus(gameId, status);
 
         if (translations.Count > 0)
@@ -413,8 +418,9 @@ public sealed class PreTranslationService(
                 var originals = translations.Keys.ToList();
                 var translationValues = originals.Select(k => translations[k]).ToList();
                 var finalRound = status.CurrentRound > 0 ? status.CurrentRound : 1;
-                await translationMemoryService.AddAsync(gameId, originals, translationValues,
-                    finalRound, isFinal: true, ct);
+                translationMemoryService.Add(gameId, originals, translationValues,
+                    finalRound, isFinal: true);
+                await translationMemoryService.FlushAsync(gameId, ct);
                 logger.LogInformation("翻译记忆库: 写入 {Count} 条, 游戏 {GameId}",
                     translations.Count, gameId);
             }

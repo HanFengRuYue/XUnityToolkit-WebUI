@@ -15,7 +15,7 @@ public sealed class ScriptTagService(
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ConcurrentDictionary<string, ScriptTagConfig> _cache = new();
     private readonly ConcurrentDictionary<string, CompiledRuleSet> _compiled = new();
-    private ScriptTagPreset? _presetCache;
+    private volatile ScriptTagPreset? _presetCache;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

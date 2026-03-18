@@ -9,34 +9,34 @@ public static class LocalLlmEndpoints
     {
         var group = app.MapGroup("/api/local-llm");
 
-        group.MapGet("/status", async (LocalLlmService svc) =>
-            ApiResult<LocalLlmStatus>.Ok(svc.GetStatus()));
+        group.MapGet("/status", (LocalLlmService svc) =>
+            Results.Ok(ApiResult<LocalLlmStatus>.Ok(svc.GetStatus())));
 
         group.MapGet("/gpus", async (LocalLlmService svc) =>
-            ApiResult<List<GpuInfo>>.Ok(await svc.DetectGpusAsync()));
+            Results.Ok(ApiResult<List<GpuInfo>>.Ok(await svc.DetectGpusAsync())));
 
         group.MapPost("/gpus/refresh", async (LocalLlmService svc) =>
         {
             svc.ClearGpuCache();
-            return ApiResult<List<GpuInfo>>.Ok(await svc.DetectGpusAsync());
+            return Results.Ok(ApiResult<List<GpuInfo>>.Ok(await svc.DetectGpusAsync()));
         });
 
         group.MapGet("/settings", async (LocalLlmService svc, CancellationToken ct) =>
-            ApiResult<LocalLlmSettings>.Ok(await svc.LoadSettingsAsync(ct)));
+            Results.Ok(ApiResult<LocalLlmSettings>.Ok(await svc.LoadSettingsAsync(ct))));
 
         group.MapPut("/settings", async (LocalLlmService svc, UpdateLocalLlmSettingsRequest req, CancellationToken ct) =>
         {
             await svc.UpdateUserSettingsAsync(req, ct);
-            return ApiResult.Ok();
+            return Results.Ok(ApiResult.Ok());
         });
 
         group.MapGet("/catalog", () =>
-            ApiResult<IReadOnlyList<BuiltInModelInfo>>.Ok(BuiltInModelCatalog.Models));
+            Results.Ok(ApiResult<IReadOnlyList<BuiltInModelInfo>>.Ok(BuiltInModelCatalog.Models)));
 
         // ── llama.cpp binary status ──
 
         group.MapGet("/llama-status", async (LocalLlmService svc, CancellationToken ct) =>
-            ApiResult<LlamaStatus>.Ok(await svc.GetLlamaStatusAsync(ct)));
+            Results.Ok(ApiResult<LlamaStatus>.Ok(await svc.GetLlamaStatusAsync(ct))));
 
         // ── Test ──
 
@@ -44,6 +44,7 @@ public static class LocalLlmEndpoints
             LocalLlmService localSvc,
             LlmTranslationService translateSvc,
             AppSettingsService settingsSvc,
+            ILogger<LocalLlmService> logger,
             CancellationToken ct) =>
         {
             var status = localSvc.GetStatus();
@@ -66,10 +67,16 @@ public static class LocalLlmEndpoints
                 return Results.Ok(ApiResult<LocalLlmTestResult>.Ok(
                     new LocalLlmTestResult(r.Success, r.Translations?.ToArray(), r.Error, r.ResponseTimeMs)));
             }
-            catch (Exception ex)
+            catch (HttpRequestException ex)
             {
                 return Results.Ok(ApiResult<LocalLlmTestResult>.Ok(
                     new LocalLlmTestResult(false, null, ex.Message, 0)));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "本地 LLM 测试失败");
+                return Results.Ok(ApiResult<LocalLlmTestResult>.Ok(
+                    new LocalLlmTestResult(false, null, "测试翻译失败", 0)));
             }
         });
 
@@ -84,7 +91,7 @@ public static class LocalLlmEndpoints
         });
 
         group.MapPost("/stop", async (LocalLlmService svc, CancellationToken ct) =>
-            ApiResult<LocalLlmStatus>.Ok(await svc.StopAsync(ct)));
+            Results.Ok(ApiResult<LocalLlmStatus>.Ok(await svc.StopAsync(ct))));
 
         // ── Model download ──
 
@@ -107,13 +114,13 @@ public static class LocalLlmEndpoints
         group.MapPost("/download/pause", (LocalLlmService svc, PauseDownloadRequest req) =>
         {
             svc.PauseDownload(req.CatalogId);
-            return ApiResult.Ok();
+            return Results.Ok(ApiResult.Ok());
         });
 
         group.MapPost("/download/cancel", async (LocalLlmService svc, CancelDownloadRequest req) =>
         {
             await svc.CancelDownloadAsync(req.CatalogId);
-            return ApiResult.Ok();
+            return Results.Ok(ApiResult.Ok());
         });
 
         // ── Model inventory ──
@@ -121,16 +128,16 @@ public static class LocalLlmEndpoints
         group.MapGet("/models", async (LocalLlmService svc, CancellationToken ct) =>
         {
             var settings = await svc.LoadSettingsAsync(ct);
-            return ApiResult<List<LocalModelEntry>>.Ok(settings.Models);
+            return Results.Ok(ApiResult<List<LocalModelEntry>>.Ok(settings.Models));
         });
 
         group.MapPost("/models/add", async (LocalLlmService svc, AddModelRequest req, CancellationToken ct) =>
-            ApiResult<LocalModelEntry>.Ok(await svc.AddModelAsync(req.FilePath, req.Name, ct)));
+            Results.Ok(ApiResult<LocalModelEntry>.Ok(await svc.AddModelAsync(req.FilePath, req.Name, ct))));
 
         group.MapDelete("/models/{id}", async (LocalLlmService svc, string id, CancellationToken ct) =>
         {
             await svc.RemoveModelAsync(id, ct);
-            return ApiResult.Ok();
+            return Results.Ok(ApiResult.Ok());
         });
     }
 }

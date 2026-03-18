@@ -32,9 +32,11 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **TermEditorView:** Unified term editor (replaces old GlossaryEditorView); filter chip bar for type (translate/doNotTranslate) and category; NDataTable with virtual scroll, inline editing, column visibility control; single `useAutoSave` instance; JSON/CSV import/export; cross-game import via modal
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
 - SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
+- **SignalR in KeepAlive views:** NEVER create `HubConnection` at module/script level — always create inside `onMounted` and clean up in BOTH `onDeactivated` AND `onBeforeUnmount` (KeepAlive views are deactivated, not unmounted — `onBeforeUnmount` alone won't fire); extract cleanup into a shared function to avoid duplication; type `let connection: HubConnection | null = null` and assign in `onMounted`
 
 ## Patterns & Gotchas
 
+- **Pinia store mutation:** Never mutate store `ref` state directly from views (`store.x = y`); always use store actions — direct mutation bypasses devtools tracking and creates race conditions
 - **Theme default:** CSS `:root` = dark theme; `loadInitialTheme()` defaults to `'system'`; OS detection via `matchMedia`; `resolveTheme('system')` falls back to `'dark'` when OS detection unavailable
 - **Scoped → global CSS:** Scoped styles (`.class[data-v-xxx]`) have higher specificity than global (`.class`); when extracting shared styles to `main.css`, must REMOVE scoped duplicates or they'll override; page-specific overrides stay in scoped with just the differing properties
 - **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232

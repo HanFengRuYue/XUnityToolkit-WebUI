@@ -27,6 +27,7 @@ public static class SettingsEndpoints
             settings.AiTranslation.ContextSize = Math.Clamp(settings.AiTranslation.ContextSize, 0, 100);
             settings.AiTranslation.LocalContextSize = Math.Clamp(settings.AiTranslation.LocalContextSize, 0, 10);
             settings.AiTranslation.Temperature = Math.Clamp(settings.AiTranslation.Temperature, 0.0, 2.0);
+            settings.AiTranslation.FuzzyMatchThreshold = Math.Clamp(settings.AiTranslation.FuzzyMatchThreshold, 0, 100);
 
             var saved = await settingsService.SaveAsync(settings);
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
@@ -66,9 +67,9 @@ public static class SettingsEndpoints
             }
             finally
             {
-                // Recreate directories and reopen log file
-                paths.EnsureDirectoriesExist();
+                // Release log file lock first to prevent deadlock if EnsureDirectoriesExist throws
                 fileLoggerProvider.ResumeFileLog();
+                paths.EnsureDirectoriesExist();
             }
 
             if (errors.Count > 0)
@@ -109,7 +110,7 @@ public static class SettingsEndpoints
             }
             catch
             {
-                return Results.Ok(ApiResult.Fail("无法打开文件夹"));
+                return Results.Json(ApiResult.Fail("无法打开文件夹"), statusCode: 500);
             }
         });
 
@@ -158,7 +159,14 @@ public static class SettingsEndpoints
             return Results.File(memoryStream, "application/zip", fileName);
         });
 
-        group.MapPost("/import", async (HttpRequest request, AppDataPaths paths, ILogger<AppSettingsService> logger) =>
+        group.MapPost("/import", async (HttpRequest request, AppDataPaths paths,
+            AppSettingsService settingsService,
+            TermService termService,
+            ScriptTagService scriptTagService,
+            TranslationMemoryService tmService,
+            DynamicPatternService dynamicPatternService,
+            TermExtractionService extractionService,
+            ILogger<AppSettingsService> logger) =>
         {
             if (!request.HasFormContentType)
                 return Results.BadRequest(ApiResult.Fail("请求必须是 multipart/form-data"));
@@ -167,6 +175,9 @@ public static class SettingsEndpoints
             var file = form.Files.FirstOrDefault();
             if (file is null || file.Length == 0)
                 return Results.BadRequest(ApiResult.Fail("未找到上传的文件"));
+
+            if (file.Length > 100 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("文件大小不能超过 100MB"));
 
             var rootPath = Path.GetFullPath(paths.Root);
             try
@@ -261,6 +272,14 @@ public static class SettingsEndpoints
                         Directory.Delete(dntDir);
                 }
 
+                // Invalidate all in-memory caches so services pick up imported data
+                settingsService.InvalidateCache();
+                termService.ClearAllCache();
+                scriptTagService.ClearAllCache();
+                tmService.ClearAllCache();
+                dynamicPatternService.ClearAllCache();
+                extractionService.ClearAllCache();
+
                 logger.LogInformation("已导入配置数据");
                 return Results.Ok(ApiResult.Ok());
             }
@@ -277,7 +296,7 @@ public static class SettingsEndpoints
     private static void TryDelete(Action action, string name, List<string> errors)
     {
         try { action(); }
-        catch (Exception ex) { errors.Add($"{name}: {ex.Message}"); }
+        catch (Exception) { errors.Add($"删除失败: {Path.GetFileName(name)}"); }
     }
 }
 

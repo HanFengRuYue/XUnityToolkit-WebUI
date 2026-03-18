@@ -6,8 +6,13 @@ public static class PathSecurity
 {
     public static string SafeJoin(string root, string relativePath)
     {
-        var full = Path.GetFullPath(Path.Combine(root, relativePath));
-        if (!full.StartsWith(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase))
+        var normalizedRoot = Path.GetFullPath(root);
+        // Ensure root ends with separator to prevent prefix-match bypass
+        // (e.g., root="C:\data" must not match "C:\data-sibling\file")
+        if (!normalizedRoot.EndsWith(Path.DirectorySeparatorChar))
+            normalizedRoot += Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(normalizedRoot, relativePath));
+        if (!full.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Path traversal detected: {relativePath}");
         return full;
     }

@@ -10,6 +10,7 @@ import {
   NSwitch,
   NSlider,
   NColorPicker,
+  NTag,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -161,6 +162,52 @@ const changelogHtml = computed(() => {
   const md = updateStore.availableInfo?.changelog
   if (!md) return ''
   return marked.parse(md, { async: false }) as string
+})
+
+interface ChangelogEntry {
+  type: string
+  text: string
+  hash?: string
+}
+
+const typeLabels: Record<string, string> = {
+  feat: '新功能',
+  fix: '修复',
+  docs: '文档',
+  refactor: '重构',
+  perf: '性能',
+  ci: 'CI',
+  chore: '杂项',
+  style: '样式',
+  test: '测试',
+}
+
+const changelogEntries = computed<ChangelogEntry[]>(() => {
+  const md = updateStore.availableInfo?.changelog
+  if (!md) return []
+  const entries: ChangelogEntry[] = []
+  for (const line of md.split('\n')) {
+    // Match conventional commit: * type: description
+    const match = line.match(/^[\*\-]\s+(\w+):\s+(.+)\s*$/)
+    if (match && match[1] && match[2]) {
+      let text = match[2]
+      let hash: string | undefined
+      // Extract trailing hash: (abc1234) or (`abc1234`)
+      const hashMatch = text.match(/\s*\(?`?([a-f0-9]{6,40})`?\)?\s*$/)
+      if (hashMatch && hashMatch[1]) {
+        hash = hashMatch[1]
+        text = text.slice(0, -hashMatch[0].length).trim()
+      }
+      entries.push({ type: match[1], text, hash })
+    } else {
+      // Fallback for lines without conventional commit format
+      const plain = line.replace(/^[\*\-]\s+/, '').trim()
+      if (plain) {
+        entries.push({ type: '', text: plain })
+      }
+    }
+  }
+  return entries
 })
 
 async function loadVersion() {
@@ -600,28 +647,52 @@ onMounted(() => {
       <!-- Update Available Details -->
       <template v-if="updateStore.isUpdateAvailable && updateStore.availableInfo">
         <div class="update-details">
-          <div class="update-header">
-            <span class="update-title">v{{ updateStore.availableInfo.version }} 可用</span>
+          <div class="update-details-header">
+            <div class="update-new-version-row">
+              <span class="update-new-version">v{{ updateStore.availableInfo.version }}</span>
+              <span class="update-size-badge">
+                <NIcon :size="13"><CloudDownloadOutlined /></NIcon>
+                {{ updateStore.formatBytes(updateStore.availableInfo.downloadSize) }}
+              </span>
+            </div>
           </div>
 
-          <div v-if="changelogHtml" class="update-changelog">
-            <div class="changelog-label">更新内容</div>
+          <div v-if="changelogEntries.length" class="update-changelog">
+            <div class="changelog-entries">
+              <div v-for="(entry, i) in changelogEntries" :key="i" class="changelog-entry">
+                <span v-if="entry.type" :class="['changelog-type-badge', `type-${entry.type}`]">
+                  {{ typeLabels[entry.type] || entry.type }}
+                </span>
+                <span class="changelog-text">{{ entry.text }}</span>
+                <code v-if="entry.hash" class="changelog-hash">{{ entry.hash.slice(0, 7) }}</code>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="changelogHtml" class="update-changelog">
             <div class="changelog-content" v-html="changelogHtml"></div>
           </div>
 
-          <div class="update-packages">
+          <div v-if="updateStore.availableInfo.changedPackages?.length" class="update-packages">
             <div class="packages-label">需要下载</div>
-            <div v-for="pkg in updateStore.availableInfo.changedPackages" :key="pkg" class="package-item">
-              {{ pkg }}.zip
-            </div>
-            <div class="packages-total">
-              总计 {{ updateStore.formatBytes(updateStore.availableInfo.downloadSize) }}
+            <div class="packages-tags">
+              <NTag
+                v-for="pkg in updateStore.availableInfo.changedPackages"
+                :key="pkg"
+                size="small"
+                round
+                :bordered="false"
+              >
+                {{ pkg }}
+              </NTag>
             </div>
           </div>
 
           <div class="update-actions">
-            <NButton type="primary" @click="updateStore.downloadUpdate()">开始更新</NButton>
-            <NButton @click="updateStore.dismissUpdate()">暂不更新</NButton>
+            <NButton type="primary" @click="updateStore.downloadUpdate()">
+              <template #icon><NIcon><CloudDownloadOutlined /></NIcon></template>
+              开始更新
+            </NButton>
+            <NButton quaternary @click="updateStore.dismissUpdate()">暂不更新</NButton>
           </div>
         </div>
       </template>
@@ -629,34 +700,43 @@ onMounted(() => {
       <!-- Download Progress -->
       <template v-if="updateStore.isDownloading">
         <div class="update-progress">
-          <div class="progress-header">
-            正在下载更新
-            <span v-if="updateStore.currentPackage">: {{ updateStore.currentPackage }}</span>
+          <div class="progress-top">
+            <div class="progress-header">
+              正在下载
+              <span v-if="updateStore.currentPackage" class="progress-package">{{ updateStore.currentPackage }}</span>
+            </div>
+            <div class="progress-bytes">
+              {{ updateStore.formatBytes(updateStore.downloadedBytes) }} / {{ updateStore.formatBytes(updateStore.totalBytes) }}
+            </div>
           </div>
           <NProgress
             type="line"
             :percentage="Math.round(updateStore.progress)"
-            :show-indicator="true"
+            :show-indicator="false"
+            :height="6"
+            :border-radius="3"
           />
-          <div class="progress-detail">
-            {{ updateStore.formatBytes(updateStore.downloadedBytes) }} / {{ updateStore.formatBytes(updateStore.totalBytes) }}
+          <div class="progress-actions">
+            <NButton size="small" quaternary @click="updateStore.cancelDownload()">取消下载</NButton>
           </div>
-          <NButton size="small" @click="updateStore.cancelDownload()">取消</NButton>
         </div>
       </template>
 
       <!-- Ready to Apply -->
       <template v-if="updateStore.isReady">
         <div class="update-ready">
-          <span>更新已下载完成，需要重启应用以完成更新</span>
-          <NButton type="primary" @click="updateStore.applyUpdate()">立即重启更新</NButton>
+          <div class="ready-info">
+            <span class="ready-icon">&#10003;</span>
+            <span>更新已下载完成，重启应用以完成更新</span>
+          </div>
+          <NButton type="primary" size="small" @click="updateStore.applyUpdate()">立即重启</NButton>
         </div>
       </template>
 
       <!-- Applying -->
       <template v-if="updateStore.isApplying">
         <div class="update-applying">
-          <NSpin :size="16" />
+          <NSpin :size="14" />
           <span>{{ updateStore.message || '正在应用更新，应用即将重启...' }}</span>
         </div>
       </template>
@@ -664,7 +744,7 @@ onMounted(() => {
       <!-- Error -->
       <template v-if="updateStore.hasError">
         <div class="update-error">
-          <span>{{ updateStore.error || '更新过程中出现错误' }}</span>
+          <span class="error-text">{{ updateStore.error || '更新过程中出现错误' }}</span>
           <NButton size="small" @click="handleCheckUpdate">重试</NButton>
         </div>
       </template>
@@ -946,21 +1026,22 @@ onMounted(() => {
 
 .update-version-info {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 10px;
 }
 
 .update-version-number {
-  font-size: 22px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 700;
   color: var(--text-1);
   letter-spacing: -0.5px;
-  line-height: 1.2;
+  line-height: 1;
 }
 
 .update-build-number {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-3);
+  font-family: var(--font-mono);
 }
 
 .update-status-badge {
@@ -982,6 +1063,7 @@ onMounted(() => {
 .update-status-badge.available {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--accent);
+  font-weight: 600;
 }
 
 .update-status-badge.ready {
@@ -1005,24 +1087,58 @@ onMounted(() => {
   margin: 16px 0;
 }
 
+/* Update Available Details Card */
 .update-details {
   margin-top: 16px;
-  padding: 16px;
+  padding: 20px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.update-header { margin-bottom: 12px; }
-.update-title { font-weight: 600; font-size: 14px; color: var(--accent); }
-.update-changelog { margin-bottom: 12px; }
-.changelog-label {
+
+.update-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.update-new-version-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  justify-content: space-between;
+}
+
+.update-new-version {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.3px;
+}
+
+.update-size-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 12px;
   font-size: 12px;
-  color: var(--text-3);
-  margin-bottom: 6px;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--text-2);
+  background: var(--bg-muted);
 }
+
+/* Changelog */
+.update-changelog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .changelog-content {
   font-size: 13px;
   :deep(ul) { margin: 0; padding-left: 20px; }
@@ -1030,61 +1146,210 @@ onMounted(() => {
   :deep(code) { font-size: 12px; padding: 1px 4px; border-radius: 3px; background: var(--bg-muted); }
   :deep(p) { margin: 4px 0; }
 }
-.packages-label {
-  font-size: 12px;
+
+.changelog-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.changelog-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.changelog-entry:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.changelog-entry:first-child {
+  padding-top: 0;
+}
+
+.changelog-type-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.changelog-type-badge.type-fix {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.changelog-type-badge.type-docs {
+  background: color-mix(in srgb, var(--text-3) 15%, transparent);
+  color: var(--text-2);
+}
+
+.changelog-type-badge.type-perf {
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.changelog-type-badge.type-refactor {
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
+  color: #a78bfa;
+}
+
+.changelog-type-badge.type-ci,
+.changelog-type-badge.type-chore,
+.changelog-type-badge.type-style,
+.changelog-type-badge.type-test {
+  background: color-mix(in srgb, var(--text-3) 12%, transparent);
   color: var(--text-3);
-  margin-bottom: 6px;
+}
+
+.changelog-text {
+  font-size: 13px;
+  color: var(--text-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.changelog-hash {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--bg-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* Packages */
+.update-packages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.packages-label {
+  font-size: 11px;
+  color: var(--text-3);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-.package-item { font-size: 13px; padding: 2px 0; }
-.packages-total { font-size: 13px; font-weight: 500; margin-top: 6px; color: var(--text-2); }
-.update-actions { display: flex; gap: 8px; margin-top: 16px; }
 
+.packages-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Download Progress */
 .update-progress {
   margin-top: 16px;
   padding: 16px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
-  border: 1px solid var(--border);
-}
-.progress-header { font-size: 14px; margin-bottom: 8px; font-weight: 500; }
-.progress-detail {
-  font-size: 12px;
-  color: var(--text-3);
-  margin-top: 4px;
-  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.update-applying {
-  margin-top: 16px;
-  padding: 16px;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+.progress-top {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+}
+
+.progress-header {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.progress-package {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.progress-bytes {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-3);
+}
+
+.progress-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Applying */
+.update-applying {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 13px;
   color: var(--accent);
 }
 
-.update-ready, .update-error {
+/* Ready & Error */
+.update-ready {
   margin-top: 16px;
-  padding: 16px;
+  padding: 14px 16px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
-  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--success) 5%, var(--bg-subtle));
+  border: 1px solid color-mix(in srgb, var(--success) 15%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
 }
+
+.ready-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ready-icon {
+  color: var(--success);
+  font-weight: 700;
+  font-size: 14px;
+}
+
 .update-error {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--danger) 5%, var(--bg-subtle));
-  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 15%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.error-text {
+  color: var(--danger);
 }
 
 .setting-row {
