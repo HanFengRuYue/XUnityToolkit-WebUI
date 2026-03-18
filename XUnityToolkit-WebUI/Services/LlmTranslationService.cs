@@ -16,6 +16,7 @@ public sealed class LlmTranslationService(
     TermService termService,
     TermMatchingService termMatchingService,
     TermAuditService termAuditService,
+    TranslationMemoryService translationMemoryService,
     GameLibraryService gameLibraryService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<LlmTranslationService> logger)
@@ -68,6 +69,12 @@ public sealed class LlmTranslationService(
     private long _termAuditPhase1PassCount;
     private long _termAuditPhase2PassCount;
     private long _termAuditForceCorrectedCount;
+
+    // ── Translation memory stats ──
+    private long _tmExactHits;
+    private long _tmFuzzyHits;
+    private long _tmPatternHits;
+    private long _tmMisses;
 
     // ── Per-endpoint runtime stats ──
     private readonly ConcurrentDictionary<string, EndpointStats> _endpointStats = new();
@@ -134,7 +141,11 @@ public sealed class LlmTranslationService(
             TermMatchedTextCount = (int)Interlocked.Read(ref _termMatchedTextCount),
             TermAuditPhase1PassCount = (int)Interlocked.Read(ref _termAuditPhase1PassCount),
             TermAuditPhase2PassCount = (int)Interlocked.Read(ref _termAuditPhase2PassCount),
-            TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount)
+            TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount),
+            TranslationMemoryHits = (int)Volatile.Read(ref _tmExactHits),
+            TranslationMemoryFuzzyHits = (int)Volatile.Read(ref _tmFuzzyHits),
+            TranslationMemoryPatternHits = (int)Volatile.Read(ref _tmPatternHits),
+            TranslationMemoryMisses = (int)Volatile.Read(ref _tmMisses),
         };
     }
 
@@ -253,6 +264,7 @@ public sealed class LlmTranslationService(
 
             // ═══════════════════════════════════════════════════════════
             // Multi-phase translation pipeline
+            // Phase 0: Translation Memory lookup (exact/pattern/fuzzy)
             // Phase 1: Natural translation (terms in system prompt, no placeholders)
             // Phase 2: Placeholder-based translation (existing logic)
             // Phase 3: Force correction for segments that still fail audit
@@ -268,6 +280,7 @@ public sealed class LlmTranslationService(
             var perTextHasTerms = new bool[texts.Count];
             var perTextHasDnt = new bool[texts.Count];
             var perTextAuditResult = new string?[texts.Count];
+            var perTextTranslationSource = new string?[texts.Count];
 
             // Compute per-text term info
             if (matchedTerms is { Count: > 0 })
@@ -282,6 +295,72 @@ public sealed class LlmTranslationService(
                         matchedCount++;
                 }
                 Interlocked.Add(ref _termMatchedTextCount, matchedCount);
+            }
+
+            // ── Phase 0: Translation Memory lookup ──
+            var tmResults = new Dictionary<int, (string translation, TmMatchType matchType)>();
+            if (ai.EnableTranslationMemory && !string.IsNullOrEmpty(gameId))
+            {
+                await translationMemoryService.EnsureLoadedAsync(gameId, ct);
+
+                for (int i = 0; i < texts.Count; i++)
+                {
+                    var tmMatch = translationMemoryService.TryMatch(gameId, texts[i], ai.FuzzyMatchThreshold / 100.0);
+                    if (tmMatch is null)
+                    {
+                        Interlocked.Increment(ref _tmMisses);
+                        continue;
+                    }
+
+                    // Term audit check if terms exist
+                    if (matchedTerms is { Count: > 0 } && ai.TermAuditEnabled)
+                    {
+                        var termsForText = termMatchingService.FindMatchedTerms(allTerms!, [texts[i]]);
+                        if (termsForText.Count > 0)
+                        {
+                            var auditResult = termAuditService.AuditTranslation(tmMatch.Translation, termsForText);
+                            if (!auditResult.Passed)
+                                continue; // Audit failed, fall through to LLM
+                        }
+                    }
+
+                    tmResults[i] = (tmMatch.Translation, tmMatch.MatchType);
+
+                    // Track stats
+                    switch (tmMatch.MatchType)
+                    {
+                        case TmMatchType.Exact: Interlocked.Increment(ref _tmExactHits); break;
+                        case TmMatchType.Fuzzy: Interlocked.Increment(ref _tmFuzzyHits); break;
+                        case TmMatchType.Pattern: Interlocked.Increment(ref _tmPatternHits); break;
+                    }
+                }
+
+                if (tmResults.Count > 0)
+                    logger.LogDebug("Phase 0 TM 命中: {Count}/{Total} 条", tmResults.Count, texts.Count);
+            }
+
+            // Apply Phase 0 results — mark resolved indices so Phases 1-3 skip them
+            var phase0Resolved = new HashSet<int>();
+            if (tmResults.Count > 0)
+            {
+                foreach (var (idx, (translation, matchType)) in tmResults)
+                {
+                    translations[idx] = translation;
+                    phase0Resolved.Add(idx);
+                    perTextTranslationSource[idx] = matchType switch
+                    {
+                        TmMatchType.Exact => "tmExact",
+                        TmMatchType.Fuzzy => "tmFuzzy",
+                        TmMatchType.Pattern => "tmPattern",
+                        _ => null
+                    };
+                }
+
+                if (tmResults.Count == texts.Count)
+                {
+                    // All texts resolved by TM — skip Phases 1-3 entirely
+                    goto PipelineComplete;
+                }
             }
 
             // ── Phase 1: Natural Translation Mode ──
@@ -311,11 +390,23 @@ public sealed class LlmTranslationService(
                     // Local mode: skip glossary in system prompt — not applicable here since usePhase1 excludes local mode
                     List<TermEntry>? nullGlossary = null;
 
+                    // Filter out Phase 0 TM-resolved texts to avoid wasting LLM tokens
+                    var p1Indices = new List<int>();
+                    var p1Texts = new List<string>();
+                    for (int i = 0; i < texts.Count; i++)
+                    {
+                        if (!phase0Resolved.Contains(i))
+                        {
+                            p1Indices.Add(i);
+                            p1Texts.Add(texts[i]);
+                        }
+                    }
+
                     // Send unmodified source texts to LLM
-                    if (texts.Count > 0)
+                    if (p1Texts.Count > 0)
                     {
                         var (p1Result, p1Tokens, p1Ms, p1Endpoint) = await TranslateBatchAsync(
-                            texts, from, to, ai, enabledEndpoints, nullGlossary,
+                            p1Texts, from, to, ai, enabledEndpoints, nullGlossary,
                             gameDescription, memoryContext, null, semaphore, ct,
                             overrideSystemPrompt: naturalPrompt);
                         tokens += p1Tokens;
@@ -323,9 +414,10 @@ public sealed class LlmTranslationService(
                         endpointName = p1Endpoint;
 
                         // Audit Phase 1 results if enabled
-                        for (int i = 0; i < texts.Count; i++)
+                        for (int j = 0; j < p1Indices.Count; j++)
                         {
-                            var translated = i < p1Result.Count ? p1Result[i] : texts[i];
+                            var i = p1Indices[j];
+                            var translated = j < p1Result.Count ? p1Result[j] : texts[i];
 
                             if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                             {
@@ -360,11 +452,11 @@ public sealed class LlmTranslationService(
             }
 
             // ── Phase 2: Placeholder-based translation ──
-            // For segments not resolved by Phase 1 (or if Phase 1 was skipped entirely)
+            // For segments not resolved by Phase 0 or Phase 1
             var phase2Indices = new List<int>();
             for (int i = 0; i < texts.Count; i++)
             {
-                if (!phase1Resolved.Contains(i))
+                if (!phase0Resolved.Contains(i) && !phase1Resolved.Contains(i))
                     phase2Indices.Add(i);
             }
 
@@ -595,9 +687,9 @@ public sealed class LlmTranslationService(
 
             if (logger.IsEnabled(LogLevel.Debug) && matchedTerms is { Count: > 0 })
             {
-                var phase3Candidates = texts.Count - phase1Resolved.Count - phase2Resolved.Count;
-                logger.LogDebug("术语审查汇总: Phase1通过={P1}/{Total}, Phase2通过={P2}, 待强制修正={P3}",
-                    phase1Resolved.Count, texts.Count, phase2Resolved.Count, phase3Candidates);
+                var phase3Candidates = texts.Count - phase0Resolved.Count - phase1Resolved.Count - phase2Resolved.Count;
+                logger.LogDebug("术语审查汇总: Phase0(TM)={P0}, Phase1通过={P1}/{Total}, Phase2通过={P2}, 待强制修正={P3}",
+                    phase0Resolved.Count, phase1Resolved.Count, texts.Count, phase2Resolved.Count, phase3Candidates);
             }
 
             // ── Phase 3: Force Correction ──
@@ -606,7 +698,7 @@ public sealed class LlmTranslationService(
             {
                 for (int i = 0; i < texts.Count; i++)
                 {
-                    if (phase1Resolved.Contains(i) || phase2Resolved.Contains(i))
+                    if (phase0Resolved.Contains(i) || phase1Resolved.Contains(i) || phase2Resolved.Contains(i))
                         continue;
 
                     // This segment failed audit in previous phases — apply force correction
@@ -672,6 +764,8 @@ public sealed class LlmTranslationService(
                 }
             }
 
+            PipelineComplete:
+
             // Guard: empty translations cause XUnity.AutoTranslator to count as errors;
             // 5 consecutive errors trigger automatic translator shutdown.
             // Fall back to the original text when the LLM returns an empty string.
@@ -684,23 +778,35 @@ public sealed class LlmTranslationService(
             for (int i = 0; i < translations.Count; i++)
             {
                 // Record recent translation with term metadata
+                var tokensPerText = texts.Count > 0 ? tokens / texts.Count : 0;
                 var recent = new RecentTranslation(
-                    texts[i], translations[i], DateTime.UtcNow, tokens / texts.Count, Math.Round(ms, 1), endpointName, gameId)
+                    texts[i], translations[i], DateTime.UtcNow, tokensPerText, Math.Round(ms, 1), endpointName, gameId)
                 {
                     HasTerms = perTextHasTerms[i],
                     HasDnt = perTextHasDnt[i],
                     TermAuditResult = perTextAuditResult[i],
+                    TranslationSource = perTextTranslationSource[i],
                 };
                 _recentTranslations.Enqueue(recent);
                 while (_recentTranslations.Count > MaxRecentTranslations)
                     _recentTranslations.TryDequeue(out _);
             }
 
-            // Accumulate translation memory
+            // Accumulate volatile translation memory (for LLM context)
             if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
             {
                 var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
                 buffer.Add(texts, translations, contextSize);
+            }
+
+            // Persist to Translation Memory service (fire-and-forget)
+            if (ai.EnableTranslationMemory && !string.IsNullOrEmpty(gameId))
+            {
+                _ = Task.Run(async () =>
+                {
+                    try { await translationMemoryService.AddAsync(gameId, texts, translations, round: 1, isFinal: true, ct: CancellationToken.None); }
+                    catch (Exception ex) { logger.LogWarning(ex, "翻译记忆写入失败"); }
+                });
             }
 
             Interlocked.Add(ref _totalTranslated, texts.Count);
