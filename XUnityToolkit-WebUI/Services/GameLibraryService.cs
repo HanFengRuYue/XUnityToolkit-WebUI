@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -8,13 +7,6 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class GameLibraryService(AppDataPaths paths, ILogger<GameLibraryService> logger)
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public async Task<List<Game>> GetAllAsync(CancellationToken ct = default)
     {
@@ -109,12 +101,12 @@ public sealed class GameLibraryService(AppDataPaths paths, ILogger<GameLibrarySe
             return [];
 
         var json = await File.ReadAllTextAsync(paths.LibraryFile, ct);
-        return JsonSerializer.Deserialize<List<Game>>(json, JsonOptions) ?? [];
+        return JsonSerializer.Deserialize<List<Game>>(json, FileHelper.DataJsonOptions) ?? [];
     }
 
     private async Task WriteLibraryAsync(List<Game> games, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(games, JsonOptions);
+        var json = JsonSerializer.Serialize(games, FileHelper.DataJsonOptions);
         var tmpPath = paths.LibraryFile + ".tmp";
         await File.WriteAllTextAsync(tmpPath, json, ct);
         File.Move(tmpPath, paths.LibraryFile, overwrite: true);

@@ -51,6 +51,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Multi-round pre-translation:** `PreTranslationService` supports 2-round pipeline; Round 1: standard translation + auto term extraction; optional term review pause (5-min timeout, `AwaitingTermReview` state); Round 2: re-translates with newly extracted terms applied; dynamic pattern regex appended to `_PreTranslated_Regex.txt`; results batch-written to TM
 - **LLM batch analysis limits:** `DynamicPatternService` and `TermExtractionService` sample max 200 pairs (`MaxAnalysisPairs`/`MaxExtractionPairs`) to cap at ~10 LLM calls; without this, 2500 translations = 127 sequential calls (10min–2h)
 - **LLM batch service progress:** `DynamicPatternService.AnalyzeDynamicFragmentsAsync` and `TermExtractionService.ExtractFromPairsAsync` accept `Action<int, int>? onBatchProgress` (done, total); `PreTranslationService` uses fire-and-forget `_ = BroadcastStatus(...)` inside the synchronous callback to push SignalR updates
+- **Term extraction services:** `GlossaryExtractionService` (reactive, hot-path, direct-to-term-table) and `TermExtractionService` (batch, pre-translation, staging candidates) share LLM extraction logic via `LlmResponseParser`, `EndpointSelector`, `TermCategoryMapping` but are intentionally separate services — different lifecycles, outputs, and concurrency models; do NOT merge
 - **Unified Term Management:** `TermService` stores per-game term entries at `data/glossaries/{gameId}.json` (migrates legacy DNT entries on first load); each `TermEntry` has `Type` (Translate/DoNotTranslate), `Category`, `Priority`, `CaseSensitive`, `ExactMatch`, `IsRegex`; `TermMatchingService` handles priority-based placeholder substitution; `TermAuditService` verifies term compliance in translations
 - **Enum JSON casing:** `TermType` and `TermCategory` use `CamelCaseJsonStringEnumConverter<T>` (camelCase: `"translate"`, `"doNotTranslate"`, `"character"`); ALL other enums use default PascalCase (`"OpenAI"`, `"NotInstalled"`) — do NOT change global `JsonStringEnumConverter` or add naming policy to it; **converter precedence:** property-level `[JsonConverter]` > `JsonSerializerOptions.Converters` > type-level `[JsonConverter]` — camelCase enums MUST have `[JsonConverter]` on the TermEntry **property** (not just the enum type), otherwise the global PascalCase `JsonStringEnumConverter` in `Program.cs` and service `JsonOptions` overrides the type-level attribute
 - **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
@@ -93,8 +94,21 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Settings validation:** Clamp numeric settings in `SettingsEndpoints` (MaxConcurrency, Port, ContextSize, LocalContextSize, Temperature, FuzzyMatchThreshold); adding new numeric `AiTranslationSettings` fields requires adding a corresponding `Math.Clamp` line
 - **Input size limits:** Enforce maximum counts on list endpoints (terms 10000 (unified), translate texts 500, raw config 512 KB); file uploads: font 50MB, charset/translation 10MB, settings import 100MB
 - **Regex validation:** Validate term `IsRegex` entries with `new Regex(..., timeout: 1s)` before saving
-- **Atomic file writes:** Use write-to-temp + `File.Move(overwrite: true)` for critical data files (settings, library, manifests)
+- **Atomic file writes:** Use `FileHelper.WriteJsonAtomicAsync` for JSON data files; use write-to-temp + `File.Move(overwrite: true)` for non-JSON critical files
 - **SignalR error messages:** Do not broadcast internal file paths in `_error` fields; use `Path.GetFileName()` or generic messages
+
+## Shared Infrastructure (`Infrastructure/`)
+
+- **`FileHelper.DataJsonOptions`:** Standard `JsonSerializerOptions` (WriteIndented + CamelCase + JsonStringEnumConverter) shared by all data-file services — do NOT declare per-service `JsonOptions`; services with different config (e.g., `GameImageService` without WriteIndented, `UpdateService` without JsonStringEnumConverter) keep their own
+- **`FileHelper.WriteJsonAtomicAsync<T>`:** Atomic JSON write (serialize → `.tmp` → `File.Move`); includes `Directory.CreateDirectory`; use for all per-game data file persistence
+- **`LlmResponseParser`:** `ExtractJsonArray(content)` strips `<think>` blocks + markdown fences + extracts `[...]`; `ExtractJsonContent(content)` for general JSON (array or object); used by `GlossaryExtractionService`, `TermExtractionService`, `LlmTranslationService`, `DynamicPatternService`
+- **`EndpointSelector`:** `SelectBestEndpoint(endpoints)` returns highest-priority enabled endpoint; `SelectEndpoint(endpoints, preferredId)` tries named endpoint first, falls back to best; used by `GlossaryExtractionService`, `TermExtractionService`, `DynamicPatternService`, `BepInExLogService`
+- **`TermCategoryMapping.FromString`:** Shared `Dictionary<string, TermCategory>` in `Models/TermEntry.cs`; used by both `GlossaryExtractionService` and `TermExtractionService` for LLM response parsing
+
+## Frontend Shared Utilities
+
+- **`src/utils/format.ts`:** `formatBytes(bytes)` and `formatSpeed(bytesPerSec)` — shared formatting; do NOT declare local `formatBytes`/`formatSize` in components
+- **`src/constants/prompts.ts`:** `DEFAULT_SYSTEM_PROMPT` — shared default system prompt constant; do NOT duplicate in components
 
 ## Code Conventions
 
@@ -152,7 +166,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
-- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`; includes `TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`, `EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`
+- **Adding AiTranslationSettings fields:** Sync 3 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION` + pipeline settings UI); real-time settings (`TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`) display in `AiTranslationView.vue`; pre-translation-only settings (`EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`) display in `AssetExtractionView.vue`
 - **Adding TermEntry fields:** Sync 2 places: `Models/TermEntry.cs`, `src/api/types.ts`; includes `Source` (`TermSource` enum, PascalCase JSON)
 - **ScriptTagRule/ScriptTagConfig fields:** Sync 2 places: `Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
 - **Per-game data cleanup (script tags):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete `scriptTagFile` + call `scriptTagService.RemoveCache`
@@ -182,7 +196,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - `dotnet build` auto-runs frontend; skip with `-p:SkipFrontendBuild=true`
 - `build.ps1`: local build — downloads bundled assets → extracts XUnity reference DLLs → updates classdata.tpk → frontend → TranslatorEndpoint → Updater (AOT) → publish to `Release/win-x64/`; `-SkipDownload` skips asset downloads; no manifest/component ZIPs, no MSI (CI `build.yml` handles full release builds independently); cleanup: remove `web.config`, `*.pdb`, `*.staticwebassets.endpoints.json`
-- **Versioning:** `build.ps1` auto-generates `3.0.{YYYYMMDDHHmm}` (CI uses `3.0.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
+- **Versioning:** `build.ps1` auto-generates `3.1.{YYYYMMDDHHmm}` (CI uses `3.1.` prefix) via `-p:InformationalVersion`; **must use `InformationalVersion` not `Version`** — `Version` sets `AssemblyVersion` (UInt16 max 65535) which overflows with timestamp
 - **Multi-file publishing:** `PublishSingleFile` removed; `ExcludeFromSingleFile` target removed; LibCpp2IL.dll works naturally in multi-file mode
 - **Satellite assemblies:** `SatelliteResourceLanguages=en` strips all language folders (cs/de/fr/ja/ko/etc.) from publish output; WinForms satellite resources are unused (UI is Vue, native dialogs use OS localization)
 - **Data path:** Always `%AppData%\XUnityToolkit\` (no portable mode); `AppData:Root` config key allows override for dev/test

@@ -49,6 +49,10 @@ const fromLang = ref('ja')
 const toLang = ref('zh')
 const hasAiProvider = ref(false)
 const enablePreTranslationCache = ref(false)
+const enableLlmPatternAnalysis = ref(false)
+const enableMultiRoundTranslation = ref(false)
+const enableAutoTermExtraction = ref(false)
+const autoApplyExtractedTerms = ref(false)
 
 const collapsed = reactive({
   scriptTags: true,
@@ -136,6 +140,16 @@ async function handleToggleCache(value: boolean) {
     await settingsApi.save(settings)
   } catch {
     message.error('保存缓存设置失败')
+  }
+}
+
+async function handlePreTranslationSettingChange(field: string, value: boolean) {
+  try {
+    const settings = await settingsApi.get()
+    ;(settings.aiTranslation as unknown as Record<string, unknown>)[field] = value
+    await settingsApi.save(settings)
+  } catch {
+    message.error('保存设置失败')
   }
 }
 
@@ -265,6 +279,10 @@ onMounted(async () => {
       const endpoints = settings.aiTranslation?.endpoints ?? []
       hasAiProvider.value = endpoints.some(e => e.enabled && e.apiKey)
       enablePreTranslationCache.value = settings.aiTranslation?.enablePreTranslationCache ?? false
+      enableLlmPatternAnalysis.value = settings.aiTranslation?.enableLlmPatternAnalysis ?? false
+      enableMultiRoundTranslation.value = settings.aiTranslation?.enableMultiRoundTranslation ?? false
+      enableAutoTermExtraction.value = settings.aiTranslation?.enableAutoTermExtraction ?? false
+      autoApplyExtractedTerms.value = settings.aiTranslation?.autoApplyExtractedTerms ?? false
     } catch { /* ignore */ }
     await loadScriptTags()
   } catch {
@@ -517,6 +535,50 @@ function langLabel(code: string): string {
           <router-link to="/ai-translation" style="color: var(--accent); font-weight: 500">AI 翻译页面</router-link>
           添加至少一个提供商。
         </NAlert>
+
+        <!-- Pre-Translation Pipeline Settings -->
+        <div class="pre-translation-settings">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">LLM 动态模式分析</span>
+              <span class="setting-description">利用 LLM 分析翻译中的重复模式，加速后续翻译</span>
+            </div>
+            <NSwitch
+              v-model:value="enableLlmPatternAnalysis"
+              @update:value="(v: boolean) => handlePreTranslationSettingChange('enableLlmPatternAnalysis', v)"
+            />
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">多轮翻译</span>
+              <span class="setting-description">预翻译时进行多轮翻译，第二轮利用翻译记忆进行润色</span>
+            </div>
+            <NSwitch
+              v-model:value="enableMultiRoundTranslation"
+              @update:value="(v: boolean) => handlePreTranslationSettingChange('enableMultiRoundTranslation', v)"
+            />
+          </div>
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">自动术语提取</span>
+              <span class="setting-description">预翻译过程中自动提取术语候选项</span>
+            </div>
+            <NSwitch
+              v-model:value="enableAutoTermExtraction"
+              @update:value="(v: boolean) => handlePreTranslationSettingChange('enableAutoTermExtraction', v)"
+            />
+          </div>
+          <div v-if="enableAutoTermExtraction" class="setting-row sub-setting">
+            <div class="setting-info">
+              <span class="setting-label">自动应用提取的术语</span>
+              <span class="setting-description">自动将提取的术语加入术语表，无需手动确认</span>
+            </div>
+            <NSwitch
+              v-model:value="autoApplyExtractedTerms"
+              @update:value="(v: boolean) => handlePreTranslationSettingChange('autoApplyExtractedTerms', v)"
+            />
+          </div>
+        </div>
 
         <!-- Pre-Translation Cache Toggle -->
         <div class="cache-toggle-section">
@@ -897,6 +959,30 @@ function langLabel(code: string): string {
 
 .failed-count {
   color: var(--danger);
+}
+
+/* ===== Pre-Translation Pipeline Settings ===== */
+.pre-translation-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.setting-info { flex: 1; }
+.setting-label { font-size: 14px; font-weight: 500; display: block; }
+.setting-description { font-size: 12px; color: var(--text-3); display: block; margin-top: 2px; }
+
+.sub-setting {
+  padding-left: 16px;
 }
 
 /* ===== Cache Toggle ===== */

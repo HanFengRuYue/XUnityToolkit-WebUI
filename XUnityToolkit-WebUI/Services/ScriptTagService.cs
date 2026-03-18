@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -17,12 +16,6 @@ public sealed class ScriptTagService(
     private readonly ConcurrentDictionary<string, CompiledRuleSet> _compiled = new();
     private volatile ScriptTagPreset? _presetCache;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     private sealed class CompiledRuleSet
     {
@@ -43,7 +36,7 @@ public sealed class ScriptTagService(
         }
 
         var json = File.ReadAllText(file);
-        _presetCache = JsonSerializer.Deserialize<ScriptTagPreset>(json, JsonOptions)
+        _presetCache = JsonSerializer.Deserialize<ScriptTagPreset>(json, FileHelper.DataJsonOptions)
             ?? new ScriptTagPreset { Version = 0, Rules = [] };
         return _presetCache;
     }
@@ -81,7 +74,7 @@ public sealed class ScriptTagService(
             }
 
             var json = await File.ReadAllTextAsync(file, ct);
-            var config = JsonSerializer.Deserialize<ScriptTagConfig>(json, JsonOptions)
+            var config = JsonSerializer.Deserialize<ScriptTagConfig>(json, FileHelper.DataJsonOptions)
                 ?? new ScriptTagConfig();
 
             // Auto-update: if stored preset version is behind bundled version
@@ -100,7 +93,7 @@ public sealed class ScriptTagService(
                 config.PresetVersion = currentPreset.Version;
 
                 // Write back updated config
-                var updatedJson = JsonSerializer.Serialize(config, JsonOptions);
+                var updatedJson = JsonSerializer.Serialize(config, FileHelper.DataJsonOptions);
                 var tmpPath = file + ".tmp";
                 await File.WriteAllTextAsync(tmpPath, updatedJson, ct);
                 File.Move(tmpPath, file, overwrite: true);
@@ -124,7 +117,7 @@ public sealed class ScriptTagService(
         try
         {
             var file = paths.ScriptTagFile(gameId);
-            var json = JsonSerializer.Serialize(config, JsonOptions);
+            var json = JsonSerializer.Serialize(config, FileHelper.DataJsonOptions);
             var tmpPath = file + ".tmp";
             await File.WriteAllTextAsync(tmpPath, json, ct);
             File.Move(tmpPath, file, overwrite: true);

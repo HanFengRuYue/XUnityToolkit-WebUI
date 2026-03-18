@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -28,12 +27,6 @@ public sealed class TranslationMemoryService(
     private long _fuzzyHits;
     private long _misses;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     // ── Internal store ──
 
@@ -592,7 +585,7 @@ public sealed class TranslationMemoryService(
         try
         {
             var json = await File.ReadAllTextAsync(file, ct);
-            var entries = JsonSerializer.Deserialize<List<TranslationMemoryEntry>>(json, JsonOptions);
+            var entries = JsonSerializer.Deserialize<List<TranslationMemoryEntry>>(json, FileHelper.DataJsonOptions);
             if (entries is null) return;
 
             foreach (var entry in entries)
@@ -625,7 +618,7 @@ public sealed class TranslationMemoryService(
 
             var file = paths.TranslationMemoryFile(gameId);
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var json = JsonSerializer.Serialize(entries, JsonOptions);
+            var json = JsonSerializer.Serialize(entries, FileHelper.DataJsonOptions);
             var tmpPath = file + ".tmp";
             await File.WriteAllTextAsync(tmpPath, json, ct);
             File.Move(tmpPath, file, overwrite: true);

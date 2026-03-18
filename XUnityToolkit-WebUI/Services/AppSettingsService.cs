@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using static XUnityToolkit_WebUI.Infrastructure.DpapiProtector;
@@ -10,13 +9,6 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private volatile AppSettings? _cached;
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public async Task<AppSettings> GetAsync(CancellationToken ct = default)
     {
@@ -68,8 +60,8 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
         {
             // Round-trip through JSON to get a deep copy, avoiding mutation of the cached instance
             var current = _cached ?? await ReadAsync(ct);
-            var json = JsonSerializer.Serialize(current, JsonOptions);
-            var copy = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)!;
+            var json = JsonSerializer.Serialize(current, FileHelper.DataJsonOptions);
+            var copy = JsonSerializer.Deserialize<AppSettings>(json, FileHelper.DataJsonOptions)!;
             mutate(copy);
             await WriteAsync(copy, ct);
             _cached = copy;
@@ -92,7 +84,7 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
             return new AppSettings();
 
         var json = await File.ReadAllTextAsync(paths.SettingsFile, ct);
-        var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+        var settings = JsonSerializer.Deserialize<AppSettings>(json, FileHelper.DataJsonOptions) ?? new AppSettings();
         var hasFailures = DecryptSettings(settings);
         if (hasFailures)
         {
@@ -110,10 +102,10 @@ public sealed class AppSettingsService(AppDataPaths paths, ILogger<AppSettingsSe
     private async Task WriteAsync(AppSettings settings, CancellationToken ct)
     {
         // Deep-copy then encrypt — never mutate the in-memory cached object
-        var json = JsonSerializer.Serialize(settings, JsonOptions);
-        var encryptedCopy = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions)!;
+        var json = JsonSerializer.Serialize(settings, FileHelper.DataJsonOptions);
+        var encryptedCopy = JsonSerializer.Deserialize<AppSettings>(json, FileHelper.DataJsonOptions)!;
         EncryptSettings(encryptedCopy);
-        var encryptedJson = JsonSerializer.Serialize(encryptedCopy, JsonOptions);
+        var encryptedJson = JsonSerializer.Serialize(encryptedCopy, FileHelper.DataJsonOptions);
 
         var tmpPath = paths.SettingsFile + ".tmp";
         await File.WriteAllTextAsync(tmpPath, encryptedJson, ct);

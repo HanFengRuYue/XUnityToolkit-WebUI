@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -17,13 +16,6 @@ public sealed class TermExtractionService(
 {
     private readonly ConcurrentDictionary<string, TermCandidateStore> _cache = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     private const int BatchSize = 20;
     private const int MaxExtractionPairs = 200;
@@ -43,15 +35,6 @@ public sealed class TermExtractionService(
         "- 输出 JSON 数组格式：[{\"original\": \"原文\", \"translation\": \"译文\", \"category\": \"character\"}]\n" +
         "- 只输出 JSON 数组，不要其他说明";
 
-    private static readonly Dictionary<string, TermCategory> CategoryMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["character"] = TermCategory.Character,
-        ["location"] = TermCategory.Location,
-        ["item"] = TermCategory.Item,
-        ["skill"] = TermCategory.Skill,
-        ["organization"] = TermCategory.Organization,
-        ["general"] = TermCategory.General,
-    };
 
     /// <summary>
     /// Extract term candidates from translation pairs via LLM.
@@ -71,10 +54,7 @@ public sealed class TermExtractionService(
         }
 
         var ai = settings.AiTranslation;
-        var endpoint = ai.Endpoints
-            .Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey))
-            .OrderByDescending(e => e.Priority)
-            .FirstOrDefault();
+        var endpoint = EndpointSelector.SelectBestEndpoint(ai.Endpoints);
 
         if (endpoint is null)
         {
@@ -176,7 +156,7 @@ public sealed class TermExtractionService(
         try
         {
             var json = await File.ReadAllTextAsync(file, ct);
-            var store = JsonSerializer.Deserialize<TermCandidateStore>(json, JsonOptions)
+            var store = JsonSerializer.Deserialize<TermCandidateStore>(json, FileHelper.DataJsonOptions)
                 ?? new TermCandidateStore();
             _cache[gameId] = store;
             return store;
@@ -301,16 +281,7 @@ public sealed class TermExtractionService(
 
     private List<TermCandidate> ParseExtractionResult(string content)
     {
-        var json = content.Trim();
-
-        // Strip markdown code fences
-        if (json.StartsWith("```"))
-        {
-            var start = json.IndexOf('[');
-            var end = json.LastIndexOf(']');
-            if (start >= 0 && end > start)
-                json = json[start..(end + 1)];
-        }
+        var json = LlmResponseParser.ExtractJsonArray(content);
 
         try
         {
@@ -327,7 +298,7 @@ public sealed class TermExtractionService(
 
                 var categoryStr = item?["category"]?.GetValue<string>();
                 var category = TermCategory.General;
-                if (!string.IsNullOrWhiteSpace(categoryStr) && CategoryMap.TryGetValue(categoryStr, out var cat))
+                if (!string.IsNullOrWhiteSpace(categoryStr) && TermCategoryMapping.FromString.TryGetValue(categoryStr, out var cat))
                     category = cat;
 
                 result.Add(new TermCandidate
@@ -354,11 +325,7 @@ public sealed class TermExtractionService(
         try
         {
             var file = paths.TermCandidatesFile(gameId);
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var json = JsonSerializer.Serialize(store, JsonOptions);
-            var tmpPath = file + ".tmp";
-            await File.WriteAllTextAsync(tmpPath, json, ct);
-            File.Move(tmpPath, file, overwrite: true);
+            await FileHelper.WriteJsonAtomicAsync(file, store, ct: ct);
         }
         finally
         {

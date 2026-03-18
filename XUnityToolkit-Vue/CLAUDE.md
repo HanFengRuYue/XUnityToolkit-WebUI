@@ -63,6 +63,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
 - **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
 - TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
+- **Dynamic field access on typed objects:** `(obj as Record<string, unknown>)[field]` fails strict TS; use `(obj as unknown as Record<string, unknown>)[field]`
 - **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false }) as string` — `as string` cast required (overload returns `string | Promise<string>`)
 - **Regex match groups:** `match[1]` is `string | undefined` in strict TS — always check `match && match[1]`
 - **Scoped `:deep()` nesting:** Never chain `:deep()` — `.x :deep(a) :deep(b)` silently fails; use `:deep(a b)` for descendant selectors inside a single `:deep()` call

@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -21,13 +20,6 @@ public sealed partial class DynamicPatternService(
 
     private readonly ConcurrentDictionary<string, DynamicPatternStore> _cache = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     // ── Template variable detection (regex-based, zero LLM cost) ──
 
@@ -135,7 +127,8 @@ public sealed partial class DynamicPatternService(
             if (literalLength < MinLiteralChars) continue;
 
             // Build replacement template from translation
-            var replacement = BuildReplacementTemplate(translation, variables, original);
+            var replacement = BuildSubstitutionTemplate(translation,
+                variables.Select(v => (v.Start, v.End)), original);
             if (replacement is null) continue;
 
             results.Add((patternBuilder.ToString(), replacement));
@@ -167,10 +160,7 @@ public sealed partial class DynamicPatternService(
         }
 
         var settings = await settingsService.GetAsync();
-        var endpoint = settings.AiTranslation.Endpoints
-            .Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey))
-            .OrderByDescending(e => e.Priority)
-            .FirstOrDefault();
+        var endpoint = EndpointSelector.SelectBestEndpoint(settings.AiTranslation.Endpoints);
 
         if (endpoint is null)
         {
@@ -249,7 +239,7 @@ public sealed partial class DynamicPatternService(
             }
 
             var json = await File.ReadAllTextAsync(file, ct);
-            var store = JsonSerializer.Deserialize<DynamicPatternStore>(json, JsonOptions)
+            var store = JsonSerializer.Deserialize<DynamicPatternStore>(json, FileHelper.DataJsonOptions)
                         ?? new DynamicPatternStore();
             _cache[gameId] = store;
             return store;
@@ -336,17 +326,7 @@ public sealed partial class DynamicPatternService(
 
         try
         {
-            // Strip markdown fencing if present
-            var json = content.Trim();
-            if (json.StartsWith("```"))
-            {
-                var firstNewline = json.IndexOf('\n');
-                if (firstNewline >= 0)
-                    json = json[(firstNewline + 1)..];
-                if (json.EndsWith("```"))
-                    json = json[..^3];
-                json = json.Trim();
-            }
+            var json = LlmResponseParser.ExtractJsonContent(content);
 
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
@@ -392,7 +372,8 @@ public sealed partial class DynamicPatternService(
 
                 // Build original template (replace variable spans with placeholders)
                 var origTemplate = BuildTemplate(orig, variables);
-                var transTemplate = BuildTranslationTemplate(trans, variables, orig);
+                var transTemplate = BuildSubstitutionTemplate(trans,
+                    variables.Select(v => (v.Start, v.End)), orig);
 
                 if (origTemplate is not null && transTemplate is not null)
                 {
@@ -436,18 +417,22 @@ public sealed partial class DynamicPatternService(
         return sb.Length > 0 ? sb.ToString() : null;
     }
 
-    private static string? BuildTranslationTemplate(
+    /// <summary>
+    /// Build a substitution template by replacing variable spans in the translation
+    /// with $N backreferences. Used by both regex entry generation and LLM pattern analysis.
+    /// </summary>
+    private static string? BuildSubstitutionTemplate(
         string translation,
-        List<(int Start, int End, string Type)> variables,
+        IEnumerable<(int Start, int End)> variableSpans,
         string original)
     {
-        // Try to find the variable values in the translation and replace them with backreferences
-        var sorted = variables.OrderBy(v => v.Start).ToList();
+        var sorted = variableSpans.OrderBy(v => v.Start).ToList();
         var result = translation;
 
+        // Replace variable values in translation with backreferences (reverse order to preserve positions)
         for (var i = sorted.Count - 1; i >= 0; i--)
         {
-            var (start, end, _) = sorted[i];
+            var (start, end) = sorted[i];
             var varValue = original[start..end];
 
             var pos = result.IndexOf(varValue, StringComparison.Ordinal);
@@ -461,37 +446,6 @@ public sealed partial class DynamicPatternService(
             else
             {
                 // Variable value not found in translation — cannot build safe template
-                return null;
-            }
-        }
-
-        return result;
-    }
-
-    private static string? BuildReplacementTemplate(
-        string translation,
-        List<(int Start, int End, string Variable)> variables,
-        string original)
-    {
-        var sorted = variables.OrderBy(v => v.Start).ToList();
-        var result = translation;
-
-        // Replace variable values in translation with backreferences (reverse order to preserve positions)
-        for (var i = sorted.Count - 1; i >= 0; i--)
-        {
-            var (start, end, _) = sorted[i];
-            var varValue = original[start..end];
-
-            var pos = result.IndexOf(varValue, StringComparison.Ordinal);
-            if (pos >= 0)
-            {
-                result = string.Concat(
-                    result.AsSpan(0, pos),
-                    $"${i + 1}",
-                    result.AsSpan(pos + varValue.Length));
-            }
-            else
-            {
                 return null;
             }
         }
@@ -569,11 +523,7 @@ public sealed partial class DynamicPatternService(
         try
         {
             var file = paths.DynamicPatternsFile(gameId);
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var json = JsonSerializer.Serialize(store, JsonOptions);
-            var tmpPath = file + ".tmp";
-            await File.WriteAllTextAsync(tmpPath, json, ct);
-            File.Move(tmpPath, file, overwrite: true);
+            await FileHelper.WriteJsonAtomicAsync(file, store, ct: ct);
             _cache[gameId] = store;
         }
         catch (Exception ex)

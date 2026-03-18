@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import * as signalR from '@microsoft/signalr'
 import { updateApi } from '@/api/update'
 import type { UpdateState, UpdateCheckResult, UpdateStatusInfo, UpdateAvailableInfo } from '@/api/types'
+import { formatBytes } from '@/utils/format'
 
 export const useUpdateStore = defineStore('update', () => {
   const state = ref<UpdateState>('None')
@@ -24,12 +25,6 @@ export const useUpdateStore = defineStore('update', () => {
   const isReady = computed(() => state.value === 'Ready')
   const isApplying = computed(() => state.value === 'Applying')
   const hasError = computed(() => state.value === 'Error')
-
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  }
 
   async function connectHub() {
     if (connection && connection.state !== signalR.HubConnectionState.Disconnected) return
