@@ -32,7 +32,6 @@ import {
   FileUploadOutlined,
   StorageOutlined,
   ExpandMoreOutlined,
-  SmartToyOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
@@ -426,68 +425,6 @@ onMounted(() => {
             clearable
           />
           <span class="form-hint">加速 AI 模型下载（留空使用官方地址）</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- AI Translation Pipeline Settings -->
-    <div class="section-card" style="animation-delay: 0.1s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><SmartToyOutlined /></NIcon>
-          </span>
-          AI 翻译管线
-        </h2>
-      </div>
-      <div class="settings-form">
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">翻译记忆</span>
-            <span class="setting-description">缓存已翻译的文本，相同或相似文本复用翻译结果</span>
-          </div>
-          <NSwitch v-model:value="settings.aiTranslation.enableTranslationMemory" />
-        </div>
-        <div v-if="settings.aiTranslation.enableTranslationMemory" class="form-row" style="padding-left: 16px">
-          <label class="form-label">模糊匹配阈值</label>
-          <NSlider
-            v-model:value="settings.aiTranslation.fuzzyMatchThreshold"
-            :min="0"
-            :max="100"
-            :step="1"
-            :tooltip="true"
-            :format-tooltip="(v: number) => v + '%'"
-            style="max-width: 320px"
-          />
-          <span class="form-hint">阈值越高匹配越严格，建议 80-90</span>
-        </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">LLM 动态模式分析</span>
-            <span class="setting-description">利用 LLM 分析翻译中的重复模式，加速后续翻译</span>
-          </div>
-          <NSwitch v-model:value="settings.aiTranslation.enableLlmPatternAnalysis" />
-        </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">多轮翻译</span>
-            <span class="setting-description">预翻译时进行多轮翻译，第二轮利用翻译记忆进行润色</span>
-          </div>
-          <NSwitch v-model:value="settings.aiTranslation.enableMultiRoundTranslation" />
-        </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">自动术语提取</span>
-            <span class="setting-description">预翻译过程中自动提取术语候选项</span>
-          </div>
-          <NSwitch v-model:value="settings.aiTranslation.enableAutoTermExtraction" />
-        </div>
-        <div v-if="settings.aiTranslation.enableAutoTermExtraction" class="setting-row" style="padding-left: 16px">
-          <div class="setting-info">
-            <span class="setting-label">自动应用提取的术语</span>
-            <span class="setting-description">自动将提取的术语加入术语表，无需手动确认</span>
-          </div>
-          <NSwitch v-model:value="settings.aiTranslation.autoApplyExtractedTerms" />
         </div>
       </div>
     </div>

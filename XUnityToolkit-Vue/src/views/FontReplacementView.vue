@@ -12,6 +12,7 @@ import type {
   FontReplacementProgress, FontReplacementResult
 } from '@/api/types'
 import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
+import { formatBytes } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,12 +41,6 @@ const phaseLabels: Record<string, string> = {
 // SignalR connection (created in onMounted)
 let connection: HubConnection | null = null
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 const columns = computed<DataTableColumns<FontInfo>>(() => [
   { type: 'selection', disabled: (row: FontInfo) => !row.isSupported },
   { title: '字体名称', key: 'name', minWidth: 150, ellipsis: { tooltip: true } },
@@ -71,7 +66,7 @@ const columns = computed<DataTableColumns<FontInfo>>(() => [
   },
   {
     title: '大小', key: 'fontDataSize', width: 100,
-    render: (row) => row.fontType === 'TTF' ? formatSize(row.fontDataSize) : '—'
+    render: (row) => row.fontType === 'TTF' ? formatBytes(row.fontDataSize) : '—'
   },
   {
     title: '状态', key: 'isSupported', width: 100,

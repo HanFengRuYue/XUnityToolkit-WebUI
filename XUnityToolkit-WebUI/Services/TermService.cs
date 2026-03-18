@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -10,13 +9,6 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly ConcurrentDictionary<string, List<TermEntry>> _cache = new();
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public async Task<List<TermEntry>> GetAsync(string gameId, CancellationToken ct = default)
     {
@@ -35,7 +27,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
             if (File.Exists(file))
             {
                 var json = await File.ReadAllTextAsync(file, ct);
-                entries = JsonSerializer.Deserialize<List<TermEntry>>(json, JsonOptions) ?? [];
+                entries = JsonSerializer.Deserialize<List<TermEntry>>(json, FileHelper.DataJsonOptions) ?? [];
             }
             else
             {
@@ -49,7 +41,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
             if (File.Exists(dntFile))
             {
                 var dntJson = await File.ReadAllTextAsync(dntFile, ct);
-                var dntEntries = JsonSerializer.Deserialize<List<LegacyDntEntry>>(dntJson, JsonOptions) ?? [];
+                var dntEntries = JsonSerializer.Deserialize<List<LegacyDntEntry>>(dntJson, FileHelper.DataJsonOptions) ?? [];
 
                 var existingOriginals = new HashSet<string>(
                     entries.Select(e => e.Original), StringComparer.Ordinal);
@@ -225,7 +217,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         }
 
         var json = await File.ReadAllTextAsync(file, ct);
-        var entries = JsonSerializer.Deserialize<List<TermEntry>>(json, JsonOptions) ?? [];
+        var entries = JsonSerializer.Deserialize<List<TermEntry>>(json, FileHelper.DataJsonOptions) ?? [];
         _cache[gameId] = entries;
         return entries;
     }
@@ -234,7 +226,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     {
         var file = paths.GlossaryFile(gameId);
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        var json = JsonSerializer.Serialize(entries, JsonOptions);
+        var json = JsonSerializer.Serialize(entries, FileHelper.DataJsonOptions);
         var tmpPath = file + ".tmp";
         await File.WriteAllTextAsync(tmpPath, json, ct);
         File.Move(tmpPath, file, overwrite: true);

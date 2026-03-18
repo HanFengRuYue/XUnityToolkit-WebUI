@@ -1434,11 +1434,7 @@ public sealed class LlmTranslationService(
     {
         var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
 
-        if (!string.IsNullOrWhiteSpace(gameDescription))
-        {
-            sb.Append("\n\n游戏背景：\n");
-            sb.Append(gameDescription);
-        }
+        AppendGameDescription(sb, gameDescription);
 
         if (glossary is { Count: > 0 })
         {
@@ -1456,15 +1452,7 @@ public sealed class LlmTranslationService(
             }
         }
 
-        if (memoryContext is { Count: > 0 })
-        {
-            sb.Append("\n\n以下是近期翻译示例（供参考，保持风格一致）：\n");
-            foreach (var entry in memoryContext)
-            {
-                sb.Append($"  {from}: {entry.Original}\n");
-                sb.Append($"  {to}: {entry.Translated}\n");
-            }
-        }
+        AppendMemoryContext(sb, memoryContext, from, to);
 
         if (!string.IsNullOrEmpty(dntHint))
             sb.Append(dntHint);
@@ -1482,11 +1470,7 @@ public sealed class LlmTranslationService(
     {
         var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
 
-        if (!string.IsNullOrWhiteSpace(gameDescription))
-        {
-            sb.Append("\n\n游戏背景：\n");
-            sb.Append(gameDescription);
-        }
+        AppendGameDescription(sb, gameDescription);
 
         var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
         var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
@@ -1518,17 +1502,30 @@ public sealed class LlmTranslationService(
             }
         }
 
-        if (memoryContext is { Count: > 0 })
-        {
-            sb.Append("\n\n以下是近期翻译示例（供参考，保持风格一致）：\n");
-            foreach (var entry in memoryContext)
-            {
-                sb.Append($"  {from}: {entry.Original}\n");
-                sb.Append($"  {to}: {entry.Translated}\n");
-            }
-        }
+        AppendMemoryContext(sb, memoryContext, from, to);
 
         return sb.ToString();
+    }
+
+    private static void AppendGameDescription(StringBuilder sb, string? gameDescription)
+    {
+        if (!string.IsNullOrWhiteSpace(gameDescription))
+        {
+            sb.Append("\n\n游戏背景：\n");
+            sb.Append(gameDescription);
+        }
+    }
+
+    private static void AppendMemoryContext(StringBuilder sb,
+        IList<TranslationMemoryEntry>? memoryContext, string from, string to)
+    {
+        if (memoryContext is not { Count: > 0 }) return;
+        sb.Append("\n\n以下是近期翻译示例（供参考，保持风格一致）：\n");
+        foreach (var entry in memoryContext)
+        {
+            sb.Append($"  {from}: {entry.Original}\n");
+            sb.Append($"  {to}: {entry.Translated}\n");
+        }
     }
 
     // ── Glossary post-processing ──
@@ -1689,30 +1686,7 @@ public sealed class LlmTranslationService(
     private static IList<string> ParseTranslationArray(string content, int expectedCount,
         ILogger? log = null)
     {
-        var json = content.Trim();
-
-        // Strip <think>...</think> blocks produced by reasoning models (e.g. Qwen3).
-        // Find the LAST </think> tag to handle multi-block or nested output.
-        var thinkEnd = json.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
-        if (thinkEnd >= 0)
-            json = json[(thinkEnd + "</think>".Length)..].TrimStart();
-
-        // Strip markdown code fences (``` or ```json)
-        if (json.StartsWith("```"))
-        {
-            var start = json.IndexOf('[');
-            var end = json.LastIndexOf(']');
-            if (start >= 0 && end > start)
-                json = json[start..(end + 1)];
-        }
-        else if (!json.StartsWith('['))
-        {
-            // Model may have wrapped the array in prose text — extract JSON array
-            var start = json.IndexOf('[');
-            var end = json.LastIndexOf(']');
-            if (start >= 0 && end > start)
-                json = json[start..(end + 1)];
-        }
+        var json = Infrastructure.LlmResponseParser.ExtractJsonArray(content);
 
         try
         {

@@ -32,6 +32,23 @@ public enum TermCategory
 
 public enum TermSource { User, AI, Import }
 
+/// <summary>
+/// Shared category string-to-enum mapping used by term extraction services.
+/// </summary>
+public static class TermCategoryMapping
+{
+    public static readonly Dictionary<string, TermCategory> FromString =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["character"] = TermCategory.Character,
+            ["location"] = TermCategory.Location,
+            ["item"] = TermCategory.Item,
+            ["skill"] = TermCategory.Skill,
+            ["organization"] = TermCategory.Organization,
+            ["general"] = TermCategory.General,
+        };
+}
+
 public sealed record TermEntry
 {
     [JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermType>))]

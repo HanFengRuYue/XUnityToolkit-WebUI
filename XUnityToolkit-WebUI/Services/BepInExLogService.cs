@@ -1,4 +1,5 @@
 using System.Text;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -95,12 +96,5 @@ public class BepInExLogService
     }
 
     private static ApiEndpointConfig? ResolveEndpoint(AiTranslationSettings ai)
-    {
-        var enabled = ai.Endpoints
-            .Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey))
-            .OrderByDescending(e => e.Priority)
-            .ToList();
-
-        return enabled.Count > 0 ? enabled[0] : null;
-    }
+        => EndpointSelector.SelectBestEndpoint(ai.Endpoints);
 }

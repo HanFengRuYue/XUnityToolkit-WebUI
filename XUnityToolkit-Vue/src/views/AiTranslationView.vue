@@ -7,6 +7,7 @@ import {
   NSelect,
   NTag,
   NProgress,
+  NSlider,
   NCollapse,
   NCollapseItem,
   NPopover,
@@ -40,6 +41,7 @@ import type { AppSettings, AiTranslationSettings, TranslationMemoryStats } from 
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
+import { DEFAULT_SYSTEM_PROMPT } from '@/constants/prompts'
 
 defineOptions({ name: 'AiTranslationView' })
 
@@ -59,17 +61,7 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   activeMode: 'cloud',
   maxConcurrency: 4,
   port: 51821,
-  systemPrompt:
-    '你是一名专业的游戏文本翻译家。将以下 {from} 文本翻译为 {to}。\n\n' +
-    '要求：\n' +
-    '1. 仅返回翻译结果的 JSON 数组，保持与输入相同的顺序和数量。不要添加任何解释、说明或 markdown 格式。\n' +
-    '2. 不要增加或省略信息，不擅自添加原文中没有的主语、代词或句子。\n' +
-    '3. 保持与原文一致的格式：尽量保留行数、标点和特殊符号，仅在必要时做符合目标语言语法的微调。\n' +
-    '4. 严格保留所有占位符、控制符和变量名（如 {0}、%s、%d、<b>、</b>、\\n、【SPECIAL_*】等），不要翻译、删除或改动其位置。\n' +
-    '5. 若待翻译内容仅为单个字母、数字、符号或空字符串，请原样返回。\n' +
-    '6. 翻译准确自然，忠于原文。结合上下文正确使用人称代词和称呼，使对白自然符合游戏语境，不随意改变说话人。\n' +
-    '7. 在忠实原文含义的前提下，使译文符合目标语言的表达习惯，并考虑游戏类型和角色性格，力求达到"信、达、雅"。\n\n' +
-    '输入示例：["Hello","World"] → 输出：["你好","世界"]',
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0.3,
   contextSize: 10,
   localContextSize: 0,
@@ -746,6 +738,30 @@ onBeforeUnmount(() => {
             :value="aiSettings.naturalTranslationMode"
             @update:value="(v: boolean) => { aiSettings = { ...aiSettings, naturalTranslationMode: v } }"
           />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-label">翻译记忆</span>
+            <span class="setting-description">缓存已翻译的文本，相同或相似文本复用翻译结果</span>
+          </div>
+          <NSwitch
+            :value="aiSettings.enableTranslationMemory"
+            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, enableTranslationMemory: v } }"
+          />
+        </div>
+        <div v-if="aiSettings.enableTranslationMemory" class="sub-setting">
+          <span class="setting-label">模糊匹配阈值</span>
+          <NSlider
+            :value="aiSettings.fuzzyMatchThreshold"
+            @update:value="(v: number) => { aiSettings = { ...aiSettings, fuzzyMatchThreshold: v } }"
+            :min="0"
+            :max="100"
+            :step="1"
+            :tooltip="true"
+            :format-tooltip="(v: number) => v + '%'"
+            class="threshold-slider"
+          />
+          <span class="sub-setting-hint">阈值越高匹配越严格，建议 80-90</span>
         </div>
       </div>
 
@@ -1593,6 +1609,21 @@ onBeforeUnmount(() => {
 .setting-info { flex: 1; }
 .setting-label { font-size: 14px; font-weight: 500; display: block; }
 .setting-description { font-size: 12px; color: var(--text-3); display: block; margin-top: 2px; }
+
+.sub-setting {
+  padding-left: 16px;
+}
+
+.threshold-slider {
+  max-width: 320px;
+}
+
+.sub-setting-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-top: 2px;
+  display: block;
+}
 
 /* ===== Mode Tabs ===== */
 .mode-tabs {

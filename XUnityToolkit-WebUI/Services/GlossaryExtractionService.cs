@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -223,20 +224,8 @@ public sealed class GlossaryExtractionService(
         }
     }
 
-    private ApiEndpointConfig? ResolveEndpoint(AiTranslationSettings ai)
-    {
-        var enabled = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
-        if (enabled.Count == 0) return null;
-
-        if (!string.IsNullOrEmpty(ai.GlossaryExtractionEndpointId))
-        {
-            var specific = enabled.FirstOrDefault(e => e.Id == ai.GlossaryExtractionEndpointId);
-            if (specific is not null) return specific;
-        }
-
-        // Fallback: use the first enabled endpoint
-        return enabled[0];
-    }
+    private static ApiEndpointConfig? ResolveEndpoint(AiTranslationSettings ai)
+        => EndpointSelector.SelectEndpoint(ai.Endpoints, ai.GlossaryExtractionEndpointId);
 
     private static string BuildExtractionSystemPrompt(List<TermEntry> existingGlossary,
         List<TermEntry> dntEntries)
@@ -271,28 +260,9 @@ public sealed class GlossaryExtractionService(
         return JsonSerializer.Serialize(items);
     }
 
-    private static readonly Dictionary<string, TermCategory> CategoryMap = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["character"] = TermCategory.Character,
-        ["location"] = TermCategory.Location,
-        ["item"] = TermCategory.Item,
-        ["skill"] = TermCategory.Skill,
-        ["organization"] = TermCategory.Organization,
-        ["general"] = TermCategory.General,
-    };
-
     private static List<TermEntry> ParseExtractionResult(string content, ILogger? log = null)
     {
-        var json = content.Trim();
-
-        // Strip markdown code fences
-        if (json.StartsWith("```"))
-        {
-            var start = json.IndexOf('[');
-            var end = json.LastIndexOf(']');
-            if (start >= 0 && end > start)
-                json = json[start..(end + 1)];
-        }
+        var json = LlmResponseParser.ExtractJsonArray(content);
 
         try
         {
@@ -309,7 +279,7 @@ public sealed class GlossaryExtractionService(
                     var description = item?["description"]?.GetValue<string>();
                     var categoryStr = item?["category"]?.GetValue<string>();
                     TermCategory? category = null;
-                    if (!string.IsNullOrWhiteSpace(categoryStr) && CategoryMap.TryGetValue(categoryStr, out var cat))
+                    if (!string.IsNullOrWhiteSpace(categoryStr) && TermCategoryMapping.FromString.TryGetValue(categoryStr, out var cat))
                         category = cat;
 
                     result.Add(new TermEntry

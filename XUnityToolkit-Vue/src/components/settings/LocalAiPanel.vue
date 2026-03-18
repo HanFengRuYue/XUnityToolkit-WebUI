@@ -26,18 +26,8 @@ import {
 import { useLocalLlmStore } from '@/stores/localLlm'
 import { localLlmApi, dialogApi } from '@/api/games'
 import type { AiTranslationSettings, BuiltInModelInfo, LocalModelEntry } from '@/api/types'
-
-const DEFAULT_SYSTEM_PROMPT =
-  '你是一名专业的游戏文本翻译家。将以下 {from} 文本翻译为 {to}。\n\n' +
-  '要求：\n' +
-  '1. 仅返回翻译结果的 JSON 数组，保持与输入相同的顺序和数量。不要添加任何解释、说明或 markdown 格式。\n' +
-  '2. 不要增加或省略信息，不擅自添加原文中没有的主语、代词或句子。\n' +
-  '3. 保持与原文一致的格式：尽量保留行数、标点和特殊符号，仅在必要时做符合目标语言语法的微调。\n' +
-  '4. 严格保留所有占位符、控制符和变量名（如 {0}、%s、%d、<b>、</b>、\\n、【SPECIAL_*】等），不要翻译、删除或改动其位置。\n' +
-  '5. 若待翻译内容仅为单个字母、数字、符号或空字符串，请原样返回。\n' +
-  '6. 翻译准确自然，忠于原文。结合上下文正确使用人称代词和称呼，使对白自然符合游戏语境，不随意改变说话人。\n' +
-  '7. 在忠实原文含义的前提下，使译文符合目标语言的表达习惯，并考虑游戏类型和角色性格，力求达到"信、达、雅"。\n\n' +
-  '输入示例：["Hello","World"] → 输出：["你好","世界"]'
+import { DEFAULT_SYSTEM_PROMPT } from '@/constants/prompts'
+import { formatBytes, formatSpeed } from '@/utils/format'
 
 const props = defineProps<{
   modelValue: AiTranslationSettings
@@ -59,16 +49,6 @@ const contextLength = ref(4096)
 const catalogExpanded = ref(false)
 const testing = ref(false)
 
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
-  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(0) + ' MB'
-  return (bytes / 1024).toFixed(0) + ' KB'
-}
-
-function formatSpeed(bytesPerSec: number): string {
-  if (bytesPerSec >= 1024 * 1024) return (bytesPerSec / (1024 * 1024)).toFixed(1) + ' MB/s'
-  return (bytesPerSec / 1024).toFixed(0) + ' KB/s'
-}
 
 const allModels = computed(() => store.settings?.models ?? [])
 const pausedDownloads = computed(() =>

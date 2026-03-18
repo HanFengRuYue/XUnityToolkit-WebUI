@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -7,12 +6,6 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> logger)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() }
-    };
 
     public Task<BackupManifest> CreateBackupAsync(
         string gameId, string gamePath, IEnumerable<string> relativePathsToBackup,
@@ -43,7 +36,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
         // Save manifest (atomic: write to temp, then rename)
         var manifestPath = Path.Combine(backupDir, "manifest.json");
         var tmpManifestPath = manifestPath + ".tmp";
-        File.WriteAllText(tmpManifestPath, JsonSerializer.Serialize(manifest, JsonOptions));
+        File.WriteAllText(tmpManifestPath, JsonSerializer.Serialize(manifest, FileHelper.DataJsonOptions));
         File.Move(tmpManifestPath, manifestPath, overwrite: true);
 
         logger.LogInformation("已创建备份: 游戏 {GameId}，共 {Count} 个文件",
@@ -59,7 +52,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
             return Task.FromResult<BackupManifest?>(null);
 
         var json = File.ReadAllText(manifestPath);
-        var manifest = JsonSerializer.Deserialize<BackupManifest>(json, JsonOptions);
+        var manifest = JsonSerializer.Deserialize<BackupManifest>(json, FileHelper.DataJsonOptions);
         return Task.FromResult(manifest);
     }
 
@@ -75,7 +68,7 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
         }
 
         var json = File.ReadAllText(manifestPath);
-        var manifest = JsonSerializer.Deserialize<BackupManifest>(json, JsonOptions);
+        var manifest = JsonSerializer.Deserialize<BackupManifest>(json, FileHelper.DataJsonOptions);
 
         if (manifest is null) return Task.CompletedTask;
 
