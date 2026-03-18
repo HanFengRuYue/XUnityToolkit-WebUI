@@ -93,8 +93,23 @@ public static class TranslateEndpoints
             }
         });
 
-        app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
-            Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
+        app.MapGet("/api/translate/stats", (
+            LlmTranslationService translationService,
+            DynamicPatternService dynamicPatternService,
+            TermExtractionService termExtractionService) =>
+        {
+            var stats = translationService.GetStats();
+            var gameId = stats.CurrentGameId;
+            if (gameId is not null)
+            {
+                stats = stats with
+                {
+                    DynamicPatternCount = dynamicPatternService.GetPatternCount(gameId),
+                    ExtractedTermCount = termExtractionService.GetCandidateCount(gameId),
+                };
+            }
+            return Results.Ok(ApiResult<TranslationStats>.Ok(stats));
+        });
 
         app.MapGet("/api/translate/cache-stats", (PreTranslationCacheMonitor cacheMonitor) =>
             Results.Ok(ApiResult<PreTranslationCacheStats>.Ok(cacheMonitor.GetStats())));
@@ -139,7 +154,7 @@ public static class TranslateEndpoints
             catch (Exception ex)
             {
                 logger.LogError(ex, "测试翻译失败");
-                return Results.Json(ApiResult.Fail($"测试翻译失败: {ex.Message}"), statusCode: 500);
+                return Results.Json(ApiResult.Fail("测试翻译失败"), statusCode: 500);
             }
         });
 

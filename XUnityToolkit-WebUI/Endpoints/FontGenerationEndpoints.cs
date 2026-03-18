@@ -2,6 +2,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using FreeTypeSharp;
+using Microsoft.AspNetCore.SignalR;
+using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
@@ -48,10 +50,12 @@ public static class FontGenerationEndpoints
                 FontName = fontName,
                 FileSize = file.Length,
             }));
-        });
+        }).DisableAntiforgery();
 
         group.MapPost("/generate", (FontGenerationStartRequest body,
-            TmpFontGeneratorService generator, AppDataPaths appDataPaths) =>
+            TmpFontGeneratorService generator, AppDataPaths appDataPaths,
+            IHubContext<InstallProgressHub> hubContext,
+            ILogger<TmpFontGeneratorService> logger) =>
         {
             var fontPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory, Path.GetFileName(body.FileName));
             if (!File.Exists(fontPath))
@@ -73,10 +77,22 @@ public static class FontGenerationEndpoints
             // Fire-and-forget
             _ = Task.Run(async () =>
             {
-                var result = await generator.GenerateAsync(request);
-                if (!result.Success)
+                try
                 {
-                    // Error already broadcast via SignalR in GenerateAsync
+                    var result = await generator.GenerateAsync(request);
+                    if (!result.Success)
+                    {
+                        await hubContext.Clients.Group("font-generation")
+                            .SendAsync("FontGenerationComplete",
+                                new FontGenerationComplete(false, null, 0, result.Error));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "字体生成失败");
+                    await hubContext.Clients.Group("font-generation")
+                        .SendAsync("FontGenerationComplete",
+                            new FontGenerationComplete(false, null, 0, "字体生成失败，请检查字体文件格式"));
                 }
             }, CancellationToken.None);
 
@@ -198,6 +214,9 @@ public static class FontGenerationEndpoints
             if (file == null || file.Length == 0)
                 return Results.BadRequest(ApiResult.Fail("请上传字符集文件"));
 
+            if (file.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("字符集文件大小不能超过 10MB"));
+
             var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (ext != ".txt")
                 return Results.BadRequest(ApiResult.Fail("仅支持 .txt 格式"));
@@ -219,7 +238,7 @@ public static class FontGenerationEndpoints
             }
 
             return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = charCount.Count }));
-        });
+        }).DisableAntiforgery();
 
         // POST /charset/upload-translation — upload translation file
         group.MapPost("/charset/upload-translation", async (HttpRequest request, AppDataPaths appDataPaths) =>
@@ -232,6 +251,9 @@ public static class FontGenerationEndpoints
             if (file == null || file.Length == 0)
                 return Results.BadRequest(ApiResult.Fail("请上传翻译文件"));
 
+            if (file.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("翻译文件大小不能超过 10MB"));
+
             var safeName = $"{Guid.NewGuid():N}.txt";
             var savePath = Path.Combine(appDataPaths.FontGenerationTranslationUploadsDirectory, safeName);
             await using (var fs = new FileStream(savePath, FileMode.Create))
@@ -241,7 +263,7 @@ public static class FontGenerationEndpoints
             var chars = charsetService.ExtractFromTranslationFile(savePath);
 
             return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = chars.Count }));
-        });
+        }).DisableAntiforgery();
 
         // GET /report/{fileName} — get historical generation report
         group.MapGet("/report/{fileName}", async (string fileName, AppDataPaths appDataPaths) =>

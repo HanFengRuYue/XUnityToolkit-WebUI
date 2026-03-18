@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onDeactivated } from 'vue'
 import {
   NButton, NIcon, NUpload, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
@@ -10,7 +10,7 @@ import {
   DeleteOutlined, SwapHorizOutlined, TextFieldsOutlined, AssessmentOutlined,
   ExpandMoreOutlined,
 } from '@vicons/material'
-import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
+import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { api } from '@/api/client'
 import type {
   FontUploadInfo, FontGenerationStatus, GeneratedFontInfo, FontGenerationProgress,
@@ -306,38 +306,43 @@ watch(
   { deep: true },
 )
 
-// SignalR
-const connection = new HubConnectionBuilder()
-  .withUrl('/hubs/install')
-  .withAutomaticReconnect()
-  .build()
-
-connection.on('FontGenerationProgress', (p: FontGenerationProgress) => {
-  phase.value = p.phase
-  current.value = p.current
-  total.value = p.total
-})
-
-connection.on('FontGenerationComplete', (result: FontGenerationComplete) => {
-  isGenerating.value = false
-  if (result.success) {
-    message.success(`字体 ${result.fontName} 生成成功（${result.glyphCount} 字形）`)
-    generationReport.value = result.report ?? null
-  } else {
-    message.error(result.error || '生成失败')
-    generationReport.value = null
-  }
-  loadHistory()
-})
-
-connection.onreconnected(async () => {
-  await connection.invoke('JoinFontGenerationGroup')
-})
+// SignalR (created in onMounted)
+let connection: HubConnection | null = null
 
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
   try {
+    connection = new HubConnectionBuilder()
+      .withUrl('/hubs/install')
+      .withAutomaticReconnect()
+      .build()
+
+    connection.on('FontGenerationProgress', (p: FontGenerationProgress) => {
+      phase.value = p.phase
+      current.value = p.current
+      total.value = p.total
+    })
+
+    connection.on('FontGenerationComplete', (result: FontGenerationComplete) => {
+      isGenerating.value = false
+      if (result.success) {
+        message.success(`字体 ${result.fontName} 生成成功（${result.glyphCount} 字形）`)
+        generationReport.value = result.report ?? null
+      } else if (result.error === '已取消') {
+        message.info('字体生成已取消')
+        generationReport.value = null
+      } else {
+        message.error(result.error || '生成失败')
+        generationReport.value = null
+      }
+      loadHistory()
+    })
+
+    connection.onreconnected(async () => {
+      try { await connection?.invoke('JoinFontGenerationGroup') } catch { /* ignore */ }
+    })
+
     await connection.start()
     await connection.invoke('JoinFontGenerationGroup')
   } catch (e) {
@@ -367,15 +372,26 @@ onMounted(async () => {
   } catch { /* ignore */ }
 })
 
-onBeforeUnmount(async () => {
-  window.removeEventListener('resize', checkMobile)
-  if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
+async function cleanupConnection() {
   try {
-    if (connection.state === HubConnectionState.Connected) {
-      await connection.invoke('LeaveFontGenerationGroup')
+    if (connection) {
+      if (connection.state === HubConnectionState.Connected) {
+        await connection.invoke('LeaveFontGenerationGroup')
+      }
       await connection.stop()
     }
   } catch { /* ignore */ }
+  connection = null
+}
+
+onDeactivated(async () => {
+  await cleanupConnection()
+})
+
+onBeforeUnmount(async () => {
+  window.removeEventListener('resize', checkMobile)
+  if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
+  await cleanupConnection()
 })
 </script>
 

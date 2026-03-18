@@ -23,7 +23,8 @@ export const useInstallStore = defineStore('install', () => {
 
   async function connectHub(gameId: string) {
     if (connection) {
-      await connection.stop()
+      try { await connection.stop() } catch { /* best effort */ }
+      connection = null
     }
 
     connection = new signalR.HubConnectionBuilder()
@@ -33,6 +34,12 @@ export const useInstallStore = defineStore('install', () => {
 
     connection.on('progressUpdate', (update: InstallationStatus) => {
       status.value = update
+    })
+
+    connection.onreconnected(async () => {
+      if (activeGameId.value) {
+        try { await connection?.invoke('JoinGameGroup', activeGameId.value) } catch { /* ignore */ }
+      }
     })
 
     await connection.start()
@@ -59,7 +66,11 @@ export const useInstallStore = defineStore('install', () => {
    */
   async function resumeInstall(gameId: string, backendStatus: InstallationStatus) {
     activeGameId.value = gameId
-    operationType.value = 'install'
+    // Infer operation type from step — removal steps indicate uninstall
+    const step = backendStatus.step
+    operationType.value = (step === 'RemovingXUnity' || step === 'RemovingBepInEx')
+      ? 'uninstall'
+      : 'install'
     status.value = backendStatus
     isDrawerOpen.value = true
     await connectHub(gameId)

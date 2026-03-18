@@ -71,7 +71,7 @@ public sealed class InstallOrchestrator(
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "安装失败: 游戏 {GameId}", gameId);
-                    await UpdateStatus(status, InstallStep.Failed, 0, error: ex.Message);
+                    await UpdateStatus(status, InstallStep.Failed, 0, error: "安装过程中发生内部错误，请查看日志获取详情");
                 }
                 finally
                 {
@@ -106,16 +106,30 @@ public sealed class InstallOrchestrator(
             status.Error = null;
             status.Message = null;
 
+            var cts = new CancellationTokenSource();
+            if (_cancellations.TryRemove(gameId, out var oldCts))
+                oldCts.Dispose();
+            _cancellations[gameId] = cts;
+
             _ = Task.Run(async () =>
             {
                 try
                 {
                     await ExecuteUninstallAsync(game, status);
                 }
+                catch (OperationCanceledException)
+                {
+                    await UpdateStatus(status, InstallStep.Failed, 0, error: "Uninstallation cancelled.");
+                }
                 catch (Exception ex)
                 {
                     logger.LogError(ex, "卸载失败: 游戏 {GameId}", gameId);
-                    await UpdateStatus(status, InstallStep.Failed, 0, error: ex.Message);
+                    await UpdateStatus(status, InstallStep.Failed, 0, error: "卸载过程中发生内部错误，请查看日志获取详情");
+                }
+                finally
+                {
+                    if (_cancellations.TryRemove(gameId, out var doneCts))
+                        doneCts.Dispose();
                 }
             });
 

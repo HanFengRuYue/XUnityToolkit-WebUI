@@ -142,10 +142,11 @@ public sealed class LlmTranslationService(
             TermAuditPhase1PassCount = (int)Interlocked.Read(ref _termAuditPhase1PassCount),
             TermAuditPhase2PassCount = (int)Interlocked.Read(ref _termAuditPhase2PassCount),
             TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount),
-            TranslationMemoryHits = (int)Volatile.Read(ref _tmExactHits),
-            TranslationMemoryFuzzyHits = (int)Volatile.Read(ref _tmFuzzyHits),
-            TranslationMemoryPatternHits = (int)Volatile.Read(ref _tmPatternHits),
-            TranslationMemoryMisses = (int)Volatile.Read(ref _tmMisses),
+            TranslationMemoryHits = (int)Interlocked.Read(ref _tmExactHits),
+            TranslationMemoryFuzzyHits = (int)Interlocked.Read(ref _tmFuzzyHits),
+            TranslationMemoryPatternHits = (int)Interlocked.Read(ref _tmPatternHits),
+            TranslationMemoryMisses = (int)Interlocked.Read(ref _tmMisses),
+            MaxConcurrency = _currentMaxConcurrency,
         };
     }
 
@@ -799,14 +800,11 @@ public sealed class LlmTranslationService(
                 buffer.Add(texts, translations, contextSize);
             }
 
-            // Persist to Translation Memory service (fire-and-forget)
+            // Persist to Translation Memory service (in-memory + debounced disk write)
             if (ai.EnableTranslationMemory && !string.IsNullOrEmpty(gameId))
             {
-                _ = Task.Run(async () =>
-                {
-                    try { await translationMemoryService.AddAsync(gameId, texts, translations, round: 1, isFinal: true, ct: CancellationToken.None); }
-                    catch (Exception ex) { logger.LogWarning(ex, "翻译记忆写入失败"); }
-                });
+                try { translationMemoryService.Add(gameId, texts, translations, round: 1, isFinal: true); }
+                catch (Exception ex) { logger.LogWarning(ex, "翻译记忆写入失败"); }
             }
 
             Interlocked.Add(ref _totalTranslated, texts.Count);
@@ -826,8 +824,7 @@ public sealed class LlmTranslationService(
         string? dntHint, SemaphoreSlim semaphore, CancellationToken ct,
         string? overrideSystemPrompt = null)
     {
-        var textCount = texts.Count;
-        Interlocked.Add(ref _queued, textCount);
+        Interlocked.Increment(ref _queued);
         _ = BroadcastStats();
 
         bool semaphoreAcquired = false;
@@ -843,69 +840,98 @@ public sealed class LlmTranslationService(
         catch
         {
             // Semaphore not acquired (timeout or cancellation): only decrement queued
-            Interlocked.Add(ref _queued, -textCount);
+            Interlocked.Decrement(ref _queued);
             _ = BroadcastStats();
             throw;
         }
 
         // Acquired semaphore: transition from queued to translating
-        Interlocked.Add(ref _queued, -textCount);
-        Interlocked.Add(ref _translating, textCount);
+        Interlocked.Decrement(ref _queued);
+        Interlocked.Increment(ref _translating);
         _ = BroadcastStats();
 
+        const int maxRetries = 2;
         ApiEndpointConfig? chosenEndpoint = null;
         try
         {
-            chosenEndpoint = SelectEndpoint(endpoints);
-            var sw = Stopwatch.StartNew();
-
-            var (result, tokens) = await CallProviderAsync(
-                chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
-                overrideSystemPrompt);
-            sw.Stop();
-
-            var elapsedMs = sw.Elapsed.TotalMilliseconds;
-
-            // Update per-endpoint stats
-            var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-            stats.RecordSuccess(elapsedMs);
-
-            // Update global stats
-            Interlocked.Add(ref _totalTokensUsed, tokens);
-            Interlocked.Add(ref _totalResponseTimeMs, (long)elapsedMs);
-            Interlocked.Increment(ref _totalRequests);
-            _requestTimestamps.Enqueue(DateTime.UtcNow.Ticks);
-
-            // Defensive: ensure result count matches input
-            if (result.Count != texts.Count)
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
             {
-                logger.LogWarning("LLM 返回数量不匹配: 期望 {Expected}, 实际 {Actual}", texts.Count, result.Count);
-                var padded = new List<string>(texts.Count);
-                for (int i = 0; i < texts.Count; i++)
-                    padded.Add(i < result.Count ? result[i] : texts[i]);
-                result = padded;
+                try
+                {
+                    chosenEndpoint = SelectEndpoint(endpoints);
+                    var sw = Stopwatch.StartNew();
+
+                    var (result, tokens) = await CallProviderAsync(
+                        chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
+                        overrideSystemPrompt);
+                    sw.Stop();
+
+                    var elapsedMs = sw.Elapsed.TotalMilliseconds;
+
+                    // Update per-endpoint stats
+                    var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
+                    stats.RecordSuccess(elapsedMs);
+
+                    // Update global stats
+                    Interlocked.Add(ref _totalTokensUsed, tokens);
+                    Interlocked.Add(ref _totalResponseTimeMs, (long)elapsedMs);
+                    Interlocked.Increment(ref _totalRequests);
+                    _requestTimestamps.Enqueue(DateTime.UtcNow.Ticks);
+
+                    // Defensive: ensure result count matches input
+                    if (result.Count != texts.Count)
+                    {
+                        logger.LogWarning("LLM 返回数量不匹配: 期望 {Expected}, 实际 {Actual}", texts.Count, result.Count);
+                        var padded = new List<string>(texts.Count);
+                        for (int i = 0; i < texts.Count; i++)
+                            padded.Add(i < result.Count ? result[i] : texts[i]);
+                        result = padded;
+                    }
+
+                    return (result, tokens, elapsedMs, chosenEndpoint.Name);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex) when (attempt < maxRetries && IsTransientError(ex))
+                {
+                    if (chosenEndpoint is not null)
+                    {
+                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
+                        stats.RecordError();
+                    }
+                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt) * 2);
+                    logger.LogWarning(ex, "提供商 {Name} 翻译失败 (尝试 {Attempt}/{Max}), {Delay}s 后重试",
+                        chosenEndpoint?.Name, attempt + 1, maxRetries + 1, delay.TotalSeconds);
+                    await Task.Delay(delay, ct);
+                }
+                catch (Exception ex)
+                {
+                    if (chosenEndpoint is not null)
+                    {
+                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
+                        stats.RecordError();
+                        logger.LogWarning(ex, "提供商 {Name} 翻译失败", chosenEndpoint.Name);
+                    }
+                    throw;
+                }
             }
 
-            return (result, tokens, elapsedMs, chosenEndpoint.Name);
-        }
-        catch (Exception ex)
-        {
-            if (chosenEndpoint is not null)
-            {
-                var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-                stats.RecordError();
-                logger.LogWarning(ex, "提供商 {Name} 翻译失败", chosenEndpoint.Name);
-            }
-            throw;
+            // Should not reach here, but satisfy compiler
+            throw new InvalidOperationException("重试已用尽");
         }
         finally
         {
             // Only release semaphore and decrement translating if we actually acquired it
-            Interlocked.Add(ref _translating, -textCount);
+            Interlocked.Decrement(ref _translating);
             semaphore.Release();
             _ = BroadcastStats();
         }
     }
+
+    private static bool IsTransientError(Exception ex) =>
+        ex is TaskCanceledException or HttpRequestException or TimeoutException;
 
     // ── Load Balancer ──
 

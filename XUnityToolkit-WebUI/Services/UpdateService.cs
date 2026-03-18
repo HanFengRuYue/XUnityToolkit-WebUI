@@ -347,6 +347,9 @@ public sealed class UpdateService(
             || (_resolvedTag is null && _releaseAssets is null))
             throw new InvalidOperationException("没有可用的更新");
 
+        if (_downloadCts is not null)
+            throw new InvalidOperationException("下载已在进行中");
+
         _downloadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var token = _downloadCts.Token;
 

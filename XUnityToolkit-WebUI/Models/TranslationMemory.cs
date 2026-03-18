@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace XUnityToolkit_WebUI.Models;
 
 public sealed record TranslationMemoryEntry
@@ -33,6 +35,7 @@ public sealed record TermCandidate
 {
     public required string Original { get; init; }
     public required string Translation { get; init; }
+    [JsonConverter(typeof(CamelCaseJsonStringEnumConverter<TermCategory>))]
     public TermCategory Category { get; init; } = TermCategory.General;
     public int Frequency { get; init; } = 1;
 }

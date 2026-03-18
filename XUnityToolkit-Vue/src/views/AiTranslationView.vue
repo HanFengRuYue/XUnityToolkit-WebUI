@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, onDeactivated, nextTick } from 'vue'
 import {
   NIcon,
   NButton,
@@ -248,6 +248,10 @@ async function loadTmStats() {
   }
 }
 
+watch(() => aiStore.stats?.currentGameId, (id) => {
+  if (id) loadTmStats()
+})
+
 onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
@@ -257,6 +261,10 @@ onMounted(async () => {
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
   await loadTmStats()
+})
+
+onDeactivated(() => {
+  aiStore.disconnect()
 })
 
 onUnmounted(() => {
@@ -374,7 +382,7 @@ onUnmounted(() => {
             <NIcon :size="18"><SyncOutlined /></NIcon>
           </div>
           <div class="stage-content">
-            <span class="stage-value">{{ aiStore.stats?.translating ?? 0 }}</span>
+            <span class="stage-value">{{ aiStore.stats?.translating ?? 0 }}<span v-if="aiStore.stats?.maxConcurrency" class="stage-max">/{{ aiStore.stats.maxConcurrency }}</span></span>
             <span class="stage-label">正在翻译</span>
           </div>
         </div>
@@ -1256,6 +1264,12 @@ onUnmounted(() => {
   color: var(--text-1);
   letter-spacing: -0.02em;
   line-height: 1.2;
+}
+
+.stage-max {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-3);
 }
 
 .stage-label {

@@ -16,6 +16,7 @@ public sealed class TermExtractionService(
     ILogger<TermExtractionService> logger)
 {
     private readonly ConcurrentDictionary<string, TermCandidateStore> _cache = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -25,6 +26,7 @@ public sealed class TermExtractionService(
     };
 
     private const int BatchSize = 20;
+    private const int MaxExtractionPairs = 200;
 
     private const string ExtractionPrompt =
         "你是一名专业的游戏术语提取专家。根据以下游戏文本的原文和译文对，提取出有价值的术语。\n\n" +
@@ -58,7 +60,8 @@ public sealed class TermExtractionService(
     public async Task<List<TermCandidate>> ExtractFromPairsAsync(
         string gameId,
         IList<(string original, string translation)> pairs,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<int, int>? onBatchProgress = null)
     {
         var settings = await settingsService.GetAsync(ct);
         if (!settings.AiTranslation.EnableAutoTermExtraction)
@@ -79,14 +82,39 @@ public sealed class TermExtractionService(
             return [];
         }
 
+        // Sample to avoid excessive LLM calls (200 pairs = 10 batches)
+        if (pairs.Count > MaxExtractionPairs)
+        {
+            logger.LogInformation("术语提取: 从 {Total} 对中采样 {Sample} 对, 游戏 {GameId}",
+                pairs.Count, MaxExtractionPairs, gameId);
+            pairs = pairs.Take(MaxExtractionPairs).ToList();
+        }
+
         // Process in batches
         var allCandidates = new List<TermCandidate>();
+        var totalBatches = (int)Math.Ceiling((double)pairs.Count / BatchSize);
         for (var i = 0; i < pairs.Count; i += BatchSize)
         {
             ct.ThrowIfCancellationRequested();
             var batch = pairs.Skip(i).Take(BatchSize).ToList();
-            var batchCandidates = await ExtractBatchAsync(endpoint, batch, ct);
-            allCandidates.AddRange(batchCandidates);
+            var batchIndex = i / BatchSize + 1;
+            try
+            {
+                var batchCandidates = await ExtractBatchAsync(endpoint, batch, ct);
+                allCandidates.AddRange(batchCandidates);
+                logger.LogInformation("术语提取: 批次 {Current}/{Total} 完成, 提取 {Count} 条候选",
+                    batchIndex, totalBatches, batchCandidates.Count);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "术语提取批次失败 (批次起始: {Start})", i);
+            }
+
+            onBatchProgress?.Invoke(batchIndex, totalBatches);
         }
 
         if (allCandidates.Count == 0)
@@ -145,11 +173,18 @@ public sealed class TermExtractionService(
         if (!File.Exists(file))
             return new TermCandidateStore();
 
-        var json = await File.ReadAllTextAsync(file, ct);
-        var store = JsonSerializer.Deserialize<TermCandidateStore>(json, JsonOptions)
-            ?? new TermCandidateStore();
-        _cache[gameId] = store;
-        return store;
+        try
+        {
+            var json = await File.ReadAllTextAsync(file, ct);
+            var store = JsonSerializer.Deserialize<TermCandidateStore>(json, JsonOptions)
+                ?? new TermCandidateStore();
+            _cache[gameId] = store;
+            return store;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new TermCandidateStore();
+        }
     }
 
     /// <summary>
@@ -218,9 +253,23 @@ public sealed class TermExtractionService(
         return Task.CompletedTask;
     }
 
-    public void RemoveCache(string gameId) => _cache.TryRemove(gameId, out _);
+    public int GetCandidateCount(string gameId)
+    {
+        return _cache.TryGetValue(gameId, out var store) ? store.Candidates.Count : 0;
+    }
 
-    public void ClearAllCache() => _cache.Clear();
+    public void RemoveCache(string gameId)
+    {
+        _cache.TryRemove(gameId, out _);
+        if (_locks.TryRemove(gameId, out var sem))
+            sem.Dispose();
+    }
+
+    public void ClearAllCache()
+    {
+        _cache.Clear();
+        _locks.Clear();
+    }
 
     private async Task<List<TermCandidate>> ExtractBatchAsync(
         ApiEndpointConfig endpoint,
@@ -298,11 +347,20 @@ public sealed class TermExtractionService(
 
     private async Task SaveStoreAsync(string gameId, TermCandidateStore store, CancellationToken ct)
     {
-        var file = paths.TermCandidatesFile(gameId);
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        var json = JsonSerializer.Serialize(store, JsonOptions);
-        var tmpPath = file + ".tmp";
-        await File.WriteAllTextAsync(tmpPath, json, ct);
-        File.Move(tmpPath, file, overwrite: true);
+        var gameLock = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await gameLock.WaitAsync(ct);
+        try
+        {
+            var file = paths.TermCandidatesFile(gameId);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            var json = JsonSerializer.Serialize(store, JsonOptions);
+            var tmpPath = file + ".tmp";
+            await File.WriteAllTextAsync(tmpPath, json, ct);
+            File.Move(tmpPath, file, overwrite: true);
+        }
+        finally
+        {
+            gameLock.Release();
+        }
     }
 }

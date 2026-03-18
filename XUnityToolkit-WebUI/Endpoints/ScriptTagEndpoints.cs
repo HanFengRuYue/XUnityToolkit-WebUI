@@ -43,12 +43,12 @@ public static class ScriptTagEndpoints
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
             if (config.Rules.Count > 100)
-                return Results.Ok(ApiResult.Fail("规则数量不能超过 100 条"));
+                return Results.BadRequest(ApiResult.Fail("规则数量不能超过 100 条"));
 
             foreach (var rule in config.Rules)
             {
                 if (string.IsNullOrWhiteSpace(rule.Pattern))
-                    return Results.Ok(ApiResult.Fail("正则表达式不能为空"));
+                    return Results.BadRequest(ApiResult.Fail("正则表达式不能为空"));
 
                 try
                 {
@@ -57,13 +57,13 @@ public static class ScriptTagEndpoints
                     if (rule.Action == ScriptTagAction.Extract
                         && regex.GetGroupNumbers().Length < 2)
                     {
-                        return Results.Ok(ApiResult.Fail(
+                        return Results.BadRequest(ApiResult.Fail(
                             $"Extract 规则必须包含至少一个捕获组 (...): {rule.Pattern}"));
                     }
                 }
                 catch (RegexParseException)
                 {
-                    return Results.Ok(ApiResult.Fail($"无效的正则表达式: {rule.Pattern}"));
+                    return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {rule.Pattern}"));
                 }
             }
 

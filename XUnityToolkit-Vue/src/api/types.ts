@@ -252,6 +252,7 @@ export interface TranslationStats {
   translationMemoryFuzzyHits: number
   translationMemoryPatternHits: number
   translationMemoryMisses: number
+  maxConcurrency: number
   dynamicPatternCount: number
   extractedTermCount: number
 }
@@ -447,6 +448,8 @@ export interface PreTranslationStatus {
   error?: string
   currentRound: number
   currentPhase?: string
+  phaseProgress: number
+  phaseTotal: number
   extractedTermCount: number
   dynamicPatternCount: number
 }

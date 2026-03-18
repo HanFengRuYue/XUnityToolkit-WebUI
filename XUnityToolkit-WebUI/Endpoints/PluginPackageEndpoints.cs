@@ -27,13 +27,13 @@ public static class PluginPackageEndpoints
                 var (stream, fileName) = await pkgService.ExportAsync(game, ct);
                 return Results.File(stream, "application/zip", fileName);
             }
-            catch (DirectoryNotFoundException ex)
+            catch (DirectoryNotFoundException)
             {
-                return Results.BadRequest(ApiResult.Fail(ex.Message));
+                return Results.BadRequest(ApiResult.Fail("游戏 BepInEx 目录不存在，请先安装插件"));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.Json(ApiResult.Fail($"生成汉化包失败: {ex.Message}"), statusCode: 500);
+                return Results.Json(ApiResult.Fail("生成汉化包失败"), statusCode: 500);
             }
         });
 
@@ -67,9 +67,9 @@ public static class PluginPackageEndpoints
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                return Results.Json(ApiResult.Fail($"导入汉化包失败: {ex.Message}"), statusCode: 500);
+                return Results.Json(ApiResult.Fail("导入汉化包失败"), statusCode: 500);
             }
         });
     }

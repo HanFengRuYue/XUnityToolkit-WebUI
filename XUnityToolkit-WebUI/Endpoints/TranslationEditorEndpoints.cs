@@ -21,7 +21,15 @@ public static class TranslationEditorEndpoints
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
             var config = await configService.GetAsync(game.GamePath, ct);
-            var filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            string filePath;
+            try
+            {
+                filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.BadRequest(ApiResult.Fail("翻译文件路径不安全"));
+            }
             var exists = File.Exists(filePath);
 
             var entries = new List<TranslationEntryDto>();
@@ -31,8 +39,10 @@ public static class TranslationEditorEndpoints
                 entries = XUnityTranslationFormat.ParseLines(lines);
             }
 
+            // Return relative path (from game directory) to avoid exposing server filesystem
+            var relativePath = Path.GetRelativePath(game.GamePath, filePath);
             return Results.Ok(ApiResult<TranslationEditorData>.Ok(
-                new TranslationEditorData(filePath, exists, entries.Count,
+                new TranslationEditorData(relativePath, exists, entries.Count,
                     entries.Select(e => new TranslationEntryResponse(e.Original, e.Translation)).ToList())));
         });
 
@@ -60,7 +70,15 @@ public static class TranslationEditorEndpoints
                 return Results.BadRequest(ApiResult.Fail($"重复的原文条目: {string.Join(", ", duplicates)}"));
 
             var config = await configService.GetAsync(game.GamePath, ct);
-            var filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            string filePath;
+            try
+            {
+                filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.BadRequest(ApiResult.Fail("翻译文件路径不安全"));
+            }
 
             var dtos = request.Entries
                 .Select(e => new TranslationEntryDto(e.Original, e.Translation))
@@ -112,7 +130,15 @@ public static class TranslationEditorEndpoints
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
             var config = await configService.GetAsync(game.GamePath, ct);
-            var filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            string filePath;
+            try
+            {
+                filePath = ResolveTranslationFilePath(game.GamePath, config.OutputFile, config.TargetLanguage);
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.BadRequest(ApiResult.Fail("翻译文件路径不安全"));
+            }
 
             if (!File.Exists(filePath))
                 return Results.NotFound(ApiResult.Fail("翻译文件不存在"));

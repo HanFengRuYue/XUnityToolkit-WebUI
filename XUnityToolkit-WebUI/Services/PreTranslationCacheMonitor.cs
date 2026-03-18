@@ -14,7 +14,7 @@ public sealed class PreTranslationCacheMonitor(
 {
     private volatile string? _activeGameId;
     private volatile string? _loadAttemptedForGameId;
-    private HashSet<string> _preTranslatedKeys = [];
+    private volatile HashSet<string> _preTranslatedKeys = [];
     private readonly ConcurrentDictionary<string, string> _misses = new();
     private long _newTexts;
     private long _lastBroadcastTicks;
@@ -112,6 +112,8 @@ public sealed class PreTranslationCacheMonitor(
             var normalized = scriptTagService.NormalizeForCache(gameId, text);
             if (_preTranslatedKeys.Contains(normalized))
             {
+                // Text was pre-translated but XUnity still asked for it — cache miss
+                // (key format/normalization mismatch between pre-translation and runtime)
                 if (_misses.TryAdd(normalized, text))
                 {
                     var entry = new CacheMissEntry(normalized, text, DateTime.UtcNow);

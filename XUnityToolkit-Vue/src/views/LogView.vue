@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onDeactivated, nextTick } from 'vue'
 import { NButton, NIcon, NInput, NSwitch, NTooltip } from 'naive-ui'
 import {
   TerminalOutlined,
@@ -116,6 +116,10 @@ onMounted(async () => {
   }
   await nextTick()
   scrollToBottom()
+})
+
+onDeactivated(() => {
+  logStore.disconnect()
 })
 
 onUnmounted(() => {

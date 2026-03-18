@@ -152,7 +152,7 @@ public static class FontReplacementEndpoints
             }
 
             return Results.Ok(ApiResult.Ok());
-        });
+        }).DisableAntiforgery();
 
         // DELETE .../custom-font
         group.MapDelete("/custom-font", (string id, AppDataPaths appDataPaths) =>
@@ -169,8 +169,11 @@ public static class FontReplacementEndpoints
         // POST .../cancel
         group.MapPost("/cancel", (string id) =>
         {
-            if (_cancellationTokens.TryGetValue(id, out var cts))
+            if (_cancellationTokens.TryRemove(id, out var cts))
+            {
                 cts.Cancel();
+                cts.Dispose();
+            }
             return Results.Ok(ApiResult.Ok());
         });
     }

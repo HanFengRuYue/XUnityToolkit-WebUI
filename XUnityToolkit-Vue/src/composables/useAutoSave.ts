@@ -1,4 +1,4 @@
-import { watch, ref, onBeforeUnmount, type WatchSource } from 'vue'
+import { watch, ref, onBeforeUnmount, onDeactivated, type WatchSource } from 'vue'
 
 /**
  * Auto-save composable: watches a reactive source and debounces save calls.
@@ -56,7 +56,9 @@ export function useAutoSave<T>(
 
   watch(source, schedule, { deep })
 
+  // Flush on unmount (non-KeepAlive) and on deactivation (KeepAlive)
   onBeforeUnmount(flush)
+  onDeactivated(flush)
 
   return { saving, enable, disable, flush }
 }

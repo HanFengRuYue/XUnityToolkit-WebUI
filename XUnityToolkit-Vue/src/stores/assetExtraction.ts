@@ -30,22 +30,27 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
       preTranslationStatus.value = update
     })
 
-    connection.on('roundProgress', (update: PreTranslationStatus) => {
-      preTranslationStatus.value = update
+    // These events send partial objects (not full PreTranslationStatus).
+    // Do NOT overwrite preTranslationStatus — only extract relevant info.
+    connection.on('roundProgress', (_update: { gameId: string; round: number; phase: string }) => {
+      // Status is already tracked via preTranslationUpdate broadcasts
     })
 
-    connection.on('patternAnalysisProgress', (update: PreTranslationStatus) => {
-      preTranslationStatus.value = update
+    connection.on('patternAnalysisProgress', (_update: { phase: string; progress: number }) => {
+      // Status is already tracked via preTranslationUpdate broadcasts
     })
 
-    connection.on('termExtractionComplete', (update: PreTranslationStatus) => {
-      preTranslationStatus.value = update
+    connection.on('termExtractionComplete', (_update: { gameId: string; candidateCount: number }) => {
       termExtractionComplete.value = true
     })
 
     connection.onreconnected(async () => {
       try {
         await connection?.invoke('JoinPreTranslationGroup', activeGameId)
+        // Re-fetch current status to recover any missed updates
+        if (activeGameId) {
+          preTranslationStatus.value = await assetApi.getPreTranslationStatus(activeGameId)
+        }
       } catch { /* ignore */ }
     })
 
@@ -101,6 +106,10 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
     extractionResult.value = null
   }
 
+  function resetTermExtractionComplete() {
+    termExtractionComplete.value = false
+  }
+
   return {
     extractionResult,
     preTranslationStatus,
@@ -115,5 +124,6 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
     cancelPreTranslation,
     fetchPreTranslationStatus,
     clearCache,
+    resetTermExtractionComplete,
   }
 })

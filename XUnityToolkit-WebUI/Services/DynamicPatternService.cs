@@ -17,9 +17,10 @@ public sealed partial class DynamicPatternService(
 {
     private const int LlmBatchSize = 20;
     private const int MinLiteralChars = 3;
+    private const int MaxAnalysisPairs = 200; // 10 batches max
 
     private readonly ConcurrentDictionary<string, DynamicPatternStore> _cache = new();
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -152,9 +153,18 @@ public sealed partial class DynamicPatternService(
     public async Task<int> AnalyzeDynamicFragmentsAsync(
         string gameId,
         IList<(string Original, string Translation)> pairs,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<int, int>? onBatchProgress = null)
     {
         if (pairs.Count == 0) return 0;
+
+        // Sample to avoid excessive LLM calls (200 pairs = 10 batches)
+        if (pairs.Count > MaxAnalysisPairs)
+        {
+            logger.LogInformation("动态模式分析: 从 {Total} 对中采样 {Sample} 对, 游戏 {GameId}",
+                pairs.Count, MaxAnalysisPairs, gameId);
+            pairs = pairs.Take(MaxAnalysisPairs).ToList();
+        }
 
         var settings = await settingsService.GetAsync();
         var endpoint = settings.AiTranslation.Endpoints
@@ -169,6 +179,7 @@ public sealed partial class DynamicPatternService(
         }
 
         var allPatterns = new List<DynamicPattern>();
+        var totalBatches = (int)Math.Ceiling((double)pairs.Count / LlmBatchSize);
 
         // Process in batches
         for (var batchStart = 0; batchStart < pairs.Count; batchStart += LlmBatchSize)
@@ -177,13 +188,16 @@ public sealed partial class DynamicPatternService(
 
             var batchEnd = Math.Min(batchStart + LlmBatchSize, pairs.Count);
             var batch = pairs.Skip(batchStart).Take(batchEnd - batchStart).ToList();
+            var batchIndex = batchStart / LlmBatchSize + 1;
 
             try
             {
                 var batchPatterns = await AnalyzeBatchAsync(endpoint, batch, ct);
                 allPatterns.AddRange(batchPatterns);
+                logger.LogInformation("动态模式分析: 批次 {Current}/{Total} 完成, 发现 {Count} 个模式",
+                    batchIndex, totalBatches, batchPatterns.Count);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
@@ -191,6 +205,8 @@ public sealed partial class DynamicPatternService(
             {
                 logger.LogError(ex, "动态模式分析批次失败 (批次起始: {Start})", batchStart);
             }
+
+            onBatchProgress?.Invoke(batchIndex, totalBatches);
         }
 
         if (allPatterns.Count == 0)
@@ -217,7 +233,8 @@ public sealed partial class DynamicPatternService(
         if (_cache.TryGetValue(gameId, out var cached))
             return cached;
 
-        await _lock.WaitAsync(ct);
+        var gameLock = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await gameLock.WaitAsync(ct);
         try
         {
             if (_cache.TryGetValue(gameId, out cached))
@@ -246,7 +263,7 @@ public sealed partial class DynamicPatternService(
         }
         finally
         {
-            _lock.Release();
+            gameLock.Release();
         }
     }
 
@@ -261,9 +278,18 @@ public sealed partial class DynamicPatternService(
         }
     }
 
-    public void RemoveCache(string gameId) => _cache.TryRemove(gameId, out _);
+    public void RemoveCache(string gameId)
+    {
+        _cache.TryRemove(gameId, out _);
+        if (_locks.TryRemove(gameId, out var sem))
+            sem.Dispose();
+    }
 
-    public void ClearAllCache() => _cache.Clear();
+    public void ClearAllCache()
+    {
+        _cache.Clear();
+        _locks.Clear();
+    }
 
     public int GetPatternCount(string gameId)
     {
@@ -536,7 +562,8 @@ public sealed partial class DynamicPatternService(
 
     private async Task SaveStoreAsync(string gameId, DynamicPatternStore store, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        var gameLock = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await gameLock.WaitAsync(ct);
         try
         {
             var file = paths.DynamicPatternsFile(gameId);
@@ -553,7 +580,7 @@ public sealed partial class DynamicPatternService(
         }
         finally
         {
-            _lock.Release();
+            gameLock.Release();
         }
     }
 }

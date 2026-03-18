@@ -12,7 +12,9 @@ public static class TranslationMemoryEndpoints
             string id,
             TranslationMemoryService tmService) =>
         {
-            var (exact, fuzzy, pattern, misses) = tmService.GetHitStats();
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+            var (exact, pattern, fuzzy, misses) = tmService.GetHitStats();
             return Results.Ok(ApiResult<object>.Ok(new
             {
                 entryCount = tmService.GetEntryCount(id),
@@ -28,6 +30,8 @@ public static class TranslationMemoryEndpoints
             string id,
             TranslationMemoryService tmService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             await tmService.DeleteAsync(id);
             return Results.Ok(ApiResult.Ok());
         });
@@ -38,6 +42,8 @@ public static class TranslationMemoryEndpoints
             DynamicPatternService patternService,
             CancellationToken ct) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var store = await patternService.GetPatternsAsync(id, ct);
             return Results.Ok(ApiResult<DynamicPatternStore>.Ok(store));
         });
@@ -46,6 +52,8 @@ public static class TranslationMemoryEndpoints
             string id,
             DynamicPatternService patternService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             await patternService.DeleteAsync(id);
             return Results.Ok(ApiResult.Ok());
         });
@@ -56,6 +64,8 @@ public static class TranslationMemoryEndpoints
             TermExtractionService extractionService,
             CancellationToken ct) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var store = await extractionService.GetCandidatesAsync(id, ct);
             return Results.Ok(ApiResult<TermCandidateStore>.Ok(store));
         });
@@ -77,6 +87,8 @@ public static class TranslationMemoryEndpoints
             string id,
             TermExtractionService extractionService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             await extractionService.DeleteCandidatesAsync(id);
             return Results.Ok(ApiResult.Ok());
         });

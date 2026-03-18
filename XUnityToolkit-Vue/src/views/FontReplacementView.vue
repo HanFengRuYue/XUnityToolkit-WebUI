@@ -11,7 +11,7 @@ import type {
   Game, FontInfo, FontReplacementRequest, FontReplacementStatus,
   FontReplacementProgress, FontReplacementResult
 } from '@/api/types'
-import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr'
+import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,11 +37,8 @@ const phaseLabels: Record<string, string> = {
   completed: '已完成'
 }
 
-// SignalR connection
-const connection = new HubConnectionBuilder()
-  .withUrl('/hubs/install')
-  .withAutomaticReconnect()
-  .build()
+// SignalR connection (created in onMounted)
+let connection: HubConnection | null = null
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -226,11 +223,21 @@ onMounted(async () => {
   await loadStatus()
 
   try {
-    await connection.start()
-    await connection.invoke('JoinFontReplacementGroup', gameId.value)
+    connection = new HubConnectionBuilder()
+      .withUrl('/hubs/install')
+      .withAutomaticReconnect()
+      .build()
+
     connection.on('fontReplacementProgress', (p: FontReplacementProgress) => {
       progress.value = p
     })
+
+    connection.onreconnected(async () => {
+      try { await connection?.invoke('JoinFontReplacementGroup', gameId.value) } catch { /* ignore */ }
+    })
+
+    await connection.start()
+    await connection.invoke('JoinFontReplacementGroup', gameId.value)
   } catch (e) {
     console.error('SignalR connection failed:', e)
   }
@@ -238,11 +245,14 @@ onMounted(async () => {
 
 onBeforeUnmount(async () => {
   try {
-    if (connection.state === HubConnectionState.Connected) {
-      await connection.invoke('LeaveFontReplacementGroup', gameId.value)
+    if (connection) {
+      if (connection.state === HubConnectionState.Connected) {
+        await connection.invoke('LeaveFontReplacementGroup', gameId.value)
+      }
       await connection.stop()
     }
   } catch { /* ignore */ }
+  connection = null
 })
 </script>
 
