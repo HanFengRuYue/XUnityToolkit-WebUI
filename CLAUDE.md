@@ -45,6 +45,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
 - **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game unified term list, translation memory, AI description; real-time stats via SignalR
+- **Translation Memory:** `TranslationMemoryService` provides persistent per-game TM with three-tier matching (exact → dynamic pattern → Levenshtein fuzzy); loaded lazily on first `POST /api/translate`; integrated as Phase 0 in `LlmTranslationService` pipeline (before Phase 1); TM hits undergo `TermAuditService` validation; fire-and-forget persistence after translation; `DynamicPatternService` detects template variables and uses LLM to identify dynamic text fragments, generates XUnity `r:` regex patterns; `TermExtractionService` extracts terms via dedicated LLM call after Round 1 pre-translation
+- **Multi-round pre-translation:** `PreTranslationService` supports 2-round pipeline; Round 1: standard translation + auto term extraction; optional term review pause (5-min timeout, `AwaitingTermReview` state); Round 2: re-translates with newly extracted terms applied; dynamic pattern regex appended to `_PreTranslated_Regex.txt`; results batch-written to TM
 - **Unified Term Management:** `TermService` stores per-game term entries at `data/glossaries/{gameId}.json` (migrates legacy DNT entries on first load); each `TermEntry` has `Type` (Translate/DoNotTranslate), `Category`, `Priority`, `CaseSensitive`, `ExactMatch`, `IsRegex`; `TermMatchingService` handles priority-based placeholder substitution; `TermAuditService` verifies term compliance in translations
 - **Enum JSON casing:** `TermType` and `TermCategory` use `CamelCaseJsonStringEnumConverter<T>` (camelCase: `"translate"`, `"doNotTranslate"`, `"character"`); ALL other enums use default PascalCase (`"OpenAI"`, `"NotInstalled"`) — do NOT change global `JsonStringEnumConverter` or add naming policy to it; **converter precedence:** property-level `[JsonConverter]` > `JsonSerializerOptions.Converters` > type-level `[JsonConverter]` — camelCase enums MUST have `[JsonConverter]` on the TermEntry **property** (not just the enum type), otherwise the global PascalCase `JsonStringEnumConverter` in `Program.cs` and service `JsonOptions` overrides the type-level attribute
 - **Multi-phase translation pipeline:** Phase 1 (natural) sends unmodified text with terms in structured prompt — no placeholders, relies on LLM understanding; Phase 2 (placeholder) applies `{{G_x}}`/`{{DNT_x}}` substitution for terms not resolved in Phase 1; Phase 3 (force correction) retranslates segments that still fail term audit; phases are progressive — each phase only processes texts unresolved by prior phases
@@ -115,6 +117,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Terms:** `GET/PUT /api/games/{id}/terms` — unified term CRUD (replaces separate glossary/DNT); `POST /api/games/{id}/terms/import-from-game` — cross-game import | **Description:** `GET/PUT .../description`
 - **Glossary (compat):** `GET/PUT /api/games/{id}/glossary` — legacy shim, reads/writes via TermService
 - **Do-Not-Translate (compat):** `GET/PUT /api/games/{id}/do-not-translate` — legacy shim, reads/writes via TermService
+- **Translation Memory:** `GET/DELETE /api/games/{id}/translation-memory` (stats/clear), `GET/DELETE .../dynamic-patterns`, `GET/POST/DELETE .../term-candidates` (apply via POST with `{ originals: string[] }`, also resumes paused pre-translation)
 - **Script Tags:** `GET /api/script-tag-presets`, `GET/PUT /api/games/{id}/script-tags`
 - **Asset Extraction:** `POST .../extract-assets`, `GET/DELETE .../extracted-texts`
 - **Pre-Translation:** `POST .../pre-translate`, `GET .../pre-translate/status`, `POST .../pre-translate/cancel`, `GET/PUT .../pre-translate/regex`
@@ -141,15 +144,17 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
-- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`; includes `TermAuditEnabled`, `NaturalTranslationMode`
-- **Adding TermEntry fields:** Sync 2 places: `Models/TermEntry.cs`, `src/api/types.ts`
+- **Adding AiTranslationSettings fields:** Sync 4 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION`), `SettingsView.vue`; includes `TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`, `EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`
+- **Adding TermEntry fields:** Sync 2 places: `Models/TermEntry.cs`, `src/api/types.ts`; includes `Source` (`TermSource` enum, PascalCase JSON)
 - **ScriptTagRule/ScriptTagConfig fields:** Sync 2 places: `Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
 - **Per-game data cleanup (script tags):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete `scriptTagFile` + call `scriptTagService.RemoveCache`
 - **Per-game data cleanup (terms):** `DELETE /api/games/{id}` in `GameEndpoints.cs` must delete glossary file + call `termService.RemoveCache`
+- **Per-game data cleanup (translation memory):** `DELETE /api/games/{id}` must delete TM file + call `translationMemoryService.RemoveCache`, `dynamicPatternService.RemoveCache`, `termExtractionService.RemoveCache`
 - **`NormalizeForCache` call sites:** 3 places must all use `ScriptTagService.NormalizeForCache(gameId, text)`: `WriteTranslationCacheAsync`, `LoadCache`, `RecordTexts`
 - **Adding preset rules:** Update `bundled/script-tag-presets.json`, increment `version`
-- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 3 places: `Models/TranslationStats.cs`, `src/api/types.ts`, `AiTranslationView.vue` (display + recent-meta section); includes term audit stats and per-text term metadata (`HasTerms`, `HasDnt`, `TermAuditResult`)
+- **Adding TranslationStats/RecentTranslation/TranslationError fields:** Sync 3 places: `Models/TranslationStats.cs`, `src/api/types.ts`, `AiTranslationView.vue` (display + recent-meta section); includes term audit stats and per-text term metadata (`HasTerms`, `HasDnt`, `TermAuditResult`), `TranslationMemoryHits`, `TranslationMemoryFuzzyHits`, `TranslationMemoryPatternHits`, `TranslationMemoryMisses`, `DynamicPatternCount`, `ExtractedTermCount`
 - **PreTranslationCacheStats fields:** Sync 2 places: `Models/TranslationStats.cs`, `src/api/types.ts`; display in `AiTranslationView.vue`
+- **PreTranslationStatus fields:** Sync 2 places: `Models/AssetExtraction.cs`, `src/api/types.ts`; includes `CurrentRound`, `CurrentPhase`, `ExtractedTermCount`, `DynamicPatternCount`
 - **`RecordError` call sites:** `LlmTranslationService.RecordError` called from: internal (`TranslateAsync` early-exit), external (`TranslateEndpoints.cs` catch blocks) — signature changes must update both
 - **Font generation models:** Sync `CharacterSetConfig`/`FontGenerationReport`/`CharsetInfo` between `Models/FontGeneration.cs` ↔ `src/api/types.ts`; phase values between `TmpFontGeneratorService` ↔ `FontGeneratorView.vue` phaseLabels; charset IDs between `BuiltinCharsets` ↔ frontend checkbox values
 - **Font replacement models:** Sync `FontInfo`/`FontReplacementStatus` between `Models/FontReplacement.cs` ↔ `src/api/types.ts` ↔ `FontReplacementView.vue`
@@ -162,7 +167,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Adding BuiltInModelInfo fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **LocalLlmDownloadProgress fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **DataPathInfo:** Sync 2 places: `Endpoints/SettingsEndpoints.cs` (record), `src/api/types.ts`
-- **Adding AppDataPaths directories:** Also update export exclusion list in `SettingsEndpoints.cs` `/export` endpoint if the new directory contains large/regeneratable/machine-specific data
+- **Adding AppDataPaths directories:** Also update export exclusion list in `SettingsEndpoints.cs` `/export` endpoint if the new directory contains large/regeneratable/machine-specific data; `translation-memory/`, `dynamic-patterns/`, `term-candidates/` are excluded from export (regeneratable)
 - **Log level sync points:** `Program.cs` `AddFilter` + `FileLoggerProvider` constructor `minLevel` + frontend `LogView.vue` `selectedLevels` + `levelDefs` — all four must agree when changing log level thresholds
 
 ### Build
