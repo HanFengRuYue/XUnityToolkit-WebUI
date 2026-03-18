@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, onDeactivated, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
 import { NButton, NIcon, NInput, NSwitch, NTooltip } from 'naive-ui'
 import {
   TerminalOutlined,
@@ -122,7 +122,7 @@ onDeactivated(() => {
   logStore.disconnect()
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   logStore.disconnect()
 })
 

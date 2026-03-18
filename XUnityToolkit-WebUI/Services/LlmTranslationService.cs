@@ -130,7 +130,7 @@ public sealed class LlmTranslationService(
             TotalTokensUsed: Interlocked.Read(ref _totalTokensUsed),
             AverageResponseTimeMs: Math.Round(avgMs, 1),
             RequestsPerMinute: _requestTimestamps.Count,
-            Enabled: _enabled,
+            Enabled: Volatile.Read(ref _enabled),
             RecentTranslations: _recentTranslations.ToArray(),
             TotalReceived: Interlocked.Read(ref _totalReceived),
             TotalErrors: Interlocked.Read(ref _totalErrors),
@@ -174,7 +174,7 @@ public sealed class LlmTranslationService(
             Volatile.Write(ref _currentGameId, gameId);
         _ = BroadcastStats();
 
-        if (!_enabled)
+        if (!Volatile.Read(ref _enabled))
         {
             RecordError("AI 翻译功能已停用", gameId: gameId);
             throw new InvalidOperationException("AI 翻译功能已停用");
@@ -1416,8 +1416,7 @@ public sealed class LlmTranslationService(
 
         if (!hasCategory && !hasDescription) return;
 
-        sb.Append(fullWidth ? '（' : ' ');
-        if (!fullWidth) sb.Append('(');
+        sb.Append(fullWidth ? '（' : '(');
 
         if (hasCategory && hasDescription)
             sb.Append($"{cat}，{desc}");
