@@ -258,6 +258,7 @@ app.MapFontGenerationEndpoints();
 app.MapLocalLlmEndpoints();
 app.MapBepInExLogEndpoints();
 app.MapUpdateEndpoints();
+app.MapTranslationMemoryEndpoints();
 
 // SignalR hub
 app.MapHub<InstallProgressHub>("/hubs/install");
