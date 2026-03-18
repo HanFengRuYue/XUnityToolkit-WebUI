@@ -9,6 +9,7 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
   const preTranslationStatus = ref<PreTranslationStatus | null>(null)
   const extracting = ref(false)
   const extractError = ref<string | null>(null)
+  const termExtractionComplete = ref(false)
 
   let connection: signalR.HubConnection | null = null
   let activeGameId: string | null = null
@@ -27,6 +28,19 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
 
     connection.on('preTranslationUpdate', (update: PreTranslationStatus) => {
       preTranslationStatus.value = update
+    })
+
+    connection.on('roundProgress', (update: PreTranslationStatus) => {
+      preTranslationStatus.value = update
+    })
+
+    connection.on('patternAnalysisProgress', (update: PreTranslationStatus) => {
+      preTranslationStatus.value = update
+    })
+
+    connection.on('termExtractionComplete', (update: PreTranslationStatus) => {
+      preTranslationStatus.value = update
+      termExtractionComplete.value = true
     })
 
     connection.onreconnected(async () => {
@@ -92,6 +106,7 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
     preTranslationStatus,
     extracting,
     extractError,
+    termExtractionComplete,
     connect,
     disconnect,
     loadCachedResult,

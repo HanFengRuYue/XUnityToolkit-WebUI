@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -13,6 +13,8 @@ import {
   NEmpty,
   NSelect,
   NSwitch,
+  NModal,
+  NCheckbox,
   useMessage,
 } from 'naive-ui'
 import {
@@ -27,11 +29,12 @@ import {
   RefreshOutlined,
   DataObjectOutlined,
   ExpandMoreOutlined,
+  CheckCircleOutlined,
 } from '@vicons/material'
 import { LockClosedOutline } from '@vicons/ionicons5'
 import { useAssetExtractionStore } from '@/stores/assetExtraction'
-import { gamesApi, settingsApi, scriptTagApi } from '@/api/games'
-import type { Game, ScriptTagRule, ScriptTagConfig, ScriptTagAction } from '@/api/types'
+import { gamesApi, settingsApi, scriptTagApi, termCandidatesApi } from '@/api/games'
+import type { Game, ScriptTagRule, ScriptTagConfig, ScriptTagAction, TermCandidate } from '@/api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -159,8 +162,50 @@ const langOptions = [
   { label: '俄语 (ru)', value: 'ru' },
 ]
 
+// Term review
+const showTermReview = ref(false)
+const termCandidates = ref<TermCandidate[]>([])
+const termCandidateSelected = ref<Set<string>>(new Set())
+const termReviewLoading = ref(false)
+
+// Phase tracking
+const phases = [
+  { key: 'patternAnalysis', label: '模式分析' },
+  { key: 'round1', label: '第一轮翻译' },
+  { key: 'termExtraction', label: '术语提取' },
+  { key: 'termReview', label: '术语审核' },
+  { key: 'round2', label: '第二轮润色' },
+  { key: 'writeCache', label: '写入缓存' },
+]
+
+function getPhaseStatus(phaseKey: string): 'done' | 'active' | 'pending' {
+  const s = store.preTranslationStatus
+  if (!s || s.state === 'Idle') return 'pending'
+  const currentPhase = s.currentPhase ?? ''
+  const currentRound = s.currentRound ?? 1
+
+  const phaseOrder = phases.map(p => p.key)
+  const currentIdx = phaseOrder.indexOf(currentPhase)
+  const thisIdx = phaseOrder.indexOf(phaseKey)
+
+  if (s.state === 'Completed') return 'done'
+  if (currentIdx < 0) {
+    // Fallback: infer from round
+    if (phaseKey === 'round1' && currentRound === 1) return 'active'
+    if (phaseKey === 'round2' && currentRound === 2) return 'active'
+    return 'pending'
+  }
+  if (thisIdx < currentIdx) return 'done'
+  if (thisIdx === currentIdx) return 'active'
+  return 'pending'
+}
+
 const isPreTranslating = computed(() =>
   store.preTranslationStatus?.state === 'Running'
+)
+
+const isAwaitingTermReview = computed(() =>
+  store.preTranslationStatus?.state === 'AwaitingTermReview'
 )
 
 const preTranslationProgress = computed(() => {
@@ -225,6 +270,19 @@ onMounted(async () => {
   }
 })
 
+watch(() => store.preTranslationStatus?.state, (newState) => {
+  if (newState === 'AwaitingTermReview') {
+    loadTermCandidates()
+  }
+})
+
+watch(() => store.termExtractionComplete, (val) => {
+  if (val) {
+    loadTermCandidates()
+    store.termExtractionComplete = false
+  }
+})
+
 onUnmounted(async () => {
   await store.disconnect()
 })
@@ -266,6 +324,49 @@ async function handleClearCache() {
   } catch {
     message.error('清理失败')
   }
+}
+
+async function loadTermCandidates() {
+  try {
+    const result = await termCandidatesApi.get(gameId)
+    termCandidates.value = result.candidates
+    termCandidateSelected.value = new Set(result.candidates.map(c => c.original))
+    showTermReview.value = true
+  } catch {
+    message.error('加载术语候选项失败')
+  }
+}
+
+async function handleApplyTerms(originals: string[] | null) {
+  termReviewLoading.value = true
+  try {
+    await termCandidatesApi.apply(gameId, originals)
+    showTermReview.value = false
+    message.success(originals === null ? '已应用全部术语' : originals.length > 0 ? `已应用 ${originals.length} 条术语` : '已跳过术语应用')
+  } catch {
+    message.error('应用术语失败')
+  } finally {
+    termReviewLoading.value = false
+  }
+}
+
+function handleApplySelected() {
+  const selected = Array.from(termCandidateSelected.value)
+  handleApplyTerms(selected)
+}
+
+function handleSkipTerms() {
+  handleApplyTerms([])
+}
+
+function toggleTermCandidate(original: string, checked: boolean) {
+  if (checked) {
+    termCandidateSelected.value.add(original)
+  } else {
+    termCandidateSelected.value.delete(original)
+  }
+  // Force reactivity
+  termCandidateSelected.value = new Set(termCandidateSelected.value)
 }
 
 function langLabel(code: string): string {
@@ -514,6 +615,37 @@ function langLabel(code: string): string {
 
         <!-- Progress -->
         <div v-if="store.preTranslationStatus && store.preTranslationStatus.state !== 'Idle'" class="progress-section">
+          <!-- Phase Steps -->
+          <div v-if="isPreTranslating || isAwaitingTermReview || store.preTranslationStatus.state === 'Completed'" class="phase-steps">
+            <div
+              v-for="(phase, idx) in phases"
+              :key="phase.key"
+              class="phase-step"
+              :class="getPhaseStatus(phase.key)"
+            >
+              <div class="phase-indicator">
+                <NIcon v-if="getPhaseStatus(phase.key) === 'done'" :size="14"><CheckCircleOutlined /></NIcon>
+                <NSpin v-else-if="getPhaseStatus(phase.key) === 'active'" :size="14" />
+                <span v-else class="phase-dot"></span>
+              </div>
+              <span class="phase-label">{{ phase.label }}</span>
+              <span v-if="idx < phases.length - 1" class="phase-arrow">→</span>
+            </div>
+          </div>
+
+          <!-- Round indicator -->
+          <div v-if="(store.preTranslationStatus.currentRound ?? 0) > 0 && isPreTranslating" class="round-indicator">
+            <NTag size="small" :bordered="false">
+              第 {{ store.preTranslationStatus.currentRound }} 轮
+            </NTag>
+            <span v-if="(store.preTranslationStatus.dynamicPatternCount ?? 0) > 0" class="round-stat">
+              动态模式: {{ store.preTranslationStatus.dynamicPatternCount }}
+            </span>
+            <span v-if="(store.preTranslationStatus.extractedTermCount ?? 0) > 0" class="round-stat">
+              提取术语: {{ store.preTranslationStatus.extractedTermCount }}
+            </span>
+          </div>
+
           <NProgress
             type="line"
             :percentage="preTranslationProgress"
@@ -539,6 +671,13 @@ function langLabel(code: string): string {
             style="margin-top: 12px"
           >
             预翻译完成！翻译结果已写入游戏翻译缓存，启动游戏即可使用。
+          </NAlert>
+          <NAlert
+            v-if="store.preTranslationStatus.state === 'AwaitingTermReview'"
+            type="info"
+            style="margin-top: 12px"
+          >
+            已提取术语候选项，请审核后继续翻译。
           </NAlert>
           <NAlert
             v-if="store.preTranslationStatus.state === 'Failed'"
@@ -593,6 +732,54 @@ function langLabel(code: string): string {
         striped
       />
     </div>
+
+    <!-- Term Review Modal -->
+    <NModal
+      v-model:show="showTermReview"
+      preset="card"
+      title="术语候选项审核"
+      style="width: 680px; max-width: 90vw"
+      :mask-closable="false"
+    >
+      <div v-if="termCandidates.length === 0" class="empty-hint">
+        暂无术语候选项。
+      </div>
+      <div v-else class="term-review-list">
+        <div class="term-review-header">
+          <span>共 {{ termCandidates.length }} 条候选术语，已选中 {{ termCandidateSelected.size }} 条</span>
+        </div>
+        <div class="term-review-items">
+          <div
+            v-for="candidate in termCandidates"
+            :key="candidate.original"
+            class="term-review-item"
+          >
+            <NCheckbox
+              :checked="termCandidateSelected.has(candidate.original)"
+              @update:checked="(v: boolean) => toggleTermCandidate(candidate.original, v)"
+            />
+            <span class="term-original">{{ candidate.original }}</span>
+            <span class="term-arrow">→</span>
+            <span class="term-translation">{{ candidate.translation }}</span>
+            <NTag size="small" :bordered="false">{{ candidate.category }}</NTag>
+            <span class="term-frequency">x{{ candidate.frequency }}</span>
+          </div>
+        </div>
+      </div>
+      <template #action>
+        <div class="term-review-actions">
+          <NButton @click="handleApplyTerms(null)" :loading="termReviewLoading" type="primary">
+            全部接受
+          </NButton>
+          <NButton @click="handleApplySelected" :loading="termReviewLoading" :disabled="termCandidateSelected.size === 0">
+            应用选中 ({{ termCandidateSelected.size }})
+          </NButton>
+          <NButton @click="handleSkipTerms" :loading="termReviewLoading">
+            跳过
+          </NButton>
+        </div>
+      </template>
+    </NModal>
   </div>
 </template>
 
@@ -796,6 +983,136 @@ function langLabel(code: string): string {
   font-size: 12px;
   color: var(--text-3);
   line-height: 1.5;
+}
+
+/* ===== Phase Steps ===== */
+.phase-steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+  transition: color 0.2s ease;
+}
+
+.phase-step.done {
+  color: var(--success);
+}
+
+.phase-step.active {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.phase-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.3;
+}
+
+.phase-label {
+  white-space: nowrap;
+}
+
+.phase-arrow {
+  color: var(--text-3);
+  opacity: 0.4;
+  margin: 0 2px;
+}
+
+.round-indicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.round-stat {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+/* ===== Term Review Modal ===== */
+.term-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.term-review-header {
+  font-size: 13px;
+  color: var(--text-2);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.term-review-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.term-review-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.term-original {
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.term-arrow {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.term-translation {
+  color: var(--accent);
+}
+
+.term-frequency {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.term-review-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 @media (max-width: 768px) {

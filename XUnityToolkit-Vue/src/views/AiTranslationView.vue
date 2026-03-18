@@ -31,11 +31,12 @@ import {
   SportsEsportsOutlined,
   CachedOutlined,
   ExpandMoreOutlined,
+  StorageOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
-import { settingsApi } from '@/api/games'
-import type { AppSettings, AiTranslationSettings } from '@/api/types'
+import { settingsApi, translationMemoryApi } from '@/api/games'
+import type { AppSettings, AiTranslationSettings, TranslationMemoryStats } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -78,6 +79,12 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   enablePreTranslationCache: false,
   termAuditEnabled: true,
   naturalTranslationMode: true,
+  enableTranslationMemory: true,
+  fuzzyMatchThreshold: 85,
+  enableLlmPatternAnalysis: true,
+  enableMultiRoundTranslation: true,
+  enableAutoTermExtraction: true,
+  autoApplyExtractedTerms: false,
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -156,6 +163,16 @@ const termAuditPassRate = computed(() => {
   return ((s.termAuditPhase1PassCount / total) * 100).toFixed(1)
 })
 
+const tmStats = ref<TranslationMemoryStats | null>(null)
+
+const tmHitRate = computed(() => {
+  const s = tmStats.value
+  if (!s) return null
+  const total = s.exactHits + s.fuzzyHits + s.patternHits + s.misses
+  if (total === 0) return null
+  return (((s.exactHits + s.fuzzyHits + s.patternHits) / total) * 100).toFixed(1)
+})
+
 const activeMode = computed(() => aiSettings.value.activeMode ?? 'cloud')
 const isLocalMode = computed(() => activeMode.value === 'local')
 
@@ -222,6 +239,15 @@ async function loadSettings() {
   enableAutoSave()
 }
 
+async function loadTmStats() {
+  const gameId = aiStore.stats?.currentGameId
+  if (gameId) {
+    try {
+      tmStats.value = await translationMemoryApi.getStats(gameId)
+    } catch { tmStats.value = null }
+  }
+}
+
 onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
@@ -230,6 +256,7 @@ onMounted(async () => {
     loadSettings(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
+  await loadTmStats()
 })
 
 onUnmounted(() => {
@@ -451,6 +478,53 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Translation Memory Stats -->
+    <div v-if="tmStats && tmStats.entryCount > 0" class="section-card" style="animation-delay: 0.055s">
+      <div class="section-header">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><StorageOutlined /></NIcon>
+          </span>
+          翻译记忆
+        </h2>
+        <div class="header-actions">
+          <NButton size="small" quaternary @click="loadTmStats()">刷新</NButton>
+        </div>
+      </div>
+      <div class="metrics-strip">
+        <div class="metric-pill">
+          <div class="metric-data">
+            <span class="metric-value">{{ tmStats.entryCount }}</span>
+            <span class="metric-label">TM 条目数</span>
+          </div>
+        </div>
+        <div class="metric-pill rate-good">
+          <div class="metric-data">
+            <span class="metric-value">{{ tmStats.exactHits }}</span>
+            <span class="metric-label">精确命中</span>
+          </div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-data">
+            <span class="metric-value">{{ tmStats.fuzzyHits }}</span>
+            <span class="metric-label">模糊命中</span>
+          </div>
+        </div>
+        <div class="metric-pill">
+          <div class="metric-data">
+            <span class="metric-value">{{ tmStats.patternHits }}</span>
+            <span class="metric-label">模式命中</span>
+          </div>
+        </div>
+        <div v-if="tmHitRate !== null" class="metric-pill" :class="{ 'rate-good': Number(tmHitRate) >= 60, 'rate-warn': Number(tmHitRate) < 60 && Number(tmHitRate) >= 30, 'rate-bad': Number(tmHitRate) < 30 }">
+          <div class="metric-data">
+            <span class="metric-value">{{ tmHitRate }}<small>%</small></span>
+            <span class="metric-label">命中率</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Pre-Translation Cache Stats -->
     <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
       <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
@@ -578,6 +652,9 @@ onUnmounted(() => {
               <span v-else-if="item.termAuditResult === 'phase2Pass'" class="meta-tag audit-pass">占位符通过</span>
               <span v-else-if="item.termAuditResult === 'forceCorrected'" class="meta-tag audit-warn">强制修正</span>
               <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
+              <span v-if="item.translationSource === 'tmExact'" class="meta-tag tm-exact">TM 精确</span>
+              <span v-else-if="item.translationSource === 'tmFuzzy'" class="meta-tag tm-fuzzy">TM 模糊</span>
+              <span v-else-if="item.translationSource === 'tmPattern'" class="meta-tag tm-pattern">动态模式</span>
               <span class="meta-tag">{{ item.tokensUsed }} tok</span>
               <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
               <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
@@ -1400,6 +1477,24 @@ onUnmounted(() => {
 .meta-tag.audit-fail {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.meta-tag.tm-exact {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  font-weight: 500;
+}
+
+.meta-tag.tm-fuzzy {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 500;
+}
+
+.meta-tag.tm-pattern {
+  color: #a855f7;
+  background: color-mix(in srgb, #a855f7 12%, transparent);
+  font-weight: 500;
 }
 
 .meta-tag.time {
