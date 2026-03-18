@@ -20,6 +20,11 @@ import type {
 
 defineOptions({ name: 'FontGeneratorView' })
 
+const isMobile = ref(false)
+function checkMobile() {
+  isMobile.value = window.innerWidth <= 768
+}
+
 const collapsed = reactive({
   charset: true,
 })
@@ -330,6 +335,8 @@ connection.onreconnected(async () => {
 })
 
 onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
   try {
     await connection.start()
     await connection.invoke('JoinFontGenerationGroup')
@@ -361,6 +368,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(async () => {
+  window.removeEventListener('resize', checkMobile)
   if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
   try {
     if (connection.state === HubConnectionState.Connected) {
@@ -640,7 +648,7 @@ onBeforeUnmount(async () => {
         </h2>
       </div>
 
-      <NDescriptions label-placement="left" :column="2" bordered size="small">
+      <NDescriptions label-placement="left" :column="isMobile ? 1 : 2" bordered size="small">
         <NDescriptionsItem label="字体名称">{{ activeReport.fontName }}</NDescriptionsItem>
         <NDescriptionsItem label="耗时">{{ formatDuration(activeReport.elapsedMilliseconds) }}</NDescriptionsItem>
         <NDescriptionsItem label="总字符数">{{ activeReport.totalCharacters.toLocaleString() }}</NDescriptionsItem>
@@ -1012,6 +1020,25 @@ onBeforeUnmount(async () => {
 @media (max-width: 480px) {
   .upload-area {
     padding: 16px 12px;
+  }
+
+  .font-item :deep(.n-space) {
+    width: 100%;
+  }
+
+  .font-item :deep(.n-space .n-button),
+  .font-item :deep(.n-space .n-select) {
+    width: 100%;
+  }
+
+  .preview-total {
+    font-size: 13px;
+  }
+
+  .progress-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
   }
 }
 

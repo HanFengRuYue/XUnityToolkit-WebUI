@@ -543,5 +543,27 @@ onMounted(async () => {
   .log-content {
     max-height: 400px;
   }
+
+  .file-meta {
+    display: block;
+    margin-left: 0;
+    margin-top: 4px;
+    font-size: 12px;
+  }
+
+  .analysis-meta {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .log-lines {
+    padding: 8px 10px;
+  }
+
+  .log-content {
+    font-size: 11px;
+    max-height: 350px;
+  }
 }
 </style>

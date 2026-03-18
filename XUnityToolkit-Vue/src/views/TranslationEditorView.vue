@@ -1021,4 +1021,14 @@ function handleExport() {
     gap: 8px;
   }
 }
+
+@media (max-width: 480px) {
+  .filter-panel {
+    padding: 10px;
+  }
+
+  .regex-error {
+    max-width: 200px;
+  }
+}
 </style>

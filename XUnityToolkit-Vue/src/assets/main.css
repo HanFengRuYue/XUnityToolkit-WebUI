@@ -536,6 +536,7 @@ body::before {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
+  overflow-x: auto;
 }
 
 .add-entry-row {

@@ -1078,6 +1078,10 @@ function toggleCategoryFilter(cat: TermCategory) {
     flex-wrap: wrap;
   }
 
+  .toolbar-right {
+    justify-content: flex-end;
+  }
+
   .filter-bar {
     flex-direction: column;
     align-items: flex-start;
@@ -1086,6 +1090,22 @@ function toggleCategoryFilter(cat: TermCategory) {
   .filter-separator {
     width: 100%;
     height: 1px;
+  }
+}
+
+@media (max-width: 480px) {
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+  }
+
+  .chip {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .game-import-item {
+    padding: 8px 10px;
   }
 }
 </style>
