@@ -20,6 +20,7 @@ public static class AssetEndpoints
             string id,
             GameLibraryService gameLibrary,
             AssetExtractionService extractionService,
+            SystemTrayService trayService,
             AppDataPaths paths,
             ILogger<AssetExtractionService> logger,
             CancellationToken ct) =>
@@ -44,6 +45,9 @@ public static class AssetEndpoints
 
                 logger.LogInformation("资产提取完成并缓存: {Count} 条文本, 语言={Lang}",
                     result.TotalTextsExtracted, result.DetectedLanguage);
+
+                trayService.ShowNotification("资产提取完成",
+                    $"「{game.Name}」提取到 {result.TotalTextsExtracted} 条文本");
 
                 return Results.Ok(ApiResult<AssetExtractionResult>.Ok(result));
             }

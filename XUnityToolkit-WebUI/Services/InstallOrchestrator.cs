@@ -19,6 +19,7 @@ public sealed class InstallOrchestrator(
     AssetExtractionService assetExtraction,
     BundledAssetPaths bundledPaths,
     AppDataPaths appDataPaths,
+    SystemTrayService trayService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
 {
@@ -349,6 +350,7 @@ public sealed class InstallOrchestrator(
         await gameLibrary.UpdateAsync(game, ct);
 
         await UpdateStatus(status, InstallStep.Complete, 100, "Installation complete!");
+        trayService.ShowNotification("安装完成", $"「{game.Name}」插件安装完成");
     }
 
     private async Task ExecuteUninstallAsync(Game game, InstallationStatus status)

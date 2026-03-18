@@ -1256,6 +1256,43 @@ public sealed class LlmTranslationService(
 
     // ── System prompt + glossary injection ──
 
+    private static string GetCategoryLabel(TermCategory? category) => category switch
+    {
+        TermCategory.Character => "角色",
+        TermCategory.Location => "地点",
+        TermCategory.Item => "物品",
+        TermCategory.Skill => "技能",
+        TermCategory.Organization => "组织",
+        TermCategory.General => "通用",
+        _ => ""
+    };
+
+    /// <summary>
+    /// Format term annotation combining category and description.
+    /// Uses full-width parentheses for Phase 1 natural mode, ASCII for Phase 2 placeholder mode.
+    /// </summary>
+    private static void AppendTermAnnotation(StringBuilder sb, TermEntry entry, bool fullWidth)
+    {
+        var cat = GetCategoryLabel(entry.Category);
+        var desc = entry.Description?.Trim();
+        var hasCategory = !string.IsNullOrEmpty(cat);
+        var hasDescription = !string.IsNullOrEmpty(desc);
+
+        if (!hasCategory && !hasDescription) return;
+
+        sb.Append(fullWidth ? '（' : ' ');
+        if (!fullWidth) sb.Append('(');
+
+        if (hasCategory && hasDescription)
+            sb.Append($"{cat}，{desc}");
+        else if (hasCategory)
+            sb.Append(cat);
+        else
+            sb.Append(desc);
+
+        sb.Append(fullWidth ? '）' : ')');
+    }
+
     private static string BuildSystemPrompt(string template, string from, string to,
         List<TermEntry>? glossary, string? gameDescription = null,
         IList<TranslationMemoryEntry>? memoryContext = null, string? dntHint = null)
@@ -1278,8 +1315,7 @@ public sealed class LlmTranslationService(
                 else
                     sb.Append($"  {entry.Original} → {entry.Translation}");
 
-                if (!string.IsNullOrWhiteSpace(entry.Description))
-                    sb.Append($" ({entry.Description})");
+                AppendTermAnnotation(sb, entry, fullWidth: false);
 
                 sb.Append('\n');
             }
@@ -1330,8 +1366,7 @@ public sealed class LlmTranslationService(
                 else
                     sb.Append($"  {term.Original} → {term.Translation}");
 
-                if (!string.IsNullOrWhiteSpace(term.Description))
-                    sb.Append($"（{term.Description}）");
+                AppendTermAnnotation(sb, term, fullWidth: true);
 
                 sb.Append('\n');
             }
@@ -1343,8 +1378,7 @@ public sealed class LlmTranslationService(
             foreach (var term in dntTerms)
             {
                 sb.Append($"  - {term.Original}");
-                if (!string.IsNullOrWhiteSpace(term.Description))
-                    sb.Append($"（{term.Description}）");
+                AppendTermAnnotation(sb, term, fullWidth: true);
                 sb.Append('\n');
             }
         }
