@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
@@ -316,15 +317,27 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
                 if (!string.IsNullOrWhiteSpace(script))
                 {
-                    var extractedLines = ExtractTextLines(script);
-                    foreach (var line in extractedLines)
+                    // Check for VIDE Dialogue JSON format first
+                    var videTexts = TryExtractVideDialogue(script, name, fileName);
+                    if (videTexts != null)
                     {
-                        texts.Add(new ExtractedText
+                        texts.AddRange(videTexts);
+                        if (videTexts.Count > 0)
+                            logger.LogDebug("检测到 VIDE 对话，提取了 {Count} 条文本: {Name}",
+                                videTexts.Count, name);
+                    }
+                    else
+                    {
+                        var extractedLines = ExtractTextLines(script);
+                        foreach (var line in extractedLines)
                         {
-                            Text = line,
-                            Source = $"TextAsset:{name}",
-                            AssetFile = fileName
-                        });
+                            texts.Add(new ExtractedText
+                            {
+                                Text = line,
+                                Source = $"TextAsset:{name}",
+                                AssetFile = fileName
+                            });
+                        }
                     }
                 }
             }
@@ -362,6 +375,28 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                     if (gcTexts.Count > 0)
                         logger.LogDebug("检测到 GameCreator {Type}，提取了 {Count} 条文本: {Name}",
                             gcDialogueType, gcTexts.Count, name);
+                    continue;
+                }
+
+                // Check for VIDE SOQuotes_UW — extract quote strings
+                if (IsVideQuote(mbBase))
+                {
+                    var quoteTexts = ExtractVideQuotes(mbBase, name, fileName);
+                    texts.AddRange(quoteTexts);
+                    if (quoteTexts.Count > 0)
+                        logger.LogDebug("检测到 VIDE 语录，提取了 {Count} 条文本: {Name}",
+                            quoteTexts.Count, name);
+                    continue;
+                }
+
+                // Check for VIDE SOTraitData_UW — extract trait/achievement text
+                if (IsVideTrait(mbBase))
+                {
+                    var traitTexts = ExtractVideTraits(mbBase, name, fileName);
+                    texts.AddRange(traitTexts);
+                    if (traitTexts.Count > 0)
+                        logger.LogDebug("检测到 VIDE 特征/成就，提取了 {Count} 条文本: {Name}",
+                            traitTexts.Count, name);
                     continue;
                 }
 
@@ -780,6 +815,194 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     // ── End GameCreator 2 ───────────────────────────────────────────────
 
+    // ── VIDE Dialogues & Unaware in The City Detection & Extraction ──────
+
+    /// <summary>
+    /// Try to detect and extract VIDE dialogue text from a TextAsset JSON.
+    /// VIDE dialogues use flat JSON with keys like pd_{N}_com_{C}text for dialogue text
+    /// and pd_{N}_com_{C}charName for character names.
+    /// Returns null if the content is not a VIDE dialogue JSON.
+    /// </summary>
+    private List<ExtractedText>? TryExtractVideDialogue(string script, string name, string assetFileName)
+    {
+        // Quick check: must look like JSON with VIDE metadata keys
+        if (script.Length < 10 || script[0] != '{' || !script.Contains("\"dID\""))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(script);
+            var root = doc.RootElement;
+
+            // Verify VIDE structure: must have dID and playerDiags
+            if (!root.TryGetProperty("dID", out _) || !root.TryGetProperty("playerDiags", out _))
+                return null;
+
+            var results = new List<ExtractedText>();
+            var charNames = new HashSet<string>();
+
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.String)
+                    continue;
+
+                // Extract dialogue text: pd_{N}_com_{C}text
+                if (VideTextKeyPattern().IsMatch(prop.Name))
+                {
+                    var text = prop.Value.GetString();
+                    if (text != null && IsVideGameText(text))
+                    {
+                        results.Add(new ExtractedText
+                        {
+                            Text = text,
+                            Source = $"VIDE:{name}",
+                            AssetFile = assetFileName
+                        });
+                    }
+                }
+                // Collect unique character names: pd_{N}_com_{C}charName
+                else if (VideCharNameKeyPattern().IsMatch(prop.Name))
+                {
+                    var charName = prop.Value.GetString();
+                    if (!string.IsNullOrWhiteSpace(charName))
+                        charNames.Add(charName);
+                }
+            }
+
+            // Add unique character names as separate entries
+            foreach (var charName in charNames)
+            {
+                if (IsGameText(charName))
+                {
+                    results.Add(new ExtractedText
+                    {
+                        Text = charName,
+                        Source = $"VIDE:Character:{name}",
+                        AssetFile = assetFileName
+                    });
+                }
+            }
+
+            return results;
+        }
+        catch (JsonException)
+        {
+            return null; // Not valid JSON, fall back to generic extraction
+        }
+    }
+
+    /// <summary>
+    /// Filter VIDE dialogue text — skip control markers and non-displayable entries.
+    /// </summary>
+    private static bool IsVideGameText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (text == "*" || text.StartsWith("* ")) return false; // Branch/control markers
+        if (text is "RAND" or "ExtraData") return false; // Internal VIDE markers
+        return IsGameText(text);
+    }
+
+    /// <summary>
+    /// Detect SOQuotes_UW: has quotes array + dialType field (unique to VIDE quote system).
+    /// </summary>
+    private static bool IsVideQuote(AssetTypeValueField mbBase)
+    {
+        return !mbBase["quotes"].IsDummy && !mbBase["dialType"].IsDummy;
+    }
+
+    /// <summary>
+    /// Extract translatable quote strings from SOQuotes_UW MonoBehaviour.
+    /// </summary>
+    private static List<ExtractedText> ExtractVideQuotes(
+        AssetTypeValueField mbBase, string name, string assetFileName)
+    {
+        var results = new List<ExtractedText>();
+
+        var quotes = mbBase["quotes"];
+        if (!quotes.IsDummy)
+        {
+            foreach (var elem in GetArrayElements(quotes))
+            {
+                if (elem.TemplateField.ValueType == AssetValueType.String)
+                {
+                    var text = elem.AsString;
+                    if (IsGameText(text))
+                        results.Add(new ExtractedText
+                        {
+                            Text = text,
+                            Source = $"Quote:{name}",
+                            AssetFile = assetFileName
+                        });
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Detect SOTraitData_UW: has traitName + traitType fields (unique to trait/achievement system).
+    /// </summary>
+    private static bool IsVideTrait(AssetTypeValueField mbBase)
+    {
+        return !mbBase["traitName"].IsDummy && !mbBase["traitType"].IsDummy;
+    }
+
+    /// <summary>
+    /// Extract translatable text from SOTraitData_UW MonoBehaviour
+    /// (traits, achievements, and background stories).
+    /// Extracts traitName, reqsText, effectText, flavorText directly.
+    /// Extracts hoverText only if it contains substantial non-template prose
+    /// (e.g., background story descriptions beyond {NAME}/{REQS}/{EFFECT}/{FLAVOR} placeholders).
+    /// </summary>
+    private static List<ExtractedText> ExtractVideTraits(
+        AssetTypeValueField mbBase, string name, string assetFileName)
+    {
+        var results = new List<ExtractedText>();
+
+        // Extract direct text fields
+        foreach (var fieldName in new[] { "traitName", "reqsText", "effectText", "flavorText" })
+        {
+            var field = mbBase[fieldName];
+            if (!field.IsDummy && field.TemplateField.ValueType == AssetValueType.String)
+            {
+                var text = field.AsString;
+                if (IsGameText(text))
+                    results.Add(new ExtractedText
+                    {
+                        Text = text,
+                        Source = $"Trait:{name}",
+                        AssetFile = assetFileName
+                    });
+            }
+        }
+
+        // Extract hoverText only if it contains substantial non-template content
+        // (background stories embed unique prose text mixed with template placeholders)
+        var hoverText = mbBase["hoverText"];
+        if (!hoverText.IsDummy && hoverText.TemplateField.ValueType == AssetValueType.String)
+        {
+            var text = hoverText.AsString;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                // Strip known template placeholders and whitespace, check if real text remains
+                var stripped = TraitTemplatePlaceholderPattern().Replace(text, "")
+                    .Replace("\n", "").Replace("\r", "").Trim();
+                if (stripped.Length > 5 && IsGameText(text))
+                    results.Add(new ExtractedText
+                    {
+                        Text = text,
+                        Source = $"Trait:HoverText:{name}",
+                        AssetFile = assetFileName
+                    });
+            }
+        }
+
+        return results;
+    }
+
+    // ── End VIDE / Unaware in The City ───────────────────────────────────
+
     /// <summary>
     /// Get array elements from an AssetsTools.NET array field.
     /// Arrays have structure: field -> "Array" child -> actual elements.
@@ -1046,6 +1269,15 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     [GeneratedRegex(@"\{[A-Za-z_]\w{0,15}\}")]
     private static partial Regex TemplateVariablePattern();
+
+    [GeneratedRegex(@"^pd_\d+_com_\d+text$")]
+    private static partial Regex VideTextKeyPattern();
+
+    [GeneratedRegex(@"^pd_\d+_com_\d+charName$")]
+    private static partial Regex VideCharNameKeyPattern();
+
+    [GeneratedRegex(@"\{(NAME|REQS|EFFECT|FLAVOR|STATS|REPS|TP|ITEMS|CLOTHES)\}")]
+    private static partial Regex TraitTemplatePlaceholderPattern();
 
     /// <summary>
     /// Detect template variable patterns (e.g., {PC}, {M}, {D}) in extracted texts
