@@ -339,6 +339,15 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                 var mbBase = manager.GetBaseField(afileInst, mbInfo);
                 if (mbBase.IsDummy) continue;
 
+                // Check for I2 Localization LanguageSourceAsset — extract terms specifically
+                if (IsI2LanguageSource(mbBase))
+                {
+                    var i2Texts = ExtractI2LocalizationTerms(mbBase, fileName);
+                    texts.AddRange(i2Texts);
+                    logger.LogInformation("检测到 I2 Localization 资产，提取了 {Count} 条术语翻译", i2Texts.Count);
+                    continue;
+                }
+
                 var name = mbBase["m_Name"].IsDummy ? "(unnamed)" : mbBase["m_Name"].AsString;
                 var strings = new List<string>();
                 CollectStrings(mbBase, strings, depth: 0);
@@ -376,6 +385,100 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
         foreach (var child in field.Children)
             CollectStrings(child, results, depth + 1);
+    }
+
+    /// <summary>
+    /// Detect whether a MonoBehaviour is an I2 Localization LanguageSourceAsset
+    /// by checking for the characteristic mSource.mTerms field structure.
+    /// </summary>
+    private static bool IsI2LanguageSource(AssetTypeValueField mbBase)
+    {
+        var mSource = mbBase["mSource"];
+        if (mSource.IsDummy) return false;
+
+        var mTerms = mSource["mTerms"];
+        if (mTerms.IsDummy) return false;
+
+        var mLanguages = mSource["mLanguages"];
+        return !mLanguages.IsDummy;
+    }
+
+    /// <summary>
+    /// Extract translation terms from an I2 Localization LanguageSourceAsset.
+    /// Parses the mSource.mTerms structure to extract per-language text values
+    /// with proper categorization (e.g., "I2:en:TALK/MakinaText00").
+    /// </summary>
+    private List<ExtractedText> ExtractI2LocalizationTerms(
+        AssetTypeValueField mbBase, string assetFileName)
+    {
+        var results = new List<ExtractedText>();
+        var mSource = mbBase["mSource"];
+
+        // Read language codes from mLanguages array
+        var langCodes = new List<string>();
+        foreach (var lang in GetArrayElements(mSource["mLanguages"]))
+        {
+            var code = lang["Code"];
+            if (!code.IsDummy)
+                langCodes.Add(code.AsString);
+        }
+
+        if (langCodes.Count == 0)
+        {
+            logger.LogWarning("I2 Localization 资产未包含语言信息，跳过提取");
+            return results;
+        }
+
+        logger.LogInformation("I2 Localization 语言: {Languages}", string.Join(", ", langCodes));
+
+        // Extract terms
+        foreach (var term in GetArrayElements(mSource["mTerms"]))
+        {
+            var termKeyField = term["Term"];
+            if (termKeyField.IsDummy) continue;
+            var termKey = termKeyField.AsString;
+            if (string.IsNullOrEmpty(termKey)) continue;
+
+            var languages = term["Languages"];
+            if (languages.IsDummy) continue;
+
+            int langIdx = 0;
+            foreach (var langValue in GetArrayElements(languages))
+            {
+                if (langIdx >= langCodes.Count) break;
+
+                if (langValue.TemplateField.ValueType == AssetValueType.String)
+                {
+                    var text = langValue.AsString;
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        results.Add(new ExtractedText
+                        {
+                            Text = text,
+                            Source = $"I2:{langCodes[langIdx]}:{termKey}",
+                            AssetFile = assetFileName
+                        });
+                    }
+                }
+
+                langIdx++;
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Get array elements from an AssetsTools.NET array field.
+    /// Arrays have structure: field -> "Array" child -> actual elements.
+    /// </summary>
+    private static IReadOnlyList<AssetTypeValueField> GetArrayElements(AssetTypeValueField arrayField)
+    {
+        if (arrayField.IsDummy) return [];
+        var children = arrayField.Children;
+        if (children.Count == 1 && children[0].FieldName == "Array")
+            return children[0].Children;
+        return children;
     }
 
     /// <summary>
