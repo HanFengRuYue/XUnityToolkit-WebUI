@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { formatBytes } from '@/utils/format'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
 import {
@@ -103,13 +104,6 @@ function levelClass(level: string): string {
   }
 }
 
-// File size formatting
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 // Load log
 async function loadLog() {
   loading.value = true
@@ -202,7 +196,7 @@ onMounted(async () => {
       </span>
       BepInEx 日志
       <span v-if="fileSize" class="file-meta">
-        {{ formatFileSize(fileSize) }}
+        {{ formatBytes(fileSize) }}
         <template v-if="lastModified"> · {{ new Date(lastModified).toLocaleString() }}</template>
       </span>
     </h1>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
 import {
   NIcon,
   NButton,
@@ -36,8 +36,8 @@ import {
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
-import { settingsApi, translationMemoryApi } from '@/api/games'
-import type { AppSettings, AiTranslationSettings, TranslationMemoryStats } from '@/api/types'
+import { settingsApi } from '@/api/games'
+import type { AppSettings, AiTranslationSettings } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -49,7 +49,8 @@ const collapsed = reactive({
   cache: true,
   recent: true,
   errors: true,
-  extraction: true,
+  termSettings: false,
+  tmSettings: false,
 })
 
 const aiStore = useAiTranslationStore()
@@ -130,6 +131,18 @@ const isEnabled = computed(() => aiStore.stats?.enabled ?? true)
 
 const isActivelyTranslating = computed(() => (aiStore.stats?.translating ?? 0) > 0)
 
+const tmTotalHits = computed(() => {
+  const s = aiStore.stats
+  if (!s) return 0
+  return s.translationMemoryHits + s.translationMemoryFuzzyHits + s.translationMemoryPatternHits
+})
+
+const llmCompleted = computed(() => {
+  return Math.max(0, (aiStore.stats?.totalTranslated ?? 0) - tmTotalHits.value)
+})
+
+const hasTmActivity = computed(() => aiSettings.value.enableTranslationMemory || tmTotalHits.value > 0 || (aiStore.stats?.translationMemoryMisses ?? 0) > 0)
+
 const extractionEndpointOptions = computed(() => {
   const endpoints = aiSettings.value.endpoints ?? []
   return [
@@ -155,15 +168,15 @@ const termAuditPassRate = computed(() => {
   return ((s.termAuditPhase1PassCount / total) * 100).toFixed(1)
 })
 
-const tmStats = ref<TranslationMemoryStats | null>(null)
+const showTermAudit = computed(() =>
+  (aiStore.stats?.termMatchedTextCount ?? 0) > 0 || termAuditTotal.value > 0
+)
 
-const tmHitRate = computed(() => {
-  const s = tmStats.value
-  if (!s) return null
-  const total = s.exactHits + s.fuzzyHits + s.patternHits + s.misses
-  if (total === 0) return null
-  return (((s.exactHits + s.fuzzyHits + s.patternHits) / total) * 100).toFixed(1)
-})
+const showExtraction = computed(() =>
+  aiSettings.value.glossaryExtractionEnabled && !!extractionStats.value
+)
+
+const allSettingsCollapsed = computed(() => collapsed.termSettings && collapsed.tmSettings)
 
 const activeMode = computed(() => aiSettings.value.activeMode ?? 'cloud')
 const isLocalMode = computed(() => activeMode.value === 'local')
@@ -172,7 +185,7 @@ function setMode(mode: 'cloud' | 'local') {
   aiSettings.value = { ...aiSettings.value, activeMode: mode }
 }
 
-const { enable: enableAutoSave } = useAutoSave(
+const { enable: enableAutoSave, disable: disableAutoSave } = useAutoSave(
   () => settings.value,
   async () => {
     if (!settings.value) return
@@ -218,6 +231,7 @@ async function handleToggle(enabled: boolean) {
 }
 
 async function loadSettings() {
+  disableAutoSave()
   try {
     const loaded = await settingsApi.get()
     settings.value = {
@@ -231,19 +245,6 @@ async function loadSettings() {
   enableAutoSave()
 }
 
-async function loadTmStats() {
-  const gameId = aiStore.stats?.currentGameId
-  if (gameId) {
-    try {
-      tmStats.value = await translationMemoryApi.getStats(gameId)
-    } catch { tmStats.value = null }
-  }
-}
-
-watch(() => aiStore.stats?.currentGameId, (id) => {
-  if (id) loadTmStats()
-})
-
 onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
@@ -252,7 +253,11 @@ onMounted(async () => {
     loadSettings(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
-  await loadTmStats()
+})
+
+onActivated(async () => {
+  await aiStore.connect()
+  await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats()])
 })
 
 onDeactivated(() => {
@@ -266,6 +271,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ai-page">
+    <!-- Title Row -->
     <div class="page-title-row" style="animation-delay: 0s">
       <h1 class="page-title">
         <span class="page-title-icon">
@@ -322,293 +328,464 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Status Dashboard -->
-    <div class="section-card" :class="{ 'is-translating': isActivelyTranslating }" style="animation-delay: 0.05s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon status">
-            <NIcon :size="16">
-              <DashboardOutlined />
-            </NIcon>
-          </span>
-          翻译状态
-        </h2>
-        <div class="header-actions">
-          <span class="connection-badge" :class="connectionStatus">
-            <span class="connection-dot"></span>
-            {{ connectionLabel }}
-            <span class="connection-time">{{ lastRequestFormatted }}</span>
-          </span>
-          <NButton size="small" quaternary @click="aiStore.fetchStats()">
-            刷新
-          </NButton>
-        </div>
-      </div>
-
-      <!-- Current Game Indicator -->
-      <div v-if="aiStore.stats?.currentGameId" class="current-game-indicator">
-        <NIcon :size="14"><SportsEsportsOutlined /></NIcon>
-        <span class="current-game-label">当前翻译游戏</span>
-        <span class="current-game-name">{{ getGameName(aiStore.stats.currentGameId) }}</span>
-      </div>
-
-      <!-- Pipeline Flow -->
-      <div class="stats-group-label">处理进度</div>
-      <div class="pipeline-flow">
-        <div class="pipeline-stage queued-stage">
-          <div class="stage-icon queued">
-            <NIcon :size="18"><HourglassEmptyOutlined /></NIcon>
+    <!-- Two-Column Dashboard Grid -->
+    <div class="ai-dashboard-grid">
+      <!-- Left Column: Dashboard Cards -->
+      <div class="ai-dashboard-main">
+        <!-- Status Dashboard -->
+        <div class="section-card" :class="{ 'is-translating': isActivelyTranslating }" style="animation-delay: 0.05s">
+          <div class="section-header">
+            <h2 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><DashboardOutlined /></NIcon>
+              </span>
+              翻译状态
+            </h2>
+            <div class="header-actions">
+              <span class="connection-badge" :class="connectionStatus">
+                <span class="connection-dot"></span>
+                {{ connectionLabel }}
+                <span class="connection-time">{{ lastRequestFormatted }}</span>
+              </span>
+              <NButton size="small" quaternary @click="aiStore.fetchStats()">
+                刷新
+              </NButton>
+            </div>
           </div>
-          <div class="stage-content">
-            <span class="stage-value">{{ aiStore.stats?.queued ?? 0 }}</span>
-            <span class="stage-label">排队等待</span>
-          </div>
-        </div>
 
-        <div class="pipeline-arrow" :class="{ active: isActivelyTranslating }">
-          <NIcon :size="18"><ArrowRightAltOutlined /></NIcon>
-        </div>
-
-        <div class="pipeline-stage translating-stage" :class="{ 'is-active': isActivelyTranslating }">
-          <div class="stage-icon translating">
-            <NIcon :size="18"><SyncOutlined /></NIcon>
+          <!-- Current Game Indicator -->
+          <div v-if="aiStore.stats?.currentGameId" class="current-game-indicator">
+            <NIcon :size="14"><SportsEsportsOutlined /></NIcon>
+            <span class="current-game-label">当前翻译游戏</span>
+            <span class="current-game-name">{{ getGameName(aiStore.stats.currentGameId) }}</span>
           </div>
-          <div class="stage-content">
-            <span class="stage-value">{{ aiStore.stats?.translating ?? 0 }}<span v-if="aiStore.stats?.maxConcurrency" class="stage-max">/{{ aiStore.stats.maxConcurrency }}</span></span>
-            <span class="stage-label">正在翻译</span>
-          </div>
-        </div>
 
-        <div class="pipeline-arrow" :class="{ active: isActivelyTranslating }">
-          <NIcon :size="18"><ArrowRightAltOutlined /></NIcon>
-        </div>
+          <!-- Pipeline Fork -->
+          <div class="pipeline-fork">
+            <!-- Root: Received -->
+            <div class="fork-root">
+              <div class="pipeline-node root-node">
+                <div class="node-icon root-icon">
+                  <NIcon :size="20"><MoveToInboxOutlined /></NIcon>
+                </div>
+                <div class="node-data">
+                  <span class="node-value root-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
+                  <span class="node-label">已接收</span>
+                </div>
+              </div>
+            </div>
 
-        <div class="pipeline-stage translated-stage">
-          <div class="stage-icon translated">
-            <NIcon :size="18"><TranslateOutlined /></NIcon>
-          </div>
-          <div class="stage-content">
-            <span class="stage-value">{{ aiStore.stats?.totalTranslated ?? 0 }}</span>
-            <span class="stage-label">已翻译</span>
-          </div>
-        </div>
-      </div>
+            <!-- Fork Connector -->
+            <div class="fork-spine">
+              <div class="spine-trunk"></div>
+            </div>
 
-      <!-- Error / Success Bar -->
-      <div class="error-bar" :class="{ 'has-errors': (aiStore.stats?.totalErrors ?? 0) > 0 }">
-        <div class="error-bar-left">
-          <NIcon :size="15"><ErrorOutlineOutlined /></NIcon>
-          <span v-if="(aiStore.stats?.totalErrors ?? 0) > 0" class="error-bar-text">
-            {{ aiStore.stats!.totalErrors }} 次翻译失败
-          </span>
-          <span v-else class="error-bar-text">暂无错误</span>
-        </div>
-        <div class="error-bar-right" v-if="successRate !== null">
-          <div class="success-track">
-            <div
-              class="success-fill"
-              :class="{ warn: successRateNumber < 95, bad: successRateNumber < 80 }"
-              :style="{ width: successRate + '%' }"
-            ></div>
-          </div>
-          <span class="error-bar-rate">{{ successRate }}%</span>
-        </div>
-      </div>
+            <!-- Branches -->
+            <div class="fork-branches">
+              <!-- LLM Branch -->
+              <div class="fork-branch">
+                <div class="branch-connector"><span></span></div>
+                <div class="branch-body">
+                  <div class="branch-header">
+                    <NIcon :size="13"><SmartToyOutlined /></NIcon>
+                    <span>LLM 翻译</span>
+                  </div>
+                  <div class="branch-flow">
+                    <div class="pipeline-node compact" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
+                      <div class="node-icon">
+                        <NIcon :size="14"><HourglassEmptyOutlined /></NIcon>
+                      </div>
+                      <div class="node-data">
+                        <span class="node-value">{{ aiStore.stats?.queued ?? 0 }}</span>
+                        <span class="node-label">排队</span>
+                      </div>
+                    </div>
+                    <div class="flow-arrow" :class="{ active: isActivelyTranslating }">
+                      <span class="flow-arrow-line"></span>
+                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
+                    </div>
+                    <div class="pipeline-node compact" :class="{ 'is-active': isActivelyTranslating }">
+                      <div class="node-icon translating-icon">
+                        <NIcon :size="14"><SyncOutlined /></NIcon>
+                      </div>
+                      <div class="node-data">
+                        <span class="node-value">{{ aiStore.stats?.translating ?? 0 }}<small v-if="aiStore.stats?.maxConcurrency">/{{ aiStore.stats.maxConcurrency }}</small></span>
+                        <span class="node-label">翻译中</span>
+                      </div>
+                    </div>
+                    <div class="flow-arrow" :class="{ active: isActivelyTranslating }">
+                      <span class="flow-arrow-line"></span>
+                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
+                    </div>
+                    <div class="pipeline-node compact done-node">
+                      <div class="node-icon done-icon">
+                        <NIcon :size="14"><TranslateOutlined /></NIcon>
+                      </div>
+                      <div class="node-data">
+                        <span class="node-value">{{ llmCompleted }}</span>
+                        <span class="node-label">已完成</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Term Extraction (sub-process of LLM) -->
+                  <div v-if="showExtraction" class="branch-sub">
+                    <div class="sub-indicator">
+                      <NIcon :size="12"><AutoFixHighOutlined /></NIcon>
+                      <span>术语提取</span>
+                      <span class="sub-stat">{{ extractionStats!.totalExtracted }} 已提取</span>
+                      <span class="sub-stat">{{ extractionStats!.totalExtractionCalls }} 调用</span>
+                      <span v-if="extractionStats!.activeExtractions > 0" class="sub-stat active">{{ extractionStats!.activeExtractions }} 提取中</span>
+                      <span v-if="extractionStats!.totalErrors > 0" class="sub-stat error">{{ extractionStats!.totalErrors }} 错误</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-      <!-- Term Audit Stats -->
-      <div v-if="(aiStore.stats?.termMatchedTextCount ?? 0) > 0 || termAuditTotal > 0" class="term-audit-strip">
-        <div class="stats-group-label">术语审查</div>
-        <div class="metrics-strip">
-          <div class="metric-pill">
-            <div class="metric-data">
-              <span class="metric-value">{{ aiStore.stats?.termMatchedTextCount ?? 0 }}</span>
+              <!-- TM Branch -->
+              <div v-if="hasTmActivity" class="fork-branch tm-branch">
+                <div class="branch-connector"><span></span></div>
+                <div class="branch-body">
+                  <div class="branch-header tm-header">
+                    <NIcon :size="13"><StorageOutlined /></NIcon>
+                    <span>翻译记忆</span>
+                  </div>
+                  <div class="branch-flow">
+                    <div class="tm-hit-chips">
+                      <div class="tm-chip">
+                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryHits ?? 0 }}</span>
+                        <span class="tm-chip-type">精确</span>
+                      </div>
+                      <div class="tm-chip">
+                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryFuzzyHits ?? 0 }}</span>
+                        <span class="tm-chip-type">模糊</span>
+                      </div>
+                      <div class="tm-chip">
+                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryPatternHits ?? 0 }}</span>
+                        <span class="tm-chip-type">模式</span>
+                      </div>
+                    </div>
+                    <div class="flow-arrow active">
+                      <span class="flow-arrow-line"></span>
+                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
+                    </div>
+                    <div class="pipeline-node compact tm-done-node">
+                      <div class="node-icon tm-icon">
+                        <NIcon :size="14"><StorageOutlined /></NIcon>
+                      </div>
+                      <div class="node-data">
+                        <span class="node-value">{{ tmTotalHits }}</span>
+                        <span class="node-label">已命中</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Error / Success Bar -->
+          <div class="error-bar" :class="{ 'has-errors': (aiStore.stats?.totalErrors ?? 0) > 0 }">
+            <div class="error-bar-left">
+              <NIcon :size="15"><ErrorOutlineOutlined /></NIcon>
+              <span v-if="(aiStore.stats?.totalErrors ?? 0) > 0" class="error-bar-text">
+                {{ aiStore.stats!.totalErrors }} 次翻译失败
+              </span>
+              <span v-else class="error-bar-text">暂无错误</span>
+            </div>
+            <div class="error-bar-right" v-if="successRate !== null">
+              <div class="success-track">
+                <div
+                  class="success-fill"
+                  :class="{ warn: successRateNumber < 95, bad: successRateNumber < 80 }"
+                  :style="{ width: successRate + '%' }"
+                ></div>
+              </div>
+              <span class="error-bar-rate">{{ successRate }}%</span>
+            </div>
+          </div>
+
+          <!-- Term Audit Stats -->
+          <div v-if="showTermAudit" class="audit-strip">
+            <div class="audit-header">
+              <NIcon :size="13"><AutoFixHighOutlined /></NIcon>
+              <span>术语审查</span>
+              <span v-if="termAuditPassRate !== null" class="audit-rate" :class="{ good: Number(termAuditPassRate) >= 80, warn: Number(termAuditPassRate) < 80 }">
+                {{ termAuditPassRate }}<small>%</small>
+              </span>
+            </div>
+            <div class="audit-chips">
               <NPopover trigger="hover" placement="top">
                 <template #trigger>
-                  <span class="metric-label metric-label-help">应用术语</span>
+                  <div class="audit-chip">
+                    <span class="audit-chip-value">{{ aiStore.stats?.termMatchedTextCount ?? 0 }}</span>
+                    <span class="audit-chip-label">应用术语</span>
+                  </div>
                 </template>
                 <div style="max-width: 240px; font-size: 13px">涉及术语或禁翻词的翻译文本总数</div>
               </NPopover>
-            </div>
-          </div>
-          <div class="metric-pill rate-good">
-            <div class="metric-data">
-              <span class="metric-value">{{ aiStore.stats?.termAuditPhase1PassCount ?? 0 }}</span>
               <NPopover trigger="hover" placement="top">
                 <template #trigger>
-                  <span class="metric-label metric-label-help">自然通过</span>
+                  <div class="audit-chip good">
+                    <span class="audit-chip-value">{{ aiStore.stats?.termAuditPhase1PassCount ?? 0 }}</span>
+                    <span class="audit-chip-label">自然通过</span>
+                  </div>
                 </template>
                 <div style="max-width: 240px; font-size: 13px">在第一阶段（自然翻译模式，不使用占位符）中，LLM 直接正确应用术语的文本数</div>
               </NPopover>
-            </div>
-          </div>
-          <div class="metric-pill">
-            <div class="metric-data">
-              <span class="metric-value">{{ aiStore.stats?.termAuditPhase2PassCount ?? 0 }}</span>
               <NPopover trigger="hover" placement="top">
                 <template #trigger>
-                  <span class="metric-label metric-label-help">占位符通过</span>
+                  <div class="audit-chip">
+                    <span class="audit-chip-value">{{ aiStore.stats?.termAuditPhase2PassCount ?? 0 }}</span>
+                    <span class="audit-chip-label">占位符通过</span>
+                  </div>
                 </template>
-                <div style="max-width: 240px; font-size: 13px">在第二阶段（使用占位符替换术语）中通过审查的文本数。通常说明 LLM 在自然模式下未能正确应用术语</div>
+                <div style="max-width: 240px; font-size: 13px">在第二阶段（使用占位符替换术语）中通过审查的文本数</div>
               </NPopover>
-            </div>
-          </div>
-          <div class="metric-pill" :class="{ 'rate-warn': (aiStore.stats?.termAuditForceCorrectedCount ?? 0) > 0 }">
-            <div class="metric-data">
-              <span class="metric-value">{{ aiStore.stats?.termAuditForceCorrectedCount ?? 0 }}</span>
               <NPopover trigger="hover" placement="top">
                 <template #trigger>
-                  <span class="metric-label metric-label-help">强制修正</span>
+                  <div class="audit-chip" :class="{ warn: (aiStore.stats?.termAuditForceCorrectedCount ?? 0) > 0 }">
+                    <span class="audit-chip-value">{{ aiStore.stats?.termAuditForceCorrectedCount ?? 0 }}</span>
+                    <span class="audit-chip-label">强制修正</span>
+                  </div>
                 </template>
-                <div style="max-width: 240px; font-size: 13px">两阶段审查都未通过后，系统直接将原文替换为术语译文进行强制修正的文本数。强制修正可能导致翻译不够自然</div>
+                <div style="max-width: 240px; font-size: 13px">两阶段审查都未通过后，系统直接将原文替换为术语译文进行强制修正的文本数</div>
               </NPopover>
             </div>
-          </div>
-          <div v-if="termAuditPassRate !== null" class="metric-pill" :class="{ 'rate-good': Number(termAuditPassRate) >= 80, 'rate-warn': Number(termAuditPassRate) < 80 }">
-            <div class="metric-data">
-              <span class="metric-value">{{ termAuditPassRate }}<small>%</small></span>
-              <NPopover trigger="hover" placement="top">
-                <template #trigger>
-                  <span class="metric-label metric-label-help">自然通过率</span>
-                </template>
-                <div style="max-width: 240px; font-size: 13px">自然翻译阶段通过审查的比率。越高说明 LLM 对术语的理解和应用越好</div>
-              </NPopover>
+            <div v-if="termAuditTotal > 0" class="audit-bar">
+              <div class="audit-seg phase1" :style="{ flex: aiStore.stats?.termAuditPhase1PassCount ?? 0 }"></div>
+              <div class="audit-seg phase2" :style="{ flex: aiStore.stats?.termAuditPhase2PassCount ?? 0 }"></div>
+              <div class="audit-seg forced" :style="{ flex: aiStore.stats?.termAuditForceCorrectedCount ?? 0 }"></div>
             </div>
           </div>
+        </div>
+
+        <!-- Pre-Translation Cache Stats -->
+        <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
+          <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
+            <h2 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><CachedOutlined /></NIcon>
+              </span>
+              预翻译缓存
+              <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
+            </h2>
+            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.cache }">
+              <ExpandMoreOutlined />
+            </NIcon>
+          </div>
+          <div class="section-body" :class="{ collapsed: collapsed.cache }">
+            <div class="section-body-inner">
+              <div class="metrics-strip compact-metrics">
+                <div class="metric-pill">
+                  <div class="metric-icon">
+                    <NIcon :size="14"><CachedOutlined /></NIcon>
+                  </div>
+                  <div class="metric-data">
+                    <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
+                    <span class="metric-label">总条目</span>
+                  </div>
+                </div>
+                <div class="metric-pill rate-good">
+                  <div class="metric-icon">
+                    <NIcon :size="14"><CheckCircleOutlined /></NIcon>
+                  </div>
+                  <div class="metric-data">
+                    <span class="metric-value">{{ aiStore.cacheStats.cacheHits }}</span>
+                    <span class="metric-label">命中</span>
+                  </div>
+                </div>
+                <div class="metric-pill" :class="{ 'rate-bad': aiStore.cacheStats.cacheMisses > 0 }">
+                  <div class="metric-icon">
+                    <NIcon :size="14"><ErrorOutlineOutlined /></NIcon>
+                  </div>
+                  <div class="metric-data">
+                    <span class="metric-value">{{ aiStore.cacheStats.cacheMisses }}</span>
+                    <span class="metric-label">未命中</span>
+                  </div>
+                </div>
+                <div class="metric-pill" :class="{ 'rate-good': aiStore.cacheStats.hitRate > 80, 'rate-warn': aiStore.cacheStats.hitRate <= 80 && aiStore.cacheStats.hitRate > 50, 'rate-bad': aiStore.cacheStats.hitRate <= 50 }">
+                  <div class="metric-icon">
+                    <NIcon :size="14"><SpeedOutlined /></NIcon>
+                  </div>
+                  <div class="metric-data">
+                    <span class="metric-value">{{ aiStore.cacheStats.hitRate }}<small>%</small></span>
+                    <span class="metric-label">命中率</span>
+                  </div>
+                </div>
+              </div>
+              <NProgress
+                type="line"
+                :percentage="aiStore.cacheStats.hitRate"
+                :color="aiStore.cacheStats.hitRate > 50 ? 'var(--success)' : 'var(--danger)'"
+                class="cache-progress"
+              />
+              <NCollapse v-if="aiStore.cacheStats.recentMisses.length > 0">
+                <NCollapseItem title="最近未命中详情" name="misses">
+                  <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" class="cache-miss-item">
+                    <div class="cache-miss-row">
+                      <span class="cache-miss-label">预翻译键:</span>
+                      <code class="cache-miss-code">{{ miss.preTranslatedKey }}</code>
+                    </div>
+                    <div class="cache-miss-row">
+                      <span class="cache-miss-label">运行时文本:</span>
+                      <code class="cache-miss-code">{{ miss.runtimeText }}</code>
+                    </div>
+                  </div>
+                </NCollapseItem>
+              </NCollapse>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Settings Sidebar -->
+      <div class="ai-settings-sidebar" v-if="settings">
+        <div class="section-card" style="animation-delay: 0.05s">
+          <div class="section-header">
+            <h2 class="section-title">
+              <span class="section-icon">
+                <NIcon :size="16"><SmartToyOutlined /></NIcon>
+              </span>
+              AI 翻译设置
+            </h2>
+          </div>
+
+          <!-- Pipeline Settings Groups -->
+          <div class="pipeline-settings" :class="{ 'all-collapsed': allSettingsCollapsed }">
+            <!-- Term Settings Group -->
+            <div class="settings-group">
+              <div class="settings-group-header" @click="collapsed.termSettings = !collapsed.termSettings">
+                <div class="settings-group-title">
+                  <NIcon :size="14"><AutoFixHighOutlined /></NIcon>
+                  <span>术语设置</span>
+                </div>
+                <NIcon :size="16" class="collapse-chevron" :class="{ expanded: !collapsed.termSettings }">
+                  <ExpandMoreOutlined />
+                </NIcon>
+              </div>
+              <div class="settings-group-body" :class="{ collapsed: collapsed.termSettings }">
+                <div class="settings-group-body-inner">
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <span class="setting-label">术语审查</span>
+                      <span class="setting-description">翻译后自动检查术语是否正确应用</span>
+                    </div>
+                    <NSwitch
+                      :value="aiSettings.termAuditEnabled"
+                      @update:value="(v: boolean) => { aiSettings = { ...aiSettings, termAuditEnabled: v } }"
+                    />
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <span class="setting-label">自然翻译模式</span>
+                      <span class="setting-description">先让 LLM 自然应用术语，失败后回退到占位符方案</span>
+                    </div>
+                    <NSwitch
+                      :value="aiSettings.naturalTranslationMode"
+                      @update:value="(v: boolean) => { aiSettings = { ...aiSettings, naturalTranslationMode: v } }"
+                    />
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <span class="setting-label">自动术语提取</span>
+                      <span class="setting-description">翻译过程中自动提取专有名词、角色名等术语</span>
+                    </div>
+                    <NSwitch
+                      :value="aiSettings.glossaryExtractionEnabled"
+                      @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
+                    />
+                  </div>
+                  <div v-if="aiSettings.glossaryExtractionEnabled && !isLocalMode" class="sub-setting">
+                    <label class="setting-label">提取使用的 AI 提供商</label>
+                    <NSelect
+                      :value="aiSettings.glossaryExtractionEndpointId ?? ''"
+                      @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
+                      :options="extractionEndpointOptions"
+                      size="small"
+                      class="extraction-select"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Translation Memory Group -->
+            <div class="settings-group">
+              <div class="settings-group-header" @click="collapsed.tmSettings = !collapsed.tmSettings">
+                <div class="settings-group-title">
+                  <NIcon :size="14"><StorageOutlined /></NIcon>
+                  <span>翻译记忆</span>
+                </div>
+                <NIcon :size="16" class="collapse-chevron" :class="{ expanded: !collapsed.tmSettings }">
+                  <ExpandMoreOutlined />
+                </NIcon>
+              </div>
+              <div class="settings-group-body" :class="{ collapsed: collapsed.tmSettings }">
+                <div class="settings-group-body-inner">
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <span class="setting-label">翻译记忆</span>
+                      <span class="setting-description">缓存已翻译的文本，相同或相似文本复用翻译结果</span>
+                    </div>
+                    <NSwitch
+                      :value="aiSettings.enableTranslationMemory"
+                      @update:value="(v: boolean) => { aiSettings = { ...aiSettings, enableTranslationMemory: v } }"
+                    />
+                  </div>
+                  <div v-if="aiSettings.enableTranslationMemory" class="sub-setting">
+                    <span class="setting-label">模糊匹配阈值</span>
+                    <NSlider
+                      :value="aiSettings.fuzzyMatchThreshold"
+                      @update:value="(v: number) => { aiSettings = { ...aiSettings, fuzzyMatchThreshold: v } }"
+                      :min="0"
+                      :max="100"
+                      :step="1"
+                      :tooltip="true"
+                      :format-tooltip="(v: number) => v + '%'"
+                      class="threshold-slider"
+                    />
+                    <span class="sub-setting-hint">阈值越高匹配越严格，建议 80-90</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mode Tabs -->
+          <div class="mode-tabs">
+            <button
+              class="mode-tab"
+              :class="{ active: activeMode === 'cloud' }"
+              @click="setMode('cloud')"
+            >
+              <NIcon :size="16"><CloudOutlined /></NIcon>
+              <span>云端 AI</span>
+            </button>
+            <button
+              class="mode-tab"
+              :class="{ active: activeMode === 'local' }"
+              @click="setMode('local')"
+            >
+              <NIcon :size="16"><ComputerOutlined /></NIcon>
+              <span>本地 AI</span>
+            </button>
+          </div>
+
+          <!-- Cloud / Local Settings -->
+          <Transition name="mode-switch" mode="out-in">
+            <AiTranslationCard v-if="activeMode === 'cloud'" key="cloud" v-model="aiSettings" :embedded="true" />
+            <LocalAiPanel v-else key="local" v-model="aiSettings" />
+          </Transition>
         </div>
       </div>
     </div>
 
-    <!-- Translation Memory Stats -->
-    <div v-if="tmStats && tmStats.entryCount > 0" class="section-card" style="animation-delay: 0.055s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><StorageOutlined /></NIcon>
-          </span>
-          翻译记忆
-        </h2>
-        <div class="header-actions">
-          <NButton size="small" quaternary @click="loadTmStats()">刷新</NButton>
-        </div>
-      </div>
-      <div class="metrics-strip">
-        <div class="metric-pill">
-          <div class="metric-data">
-            <span class="metric-value">{{ tmStats.entryCount }}</span>
-            <span class="metric-label">TM 条目数</span>
-          </div>
-        </div>
-        <div class="metric-pill rate-good">
-          <div class="metric-data">
-            <span class="metric-value">{{ tmStats.exactHits }}</span>
-            <span class="metric-label">精确命中</span>
-          </div>
-        </div>
-        <div class="metric-pill">
-          <div class="metric-data">
-            <span class="metric-value">{{ tmStats.fuzzyHits }}</span>
-            <span class="metric-label">模糊命中</span>
-          </div>
-        </div>
-        <div class="metric-pill">
-          <div class="metric-data">
-            <span class="metric-value">{{ tmStats.patternHits }}</span>
-            <span class="metric-label">模式命中</span>
-          </div>
-        </div>
-        <div v-if="tmHitRate !== null" class="metric-pill" :class="{ 'rate-good': Number(tmHitRate) >= 60, 'rate-warn': Number(tmHitRate) < 60 && Number(tmHitRate) >= 30, 'rate-bad': Number(tmHitRate) < 30 }">
-          <div class="metric-data">
-            <span class="metric-value">{{ tmHitRate }}<small>%</small></span>
-            <span class="metric-label">命中率</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Pre-Translation Cache Stats -->
-    <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
-      <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><CachedOutlined /></NIcon>
-          </span>
-          预翻译缓存
-          <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
-        </h2>
-        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.cache }">
-          <ExpandMoreOutlined />
-        </NIcon>
-      </div>
-      <div class="section-body" :class="{ collapsed: collapsed.cache }">
-        <div class="section-body-inner">
-      <div class="metrics-strip">
-        <div class="metric-pill">
-          <div class="metric-icon">
-            <NIcon :size="14"><CachedOutlined /></NIcon>
-          </div>
-          <div class="metric-data">
-            <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
-            <span class="metric-label">总条目</span>
-          </div>
-        </div>
-        <div class="metric-pill rate-good">
-          <div class="metric-icon">
-            <NIcon :size="14"><CheckCircleOutlined /></NIcon>
-          </div>
-          <div class="metric-data">
-            <span class="metric-value">{{ aiStore.cacheStats.cacheHits }}</span>
-            <span class="metric-label">命中</span>
-          </div>
-        </div>
-        <div class="metric-pill" :class="{ 'rate-bad': aiStore.cacheStats.cacheMisses > 0 }">
-          <div class="metric-icon">
-            <NIcon :size="14"><ErrorOutlineOutlined /></NIcon>
-          </div>
-          <div class="metric-data">
-            <span class="metric-value">{{ aiStore.cacheStats.cacheMisses }}</span>
-            <span class="metric-label">未命中</span>
-          </div>
-        </div>
-        <div class="metric-pill" :class="{ 'rate-good': aiStore.cacheStats.hitRate > 80, 'rate-warn': aiStore.cacheStats.hitRate <= 80 && aiStore.cacheStats.hitRate > 50, 'rate-bad': aiStore.cacheStats.hitRate <= 50 }">
-          <div class="metric-icon">
-            <NIcon :size="14"><SpeedOutlined /></NIcon>
-          </div>
-          <div class="metric-data">
-            <span class="metric-value">{{ aiStore.cacheStats.hitRate }}<small>%</small></span>
-            <span class="metric-label">命中率</span>
-          </div>
-        </div>
-      </div>
-      <NProgress
-        type="line"
-        :percentage="aiStore.cacheStats.hitRate"
-        :color="aiStore.cacheStats.hitRate > 50 ? 'var(--success)' : 'var(--danger)'"
-        class="cache-progress"
-      />
-      <NCollapse v-if="aiStore.cacheStats.recentMisses.length > 0">
-        <NCollapseItem title="最近未命中详情" name="misses">
-          <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" class="cache-miss-item">
-            <div class="cache-miss-row">
-              <span class="cache-miss-label">预翻译键:</span>
-              <code class="cache-miss-code">{{ miss.preTranslatedKey }}</code>
-            </div>
-            <div class="cache-miss-row">
-              <span class="cache-miss-label">运行时文本:</span>
-              <code class="cache-miss-code">{{ miss.runtimeText }}</code>
-            </div>
-          </div>
-        </NCollapseItem>
-      </NCollapse>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recent Translations -->
+    <!-- Recent Translations (full width) -->
     <div
       v-if="(aiStore.stats?.recentTranslations?.length ?? 0) > 0"
       class="section-card"
       :class="{ 'is-collapsed': collapsed.recent }"
-      style="animation-delay: 0.08s"
+      style="animation-delay: 0.07s"
     >
       <div class="section-header collapsible" @click="collapsed.recent = !collapsed.recent">
         <h2 class="section-title">
@@ -627,51 +804,51 @@ onBeforeUnmount(() => {
 
       <div class="section-body" :class="{ collapsed: collapsed.recent }">
         <div class="section-body-inner">
-      <div class="recent-list">
-        <div
-          v-for="(item, index) in aiStore.stats!.recentTranslations"
-          :key="index"
-          class="recent-item"
-          :style="{ animationDelay: index * 0.03 + 's' }"
-        >
-          <span class="recent-index">{{ index + 1 }}</span>
-          <div class="recent-body">
-            <div class="recent-texts">
-              <span class="recent-original">{{ item.original }}</span>
-              <span class="recent-arrow">
-                <NIcon :size="12"><ArrowRightAltOutlined /></NIcon>
-              </span>
-              <span class="recent-translated">{{ item.translated }}</span>
-            </div>
-            <div class="recent-meta">
-              <span v-if="item.gameId" class="meta-tag game">{{ getGameName(item.gameId) }}</span>
-              <span class="meta-tag endpoint">{{ item.endpointName }}</span>
-              <span v-if="item.hasTerms" class="meta-tag term-tag">术语</span>
-              <span v-if="item.hasDnt" class="meta-tag dnt-tag">禁翻</span>
-              <span v-if="item.termAuditResult === 'phase1Pass'" class="meta-tag audit-pass">自然通过</span>
-              <span v-else-if="item.termAuditResult === 'phase2Pass'" class="meta-tag audit-pass">占位符通过</span>
-              <span v-else-if="item.termAuditResult === 'forceCorrected'" class="meta-tag audit-warn">强制修正</span>
-              <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
-              <span v-if="item.translationSource === 'tmExact'" class="meta-tag tm-exact">TM 精确</span>
-              <span v-else-if="item.translationSource === 'tmFuzzy'" class="meta-tag tm-fuzzy">TM 模糊</span>
-              <span v-else-if="item.translationSource === 'tmPattern'" class="meta-tag tm-pattern">动态模式</span>
-              <span class="meta-tag">{{ item.tokensUsed }} tok</span>
-              <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
-              <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
+          <div class="recent-list">
+            <div
+              v-for="(item, index) in aiStore.stats!.recentTranslations"
+              :key="index"
+              class="recent-item"
+              :style="{ animationDelay: index * 0.03 + 's' }"
+            >
+              <span class="recent-index">{{ index + 1 }}</span>
+              <div class="recent-body">
+                <div class="recent-texts">
+                  <span class="recent-original">{{ item.original }}</span>
+                  <span class="recent-arrow">
+                    <NIcon :size="12"><ArrowRightAltOutlined /></NIcon>
+                  </span>
+                  <span class="recent-translated">{{ item.translated }}</span>
+                </div>
+                <div class="recent-meta">
+                  <span v-if="item.gameId" class="meta-tag game">{{ getGameName(item.gameId) }}</span>
+                  <span class="meta-tag endpoint">{{ item.endpointName }}</span>
+                  <span v-if="item.hasTerms" class="meta-tag term-tag">术语</span>
+                  <span v-if="item.hasDnt" class="meta-tag dnt-tag">禁翻</span>
+                  <span v-if="item.termAuditResult === 'phase1Pass'" class="meta-tag audit-pass">自然通过</span>
+                  <span v-else-if="item.termAuditResult === 'phase2Pass'" class="meta-tag audit-pass">占位符通过</span>
+                  <span v-else-if="item.termAuditResult === 'forceCorrected'" class="meta-tag audit-warn">强制修正</span>
+                  <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
+                  <span v-if="item.translationSource === 'tmExact'" class="meta-tag tm-exact">TM 精确</span>
+                  <span v-else-if="item.translationSource === 'tmFuzzy'" class="meta-tag tm-fuzzy">TM 模糊</span>
+                  <span v-else-if="item.translationSource === 'tmPattern'" class="meta-tag tm-pattern">动态模式</span>
+                  <span class="meta-tag">{{ item.tokensUsed }} tok</span>
+                  <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
+                  <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
-        </div>
-      </div>
     </div>
 
-    <!-- Error Log -->
+    <!-- Error Log (full width) -->
     <div
       v-if="(aiStore.stats?.recentErrors?.length ?? 0) > 0"
       class="section-card"
       :class="{ 'is-collapsed': collapsed.errors }"
-      style="animation-delay: 0.09s"
+      style="animation-delay: 0.08s"
     >
       <div class="section-header collapsible" @click="collapsed.errors = !collapsed.errors">
         <h2 class="section-title">
@@ -688,215 +865,24 @@ onBeforeUnmount(() => {
 
       <div class="section-body" :class="{ collapsed: collapsed.errors }">
         <div class="section-body-inner">
-      <div class="error-list">
-        <div
-          v-for="err in [...aiStore.stats!.recentErrors].reverse()"
-          :key="err.timestamp + err.message"
-          class="error-item"
-        >
-          <div class="error-message">{{ err.message }}</div>
-          <div class="error-meta">
-            <span v-if="err.gameId" class="error-game-tag">{{ getGameName(err.gameId) }}</span>
-            <span v-if="err.endpointName">{{ err.endpointName }}</span>
-            <span>{{ formatRelativeTime(err.timestamp) }}</span>
-          </div>
-        </div>
-      </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- AI Settings with Mode Tabs -->
-    <div class="section-card" style="animation-delay: 0.1s" v-if="settings">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon ai">
-            <NIcon :size="16"><SmartToyOutlined /></NIcon>
-          </span>
-          AI 翻译设置
-        </h2>
-      </div>
-
-      <!-- Translation Pipeline Settings -->
-      <div class="pipeline-settings">
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">术语审查</span>
-            <span class="setting-description">翻译后自动检查术语是否正确应用</span>
-          </div>
-          <NSwitch
-            :value="aiSettings.termAuditEnabled"
-            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, termAuditEnabled: v } }"
-          />
-        </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">自然翻译模式</span>
-            <span class="setting-description">先让 LLM 自然应用术语，失败后回退到占位符方案</span>
-          </div>
-          <NSwitch
-            :value="aiSettings.naturalTranslationMode"
-            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, naturalTranslationMode: v } }"
-          />
-        </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <span class="setting-label">翻译记忆</span>
-            <span class="setting-description">缓存已翻译的文本，相同或相似文本复用翻译结果</span>
-          </div>
-          <NSwitch
-            :value="aiSettings.enableTranslationMemory"
-            @update:value="(v: boolean) => { aiSettings = { ...aiSettings, enableTranslationMemory: v } }"
-          />
-        </div>
-        <div v-if="aiSettings.enableTranslationMemory" class="sub-setting">
-          <span class="setting-label">模糊匹配阈值</span>
-          <NSlider
-            :value="aiSettings.fuzzyMatchThreshold"
-            @update:value="(v: number) => { aiSettings = { ...aiSettings, fuzzyMatchThreshold: v } }"
-            :min="0"
-            :max="100"
-            :step="1"
-            :tooltip="true"
-            :format-tooltip="(v: number) => v + '%'"
-            class="threshold-slider"
-          />
-          <span class="sub-setting-hint">阈值越高匹配越严格，建议 80-90</span>
-        </div>
-      </div>
-
-      <!-- Mode Tabs -->
-      <div class="mode-tabs">
-        <button
-          class="mode-tab"
-          :class="{ active: activeMode === 'cloud' }"
-          @click="setMode('cloud')"
-        >
-          <NIcon :size="16"><CloudOutlined /></NIcon>
-          <span>云端 AI</span>
-        </button>
-        <button
-          class="mode-tab"
-          :class="{ active: activeMode === 'local' }"
-          @click="setMode('local')"
-        >
-          <NIcon :size="16"><ComputerOutlined /></NIcon>
-          <span>本地 AI</span>
-        </button>
-      </div>
-
-      <!-- Cloud Settings -->
-      <Transition name="mode-switch" mode="out-in">
-        <AiTranslationCard v-if="activeMode === 'cloud'" key="cloud" v-model="aiSettings" :embedded="true" />
-        <LocalAiPanel v-else key="local" v-model="aiSettings" />
-      </Transition>
-    </div>
-
-    <!-- Glossary Extraction (cloud mode only) -->
-    <Transition name="card-slide">
-      <div class="section-card" :class="{ 'is-collapsed': collapsed.extraction }" style="animation-delay: 0.12s" v-if="settings && !isLocalMode">
-        <div class="section-header collapsible" @click="collapsed.extraction = !collapsed.extraction">
-          <h2 class="section-title">
-            <span class="section-icon extraction">
-              <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
-            </span>
-            自动术语提取
-          </h2>
-          <div class="header-actions">
-            <NSwitch
-              :value="aiSettings.glossaryExtractionEnabled"
-              @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
-              size="small"
-              @click.stop
-            />
-            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.extraction }">
-              <ExpandMoreOutlined />
-            </NIcon>
-          </div>
-        </div>
-
-        <div class="section-body" :class="{ collapsed: collapsed.extraction }">
-          <div class="section-body-inner">
-        <div class="extraction-content">
-          <p class="extraction-desc">
-            翻译过程中自动从原文和译文中提取专有名词、角色名等术语，并加入对应游戏的术语表。
-          </p>
-
-          <Transition name="expand-fade">
-            <div v-if="aiSettings.glossaryExtractionEnabled" class="extraction-config">
-              <div class="extraction-field">
-                <label class="extraction-label">提取使用的 AI 提供商</label>
-                <NSelect
-                  :value="aiSettings.glossaryExtractionEndpointId ?? ''"
-                  @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
-                  :options="extractionEndpointOptions"
-                  size="small"
-                  class="extraction-select"
-                />
-              </div>
-
-              <div v-if="extractionStats" class="extraction-stats">
-                <div class="ext-metrics">
-                  <div class="ext-metric-card">
-                    <div class="ext-metric-icon">
-                      <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
-                    </div>
-                    <div class="ext-metric-data">
-                      <span class="ext-metric-value">{{ extractionStats.totalExtracted }}</span>
-                      <span class="ext-metric-label">已提取术语</span>
-                    </div>
-                  </div>
-                  <div class="ext-metric-card">
-                    <div class="ext-metric-icon">
-                      <NIcon :size="16"><SyncOutlined /></NIcon>
-                    </div>
-                    <div class="ext-metric-data">
-                      <span class="ext-metric-value">{{ extractionStats.totalExtractionCalls }}</span>
-                      <span class="ext-metric-label">提取调用</span>
-                    </div>
-                  </div>
-                  <div v-if="extractionStats.activeExtractions > 0" class="ext-metric-card is-active">
-                    <div class="ext-metric-icon active">
-                      <NIcon :size="16"><HourglassEmptyOutlined /></NIcon>
-                    </div>
-                    <div class="ext-metric-data">
-                      <span class="ext-metric-value">{{ extractionStats.activeExtractions }}</span>
-                      <span class="ext-metric-label">正在提取</span>
-                    </div>
-                  </div>
-                  <div v-if="extractionStats.totalErrors > 0" class="ext-metric-card has-error">
-                    <div class="ext-metric-icon error">
-                      <NIcon :size="16"><ErrorOutlineOutlined /></NIcon>
-                    </div>
-                    <div class="ext-metric-data">
-                      <span class="ext-metric-value">{{ extractionStats.totalErrors }}</span>
-                      <span class="ext-metric-label">错误</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-if="extractionStats.recentExtractions.length > 0" class="extraction-recent">
-                  <span class="extraction-recent-title">最近提取</span>
-                  <div
-                    v-for="(item, index) in extractionStats.recentExtractions.slice().reverse().slice(0, 5)"
-                    :key="index"
-                    class="extraction-recent-item"
-                  >
-                    <div class="ext-recent-left">
-                      <span class="ext-recent-game">{{ getGameName(item.gameId) }}</span>
-                      <span class="ext-recent-time">{{ formatRelativeTime(item.timestamp) }}</span>
-                    </div>
-                    <span class="ext-recent-badge">+{{ item.termsExtracted }}</span>
-                  </div>
-                </div>
+          <div class="error-list">
+            <div
+              v-for="err in [...aiStore.stats!.recentErrors].reverse()"
+              :key="err.timestamp + err.message"
+              class="error-item"
+            >
+              <div class="error-message">{{ err.message }}</div>
+              <div class="error-meta">
+                <span v-if="err.gameId" class="error-game-tag">{{ getGameName(err.gameId) }}</span>
+                <span v-if="err.endpointName">{{ err.endpointName }}</span>
+                <span>{{ formatRelativeTime(err.timestamp) }}</span>
               </div>
             </div>
-          </Transition>
-        </div>
           </div>
         </div>
       </div>
-    </Transition>
+    </div>
+
   </div>
 </template>
 
@@ -927,12 +913,47 @@ onBeforeUnmount(() => {
   color: var(--text-2);
 }
 
+/* ===== Dashboard Grid Layout ===== */
+.ai-dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+.ai-dashboard-main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ai-settings-sidebar {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.ai-settings-sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ai-settings-sidebar::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+
 /* ===== Metrics Strip ===== */
 .metrics-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   animation: slideUp 0.45s var(--ease-out) backwards;
+}
+
+.compact-metrics {
+  animation: none;
 }
 
 .metric-pill {
@@ -970,6 +991,20 @@ onBeforeUnmount(() => {
   opacity: 0.5;
 }
 
+.metric-pill.is-active {
+  border-color: var(--accent-border);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-card));
+}
+
+.metric-pill.has-error {
+  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
+  background: color-mix(in srgb, var(--danger) 4%, var(--bg-card));
+}
+
+.metric-pill.has-error .metric-value {
+  color: var(--danger);
+}
+
 .metric-icon {
   width: 32px;
   height: 32px;
@@ -993,6 +1028,20 @@ onBeforeUnmount(() => {
 }
 
 .metric-pill.rate-bad .metric-icon {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.metric-pill.has-error .metric-icon {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.metric-icon.active-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.metric-icon.error {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
   color: var(--danger);
 }
@@ -1153,111 +1202,237 @@ onBeforeUnmount(() => {
   color: var(--text-1);
 }
 
-/* ===== Stats Group Label ===== */
-.stats-group-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-top: 8px;
-  margin-bottom: 8px;
-}
-
-.stats-group-label:first-of-type {
-  margin-top: 0;
-}
-
-/* ===== Pipeline Flow ===== */
-.pipeline-flow {
+/* ===== Pipeline Fork ===== */
+.pipeline-fork {
   display: flex;
   align-items: stretch;
   gap: 0;
   margin-bottom: 16px;
 }
 
-.pipeline-stage {
-  flex: 1;
+/* Root Node */
+.fork-root {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
+}
+
+.pipeline-node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: all 0.3s ease;
 }
 
-.pipeline-arrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  flex-shrink: 0;
-  color: var(--text-3);
-  opacity: 0.25;
-  transition: all 0.3s ease;
-}
-
-.pipeline-arrow.active {
-  opacity: 0.6;
-  color: var(--accent);
-  animation: arrow-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes arrow-pulse {
-  0%, 100% { opacity: 0.4; transform: translateX(0); }
-  50% { opacity: 0.8; transform: translateX(3px); }
-}
-
-.pipeline-stage:hover {
+.pipeline-node:hover {
   border-color: var(--border-hover);
-  background: var(--bg-subtle-hover);
 }
 
-.queued-stage {
+.pipeline-node.compact {
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+.root-node {
   border-left: 3px solid var(--accent);
-  padding-left: 17px;
-  opacity: 0.75;
+  padding-left: 14px;
 }
 
-.translating-stage {
-  border-left: 3px solid var(--accent);
-  padding-left: 17px;
-}
-
-.translating-stage.is-active {
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
-  border-color: var(--accent-border);
-  border-left-color: var(--accent);
-  box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent);
-  animation: active-glow 3s ease-in-out infinite;
-}
-
-@keyframes active-glow {
-  0%, 100% { box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent); }
-  50% { box-shadow: inset 0 0 30px color-mix(in srgb, var(--accent) 6%, transparent); }
-}
-
-.translated-stage {
-  border-left: 3px solid var(--accent);
-  padding-left: 17px;
-  opacity: 0.9;
-}
-
-.stage-icon {
-  width: 42px;
-  height: 42px;
+.node-icon {
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: 8px;
   flex-shrink: 0;
   background: var(--accent-soft);
   color: var(--accent);
 }
 
-.translating-stage.is-active .stage-icon :deep(.n-icon) {
+.root-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.node-data {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.node-value {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-1);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.node-value.root-value {
+  font-size: 24px;
+}
+
+.node-value small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.node-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Fork Spine */
+.fork-spine {
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.spine-trunk {
+  width: 12px;
+  height: 2px;
+  background: var(--border);
+}
+
+/* Fork Branches */
+.fork-branches {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  position: relative;
+  min-width: 0;
+}
+
+.fork-branch {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  position: relative;
+}
+
+/* Branch horizontal connector */
+.branch-connector {
+  display: flex;
+  align-items: center;
+  width: 16px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.branch-connector span {
+  position: absolute;
+  left: -12px;
+  width: 28px;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+.tm-branch .branch-connector span {
+  background: color-mix(in srgb, var(--secondary) 30%, var(--border));
+}
+
+.branch-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Branch Header */
+.branch-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  padding-top: 2px;
+}
+
+.tm-header {
+  color: var(--secondary);
+}
+
+/* Branch Flow */
+.branch-flow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* Flow Arrow */
+.flow-arrow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 3px;
+  color: var(--text-3);
+  opacity: 0.25;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.flow-arrow.active {
+  opacity: 0.6;
+  color: var(--accent);
+}
+
+.tm-branch .flow-arrow.active {
+  color: var(--secondary);
+}
+
+.flow-arrow-line {
+  width: 14px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 1px;
+}
+
+.flow-arrow.active .flow-arrow-line {
+  animation: flow-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes flow-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Pipeline node states */
+.pipeline-node.dimmed {
+  opacity: 0.5;
+}
+
+.pipeline-node.is-active {
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
+  border-color: var(--accent-border);
+  box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 4%, transparent);
+  animation: node-glow 3s ease-in-out infinite;
+}
+
+@keyframes node-glow {
+  0%, 100% { box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent); }
+  50% { box-shadow: inset 0 0 30px color-mix(in srgb, var(--accent) 7%, transparent); }
+}
+
+.pipeline-node.is-active .translating-icon :deep(.n-icon) {
   animation: spin-icon 2s linear infinite;
 }
 
@@ -1266,34 +1441,98 @@ onBeforeUnmount(() => {
   to { transform: rotate(360deg); }
 }
 
-.stage-content {
+.done-icon {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.tm-icon {
+  background: var(--secondary-soft);
+  color: var(--secondary);
+}
+
+.tm-done-node {
+  background: color-mix(in srgb, var(--secondary) 5%, var(--bg-subtle));
+  border-color: color-mix(in srgb, var(--secondary) 20%, var(--border));
+}
+
+/* TM hit chips */
+.tm-hit-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tm-chip {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+  align-items: center;
+  gap: 1px;
+  padding: 5px 11px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s ease;
 }
 
-.stage-value {
+.tm-chip:hover {
+  border-color: var(--border-hover);
+}
+
+.tm-chip-val {
   font-family: var(--font-display);
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-1);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.stage-max {
   font-size: 14px;
-  font-weight: 400;
-  color: var(--text-3);
+  font-weight: 600;
+  color: var(--secondary);
+  line-height: 1;
 }
 
-.stage-label {
-  font-size: 12px;
+.tm-chip-type {
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
+}
+
+/* Branch Sub-process (Term Extraction) */
+.branch-sub {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--accent) 15%, var(--border));
+}
+
+.sub-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  flex-wrap: wrap;
+}
+
+.sub-indicator .n-icon {
+  color: var(--accent);
+}
+
+.sub-stat {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-muted);
+  padding: 1px 8px;
+  border-radius: 4px;
+}
+
+.sub-stat.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.sub-stat.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* ===== Error Bar ===== */
@@ -1362,12 +1601,114 @@ onBeforeUnmount(() => {
   opacity: 0.8;
 }
 
-/* ===== Term Audit Strip ===== */
-.term-audit-strip {
-  margin-top: 12px;
-  padding-top: 12px;
+/* ===== Audit Strip ===== */
+.audit-strip {
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
+
+.audit-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+
+.audit-rate {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+  background: var(--bg-subtle);
+  padding: 2px 10px;
+  border-radius: 10px;
+}
+
+.audit-rate small {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.audit-rate.good {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.audit-rate.warn {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.audit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.audit-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 6px 14px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: background 0.2s ease;
+}
+
+.audit-chip:hover {
+  background: var(--bg-muted);
+}
+
+.audit-chip-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+}
+
+.audit-chip-label {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.audit-chip.good .audit-chip-value {
+  color: var(--success);
+}
+
+.audit-chip.warn .audit-chip-value {
+  color: var(--warning);
+}
+
+/* Audit Progress Bar */
+.audit-bar {
+  display: flex;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 10px;
+  background: var(--bg-muted);
+  gap: 1px;
+}
+
+.audit-seg {
+  min-width: 0;
+  border-radius: 2px;
+  transition: flex 0.6s var(--ease-out);
+}
+
+.audit-seg.phase1 { background: var(--success); }
+.audit-seg.phase2 { background: var(--accent); }
+.audit-seg.forced { background: var(--warning); }
+
 
 /* ===== Recent Translations ===== */
 .recent-count-badge {
@@ -1509,21 +1850,11 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
-.meta-tag.tm-exact {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 12%, transparent);
-  font-weight: 500;
-}
-
-.meta-tag.tm-fuzzy {
+.meta-tag.tm-exact,
+.meta-tag.tm-fuzzy,
+.meta-tag.tm-pattern {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  font-weight: 500;
-}
-
-.meta-tag.tm-pattern {
-  color: #a855f7;
-  background: color-mix(in srgb, #a855f7 12%, transparent);
   font-weight: 500;
 }
 
@@ -1533,7 +1864,6 @@ onBeforeUnmount(() => {
   padding: 1px 0;
   opacity: 0.7;
 }
-
 
 /* ===== Error Log ===== */
 .section-icon.error-log {
@@ -1584,11 +1914,6 @@ onBeforeUnmount(() => {
   color: var(--text-2);
 }
 
-/* ===== AI Icon ===== */
-.section-icon.ai {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
 
 /* ===== Pipeline Settings ===== */
 .pipeline-settings {
@@ -1598,6 +1923,13 @@ onBeforeUnmount(() => {
   margin-bottom: 20px;
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border);
+  transition: gap 0.3s var(--ease-out), margin-bottom 0.3s var(--ease-out), padding-bottom 0.3s var(--ease-out);
+}
+
+.pipeline-settings.all-collapsed {
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
 }
 
 .setting-row {
@@ -1623,6 +1955,69 @@ onBeforeUnmount(() => {
   color: var(--text-3);
   margin-top: 2px;
   display: block;
+}
+
+/* ===== Settings Groups ===== */
+.settings-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.settings-group:hover {
+  border-color: var(--border-hover);
+}
+
+.settings-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--bg-subtle);
+  transition: background 0.2s ease;
+}
+
+.settings-group-header:hover {
+  background: var(--bg-subtle-hover);
+}
+
+.settings-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+}
+
+.settings-group-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s var(--ease-out), opacity 0.25s ease;
+  opacity: 1;
+}
+
+.settings-group-body.collapsed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+}
+
+.settings-group-body-inner {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  transition: padding 0.3s var(--ease-out);
+}
+
+.settings-group-body.collapsed .settings-group-body-inner {
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 /* ===== Mode Tabs ===== */
@@ -1666,8 +2061,6 @@ onBeforeUnmount(() => {
 }
 
 /* ===== Transition Animations ===== */
-
-/* Mode switch transition (cloud <-> local) */
 .mode-switch-enter-active,
 .mode-switch-leave-active {
   transition: all 0.3s var(--ease-out);
@@ -1681,236 +2074,9 @@ onBeforeUnmount(() => {
   transform: translateY(-8px);
 }
 
-/* Expand fade for extraction config */
-.expand-fade-enter-active,
-.expand-fade-leave-active {
-  transition: all 0.35s var(--ease-out);
-  overflow: hidden;
-}
-.expand-fade-enter-from,
-.expand-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-  max-height: 0;
-}
-.expand-fade-enter-to,
-.expand-fade-leave-from {
-  max-height: 600px;
-}
-
-/* Card slide for glossary extraction card */
-.card-slide-enter-active {
-  transition: all 0.4s var(--ease-out);
-}
-.card-slide-leave-active {
-  transition: all 0.25s ease-in;
-}
-.card-slide-enter-from {
-  opacity: 0;
-  transform: translateY(16px);
-}
-.card-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-12px);
-}
-
-/* ===== Extraction Section ===== */
-.section-icon.extraction {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.extraction-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.extraction-desc {
-  font-size: 13px;
-  color: var(--text-2);
-  margin: 0;
-  line-height: 1.6;
-}
-
-.extraction-config {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.extraction-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.extraction-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
+/* ===== Extraction Select ===== */
 .extraction-select {
   max-width: 320px;
-}
-
-.extraction-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-/* Extraction mini metric cards */
-.ext-metrics {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.ext-metric-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  transition: all 0.2s ease;
-  flex: 1;
-  min-width: 130px;
-}
-
-.ext-metric-card:hover {
-  border-color: var(--border-hover);
-  background: var(--bg-subtle-hover);
-}
-
-.ext-metric-card.is-active {
-  border-color: var(--accent-border);
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
-}
-
-.ext-metric-card.has-error {
-  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
-  background: color-mix(in srgb, var(--danger) 4%, transparent);
-}
-
-.ext-metric-icon {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  flex-shrink: 0;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.ext-metric-icon.active {
-  background: var(--accent-soft);
-  color: var(--accent);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-.ext-metric-icon.error {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--danger);
-}
-
-.ext-metric-data {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.ext-metric-value {
-  font-family: var(--font-display);
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--text-1);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-.ext-metric-card.has-error .ext-metric-value {
-  color: var(--danger);
-}
-
-.ext-metric-label {
-  font-size: 11px;
-  color: var(--text-3);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-/* Extraction recent list */
-.extraction-recent {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.extraction-recent-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.extraction-recent-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 14px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color 0.2s ease;
-}
-
-.extraction-recent-item:hover {
-  border-color: var(--border-hover);
-}
-
-.ext-recent-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-
-.ext-recent-game {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ext-recent-time {
-  font-size: 11px;
-  color: var(--text-3);
-  flex-shrink: 0;
-}
-
-.ext-recent-badge {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  background: var(--accent-soft);
-  padding: 2px 10px;
-  border-radius: 10px;
-  flex-shrink: 0;
 }
 
 /* ===== Cache Stats ===== */
@@ -1952,25 +2118,43 @@ onBeforeUnmount(() => {
 
 /* ===== Responsive ===== */
 @media (max-width: 960px) {
-  .metrics-strip {
-    grid-template-columns: repeat(2, 1fr);
+  .ai-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-settings-sidebar {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
 @media (max-width: 768px) {
-  .metrics-strip {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .pipeline-flow {
+  .pipeline-fork {
     flex-direction: column;
-    gap: 0;
   }
 
-  .pipeline-arrow {
-    width: auto;
-    height: 24px;
-    transform: rotate(90deg);
+  .fork-spine {
+    display: none;
+  }
+
+  .fork-branches {
+    margin-left: 0;
+    padding-left: 14px;
+    border-left-width: 2px;
+  }
+
+  .branch-flow {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .tm-hit-chips {
+    flex-wrap: wrap;
+  }
+
+  .audit-chips {
+    flex-wrap: wrap;
   }
 
   .page-title-row {
@@ -2016,9 +2200,6 @@ onBeforeUnmount(() => {
     max-width: none;
   }
 
-  .ext-metrics {
-    flex-direction: column;
-  }
 
   .recent-original,
   .recent-translated {
@@ -2028,7 +2209,6 @@ onBeforeUnmount(() => {
 
 @media (max-width: 480px) {
   .metrics-strip {
-    grid-template-columns: repeat(2, 1fr);
     gap: 6px;
   }
 
@@ -2047,22 +2227,48 @@ onBeforeUnmount(() => {
     font-size: 15px;
   }
 
-  .pipeline-stage {
-    padding: 14px 16px;
+  .pipeline-node.compact {
+    padding: 6px 10px;
   }
 
-  .pipeline-stage {
-    padding-left: 13px;
+  .fork-branches {
+    padding-left: 10px;
   }
 
-  .stage-icon {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
+  .branch-connector {
+    width: 12px;
   }
 
-  .stage-value {
+  .branch-connector span {
+    left: -10px;
+    width: 22px;
+  }
+
+  .node-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+  }
+
+  .root-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .node-value {
+    font-size: 15px;
+  }
+
+  .node-value.root-value {
     font-size: 18px;
+  }
+
+  .tm-chip {
+    padding: 4px 8px;
+  }
+
+  .sub-indicator {
+    font-size: 10px;
   }
 
   .recent-texts {

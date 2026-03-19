@@ -102,6 +102,26 @@ export const useGamesStore = defineStore('games', () => {
     } catch { /* ignore */ }
   }
 
+  function setViewMode(mode: 'grid' | 'list') {
+    viewMode.value = mode
+  }
+
+  function setSortBy(value: 'name' | 'recent' | 'added') {
+    sortBy.value = value
+  }
+
+  function setCardSize(value: 'small' | 'medium' | 'large' | 'xlarge') {
+    cardSize.value = value
+  }
+
+  function setGap(value: 'compact' | 'normal' | 'spacious') {
+    gap.value = value
+  }
+
+  function setShowLabels(value: boolean) {
+    showLabels.value = value
+  }
+
   return {
     games,
     loading,
@@ -118,5 +138,10 @@ export const useGamesStore = defineStore('games', () => {
     launchGame,
     loadPreferences,
     savePreferences,
+    setViewMode,
+    setSortBy,
+    setCardSize,
+    setGap,
+    setShowLabels,
   }
 })

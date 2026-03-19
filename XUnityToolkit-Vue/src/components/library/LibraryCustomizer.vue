@@ -46,17 +46,17 @@ const gapOptions = [
 ]
 
 function setCardSize(size: 'small' | 'medium' | 'large' | 'xlarge') {
-  gamesStore.cardSize = size
+  gamesStore.setCardSize(size)
   gamesStore.savePreferences()
 }
 
 function setGap(gap: 'compact' | 'normal' | 'spacious') {
-  gamesStore.gap = gap
+  gamesStore.setGap(gap)
   gamesStore.savePreferences()
 }
 
 function toggleLabels(val: boolean) {
-  gamesStore.showLabels = val
+  gamesStore.setShowLabels(val)
   gamesStore.savePreferences()
 }
 

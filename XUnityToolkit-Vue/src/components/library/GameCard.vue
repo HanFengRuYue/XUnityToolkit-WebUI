@@ -4,6 +4,7 @@ import { NIcon } from 'naive-ui'
 import { PlayArrowRound, PhotoCameraOutlined, GamepadFilled } from '@vicons/material'
 import type { Game } from '@/api/types'
 import { gamesApi } from '@/api/games'
+import { useGamesStore } from '@/stores/games'
 
 const props = withDefaults(defineProps<{
   game: Game
@@ -64,12 +65,11 @@ function getPlaceholderGradient(name: string) {
   return `linear-gradient(135deg, hsl(${hue1}, 35%, 18%) 0%, hsl(${hue2}, 45%, 12%) 100%)`
 }
 
+const gamesStore = useGamesStore()
+
 function handlePlay(e: MouseEvent) {
   e.stopPropagation()
-  gamesApi.launch(props.game.id)
-  // Update locally
-  const game = props.game
-  game.lastPlayedAt = new Date().toISOString()
+  gamesStore.launchGame(props.game.id)
 }
 
 function handleEditCover(e: MouseEvent) {

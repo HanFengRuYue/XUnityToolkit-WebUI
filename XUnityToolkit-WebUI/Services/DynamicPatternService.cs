@@ -278,9 +278,10 @@ public sealed partial class DynamicPatternService(
     public void ClearAllCache()
     {
         _cache.Clear();
-        foreach (var sem in _locks.Values)
-            sem.Dispose();
+        var semaphores = _locks.Values.ToList();
         _locks.Clear();
+        foreach (var sem in semaphores)
+            sem.Dispose();
     }
 
     public int GetPatternCount(string gameId)
