@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, h, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import {
   NButton,
@@ -490,7 +490,7 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
   if (regexDebounceTimer) clearTimeout(regexDebounceTimer)
   if (replaceFindDebounceTimer) clearTimeout(replaceFindDebounceTimer)

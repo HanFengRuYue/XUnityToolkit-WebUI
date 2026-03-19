@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NIcon, useMessage } from 'naive-ui'
 import { SaveOutlined, ArrowBackOutlined } from '@vicons/material'
@@ -49,7 +49,7 @@ onMounted(async () => {
   }
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 

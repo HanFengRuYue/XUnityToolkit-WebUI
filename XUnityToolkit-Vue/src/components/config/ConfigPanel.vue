@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NForm,
@@ -214,7 +214,7 @@ onMounted(() => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
 })
-onUnmounted(() => {
+onBeforeUnmount(() => {
   window.removeEventListener('resize', checkMobile)
 })
 

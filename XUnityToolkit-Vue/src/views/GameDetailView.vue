@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, h, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, h, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -134,7 +134,7 @@ onMounted(() => {
   })
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
   if (scrollContainer.value) {
     scrollContainer.value.removeEventListener('scroll', onScroll)
   }
@@ -497,7 +497,7 @@ const stopWatch = watch(
     }
   },
 )
-onUnmounted(() => stopWatch())
+onBeforeUnmount(() => stopWatch())
 </script>
 
 <template>

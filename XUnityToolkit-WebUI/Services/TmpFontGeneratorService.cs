@@ -127,12 +127,13 @@ public sealed class TmpFontGeneratorService(
         catch (Exception ex)
         {
             // Clean up on charset resolution failure
+            logger.LogError(ex, "字符集解析失败");
             _isGenerating = false;
             _phase = null;
             _cts?.Dispose();
             _cts = null;
             _generationSemaphore.Release();
-            return new FontGenerationResult(false, null, null, 0, 0, 0, $"字符集解析失败: {ex.Message}");
+            return new FontGenerationResult(false, null, null, 0, 0, 0, "字符集解析失败，请检查字符集配置");
         }
 
         try
