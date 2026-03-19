@@ -350,20 +350,6 @@ export interface TermEntry {
   source?: TermSource
 }
 
-/** @deprecated Use TermEntry instead */
-export type GlossaryEntry = {
-  original: string
-  translation: string
-  isRegex: boolean
-  description?: string
-}
-
-/** @deprecated Use TermEntry instead */
-export type DoNotTranslateEntry = {
-  original: string
-  caseSensitive: boolean
-}
-
 export interface GlossaryExtractionStats {
   enabled: boolean
   totalExtracted: number
@@ -452,14 +438,6 @@ export interface PreTranslationStatus {
   phaseTotal: number
   extractedTermCount: number
   dynamicPatternCount: number
-}
-
-export interface TranslationMemoryStats {
-  entryCount: number
-  exactHits: number
-  fuzzyHits: number
-  patternHits: number
-  misses: number
 }
 
 export interface DynamicPattern {
