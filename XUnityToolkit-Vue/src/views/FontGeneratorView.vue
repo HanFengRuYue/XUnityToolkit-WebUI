@@ -7,7 +7,7 @@ import {
 } from 'naive-ui'
 import {
   FontDownloadOutlined, UploadFileOutlined, SettingsOutlined, DownloadOutlined,
-  DeleteOutlined, SwapHorizOutlined, TextFieldsOutlined, AssessmentOutlined,
+  DeleteOutlined, TextFieldsOutlined, AssessmentOutlined,
   ExpandMoreOutlined,
 } from '@vicons/material'
 import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'

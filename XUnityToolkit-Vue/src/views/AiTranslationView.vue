@@ -4,7 +4,6 @@ import {
   NIcon,
   NButton,
   NSwitch,
-  NSelect,
   NTag,
   NProgress,
   NSlider,

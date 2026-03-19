@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  NButton, NDataTable, NIcon, NProgress, NSpace, NTag,
+  NButton, NDataTable, NIcon, NProgress, NTag,
   NUpload, useMessage, useDialog, type DataTableColumns, type UploadFileInfo
 } from 'naive-ui'
 import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined, CloudUploadOutlined, DeleteOutlineOutlined } from '@vicons/material'

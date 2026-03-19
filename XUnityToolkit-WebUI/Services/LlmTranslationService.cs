@@ -321,7 +321,10 @@ public sealed class LlmTranslationService(
                         {
                             var auditResult = termAuditService.AuditTranslation(tmMatch.Translation, termsForText);
                             if (!auditResult.Passed)
+                            {
+                                Interlocked.Increment(ref _tmMisses);
                                 continue; // Audit failed, fall through to LLM
+                            }
                         }
                     }
 
@@ -1082,7 +1085,7 @@ public sealed class LlmTranslationService(
         };
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ep.ApiKey);
 
-        var resp = await client.SendAsync(req, ct);
+        using var resp = await client.SendAsync(req, ct);
         var json = await resp.Content.ReadAsStringAsync(ct);
 
         if (!resp.IsSuccessStatusCode)
@@ -1140,7 +1143,7 @@ public sealed class LlmTranslationService(
         req.Headers.Add("x-api-key", ep.ApiKey);
         req.Headers.Add("anthropic-version", "2023-06-01");
 
-        var resp = await client.SendAsync(req, ct);
+        using var resp = await client.SendAsync(req, ct);
         var json = await resp.Content.ReadAsStringAsync(ct);
 
         if (!resp.IsSuccessStatusCode)
@@ -1198,7 +1201,7 @@ public sealed class LlmTranslationService(
         };
         req.Headers.TryAddWithoutValidation("x-goog-api-key", ep.ApiKey);
 
-        var resp = await client.SendAsync(req, ct);
+        using var resp = await client.SendAsync(req, ct);
         var json = await resp.Content.ReadAsStringAsync(ct);
 
         if (!resp.IsSuccessStatusCode)
@@ -1775,9 +1778,18 @@ public sealed class LlmTranslationService(
                 sw.Stop();
                 return new EndpointTestResult(ep.Id, ep.Name, true, translations, null, Math.Round(sw.Elapsed.TotalMilliseconds, 1));
             }
-            catch (Exception ex)
+            catch (OperationCanceledException)
+            {
+                return new EndpointTestResult(ep.Id, ep.Name, false, null, "请求已取消或超时", 0);
+            }
+            catch (HttpRequestException ex)
             {
                 return new EndpointTestResult(ep.Id, ep.Name, false, null, ex.Message, 0);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "测试翻译失败: 提供商 {Name}", ep.Name);
+                return new EndpointTestResult(ep.Id, ep.Name, false, null, "连接失败，请检查 API 配置", 0);
             }
         });
 
@@ -1808,7 +1820,7 @@ public sealed class LlmTranslationService(
         using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
 
-        var resp = await client.SendAsync(req, ct);
+        using var resp = await client.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode) return [];
 
         var json = await resp.Content.ReadAsStringAsync(ct);
@@ -1834,7 +1846,7 @@ public sealed class LlmTranslationService(
         using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
         req.Headers.TryAddWithoutValidation("x-goog-api-key", apiKey);
 
-        var resp = await client.SendAsync(req, ct);
+        using var resp = await client.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode) return [];
 
         var json = await resp.Content.ReadAsStringAsync(ct);
