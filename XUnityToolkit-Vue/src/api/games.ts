@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, TranslationMemoryStats, DynamicPatternStore, TermCandidateStore } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -279,22 +279,6 @@ export const bepinexLogApi = {
   get: (id: string) => api.get<BepInExLogResponse>(`/api/games/${id}/bepinex-log`),
   analyze: (id: string) => api.post<BepInExLogAnalysis>(`/api/games/${id}/bepinex-log/analyze`, {}),
   getDownloadUrl: (id: string) => `/api/games/${id}/bepinex-log/download`,
-}
-
-// Translation Memory
-export const translationMemoryApi = {
-  getStats: (gameId: string) =>
-    api.get<TranslationMemoryStats>(`/api/games/${gameId}/translation-memory/stats`),
-  clear: (gameId: string) =>
-    api.del(`/api/games/${gameId}/translation-memory`),
-}
-
-// Dynamic Patterns
-export const dynamicPatternsApi = {
-  get: (gameId: string) =>
-    api.get<DynamicPatternStore>(`/api/games/${gameId}/dynamic-patterns`),
-  clear: (gameId: string) =>
-    api.del(`/api/games/${gameId}/dynamic-patterns`),
 }
 
 // Term Candidates
