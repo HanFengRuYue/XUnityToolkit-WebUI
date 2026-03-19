@@ -134,8 +134,14 @@ public class CharacterSetService(
             }
         }
 
+        if (!System.Text.RegularExpressions.Regex.IsMatch(language, @"^[a-zA-Z0-9_\-]{1,20}$"))
+            throw new InvalidOperationException($"Invalid language code in config");
+
         var resolvedPath = outputFile.Replace("{Lang}", language);
-        var fullPath = Path.Combine(game.GamePath, "BepInEx", resolvedPath);
+        var fullPath = Path.GetFullPath(Path.Combine(game.GamePath, "BepInEx", resolvedPath));
+        var bepInExRoot = Path.GetFullPath(Path.Combine(game.GamePath, "BepInEx"));
+        if (!fullPath.StartsWith(bepInExRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Translation file path traversal detected");
 
         if (!File.Exists(fullPath))
             throw new FileNotFoundException($"Translation file not found: {resolvedPath}");

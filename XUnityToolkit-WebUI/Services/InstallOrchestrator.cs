@@ -347,7 +347,10 @@ public sealed class InstallOrchestrator(
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                     WriteIndented = false
                 });
-                await File.WriteAllTextAsync(cachePath, json, ct);
+                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                var tmpPath = cachePath + ".tmp";
+                await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
+                File.Move(tmpPath, cachePath, overwrite: true);
                 logger.LogInformation("安装时提取的文本已缓存: {Count} 条, 游戏 {GameId}",
                     extractResult.TotalTextsExtracted, game.Id);
             }
