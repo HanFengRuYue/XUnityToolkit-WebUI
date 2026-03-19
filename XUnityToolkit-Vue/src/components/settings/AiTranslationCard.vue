@@ -237,29 +237,29 @@ const priorityMarks = computed(() => {
 
     <!-- Global Settings -->
     <div class="ai-form">
-      <div class="form-row-inline">
-        <div class="form-row" style="flex: 1">
-          <label class="form-label">最大并发数</label>
-          <NInputNumber
-            :value="modelValue.maxConcurrency"
-            @update:value="(v: number | null) => update({ maxConcurrency: v ?? 4 })"
-            :min="1"
-            :max="100"
-            style="width: 140px"
-          />
-          <span class="form-hint">同时进行的 LLM API 调用数量（1-100）</span>
-        </div>
-        <div class="form-row" style="flex: 1">
-          <label class="form-label">端口</label>
-          <NInputNumber
-            :value="modelValue.port"
-            @update:value="(v: number | null) => update({ port: v ?? 51821 })"
-            :min="1024"
-            :max="65535"
-            style="width: 140px"
-          />
-          <span class="form-hint">修改后需重启工具箱生效</span>
-        </div>
+      <div class="form-row">
+        <label class="form-label">最大并发数（{{ modelValue.maxConcurrency }}）</label>
+        <NSlider
+          :value="modelValue.maxConcurrency"
+          @update:value="(v: number) => update({ maxConcurrency: v })"
+          :min="1"
+          :max="100"
+          :step="1"
+          :tooltip="true"
+        />
+        <span class="form-hint">同时进行的 LLM API 调用数量</span>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">端口</label>
+        <NInputNumber
+          :value="modelValue.port"
+          @update:value="(v: number | null) => update({ port: v ?? 51821 })"
+          :min="1024"
+          :max="65535"
+          style="width: 140px"
+        />
+        <span class="form-hint">修改后需重启工具箱生效</span>
       </div>
 
       <div class="form-row">
@@ -287,30 +287,31 @@ const priorityMarks = computed(() => {
         <span class="form-hint">使用 {from} 和 {to} 作为语言占位符</span>
       </div>
 
-      <div class="form-row-inline">
-        <div class="form-row" style="flex: 1">
-          <label class="form-label">温度</label>
-          <NInputNumber
-            :value="modelValue.temperature"
-            @update:value="(v: number | null) => update({ temperature: v ?? 0.3 })"
-            :min="0"
-            :max="2"
-            :step="0.1"
-            style="width: 140px"
-          />
-          <span class="form-hint">较低的值产生更确定的翻译</span>
-        </div>
-        <div class="form-row" style="flex: 1">
-          <label class="form-label">翻译记忆条数</label>
-          <NInputNumber
-            :value="modelValue.contextSize"
-            @update:value="(v: number | null) => update({ contextSize: v ?? 10 })"
-            :min="0"
-            :max="100"
-            style="width: 140px"
-          />
-          <span class="form-hint">附带的近期翻译对数量，0 为关闭（0-100）</span>
-        </div>
+      <div class="form-row">
+        <label class="form-label">温度（{{ modelValue.temperature }}）</label>
+        <NSlider
+          :value="modelValue.temperature"
+          @update:value="(v: number) => update({ temperature: v })"
+          :min="0"
+          :max="2"
+          :step="0.1"
+          :tooltip="true"
+          :format-tooltip="(v: number) => v.toFixed(1)"
+        />
+        <span class="form-hint">较低的值产生更确定的翻译</span>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">翻译上下文条数（{{ modelValue.contextSize }}）</label>
+        <NSlider
+          :value="modelValue.contextSize"
+          @update:value="(v: number) => update({ contextSize: v })"
+          :min="0"
+          :max="100"
+          :step="1"
+          :tooltip="true"
+        />
+        <span class="form-hint">附带的近期翻译对数量作为上下文，0 为关闭</span>
       </div>
     </div>
 
