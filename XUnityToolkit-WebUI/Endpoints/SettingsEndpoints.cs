@@ -41,6 +41,7 @@ public static class SettingsEndpoints
             TranslationMemoryService tmService,
             DynamicPatternService dynamicPatternService,
             TermExtractionService extractionService,
+            PreTranslationCacheMonitor cacheMonitor,
             FileLoggerProvider fileLoggerProvider,
             ILogger<AppSettingsService> logger) =>
         {
@@ -51,6 +52,7 @@ public static class SettingsEndpoints
             tmService.ClearAllCache();
             dynamicPatternService.ClearAllCache();
             extractionService.ClearAllCache();
+            cacheMonitor.UnloadCache();
 
             var errors = new List<string>();
 
@@ -166,6 +168,7 @@ public static class SettingsEndpoints
             TranslationMemoryService tmService,
             DynamicPatternService dynamicPatternService,
             TermExtractionService extractionService,
+            PreTranslationCacheMonitor cacheMonitor,
             ILogger<AppSettingsService> logger) =>
         {
             if (!request.HasFormContentType)
@@ -279,6 +282,7 @@ public static class SettingsEndpoints
                 tmService.ClearAllCache();
                 dynamicPatternService.ClearAllCache();
                 extractionService.ClearAllCache();
+                cacheMonitor.UnloadCache();
 
                 logger.LogInformation("已导入配置数据");
                 return Results.Ok(ApiResult.Ok());

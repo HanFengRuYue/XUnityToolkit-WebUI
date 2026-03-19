@@ -248,9 +248,10 @@ public sealed class TermExtractionService(
     public void ClearAllCache()
     {
         _cache.Clear();
-        foreach (var sem in _locks.Values)
-            sem.Dispose();
+        var semaphores = _locks.Values.ToList();
         _locks.Clear();
+        foreach (var sem in semaphores)
+            sem.Dispose();
     }
 
     private async Task<List<TermCandidate>> ExtractBatchAsync(

@@ -51,12 +51,12 @@ function navigateToGame(id: string) {
 }
 
 function setViewMode(mode: 'grid' | 'list') {
-  gamesStore.viewMode = mode
+  gamesStore.setViewMode(mode)
   gamesStore.savePreferences()
 }
 
 function handleSortChange(value: string) {
-  gamesStore.sortBy = value as 'name' | 'recent' | 'added'
+  gamesStore.setSortBy(value as 'name' | 'recent' | 'added')
   gamesStore.savePreferences()
 }
 

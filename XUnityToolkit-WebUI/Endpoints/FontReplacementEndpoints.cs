@@ -38,10 +38,7 @@ public static class FontReplacementEndpoints
             if (game.DetectedInfo is null)
                 return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
 
-            // Prevent concurrent replacements for the same game
-            if (_cancellationTokens.ContainsKey(id))
-                return Results.Conflict(ApiResult.Fail("字体替换正在进行中，请等待完成或先取消。"));
-
+            // Prevent concurrent replacements for the same game (atomic guard)
             var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             if (!_cancellationTokens.TryAdd(id, cts))
             {
@@ -170,14 +167,11 @@ public static class FontReplacementEndpoints
             return Results.Ok(ApiResult.Ok());
         });
 
-        // POST .../cancel
+        // POST .../cancel — only cancel, /replace's finally block owns disposal
         group.MapPost("/cancel", (string id) =>
         {
-            if (_cancellationTokens.TryRemove(id, out var cts))
-            {
+            if (_cancellationTokens.TryGetValue(id, out var cts))
                 cts.Cancel();
-                cts.Dispose();
-            }
             return Results.Ok(ApiResult.Ok());
         });
     }

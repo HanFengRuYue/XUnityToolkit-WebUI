@@ -47,7 +47,7 @@ public sealed class LocalLlmService(
 
     // ── llama.cpp binary constants ──
 
-    public const string LlamaVersion = "b8354";
+    public const string LlamaVersion = "b8416";
 
     // ── Settings persistence ──
 
@@ -501,8 +501,11 @@ public sealed class LocalLlmService(
     private void StartGpuPolling()
     {
         _gpuVramTotal = -1; // Indicate "not yet polled"
-        _gpuPollCts = new CancellationTokenSource();
-        _ = Task.Run(() => GpuPollLoopAsync(_gpuPollCts.Token));
+        var newCts = new CancellationTokenSource();
+        var oldCts = Interlocked.Exchange(ref _gpuPollCts, newCts);
+        oldCts?.Cancel();
+        oldCts?.Dispose();
+        _ = Task.Run(() => GpuPollLoopAsync(newCts.Token));
     }
 
     private void StopGpuPolling()
@@ -693,6 +696,7 @@ public sealed class LocalLlmService(
         {
             // ModelScope uses /models/{repo}/resolve/master/{file} (branch: master, not main)
             url = $"https://modelscope.cn/models/{entry.ModelScopeRepo}/resolve/master/{entry.ModelScopeFile}";
+            PathSecurity.ValidateExternalUrl(url);
             fileName = entry.ModelScopeFile!;
             _downloadMirrorState[entry.Id] = false;
             _downloadModelScopeState[entry.Id] = true;

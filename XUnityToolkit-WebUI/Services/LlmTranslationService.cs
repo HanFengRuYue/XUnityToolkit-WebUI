@@ -92,7 +92,7 @@ public sealed class LlmTranslationService(
 
     // ── Concurrency control ──
     private SemaphoreSlim? _semaphore; // Read via Volatile.Read at capture site for ARM safety
-    private int _currentMaxConcurrency;
+    private volatile int _currentMaxConcurrency;
 
     // ── Current game tracking ──
     private string? _currentGameId;
@@ -780,8 +780,9 @@ public sealed class LlmTranslationService(
             {
                 // Record recent translation with term metadata
                 var tokensPerText = texts.Count > 0 ? tokens / texts.Count : 0;
+                var effectiveEndpoint = perTextTranslationSource[i] is not null ? "翻译记忆" : endpointName;
                 var recent = new RecentTranslation(
-                    texts[i], translations[i], DateTime.UtcNow, tokensPerText, Math.Round(ms, 1), endpointName, gameId)
+                    texts[i], translations[i], DateTime.UtcNow, tokensPerText, Math.Round(ms, 1), effectiveEndpoint, gameId)
                 {
                     HasTerms = perTextHasTerms[i],
                     HasDnt = perTextHasDnt[i],
