@@ -823,14 +823,6 @@ onMounted(() => {
   color: var(--text-1);
 }
 
-.info-value.mono {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--text-2);
-  word-break: break-all;
-  line-height: 1.5;
-}
-
 /* ===== Settings Form ===== */
 .settings-form {
   display: flex;

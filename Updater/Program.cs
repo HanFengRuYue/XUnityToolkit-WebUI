@@ -13,7 +13,7 @@ string? deleteListPath = null;
 string? exeName = null;
 string? dataDir = null;
 
-for (int i = 0; i < args.Length - 1; i++)
+for (int i = 0; i < args.Length; i++)
 {
     switch (args[i])
     {
@@ -175,10 +175,16 @@ if (deleteListPath is not null && File.Exists(deleteListPath))
         .ToList();
 
     Log($"  Delete list has {toDelete.Count} entry/entries.");
+    string normalizedAppDir = Path.GetFullPath(appDir) + Path.DirectorySeparatorChar;
     string? deleteError = null;
     foreach (string rel in toDelete)
     {
-        string target = Path.Combine(appDir, rel);
+        string target = Path.GetFullPath(Path.Combine(appDir, rel));
+        if (!target.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
+        {
+            Log($"  [SKIP] {rel} (rejected: path outside app directory)");
+            continue;
+        }
         try
         {
             if (File.Exists(target))
@@ -258,7 +264,12 @@ static void Rollback(
     string exeName,
     StreamWriter log)
 {
-    void Log(string msg) => log.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}");
+    void Log(string msg)
+    {
+        string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}";
+        log.WriteLine(line);
+        Console.WriteLine(line);
+    }
 
     Log("ROLLBACK: Restoring backed-up files...");
     foreach (string rel in stagingFiles)

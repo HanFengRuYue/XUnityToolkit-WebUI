@@ -151,11 +151,14 @@ jobs:
               Write-Host "  [cached] $FileName"
               return
             }
+            $tmpPath = "$destPath.downloading"
+            if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force }
             Write-Host "  Downloading $FileName..."
             $ProgressPreference = 'SilentlyContinue'
             Invoke-WithRetry -Operation "Download $FileName" -ScriptBlock {
-              Invoke-WebRequest -Uri $Url -OutFile $destPath -UseBasicParsing -TimeoutSec 600
+              Invoke-WebRequest -Uri $Url -OutFile $tmpPath -UseBasicParsing -TimeoutSec 600
             }.GetNewClosure()
+            Move-Item $tmpPath $destPath -Force
           }
 
           $BundledRoot = "bundled"

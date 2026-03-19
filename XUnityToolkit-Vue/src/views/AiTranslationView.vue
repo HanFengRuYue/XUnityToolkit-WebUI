@@ -2354,14 +2354,6 @@ watch(() => aiStore.stats?.translating, () => {
     font-size: 18px;
   }
 
-  .tm-chip {
-    padding: 4px 8px;
-  }
-
-  .tm-chip-val {
-    font-size: 13px;
-  }
-
   .extraction-details {
     gap: 4px;
   }

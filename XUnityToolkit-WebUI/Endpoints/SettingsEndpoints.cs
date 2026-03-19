@@ -245,7 +245,7 @@ public static class SettingsEndpoints
                             if (File.Exists(glossaryFile))
                             {
                                 var glossaryJson = await File.ReadAllTextAsync(glossaryFile);
-                                existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson) ?? [];
+                                existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson, FileHelper.DataJsonOptions) ?? [];
                             }
 
                             // Dedup by Original
@@ -259,8 +259,7 @@ public static class SettingsEndpoints
                                     existingTerms.Add(term);
                             }
 
-                            var mergedJson = JsonSerializer.Serialize(existingTerms,
-                                new JsonSerializerOptions { WriteIndented = true });
+                            var mergedJson = JsonSerializer.Serialize(existingTerms, FileHelper.DataJsonOptions);
                             await File.WriteAllTextAsync(glossaryFile, mergedJson);
                             File.Delete(dntFile);
                         }

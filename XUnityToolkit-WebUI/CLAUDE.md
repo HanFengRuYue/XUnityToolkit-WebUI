@@ -76,6 +76,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **ConcurrentDictionary iteration safety:** Iterating `.Keys` while concurrent modifications happen (e.g., `ClearAllCache` while `Add` inserts) can miss entries; use `.Keys.ToList()` to snapshot before mutating
 - **CTS atomic swap:** When guarding "only one operation at a time" with a nullable `CancellationTokenSource` field, use `Interlocked.CompareExchange(ref _cts, newCts, null)` — not `if (_cts is not null) throw; _cts = new...` (TOCTOU race)
 - **CTS replacement in debounce:** When replacing a CTS in a `ConcurrentDictionary`, write the new CTS first, THEN cancel/dispose the old — avoids a window where concurrent code finds neither entry
+- **CTS debounce atomic swap:** `_dict.GetValueOrDefault(key)` + `_dict[key] = newCts` is NOT thread-safe — concurrent callers can orphan a CTS (leaked background task) or double-dispose old CTS; use `GetOrAdd`/`TryUpdate` CAS loop pattern instead
 - **`await using` early close:** When a stream must be closed before subsequent code reads the file, use a block scope `{ await using var s = ...; }` instead of calling `s.Close()` (redundant with `await using` implicit dispose)
 - **Plugin concurrency:** DLL 10x10 = 100 texts; Mono >15 connections deadlocks — batch instead
 - **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
