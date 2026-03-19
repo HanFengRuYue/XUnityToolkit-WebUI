@@ -12,6 +12,7 @@ import {
 } from '@vicons/material'
 import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { api } from '@/api/client'
+import { formatBytes } from '@/utils/format'
 import type {
   FontUploadInfo, FontGenerationStatus, GeneratedFontInfo, FontGenerationProgress,
   FontGenerationComplete, CharacterSetConfig, CharacterSetPreview, FontGenerationReport,
@@ -280,11 +281,6 @@ async function viewReport(fileName: string) {
   }
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleString('zh-CN')
@@ -384,8 +380,47 @@ async function cleanupConnection() {
   connection = null
 }
 
-onActivated(() => {
+onActivated(async () => {
   window.addEventListener('resize', checkMobile)
+  // Re-establish SignalR after KeepAlive reactivation
+  if (!connection || connection.state === HubConnectionState.Disconnected) {
+    try {
+      connection = new HubConnectionBuilder()
+        .withUrl('/hubs/install')
+        .withAutomaticReconnect()
+        .build()
+
+      connection.on('FontGenerationProgress', (p: FontGenerationProgress) => {
+        phase.value = p.phase
+        current.value = p.current
+        total.value = p.total
+      })
+
+      connection.on('FontGenerationComplete', (result: FontGenerationComplete) => {
+        isGenerating.value = false
+        if (result.success) {
+          message.success(`字体 ${result.fontName} 生成成功（${result.glyphCount} 字形）`)
+          generationReport.value = result.report ?? null
+        } else if (result.error === '已取消') {
+          message.info('字体生成已取消')
+          generationReport.value = null
+        } else {
+          message.error(result.error || '生成失败')
+          generationReport.value = null
+        }
+        loadHistory()
+      })
+
+      connection.onreconnected(async () => {
+        try { await connection?.invoke('JoinFontGenerationGroup') } catch { /* ignore */ }
+      })
+
+      await connection.start()
+      await connection.invoke('JoinFontGenerationGroup')
+    } catch (e) {
+      console.error('SignalR reconnection failed:', e)
+    }
+  }
 })
 
 onDeactivated(async () => {
@@ -444,7 +479,7 @@ onBeforeUnmount(async () => {
               <NIcon :size="20" color="var(--accent)"><FontDownloadOutlined /></NIcon>
               <div>
                 <div class="upload-font-name">{{ uploadedFont.fontName }}</div>
-                <div class="upload-file-size">{{ formatFileSize(uploadedFont.fileSize) }}</div>
+                <div class="upload-file-size">{{ formatBytes(uploadedFont.fileSize) }}</div>
               </div>
             </div>
             <NButton size="small" quaternary type="error" @click="clearUploadedFont" :disabled="isGenerating">
@@ -731,7 +766,7 @@ onBeforeUnmount(async () => {
           <div class="font-item-info">
             <span class="font-item-name">{{ font.fontName }}</span>
             <span class="font-item-meta">
-              {{ formatFileSize(font.fileSize) }} · {{ formatDate(font.generatedAt) }}
+              {{ formatBytes(font.fileSize) }} · {{ formatDate(font.generatedAt) }}
             </span>
           </div>
           <NSpace :size="8">

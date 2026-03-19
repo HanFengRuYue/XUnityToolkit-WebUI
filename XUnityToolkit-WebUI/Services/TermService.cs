@@ -7,15 +7,17 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
 {
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
     private readonly ConcurrentDictionary<string, List<TermEntry>> _cache = new();
+
+    private SemaphoreSlim GetLock(string gameId) => _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
 
     public async Task<List<TermEntry>> GetAsync(string gameId, CancellationToken ct = default)
     {
         // Fast path: return cached terms without lock or disk I/O
         if (_cache.TryGetValue(gameId, out var cached)) return cached;
 
-        await _lock.WaitAsync(ct);
+        await GetLock(gameId).WaitAsync(ct);
         try
         {
             // Double-check after acquiring lock
@@ -73,7 +75,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         }
         finally
         {
-            _lock.Release();
+            GetLock(gameId).Release();
         }
     }
 
@@ -93,14 +95,14 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
             }
         }
 
-        await _lock.WaitAsync(ct);
+        await GetLock(gameId).WaitAsync(ct);
         try
         {
             await SaveInternalAsync(gameId, filtered, ct);
         }
         finally
         {
-            _lock.Release();
+            GetLock(gameId).Release();
         }
     }
 
@@ -111,7 +113,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     {
         if (newEntries.Count == 0) return;
 
-        await _lock.WaitAsync(ct);
+        await GetLock(gameId).WaitAsync(ct);
         try
         {
             var existing = _cache.TryGetValue(gameId, out var cached)
@@ -132,7 +134,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         }
         finally
         {
-            _lock.Release();
+            GetLock(gameId).Release();
         }
     }
 
@@ -142,7 +144,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     public async Task ReplaceByTypeAsync(string gameId, TermType type, List<TermEntry> newEntries,
         CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        await GetLock(gameId).WaitAsync(ct);
         try
         {
             var existing = _cache.TryGetValue(gameId, out var cached)
@@ -158,13 +160,24 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         }
         finally
         {
-            _lock.Release();
+            GetLock(gameId).Release();
         }
     }
 
-    public void RemoveCache(string gameId) => _cache.TryRemove(gameId, out _);
+    public void RemoveCache(string gameId)
+    {
+        _cache.TryRemove(gameId, out _);
+        if (_locks.TryRemove(gameId, out var sem))
+            sem.Dispose();
+    }
 
-    public void ClearAllCache() => _cache.Clear();
+    public void ClearAllCache()
+    {
+        _cache.Clear();
+        foreach (var kvp in _locks)
+            kvp.Value.Dispose();
+        _locks.Clear();
+    }
 
     /// <summary>
     /// Import terms from one game to another, dedup by Original.
@@ -176,7 +189,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         var sourceTerms = await GetAsync(sourceGameId, ct);
         if (sourceTerms.Count == 0) return (0, 0);
 
-        await _lock.WaitAsync(ct);
+        await GetLock(targetGameId).WaitAsync(ct);
         try
         {
             var targetTerms = _cache.TryGetValue(targetGameId, out var cached)
@@ -203,7 +216,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
         }
         finally
         {
-            _lock.Release();
+            GetLock(targetGameId).Release();
         }
     }
 
