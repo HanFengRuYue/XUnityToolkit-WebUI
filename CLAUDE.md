@@ -95,7 +95,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **gameId validation:** ALL endpoints (GET/PUT/DELETE) that directly use `id` for file paths (without `library.GetByIdAsync` existence check) must validate with `Guid.TryParse(id, out _)` to prevent path traversal; applies to TM stats, dynamic-patterns, term-candidates, extracted-texts, pre-translate/regex endpoints
 - **SSRF protection:** Use `PathSecurity.ValidateExternalUrl(url)` before `HttpClient.GetAsync()` on any user-supplied URL; blocks loopback, private IPs (IPv4+IPv6), link-local, `.local`/`.internal` hostnames
 - **SSRF on derived URLs:** Also validate URLs constructed from user-configurable base URLs (e.g., `HfMirrorUrl` + repo path); the final URL, not just the base, must pass `ValidateExternalUrl`
-- **Language code validation:** `fromLang`/`toLang` parameters used in file paths must be validated as simple codes (`^[a-zA-Z0-9_\-]{1,20}$`) to prevent path traversal
+- **Language code validation:** `fromLang`/`toLang` parameters AND INI-sourced language values (e.g., `[General] Language`) used in file paths must be validated as simple codes (`^[a-zA-Z0-9_\-]{1,20}$`) to prevent path traversal; also validate the resolved full path stays within the expected directory via `Path.GetFullPath` + `StartsWith`
+- **CustomFontPath validation:** `FontReplacementRequest.CustomFontPath` from request body must be validated in `FontReplacementEndpoints` to stay within `paths.GetCustomFontDirectory(gameId)` before passing to service
 - **ExecutableName validation:** Must be a simple filename with no path separators (`/`, `\`); validated in both `POST /api/games/` and `PUT /api/games/{id}`
 - **Game launch safety:** Always validate `exePath` is inside `GamePath` via `Path.GetFullPath` + `StartsWith` before `Process.Start`
 - **Process arguments:** Never interpolate user input into argument strings without sanitizing quotes; strip `"` from user-supplied paths used in `-m "..."` style arguments
