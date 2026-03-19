@@ -225,7 +225,7 @@ public sealed class GlossaryExtractionService(
     }
 
     private static ApiEndpointConfig? ResolveEndpoint(AiTranslationSettings ai)
-        => EndpointSelector.SelectEndpoint(ai.Endpoints, ai.GlossaryExtractionEndpointId);
+        => EndpointSelector.SelectBestEndpoint(ai.Endpoints);
 
     private static string BuildExtractionSystemPrompt(List<TermEntry> existingGlossary,
         List<TermEntry> dntEntries)

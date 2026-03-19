@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref, h, computed } from 'vue'
-import { NButton, NIcon, NSelect, NButtonGroup, NDropdown, NModal, NInput, useMessage } from 'naive-ui'
+import { NButton, NIcon, NSelect, NButtonGroup, NDropdown, NModal, NInput, useMessage, useDialog } from 'naive-ui'
 import { Add } from '@vicons/ionicons5'
-import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound, DriveFileRenameOutlineOutlined, PhotoCameraOutlined } from '@vicons/material'
+import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound, DriveFileRenameOutlineOutlined, PhotoCameraOutlined, WallpaperOutlined, ImageSearchOutlined, DeleteOutlineOutlined } from '@vicons/material'
 import { useRouter } from 'vue-router'
 import { useGamesStore } from '@/stores/games'
 import { useAddGameFlow } from '@/composables/useAddGameFlow'
@@ -16,10 +16,17 @@ defineOptions({ name: 'LibraryView' })
 const gamesStore = useGamesStore()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 const { addGame } = useAddGameFlow(message)
 
 const showCoverPicker = ref(false)
 const coverPickerGame = ref<Game | null>(null)
+
+const showBackgroundPicker = ref(false)
+const backgroundPickerGame = ref<Game | null>(null)
+
+const showIconPicker = ref(false)
+const iconPickerGame = ref<Game | null>(null)
 
 // Context menu state
 const showContextMenu = ref(false)
@@ -29,6 +36,10 @@ const contextMenuGame = ref<Game | null>(null)
 const contextMenuOptions = [
   { label: '重命名', key: 'rename', icon: () => h(NIcon, { size: 16 }, { default: () => h(DriveFileRenameOutlineOutlined) }) },
   { label: '更换封面', key: 'cover', icon: () => h(NIcon, { size: 16 }, { default: () => h(PhotoCameraOutlined) }) },
+  { label: '更换背景', key: 'background', icon: () => h(NIcon, { size: 16 }, { default: () => h(WallpaperOutlined) }) },
+  { label: '更换图标', key: 'icon', icon: () => h(NIcon, { size: 16 }, { default: () => h(ImageSearchOutlined) }) },
+  { type: 'divider', key: 'd1' },
+  { label: '从游戏库中删除', key: 'remove', icon: () => h(NIcon, { size: 16 }, { default: () => h(DeleteOutlineOutlined) }) },
 ]
 
 // Rename modal state
@@ -75,12 +86,34 @@ function handleCardContextMenu(e: MouseEvent, game: Game) {
 function handleContextMenuSelect(key: string) {
   showContextMenu.value = false
   if (!contextMenuGame.value) return
+  const game = contextMenuGame.value
   if (key === 'rename') {
-    renameGameId.value = contextMenuGame.value.id
-    renameValue.value = contextMenuGame.value.name
+    renameGameId.value = game.id
+    renameValue.value = game.name
     showRenameModal.value = true
   } else if (key === 'cover') {
-    openCoverPicker(contextMenuGame.value)
+    openCoverPicker(game)
+  } else if (key === 'background') {
+    backgroundPickerGame.value = game
+    showBackgroundPicker.value = true
+  } else if (key === 'icon') {
+    iconPickerGame.value = game
+    showIconPicker.value = true
+  } else if (key === 'remove') {
+    dialog.error({
+      title: '移除游戏',
+      content: `将从游戏库中移除「${game.name}」（不会删除游戏文件）。移除后该游戏的术语库、翻译缓存等数据将被清除，重新添加后无法恢复。确定吗？`,
+      positiveText: '确认移除',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        try {
+          await gamesStore.removeGame(game.id)
+          message.success('已移除')
+        } catch {
+          message.error('移除失败')
+        }
+      },
+    })
   }
 }
 
@@ -350,6 +383,24 @@ const gridStyle = computed(() => {
       @update:show="showCoverPicker = $event"
       @saved="gamesStore.refreshGame(coverPickerGame!.id)"
     />
+
+    <!-- Background Picker Modal (lazy loaded) -->
+    <BackgroundPickerModal
+      v-if="showBackgroundPicker && backgroundPickerGame"
+      :show="showBackgroundPicker"
+      :game="backgroundPickerGame"
+      @update:show="showBackgroundPicker = $event"
+      @saved="gamesStore.refreshGame(backgroundPickerGame!.id)"
+    />
+
+    <!-- Icon Picker Modal (lazy loaded) -->
+    <IconPickerModal
+      v-if="showIconPicker && iconPickerGame"
+      :show="showIconPicker"
+      :game="iconPickerGame"
+      @update:show="showIconPicker = $event"
+      @saved="gamesStore.refreshGame(iconPickerGame!.id)"
+    />
   </div>
 </template>
 
@@ -359,9 +410,15 @@ import { defineAsyncComponent } from 'vue'
 const CoverPickerModal = defineAsyncComponent(
   () => import('@/components/library/CoverPickerModal.vue')
 )
+const BackgroundPickerModal = defineAsyncComponent(
+  () => import('@/components/library/BackgroundPickerModal.vue')
+)
+const IconPickerModal = defineAsyncComponent(
+  () => import('@/components/library/IconPickerModal.vue')
+)
 
 export default {
-  components: { CoverPickerModal }
+  components: { CoverPickerModal, BackgroundPickerModal, IconPickerModal }
 }
 </script>
 

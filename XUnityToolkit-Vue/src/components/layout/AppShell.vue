@@ -184,22 +184,23 @@ function onResizeDoubleClick() {
         </template>
       </nav>
 
+      <div class="sidebar-spacer"></div>
+
       <div class="sidebar-collapse-toggle">
         <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
           <template #trigger>
-            <button class="collapse-btn" @click="sidebarStore.toggleCollapse">
-              <NIcon :size="18"><KeyboardDoubleArrowRightOutlined /></NIcon>
-            </button>
+            <a class="nav-item collapse-item" @click="sidebarStore.toggleCollapse">
+              <NIcon :size="20"><KeyboardDoubleArrowRightOutlined /></NIcon>
+              <span class="nav-label">展开</span>
+            </a>
           </template>
           展开侧栏
         </NTooltip>
-        <button v-else class="collapse-btn" @click="sidebarStore.toggleCollapse">
-          <NIcon :size="18"><KeyboardDoubleArrowLeftOutlined /></NIcon>
-          <span class="collapse-label">收起</span>
-        </button>
+        <a v-else class="nav-item collapse-item" @click="sidebarStore.toggleCollapse">
+          <NIcon :size="20"><KeyboardDoubleArrowLeftOutlined /></NIcon>
+          <span class="nav-label">收起</span>
+        </a>
       </div>
-
-      <div class="sidebar-spacer"></div>
 
       <div class="sidebar-bottom-nav">
         <div class="bottom-divider"></div>
@@ -425,35 +426,12 @@ function onResizeDoubleClick() {
 
 /* ===== Collapse Toggle ===== */
 .sidebar-collapse-toggle {
-  padding: 8px 12px 0;
+  padding: 0 12px 4px;
   transition: padding 0.3s var(--ease-out);
 }
 
-.collapse-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 16px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-3);
-  cursor: pointer;
-  font-size: 12px;
-  font-family: var(--font-body);
-  transition: all 0.2s ease;
-}
-
-.collapse-btn:hover {
-  background: var(--bg-subtle-hover);
-  color: var(--text-2);
-  border-color: var(--border);
-}
-
-.collapse-label {
-  white-space: nowrap;
-  overflow: hidden;
+.collapse-item {
+  animation: none !important;
 }
 
 /* ===== Bottom Nav (Settings) ===== */
@@ -522,6 +500,7 @@ function onResizeDoubleClick() {
 
 .sidebar.collapsed .sidebar-logo {
   justify-content: center;
+  gap: 0;
 }
 
 .sidebar.collapsed .logo-text {
@@ -539,13 +518,13 @@ function onResizeDoubleClick() {
 
 .sidebar.collapsed .nav-item {
   justify-content: center;
-  padding: 11px 0;
-  border-left-color: transparent;
+  border-left-width: 0;
   margin-left: 0;
-}
-
-.sidebar.collapsed .nav-item.active {
-  border-left-color: transparent;
+  gap: 0;
+  padding: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto;
 }
 
 .sidebar.collapsed .nav-label {
@@ -563,12 +542,7 @@ function onResizeDoubleClick() {
 }
 
 .sidebar.collapsed .sidebar-collapse-toggle {
-  padding: 8px 8px 0;
-}
-
-.sidebar.collapsed .collapse-btn {
-  justify-content: center;
-  padding: 8px 0;
+  padding: 0 8px 4px;
 }
 
 .sidebar.collapsed .sidebar-bottom-nav {

@@ -171,7 +171,6 @@ export interface AiTranslationSettings {
   localContextSize: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
-  glossaryExtractionEndpointId?: string
   enablePreTranslationCache: boolean
   termAuditEnabled: boolean
   naturalTranslationMode: boolean
