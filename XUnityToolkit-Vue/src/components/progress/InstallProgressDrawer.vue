@@ -8,7 +8,7 @@ import {
   NButton,
   NAlert,
 } from 'naive-ui'
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useInstallStore } from '@/stores/install'
 import type { InstallStep } from '@/api/types'
 
@@ -70,7 +70,7 @@ onMounted(() => {
   updateDrawerWidth()
   window.addEventListener('resize', updateDrawerWidth)
 })
-onUnmounted(() => {
+onBeforeUnmount(() => {
   window.removeEventListener('resize', updateDrawerWidth)
 })
 </script>

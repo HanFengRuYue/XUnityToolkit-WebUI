@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton,
@@ -305,7 +305,7 @@ watch(() => store.termExtractionComplete, (val) => {
   }
 })
 
-onUnmounted(async () => {
+onBeforeUnmount(async () => {
   await store.disconnect()
 })
 
