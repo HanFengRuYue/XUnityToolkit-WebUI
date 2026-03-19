@@ -80,7 +80,6 @@ const settings = ref<AppSettings>({
     localContextSize: 0,
     endpoints: [],
     glossaryExtractionEnabled: false,
-    glossaryExtractionEndpointId: undefined,
     enablePreTranslationCache: false,
     termAuditEnabled: true,
     naturalTranslationMode: true,

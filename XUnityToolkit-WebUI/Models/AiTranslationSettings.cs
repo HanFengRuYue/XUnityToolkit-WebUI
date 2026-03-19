@@ -63,7 +63,6 @@ public sealed class AiTranslationSettings
 
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }
-    public string? GlossaryExtractionEndpointId { get; set; }
 }
 
 public sealed class ApiEndpointConfig

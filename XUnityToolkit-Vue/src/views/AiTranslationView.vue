@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, onDeactivated, nextTick, watch } from 'vue'
 import {
   NIcon,
   NButton,
@@ -46,6 +46,7 @@ import { DEFAULT_SYSTEM_PROMPT } from '@/constants/prompts'
 defineOptions({ name: 'AiTranslationView' })
 
 const collapsed = reactive({
+  settings: false,
   cache: true,
   recent: true,
   errors: true,
@@ -68,7 +69,6 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   localContextSize: 0,
   endpoints: [],
   glossaryExtractionEnabled: false,
-  glossaryExtractionEndpointId: undefined,
   enablePreTranslationCache: false,
   termAuditEnabled: true,
   naturalTranslationMode: true,
@@ -142,16 +142,6 @@ const llmCompleted = computed(() => {
 })
 
 const hasTmActivity = computed(() => aiSettings.value.enableTranslationMemory || tmTotalHits.value > 0 || (aiStore.stats?.translationMemoryMisses ?? 0) > 0)
-
-const extractionEndpointOptions = computed(() => {
-  const endpoints = aiSettings.value.endpoints ?? []
-  return [
-    { label: '自动选择（第一个可用）', value: '' },
-    ...endpoints
-      .filter(e => e.enabled && e.apiKey)
-      .map(e => ({ label: e.name || e.provider, value: e.id })),
-  ]
-})
 
 const extractionStats = computed(() => aiStore.extractionStats)
 
@@ -253,19 +243,165 @@ onMounted(async () => {
     loadSettings(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
+  await nextTick()
+  computeConnections()
+  setupPipelineObserver()
 })
 
 onActivated(async () => {
   await aiStore.connect()
   await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats()])
+  await nextTick()
+  computeConnections()
+  setupPipelineObserver()
 })
 
 onDeactivated(() => {
   aiStore.disconnect()
+  cleanupPipeline()
 })
 
 onBeforeUnmount(() => {
   aiStore.disconnect()
+  cleanupPipeline()
+})
+
+// ===== Pipeline SVG Connection Logic =====
+const pipelineRef = ref<HTMLElement | null>(null)
+const rootNodeRef = ref<HTMLElement | null>(null)
+const queueNodeRef = ref<HTMLElement | null>(null)
+const translatingNodeRef = ref<HTMLElement | null>(null)
+const doneNodeRef = ref<HTMLElement | null>(null)
+const extractionNodeRef = ref<HTMLElement | null>(null)
+const tmChipsRef = ref<HTMLElement | null>(null)
+const tmDoneRef = ref<HTMLElement | null>(null)
+
+interface PipelineConnection {
+  id: string
+  pathD: string
+  active: boolean
+  particleCount: number
+  duration: number
+  isTm: boolean
+}
+
+const connections = ref<PipelineConnection[]>([])
+
+function getRelPos(el: HTMLElement | null, container: DOMRect) {
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return {
+    cx: r.left + r.width / 2 - container.left,
+    cy: r.top + r.height / 2 - container.top,
+    top: r.top - container.top,
+    bottom: r.top + r.height - container.top,
+    left: r.left - container.left,
+    right: r.left + r.width - container.left,
+    w: r.width,
+    h: r.height,
+  }
+}
+
+function particleParams(volume: number) {
+  if (volume <= 0) return { count: 0, duration: 5 }
+  const count = Math.min(6, Math.max(1, Math.ceil(volume / 5)))
+  const duration = Math.max(1.5, 5 - Math.log2(volume + 1) * 0.8)
+  return { count, duration }
+}
+
+function computeConnections() {
+  if (!pipelineRef.value) return
+  const container = pipelineRef.value.getBoundingClientRect()
+  const root = getRelPos(rootNodeRef.value, container)
+  const queue = getRelPos(queueNodeRef.value, container)
+  const translating = getRelPos(translatingNodeRef.value, container)
+  const done = getRelPos(doneNodeRef.value, container)
+  const extraction = getRelPos(extractionNodeRef.value, container)
+  const tmChips = getRelPos(tmChipsRef.value, container)
+  const tmDone = getRelPos(tmDoneRef.value, container)
+
+  const result: PipelineConnection[] = []
+  const s = aiStore.stats
+
+  // Helper: right-angle path (horizontal then vertical then horizontal)
+  function rightAngleH(x1: number, y1: number, x2: number, y2: number) {
+    const midX = x1 + (x2 - x1) * 0.5
+    return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
+  }
+
+  // root → queue
+  if (root && queue) {
+    const pathD = rightAngleH(root.right, root.cy, queue.left, queue.cy)
+    const vol = (s?.queued ?? 0) + (s?.translating ?? 0)
+    const pp = particleParams(vol)
+    result.push({ id: 'root-queue', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
+  }
+
+  // queue → translating
+  if (queue && translating) {
+    const pathD = rightAngleH(queue.right, queue.cy, translating.left, translating.cy)
+    const vol = s?.translating ?? 0
+    const pp = particleParams(vol)
+    result.push({ id: 'queue-translating', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
+  }
+
+  // translating → done
+  if (translating && done) {
+    const pathD = rightAngleH(translating.right, translating.cy, done.left, done.cy)
+    const vol = s?.translating ?? 0
+    const pp = particleParams(vol)
+    result.push({ id: 'translating-done', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
+  }
+
+  // done → extraction (horizontal inline)
+  if (done && extraction) {
+    const pathD = rightAngleH(done.right, done.cy, extraction.left, extraction.cy)
+    const vol = extractionStats.value?.activeExtractions ?? 0
+    const pp = particleParams(vol)
+    result.push({ id: 'done-extraction', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
+  }
+
+  // root → TM node (right-angle fork: right, down, right)
+  if (root && tmChips) {
+    const pathD = rightAngleH(root.right, root.cy, tmChips.left, tmChips.cy)
+    const vol = Math.min(20, tmTotalHits.value)
+    const pp = particleParams(vol)
+    result.push({ id: 'tm-root-chips', pathD, active: tmTotalHits.value > 0, particleCount: pp.count, duration: pp.duration, isTm: true })
+  }
+
+  // TM node → TM done
+  if (tmChips && tmDone) {
+    const pathD = rightAngleH(tmChips.right, tmChips.cy, tmDone.left, tmDone.cy)
+    const vol = Math.min(20, tmTotalHits.value)
+    const pp = particleParams(vol)
+    result.push({ id: 'tm-chips-done', pathD, active: tmTotalHits.value > 0, particleCount: pp.count, duration: pp.duration, isTm: true })
+  }
+
+  connections.value = result
+}
+
+let pipelineResizeObserver: ResizeObserver | null = null
+
+function setupPipelineObserver() {
+  if (!pipelineRef.value || pipelineResizeObserver) return
+  pipelineResizeObserver = new ResizeObserver(() => {
+    requestAnimationFrame(computeConnections)
+  })
+  pipelineResizeObserver.observe(pipelineRef.value)
+}
+
+function cleanupPipeline() {
+  pipelineResizeObserver?.disconnect()
+  pipelineResizeObserver = null
+}
+
+watch([hasTmActivity, showExtraction], () => {
+  nextTick(computeConnections)
+})
+
+// Recompute when stats change (for particle density updates)
+watch(() => aiStore.stats?.translating, () => {
+  nextTick(computeConnections)
 })
 </script>
 
@@ -328,11 +464,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Two-Column Dashboard Grid -->
-    <div class="ai-dashboard-grid">
-      <!-- Left Column: Dashboard Cards -->
-      <div class="ai-dashboard-main">
-        <!-- Status Dashboard -->
+    <!-- Status Dashboard -->
         <div class="section-card" :class="{ 'is-translating': isActivelyTranslating }" style="animation-delay: 0.05s">
           <div class="section-header">
             <h2 class="section-title">
@@ -360,123 +492,159 @@ onBeforeUnmount(() => {
             <span class="current-game-name">{{ getGameName(aiStore.stats.currentGameId) }}</span>
           </div>
 
-          <!-- Pipeline Fork -->
-          <div class="pipeline-fork">
-            <!-- Root: Received -->
-            <div class="fork-root">
-              <div class="pipeline-node root-node">
-                <div class="node-icon root-icon">
-                  <NIcon :size="20"><MoveToInboxOutlined /></NIcon>
-                </div>
-                <div class="node-data">
-                  <span class="node-value root-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
-                  <span class="node-label">已接收</span>
-                </div>
+          <!-- Pipeline Flow -->
+          <div class="pipeline-flow" ref="pipelineRef">
+            <!-- SVG Connection Overlay -->
+            <svg class="pipeline-svg">
+              <defs>
+                <filter id="particle-glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+              <path v-for="conn in connections" :key="conn.id"
+                    :d="conn.pathD"
+                    class="connection-path"
+                    :class="{ active: conn.active, 'tm-path': conn.isTm }" />
+              <template v-for="conn in connections" :key="'particles-' + conn.id">
+                <circle v-for="i in (conn.active ? conn.particleCount : 0)" :key="conn.id + '-p-' + i"
+                        class="flow-particle"
+                        :class="{ 'tm-particle': conn.isTm }"
+                        r="3"
+                        filter="url(#particle-glow)"
+                        :style="{
+                          offsetPath: `path('${conn.pathD}')`,
+                          animationDuration: conn.duration + 's',
+                          animationDelay: ((i - 1) * (conn.duration / conn.particleCount)) + 's',
+                        }" />
+              </template>
+            </svg>
+
+            <!-- Horizontal Fork Layout -->
+            <div class="pipeline-hbox">
+              <!-- Root Node -->
+              <div class="pipeline-root">
+                <NPopover trigger="hover" placement="bottom">
+                  <template #trigger>
+                    <div ref="rootNodeRef" class="pipeline-node root-node">
+                      <div class="node-icon root-icon">
+                        <NIcon :size="20"><MoveToInboxOutlined /></NIcon>
+                      </div>
+                      <div class="node-data">
+                        <span class="node-value root-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
+                        <span class="node-label">已接收</span>
+                      </div>
+                    </div>
+                  </template>
+                  <div class="pipeline-tooltip">所有发送到 AI 翻译服务的文本总数</div>
+                </NPopover>
               </div>
-            </div>
 
-            <!-- Fork Connector -->
-            <div class="fork-spine">
-              <div class="spine-trunk"></div>
-            </div>
-
-            <!-- Branches -->
-            <div class="fork-branches">
-              <!-- LLM Branch -->
-              <div class="fork-branch">
-                <div class="branch-connector"><span></span></div>
-                <div class="branch-body">
+              <!-- Fork Branches -->
+              <div class="pipeline-branches">
+                <!-- LLM Branch -->
+                <div class="pipeline-branch">
                   <div class="branch-header">
                     <NIcon :size="13"><SmartToyOutlined /></NIcon>
                     <span>LLM 翻译</span>
                   </div>
-                  <div class="branch-flow">
-                    <div class="pipeline-node compact" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
-                      <div class="node-icon">
-                        <NIcon :size="14"><HourglassEmptyOutlined /></NIcon>
-                      </div>
-                      <div class="node-data">
-                        <span class="node-value">{{ aiStore.stats?.queued ?? 0 }}</span>
-                        <span class="node-label">排队</span>
-                      </div>
-                    </div>
-                    <div class="flow-arrow" :class="{ active: isActivelyTranslating }">
-                      <span class="flow-arrow-line"></span>
-                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
-                    </div>
-                    <div class="pipeline-node compact" :class="{ 'is-active': isActivelyTranslating }">
-                      <div class="node-icon translating-icon">
-                        <NIcon :size="14"><SyncOutlined /></NIcon>
-                      </div>
-                      <div class="node-data">
-                        <span class="node-value">{{ aiStore.stats?.translating ?? 0 }}<small v-if="aiStore.stats?.maxConcurrency">/{{ aiStore.stats.maxConcurrency }}</small></span>
-                        <span class="node-label">翻译中</span>
-                      </div>
-                    </div>
-                    <div class="flow-arrow" :class="{ active: isActivelyTranslating }">
-                      <span class="flow-arrow-line"></span>
-                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
-                    </div>
-                    <div class="pipeline-node compact done-node">
-                      <div class="node-icon done-icon">
-                        <NIcon :size="14"><TranslateOutlined /></NIcon>
-                      </div>
-                      <div class="node-data">
-                        <span class="node-value">{{ llmCompleted }}</span>
-                        <span class="node-label">已完成</span>
-                      </div>
-                    </div>
-                  </div>
-                  <!-- Term Extraction (sub-process of LLM) -->
-                  <div v-if="showExtraction" class="branch-sub">
-                    <div class="sub-indicator">
-                      <NIcon :size="12"><AutoFixHighOutlined /></NIcon>
-                      <span>术语提取</span>
-                      <span class="sub-stat">{{ extractionStats!.totalExtracted }} 已提取</span>
-                      <span class="sub-stat">{{ extractionStats!.totalExtractionCalls }} 调用</span>
-                      <span v-if="extractionStats!.activeExtractions > 0" class="sub-stat active">{{ extractionStats!.activeExtractions }} 提取中</span>
-                      <span v-if="extractionStats!.totalErrors > 0" class="sub-stat error">{{ extractionStats!.totalErrors }} 错误</span>
-                    </div>
+                  <div class="branch-nodes">
+                    <NPopover trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="queueNodeRef" class="pipeline-node" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
+                          <div class="node-icon"><NIcon :size="14"><HourglassEmptyOutlined /></NIcon></div>
+                          <div class="node-data">
+                            <span class="node-value">{{ aiStore.stats?.queued ?? 0 }}</span>
+                            <span class="node-label">排队</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">等待 LLM 处理的翻译请求队列</div>
+                    </NPopover>
+
+                    <NPopover trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="translatingNodeRef" class="pipeline-node" :class="{ 'is-active': isActivelyTranslating }">
+                          <div class="node-icon translating-icon"><NIcon :size="14"><SyncOutlined /></NIcon></div>
+                          <div class="node-data">
+                            <span class="node-value">{{ aiStore.stats?.translating ?? 0 }}<small v-if="aiStore.stats?.maxConcurrency">/{{ aiStore.stats.maxConcurrency }}</small></span>
+                            <span class="node-label">翻译中</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">正在由大语言模型处理的翻译请求</div>
+                    </NPopover>
+
+                    <NPopover trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="doneNodeRef" class="pipeline-node done-node">
+                          <div class="node-icon done-icon"><NIcon :size="14"><TranslateOutlined /></NIcon></div>
+                          <div class="node-data">
+                            <span class="node-value">{{ llmCompleted }}</span>
+                            <span class="node-label">已完成</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">LLM 成功翻译的文本数（不含翻译记忆命中）</div>
+                    </NPopover>
+
+                    <!-- Term Extraction (inline after 已完成) -->
+                    <NPopover v-if="showExtraction" trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="extractionNodeRef" class="pipeline-node extraction-node">
+                          <div class="node-icon extraction-icon"><NIcon :size="14"><AutoFixHighOutlined /></NIcon></div>
+                          <div class="node-data">
+                            <span class="node-value">{{ extractionStats!.totalExtracted }}</span>
+                            <span class="node-label">术语提取</span>
+                          </div>
+                          <div class="extraction-details">
+                            <span class="sub-stat">{{ extractionStats!.totalExtractionCalls }} 调用</span>
+                            <span v-if="extractionStats!.activeExtractions > 0" class="sub-stat active">{{ extractionStats!.activeExtractions }} 提取中</span>
+                            <span v-if="extractionStats!.totalErrors > 0" class="sub-stat error">{{ extractionStats!.totalErrors }} 错误</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">翻译完成后自动提取专有名词、角色名等术语，用于后续翻译</div>
+                    </NPopover>
                   </div>
                 </div>
-              </div>
 
-              <!-- TM Branch -->
-              <div v-if="hasTmActivity" class="fork-branch tm-branch">
-                <div class="branch-connector"><span></span></div>
-                <div class="branch-body">
+                <!-- TM Branch -->
+                <div v-if="hasTmActivity" class="pipeline-branch tm-branch">
                   <div class="branch-header tm-header">
                     <NIcon :size="13"><StorageOutlined /></NIcon>
                     <span>翻译记忆</span>
                   </div>
-                  <div class="branch-flow">
-                    <div class="tm-hit-chips">
-                      <div class="tm-chip">
-                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryHits ?? 0 }}</span>
-                        <span class="tm-chip-type">精确</span>
-                      </div>
-                      <div class="tm-chip">
-                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryFuzzyHits ?? 0 }}</span>
-                        <span class="tm-chip-type">模糊</span>
-                      </div>
-                      <div class="tm-chip">
-                        <span class="tm-chip-val">{{ aiStore.stats?.translationMemoryPatternHits ?? 0 }}</span>
-                        <span class="tm-chip-type">模式</span>
-                      </div>
-                    </div>
-                    <div class="flow-arrow active">
-                      <span class="flow-arrow-line"></span>
-                      <NIcon :size="11"><ArrowRightAltOutlined /></NIcon>
-                    </div>
-                    <div class="pipeline-node compact tm-done-node">
-                      <div class="node-icon tm-icon">
-                        <NIcon :size="14"><StorageOutlined /></NIcon>
-                      </div>
-                      <div class="node-data">
-                        <span class="node-value">{{ tmTotalHits }}</span>
-                        <span class="node-label">已命中</span>
-                      </div>
-                    </div>
+                  <div class="branch-nodes">
+                    <NPopover trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="tmChipsRef" class="pipeline-node tm-node">
+                          <div class="node-icon tm-icon"><NIcon :size="14"><StorageOutlined /></NIcon></div>
+                          <div class="tm-chips-inline">
+                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryHits ?? 0 }}</strong> 精确</span>
+                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryFuzzyHits ?? 0 }}</strong> 模糊</span>
+                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryPatternHits ?? 0 }}</strong> 模式</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">翻译记忆三种匹配：精确（完全相同）、模糊（相似度阈值）、模式（正则匹配）</div>
+                    </NPopover>
+
+                    <NPopover trigger="hover" placement="top">
+                      <template #trigger>
+                        <div ref="tmDoneRef" class="pipeline-node tm-done-node">
+                          <div class="node-icon tm-icon"><NIcon :size="14"><StorageOutlined /></NIcon></div>
+                          <div class="node-data">
+                            <span class="node-value">{{ tmTotalHits }}</span>
+                            <span class="node-label">已命中</span>
+                          </div>
+                        </div>
+                      </template>
+                      <div class="pipeline-tooltip">翻译记忆总命中数 — 无需调用 LLM 直接复用已有翻译</div>
+                    </NPopover>
                   </div>
                 </div>
               </div>
@@ -636,25 +804,28 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
+
+    <!-- AI Translation Settings (collapsible) -->
+    <div v-if="settings" class="section-card" :class="{ 'is-collapsed': collapsed.settings }" style="animation-delay: 0.07s">
+      <div class="section-header collapsible" @click="collapsed.settings = !collapsed.settings">
+        <h2 class="section-title">
+          <span class="section-icon">
+            <NIcon :size="16"><SmartToyOutlined /></NIcon>
+          </span>
+          AI 翻译设置
+        </h2>
+        <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.settings }">
+          <ExpandMoreOutlined />
+        </NIcon>
       </div>
 
-      <!-- Right Column: Settings Sidebar -->
-      <div class="ai-settings-sidebar" v-if="settings">
-        <div class="section-card" style="animation-delay: 0.05s">
-          <div class="section-header">
-            <h2 class="section-title">
-              <span class="section-icon">
-                <NIcon :size="16"><SmartToyOutlined /></NIcon>
-              </span>
-              AI 翻译设置
-            </h2>
-          </div>
-
+      <div class="section-body" :class="{ collapsed: collapsed.settings }">
+        <div class="section-body-inner">
           <!-- Pipeline Settings Groups -->
           <div class="pipeline-settings" :class="{ 'all-collapsed': allSettingsCollapsed }">
             <!-- Term Settings Group -->
             <div class="settings-group">
-              <div class="settings-group-header" @click="collapsed.termSettings = !collapsed.termSettings">
+              <div class="settings-group-header" @click.stop="collapsed.termSettings = !collapsed.termSettings">
                 <div class="settings-group-title">
                   <NIcon :size="14"><AutoFixHighOutlined /></NIcon>
                   <span>术语设置</span>
@@ -695,23 +866,13 @@ onBeforeUnmount(() => {
                       @update:value="(v: boolean) => { aiSettings = { ...aiSettings, glossaryExtractionEnabled: v } }"
                     />
                   </div>
-                  <div v-if="aiSettings.glossaryExtractionEnabled && !isLocalMode" class="sub-setting">
-                    <label class="setting-label">提取使用的 AI 提供商</label>
-                    <NSelect
-                      :value="aiSettings.glossaryExtractionEndpointId ?? ''"
-                      @update:value="(v: string) => { aiSettings = { ...aiSettings, glossaryExtractionEndpointId: v || undefined } }"
-                      :options="extractionEndpointOptions"
-                      size="small"
-                      class="extraction-select"
-                    />
-                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Translation Memory Group -->
             <div class="settings-group">
-              <div class="settings-group-header" @click="collapsed.tmSettings = !collapsed.tmSettings">
+              <div class="settings-group-header" @click.stop="collapsed.tmSettings = !collapsed.tmSettings">
                 <div class="settings-group-title">
                   <NIcon :size="14"><StorageOutlined /></NIcon>
                   <span>翻译记忆</span>
@@ -780,12 +941,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Recent Translations (full width) -->
+    <!-- Recent Translations -->
     <div
       v-if="(aiStore.stats?.recentTranslations?.length ?? 0) > 0"
       class="section-card"
       :class="{ 'is-collapsed': collapsed.recent }"
-      style="animation-delay: 0.07s"
+      style="animation-delay: 0.08s"
     >
       <div class="section-header collapsible" @click="collapsed.recent = !collapsed.recent">
         <h2 class="section-title">
@@ -843,12 +1004,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Error Log (full width) -->
+    <!-- Error Log -->
     <div
       v-if="(aiStore.stats?.recentErrors?.length ?? 0) > 0"
       class="section-card"
       :class="{ 'is-collapsed': collapsed.errors }"
-      style="animation-delay: 0.08s"
+      style="animation-delay: 0.09s"
     >
       <div class="section-header collapsible" @click="collapsed.errors = !collapsed.errors">
         <h2 class="section-title">
@@ -913,36 +1074,6 @@ onBeforeUnmount(() => {
   color: var(--text-2);
 }
 
-/* ===== Dashboard Grid Layout ===== */
-.ai-dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 16px;
-  align-items: start;
-}
-
-.ai-dashboard-main {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.ai-settings-sidebar {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-}
-
-.ai-settings-sidebar::-webkit-scrollbar {
-  width: 4px;
-}
-
-.ai-settings-sidebar::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 2px;
-}
 
 /* ===== Metrics Strip ===== */
 .metrics-strip {
@@ -1202,16 +1333,85 @@ onBeforeUnmount(() => {
   color: var(--text-1);
 }
 
-/* ===== Pipeline Fork ===== */
-.pipeline-fork {
+/* ===== Pipeline Flow ===== */
+.pipeline-flow {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 4px 0;
+}
+
+/* SVG Connection Overlay */
+.pipeline-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+
+.connection-path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--accent) 15%, var(--border));
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke 0.4s ease;
+}
+
+.connection-path.active {
+  stroke: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.connection-path.tm-path {
+  stroke: color-mix(in srgb, var(--accent) 10%, var(--border));
+}
+
+.connection-path.tm-path.active {
+  stroke: color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+
+/* Animated particles */
+.flow-particle {
+  fill: var(--accent);
+  opacity: 0;
+  offset-rotate: 0deg;
+  animation: travel-along-path linear infinite;
+}
+
+.flow-particle.tm-particle {
+  fill: color-mix(in srgb, var(--accent) 65%, var(--text-2));
+}
+
+@keyframes travel-along-path {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.95;
+  }
+  85% {
+    opacity: 0.95;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+
+/* Horizontal Pipeline Layout */
+.pipeline-hbox {
   display: flex;
   align-items: stretch;
   gap: 0;
-  margin-bottom: 16px;
+  width: 100%;
+  position: relative;
+  z-index: 2;
 }
 
 /* Root Node */
-.fork-root {
+.pipeline-root {
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -1221,25 +1421,26 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: all 0.3s ease;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .pipeline-node:hover {
   border-color: var(--border-hover);
-}
-
-.pipeline-node.compact {
-  padding: 8px 12px;
-  gap: 8px;
+  background: color-mix(in srgb, var(--accent) 2%, var(--bg-subtle));
 }
 
 .root-node {
   border-left: 3px solid var(--accent);
-  padding-left: 14px;
+  padding: 14px 18px;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--accent) 3%, var(--bg-subtle));
 }
 
 .node-icon {
@@ -1294,66 +1495,20 @@ onBeforeUnmount(() => {
   letter-spacing: 0.05em;
 }
 
-/* Fork Spine */
-.fork-spine {
-  display: flex;
-  align-items: center;
-  padding: 0 4px;
-  flex-shrink: 0;
-}
-
-.spine-trunk {
-  width: 12px;
-  height: 2px;
-  background: var(--border);
-}
-
-/* Fork Branches */
-.fork-branches {
+/* Fork Branches (right side, stacked vertically) */
+.pipeline-branches {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--accent) 25%, var(--border));
-  position: relative;
+  gap: 8px;
+  padding-left: 16px;
   min-width: 0;
 }
 
-.fork-branch {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  position: relative;
-}
-
-/* Branch horizontal connector */
-.branch-connector {
-  display: flex;
-  align-items: center;
-  width: 16px;
-  flex-shrink: 0;
-  position: relative;
-}
-
-.branch-connector span {
-  position: absolute;
-  left: -12px;
-  width: 28px;
-  height: 2px;
-  background: color-mix(in srgb, var(--accent) 25%, var(--border));
-}
-
-.tm-branch .branch-connector span {
-  background: color-mix(in srgb, var(--secondary) 30%, var(--border));
-}
-
-.branch-body {
-  flex: 1;
+.pipeline-branch {
   min-width: 0;
 }
 
-/* Branch Header */
 .branch-header {
   display: flex;
   align-items: center;
@@ -1368,51 +1523,13 @@ onBeforeUnmount(() => {
 }
 
 .tm-header {
-  color: var(--secondary);
+  color: color-mix(in srgb, var(--accent) 65%, var(--text-2));
 }
 
-/* Branch Flow */
-.branch-flow {
+.branch-nodes {
   display: flex;
   align-items: center;
-  gap: 0;
-}
-
-/* Flow Arrow */
-.flow-arrow {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 0 3px;
-  color: var(--text-3);
-  opacity: 0.25;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-}
-
-.flow-arrow.active {
-  opacity: 0.6;
-  color: var(--accent);
-}
-
-.tm-branch .flow-arrow.active {
-  color: var(--secondary);
-}
-
-.flow-arrow-line {
-  width: 14px;
-  height: 2px;
-  background: currentColor;
-  border-radius: 1px;
-}
-
-.flow-arrow.active .flow-arrow-line {
-  animation: flow-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes flow-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  gap: 8px;
 }
 
 /* Pipeline node states */
@@ -1423,13 +1540,13 @@ onBeforeUnmount(() => {
 .pipeline-node.is-active {
   background: color-mix(in srgb, var(--accent) 5%, var(--bg-subtle));
   border-color: var(--accent-border);
-  box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 4%, transparent);
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 5%, transparent);
   animation: node-glow 3s ease-in-out infinite;
 }
 
 @keyframes node-glow {
-  0%, 100% { box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 3%, transparent); }
-  50% { box-shadow: inset 0 0 30px color-mix(in srgb, var(--accent) 7%, transparent); }
+  0%, 100% { box-shadow: inset 0 0 24px color-mix(in srgb, var(--accent) 4%, transparent); }
+  50% { box-shadow: inset 0 0 36px color-mix(in srgb, var(--accent) 8%, transparent); }
 }
 
 .pipeline-node.is-active .translating-icon :deep(.n-icon) {
@@ -1441,78 +1558,69 @@ onBeforeUnmount(() => {
   to { transform: rotate(360deg); }
 }
 
+.done-node {
+  border-color: color-mix(in srgb, var(--success) 20%, var(--border));
+}
+
 .done-icon {
   background: color-mix(in srgb, var(--success) 10%, transparent);
   color: var(--success);
 }
 
 .tm-icon {
-  background: var(--secondary-soft);
-  color: var(--secondary);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, var(--accent) 65%, var(--text-2));
 }
 
 .tm-done-node {
-  background: color-mix(in srgb, var(--secondary) 5%, var(--bg-subtle));
-  border-color: color-mix(in srgb, var(--secondary) 20%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
+  border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
 }
 
-/* TM hit chips */
-.tm-hit-chips {
+/* TM node with inline chips */
+.tm-node {
+  gap: 8px;
+  background: color-mix(in srgb, var(--accent) 3%, var(--bg-subtle));
+  border-color: color-mix(in srgb, var(--accent) 12%, var(--border));
+}
+
+.tm-chips-inline {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
 }
 
-.tm-chip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  padding: 5px 11px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color 0.2s ease;
-}
-
-.tm-chip:hover {
-  border-color: var(--border-hover);
-}
-
-.tm-chip-val {
-  font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--secondary);
-  line-height: 1;
-}
-
-.tm-chip-type {
-  font-size: 10px;
-  font-weight: 500;
+.tm-inline-chip {
+  font-size: 13px;
   color: var(--text-3);
-  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
-/* Branch Sub-process (Term Extraction) */
-.branch-sub {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed color-mix(in srgb, var(--accent) 15%, var(--border));
+.tm-inline-chip strong {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--accent) 65%, var(--text-2));
+  margin-right: 2px;
 }
 
-.sub-indicator {
+/* Extraction Node (inline in LLM flow) */
+.extraction-node {
+  border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
+  background: color-mix(in srgb, var(--accent) 2%, var(--bg-subtle));
+}
+
+.extraction-icon {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.extraction-details {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-3);
+  margin-left: auto;
   flex-wrap: wrap;
-}
-
-.sub-indicator .n-icon {
-  color: var(--accent);
 }
 
 .sub-stat {
@@ -1521,8 +1629,9 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--text-2);
   background: var(--bg-muted);
-  padding: 1px 8px;
+  padding: 2px 8px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 .sub-stat.active {
@@ -1533,6 +1642,14 @@ onBeforeUnmount(() => {
 .sub-stat.error {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+/* Tooltip */
+.pipeline-tooltip {
+  max-width: 260px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
 }
 
 /* ===== Error Bar ===== */
@@ -2117,40 +2234,27 @@ onBeforeUnmount(() => {
 }
 
 /* ===== Responsive ===== */
-@media (max-width: 960px) {
-  .ai-dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .ai-settings-sidebar {
-    position: static;
-    max-height: none;
-    overflow-y: visible;
-  }
-}
-
 @media (max-width: 768px) {
-  .pipeline-fork {
-    flex-direction: column;
-  }
-
-  .fork-spine {
+  .pipeline-svg {
     display: none;
   }
 
-  .fork-branches {
-    margin-left: 0;
-    padding-left: 14px;
-    border-left-width: 2px;
+  .pipeline-hbox {
+    flex-direction: column;
+    gap: 12px;
   }
 
-  .branch-flow {
-    flex-wrap: wrap;
-    gap: 4px;
+  .pipeline-branches {
+    padding-left: 0;
   }
 
-  .tm-hit-chips {
+  .branch-nodes {
     flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tm-chips-inline {
+    gap: 6px;
   }
 
   .audit-chips {
@@ -2200,7 +2304,6 @@ onBeforeUnmount(() => {
     max-width: none;
   }
 
-
   .recent-original,
   .recent-translated {
     max-width: none;
@@ -2227,21 +2330,9 @@ onBeforeUnmount(() => {
     font-size: 15px;
   }
 
-  .pipeline-node.compact {
-    padding: 6px 10px;
-  }
-
-  .fork-branches {
-    padding-left: 10px;
-  }
-
-  .branch-connector {
-    width: 12px;
-  }
-
-  .branch-connector span {
-    left: -10px;
-    width: 22px;
+  .pipeline-node {
+    padding: 8px 12px;
+    gap: 8px;
   }
 
   .node-icon {
@@ -2267,7 +2358,15 @@ onBeforeUnmount(() => {
     padding: 4px 8px;
   }
 
-  .sub-indicator {
+  .tm-chip-val {
+    font-size: 13px;
+  }
+
+  .extraction-details {
+    gap: 4px;
+  }
+
+  .sub-stat {
     font-size: 10px;
   }
 

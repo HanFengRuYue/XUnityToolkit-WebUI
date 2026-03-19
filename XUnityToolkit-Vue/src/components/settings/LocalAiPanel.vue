@@ -6,6 +6,7 @@ import {
   NTag,
   NInputNumber,
   NInput,
+  NSlider,
   NProgress,
   NPopconfirm,
   useMessage,
@@ -348,25 +349,27 @@ onBeforeUnmount(() => {
           <span class="form-hint">修改后需重启工具箱生效</span>
         </div>
         <div class="form-row">
-          <label class="form-label">温度</label>
-          <NInputNumber
+          <label class="form-label">温度（{{ modelValue.temperature }}）</label>
+          <NSlider
             :value="modelValue.temperature"
-            @update:value="(v: number | null) => updateAiSettings({ temperature: v ?? 0.3 })"
+            @update:value="(v: number) => updateAiSettings({ temperature: v })"
             :min="0"
             :max="2"
             :step="0.1"
-            style="width: 140px"
+            :tooltip="true"
+            :format-tooltip="(v: number) => v.toFixed(1)"
           />
           <span class="form-hint">较低的值产生更确定的翻译</span>
         </div>
         <div class="form-row">
-          <label class="form-label">翻译记忆条数</label>
-          <NInputNumber
+          <label class="form-label">翻译记忆条数（{{ modelValue.localContextSize }}）</label>
+          <NSlider
             :value="modelValue.localContextSize"
-            @update:value="(v: number | null) => updateAiSettings({ localContextSize: v ?? 0 })"
+            @update:value="(v: number) => updateAiSettings({ localContextSize: v })"
             :min="0"
             :max="10"
-            style="width: 140px"
+            :step="1"
+            :tooltip="true"
           />
           <span class="form-hint">附带的近期翻译对数量，0 为关闭（本地模式最多 10，默认关闭）</span>
         </div>
