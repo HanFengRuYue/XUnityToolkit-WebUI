@@ -59,6 +59,9 @@ public static class TranslationEditorEndpoints
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
+            if (request.Entries is null)
+                return Results.BadRequest(ApiResult.Fail("请求体缺少 entries 字段"));
+
             // Client-side should validate, but double-check for duplicate originals
             var duplicates = request.Entries
                 .GroupBy(e => e.Original, StringComparer.Ordinal)

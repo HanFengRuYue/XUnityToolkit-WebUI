@@ -122,6 +122,10 @@ export const useGamesStore = defineStore('games', () => {
     showLabels.value = value
   }
 
+  function addGame(game: Game) {
+    games.value.push(game)
+  }
+
   return {
     games,
     loading,
@@ -143,5 +147,6 @@ export const useGamesStore = defineStore('games', () => {
     setCardSize,
     setGap,
     setShowLabels,
+    addGame,
   }
 })

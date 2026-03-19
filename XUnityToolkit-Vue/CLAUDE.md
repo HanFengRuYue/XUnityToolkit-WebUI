@@ -36,10 +36,11 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - **Window listeners in KeepAlive views:** `window.addEventListener` in `onMounted` must pair with `removeEventListener` in BOTH `onDeactivated` AND `onBeforeUnmount`; re-add in `onActivated` — otherwise listener stays active when view is deactivated, or accumulates on re-activation
 - **`onBeforeUnmount` not `onUnmounted`:** Always use `onBeforeUnmount` (not `onUnmounted`) for cleanup — `onUnmounted` fires after the component is already destroyed, too late for safe teardown; `onUnmounted` also never fires for KeepAlive views during normal navigation
 - **KeepAlive child components:** Child components rendered inside KeepAlive-cached views (e.g., `LocalAiPanel` inside `AiTranslationView`) also receive `onActivated`/`onDeactivated` — if they manage SignalR or other resources, they MUST use these hooks (not just `onMounted`/`onBeforeUnmount`)
+- **FontGeneratorView KeepAlive SignalR:** `FontGeneratorView` is cached in `<KeepAlive>` — must create new `HubConnection` in `onActivated` (not just `onMounted`) and tear down in `onDeactivated`; same pattern as other KeepAlive views
 
 ## Patterns & Gotchas
 
-- **Pinia store mutation:** Never mutate store `ref` state directly from views (`store.x = y`); always use store actions — direct mutation bypasses devtools tracking and creates race conditions
+- **Pinia store mutation:** Never mutate store `ref` state directly from views or composables (`store.x = y`, `store.arr.push()`); always use store actions — direct mutation bypasses devtools tracking and creates race conditions
 - **Games store setters:** `setViewMode`, `setSortBy`, `setCardSize`, `setGap`, `setShowLabels` — use these actions instead of direct assignment; `launchGame(id)` handles both API call and `lastPlayedAt` update
 - **GameCard launch:** Must use `gamesStore.launchGame(id)` — never mutate `props.game` directly (Vue prohibits prop mutation; bypasses store reactivity)
 - **Theme default:** CSS `:root` = dark theme; `loadInitialTheme()` defaults to `'system'`; OS detection via `matchMedia`; `resolveTheme('system')` falls back to `'dark'` when OS detection unavailable

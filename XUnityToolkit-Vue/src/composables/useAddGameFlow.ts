@@ -47,7 +47,7 @@ export function useAddGameFlow(message: MessageApiInjection) {
     const game = result.game
     if (!game) return null
 
-    gamesStore.games.push(game)
+    gamesStore.addGame(game)
 
     // Build success message
     const parts: string[] = [`已添加: ${game.name}`]

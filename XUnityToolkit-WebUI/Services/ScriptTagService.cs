@@ -117,6 +117,7 @@ public sealed class ScriptTagService(
         try
         {
             var file = paths.ScriptTagFile(gameId);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
             var json = JsonSerializer.Serialize(config, FileHelper.DataJsonOptions);
             var tmpPath = file + ".tmp";
             await File.WriteAllTextAsync(tmpPath, json, ct);

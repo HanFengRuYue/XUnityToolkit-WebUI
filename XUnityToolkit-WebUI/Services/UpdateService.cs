@@ -527,8 +527,7 @@ public sealed class UpdateService(
         }
         finally
         {
-            var cts = _downloadCts;
-            _downloadCts = null;
+            var cts = Interlocked.Exchange(ref _downloadCts, null);
             cts?.Dispose();
         }
     }
@@ -677,7 +676,7 @@ public sealed class UpdateService(
                 _status = new UpdateStatusInfo
                 {
                     State = UpdateState.Error,
-                    Error = errorJson
+                    Error = "上次更新失败，请查看日志获取详情"
                 };
                 await BroadcastStatus();
                 File.Delete(errorPath);

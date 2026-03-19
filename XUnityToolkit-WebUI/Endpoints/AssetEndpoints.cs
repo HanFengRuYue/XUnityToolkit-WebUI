@@ -38,11 +38,13 @@ public static class AssetEndpoints
 
                 result.GameId = id;
 
-                // Cache the result
+                // Cache the result (use temp-then-move for atomicity)
                 var cachePath = paths.ExtractedTextsFile(id);
                 Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
                 var json = JsonSerializer.Serialize(result, JsonOptions);
-                await File.WriteAllTextAsync(cachePath, json, ct);
+                var tmpPath = cachePath + ".tmp";
+                await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
+                File.Move(tmpPath, cachePath, overwrite: true);
 
                 logger.LogInformation("资产提取完成并缓存: {Count} 条文本, 语言={Lang}",
                     result.TotalTextsExtracted, result.DetectedLanguage);
@@ -208,7 +210,9 @@ public static class AssetEndpoints
 
             var file = paths.PreTranslationRegexFile(id);
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            await File.WriteAllTextAsync(file, request.Patterns ?? "");
+            var tmpFile = file + ".tmp";
+            await File.WriteAllTextAsync(tmpFile, request.Patterns ?? "");
+            File.Move(tmpFile, file, overwrite: true);
             return Results.Ok(ApiResult.Ok());
         });
     }
