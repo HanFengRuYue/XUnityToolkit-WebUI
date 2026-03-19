@@ -31,7 +31,7 @@ public static class FontReplacementEndpoints
         // POST .../replace
         group.MapPost("/replace", async (string id, FontReplacementRequest request,
             GameLibraryService library, FontReplacementService fontReplacementService,
-            IHubContext<InstallProgressHub> hubContext, CancellationToken ct) =>
+            AppDataPaths paths, IHubContext<InstallProgressHub> hubContext, CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
@@ -52,9 +52,20 @@ public static class FontReplacementEndpoints
                     await hubContext.Clients.Group($"font-replacement-{id}")
                         .SendAsync("fontReplacementProgress", p, CancellationToken.None);
                 });
+                // Validate CustomFontPath: must be within the game's custom font directory
+                string? validatedFontPath = null;
+                if (request.CustomFontPath is not null)
+                {
+                    var customDir = Path.GetFullPath(paths.GetCustomFontDirectory(id));
+                    var resolved = Path.GetFullPath(request.CustomFontPath);
+                    if (!resolved.StartsWith(customDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                        && !resolved.Equals(customDir, StringComparison.OrdinalIgnoreCase))
+                        return Results.BadRequest(ApiResult.Fail("自定义字体路径不安全"));
+                    validatedFontPath = resolved;
+                }
                 var result = await fontReplacementService.ReplaceFontsAsync(
                     game.GamePath, id, game.DetectedInfo,
-                    request.Fonts, request.CustomFontPath, progress, cts.Token);
+                    request.Fonts, validatedFontPath, progress, cts.Token);
                 return Results.Ok(ApiResult<FontReplacementResult>.Ok(result));
             }
             finally

@@ -227,7 +227,10 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
                 };
 
                 var newManifestJson = System.Text.Json.JsonSerializer.Serialize(newManifest);
-                File.WriteAllText(Path.Combine(backupDir, "manifest.json"), newManifestJson);
+                var manifestPath = Path.Combine(backupDir, "manifest.json");
+                var tmpManifest = manifestPath + ".tmp";
+                File.WriteAllText(tmpManifest, newManifestJson);
+                File.Move(tmpManifest, manifestPath, overwrite: true);
             }
         }
 
