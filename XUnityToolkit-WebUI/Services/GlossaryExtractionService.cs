@@ -141,11 +141,13 @@ public sealed class GlossaryExtractionService(
         var acquired = await _extractionSemaphore.WaitAsync(TimeSpan.FromSeconds(30));
         if (!acquired)
         {
-            // Re-queue pairs and reset trigger so they'll be picked up next time
+            // Re-queue pairs and reset trigger so they'll be picked up after one more interval
             var buffer = _buffers.GetOrAdd(gameId, _ => new ConcurrentQueue<TranslationPair>());
             foreach (var pair in pairs) buffer.Enqueue(pair);
             var state = _gameStates.GetOrAdd(gameId, _ => new GameExtractionState());
-            Interlocked.Exchange(ref state.LastExtractionAt, 0);
+            var total = _totalPerGame.GetOrAdd(gameId, 0);
+            var interval = CalculateInterval(total);
+            Interlocked.Exchange(ref state.LastExtractionAt, Math.Max(0, total - interval + 1));
             logger.LogWarning("术语提取信号量超时，{Count} 条翻译已重新入队", pairs.Count);
             return;
         }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import {
   NIcon,
   NButton,
@@ -204,6 +204,7 @@ async function handleTest() {
 }
 
 async function handleSaveSettings() {
+  if (gpuLayers.value === null || contextLength.value === null) return
   try {
     await localLlmApi.saveSettings({
       gpuLayers: gpuLayers.value,
@@ -229,6 +230,15 @@ onMounted(async () => {
     gpuLayers.value = store.settings.gpuLayers
     contextLength.value = store.settings.contextLength
   }
+})
+
+onActivated(async () => {
+  await store.connect()
+  await store.fetchStatus()
+})
+
+onDeactivated(() => {
+  store.disconnect()
 })
 
 onBeforeUnmount(() => {

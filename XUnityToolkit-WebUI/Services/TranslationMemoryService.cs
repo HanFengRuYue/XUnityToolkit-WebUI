@@ -276,12 +276,20 @@ public sealed class TranslationMemoryService(
 
         // Cancel existing timer and atomically swap in new CTS
         var cts = new CancellationTokenSource();
-        var old = _debounceTimers.GetValueOrDefault(gameId);
-        _debounceTimers[gameId] = cts;
-        if (old is not null)
+        while (true)
         {
-            try { old.Cancel(); } catch (ObjectDisposedException) { }
-            old.Dispose();
+            var old = _debounceTimers.GetOrAdd(gameId, cts);
+            if (old == cts)
+                break; // Successfully inserted new CTS
+
+            // Try to replace existing CTS atomically
+            if (_debounceTimers.TryUpdate(gameId, cts, old))
+            {
+                try { old.Cancel(); } catch (ObjectDisposedException) { }
+                old.Dispose();
+                break;
+            }
+            // CAS failed — another thread replaced it; retry
         }
         var token = cts.Token;
 
