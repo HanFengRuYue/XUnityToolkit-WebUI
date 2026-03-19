@@ -279,7 +279,7 @@ if (-not $SkipDownload) {
     }
 
     # ── llama.cpp binaries from GitHub Releases (pinned version) ──
-    $llamaTag = "b8354"
+    $llamaTag = "b8416"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30

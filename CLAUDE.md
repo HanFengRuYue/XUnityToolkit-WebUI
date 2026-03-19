@@ -97,6 +97,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Game launch safety:** Always validate `exePath` is inside `GamePath` via `Path.GetFullPath` + `StartsWith` before `Process.Start`
 - **Process arguments:** Never interpolate user input into argument strings without sanitizing quotes; strip `"` from user-supplied paths used in `-m "..."` style arguments
 - **CancellationTokenSource:** Always `Dispose()` when removing from `ConcurrentDictionary`; dispose old CTS before overwriting
+- **CTS ownership in fire-and-forget endpoints:** The producer (e.g., `/replace` handler's `finally` block) owns disposal; cancel endpoints should only call `.Cancel()`, NOT `.Dispose()` — prevents double-dispose race between cancel and completion
 - **Process disposal:** Always call `Process.Dispose()` before setting `_process = null`
 - **Error messages to clients:** Never return `ex.Message` from generic `catch (Exception)` blocks — use safe static messages; `ex.Message` from typed catches (`HttpRequestException`, `InvalidOperationException`) is acceptable
 - **Global exception handler:** Middleware in `Program.cs` catches unhandled `/api` exceptions, logs full details server-side, returns generic error to client

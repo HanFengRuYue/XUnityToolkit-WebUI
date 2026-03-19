@@ -1,17 +1,19 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { NIcon } from 'naive-ui'
-import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined } from '@vicons/material'
+import { NIcon, NTooltip } from 'naive-ui'
+import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined, KeyboardDoubleArrowLeftOutlined, KeyboardDoubleArrowRightOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
 import { settingsApi } from '@/api/games'
 import { useUpdateStore } from '@/stores/update'
+import { useSidebarStore } from '@/stores/sidebar'
 
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
 const appVersion = ref('')
 const updateStore = useUpdateStore()
+const sidebarStore = useSidebarStore()
 
 const showUpdateBadge = computed(() =>
   updateStore.isUpdateAvailable || updateStore.isReady || updateStore.isDownloading
@@ -25,20 +27,28 @@ onMounted(async () => {
   } catch {
     appVersion.value = '1.0.0'
   }
-  // Initialize update system early so we receive SignalR broadcasts from startup auto-check
   updateStore.init()
+  window.addEventListener('resize', updateMobile)
+})
+
+onBeforeUnmount(() => {
+  removeGuard()
+  window.removeEventListener('resize', updateMobile)
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
 })
 
 // Cache top-level pages to avoid full re-renders on navigation
 const cachedPages = ['LibraryView', 'AiTranslationView', 'FontGeneratorView', 'LogView', 'SettingsView']
 
-const navItems = [
+const mainNavItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
   { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
   { label: '字体生成', key: '/font-generator', icon: FontDownloadOutlined },
   { label: '运行日志', key: '/logs', icon: ArticleOutlined },
-  { label: '设置', key: '/settings', icon: SettingsOutlined },
 ]
+
+const settingsNavItem = { label: '设置', key: '/settings', icon: SettingsOutlined }
 
 function navigateTo(key: string) {
   router.push(key)
@@ -66,13 +76,57 @@ const removeGuard = router.beforeEach((to, from) => {
   }
 })
 
-onUnmounted(() => {
-  removeGuard()
-})
-
 watch(() => route.path, () => {
   sidebarOpen.value = false
 })
+
+// Mobile detection
+const isMobile = ref(window.innerWidth <= 768)
+function updateMobile() {
+  isMobile.value = window.innerWidth <= 768
+}
+
+// Sidebar width (inline style, not applied on mobile)
+const sidebarStyle = computed(() => {
+  if (isMobile.value) return undefined
+  return { width: sidebarStore.effectiveWidth + 'px' }
+})
+
+// Drag resize
+const isResizing = ref(false)
+let startX = 0
+let startWidth = 0
+
+function onResizeStart(e: MouseEvent) {
+  if (sidebarStore.collapsed || isMobile.value) return
+  e.preventDefault()
+  isResizing.value = true
+  startX = e.clientX
+  startWidth = sidebarStore.customWidth
+  document.addEventListener('mousemove', onResizeMove)
+  document.addEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResizeMove(e: MouseEvent) {
+  if (!isResizing.value) return
+  const delta = e.clientX - startX
+  sidebarStore.setWidth(startWidth + delta)
+}
+
+function onResizeEnd() {
+  if (!isResizing.value) return
+  isResizing.value = false
+  document.removeEventListener('mousemove', onResizeMove)
+  document.removeEventListener('mouseup', onResizeEnd)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+}
+
+function onResizeDoubleClick() {
+  sidebarStore.resetWidth()
+}
 </script>
 
 <template>
@@ -95,7 +149,11 @@ watch(() => route.path, () => {
       <div v-if="sidebarOpen" class="sidebar-overlay" @click="sidebarOpen = false"></div>
     </Transition>
 
-    <aside class="sidebar" :class="{ open: sidebarOpen }">
+    <aside
+      class="sidebar"
+      :class="{ open: sidebarOpen, collapsed: sidebarStore.collapsed && !isMobile, resizing: isResizing }"
+      :style="sidebarStyle"
+    >
       <div class="sidebar-header">
         <div class="sidebar-logo">
           <img class="logo-icon" src="/logo.png" width="32" height="32" alt="XUnity Toolkit" />
@@ -109,26 +167,69 @@ watch(() => route.path, () => {
       <div class="sidebar-divider"></div>
 
       <nav class="sidebar-nav">
-        <a
-          v-for="item in navItems"
-          :key="item.key"
-          class="nav-item"
-          :class="{ active: isActive(item.key) }"
-          @click="navigateTo(item.key)"
-        >
-          <NIcon :size="20">
-            <component :is="item.icon" />
-          </NIcon>
-          <span>{{ item.label }}</span>
-          <span v-if="item.key === '/settings' && showUpdateBadge" class="update-dot" />
-        </a>
+        <template v-for="item in mainNavItems" :key="item.key">
+          <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+            <template #trigger>
+              <a class="nav-item" :class="{ active: isActive(item.key) }" @click="navigateTo(item.key)">
+                <NIcon :size="20"><component :is="item.icon" /></NIcon>
+                <span class="nav-label">{{ item.label }}</span>
+              </a>
+            </template>
+            {{ item.label }}
+          </NTooltip>
+          <a v-else class="nav-item" :class="{ active: isActive(item.key) }" @click="navigateTo(item.key)">
+            <NIcon :size="20"><component :is="item.icon" /></NIcon>
+            <span class="nav-label">{{ item.label }}</span>
+          </a>
+        </template>
       </nav>
 
+      <div class="sidebar-collapse-toggle">
+        <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+          <template #trigger>
+            <button class="collapse-btn" @click="sidebarStore.toggleCollapse">
+              <NIcon :size="18"><KeyboardDoubleArrowRightOutlined /></NIcon>
+            </button>
+          </template>
+          展开侧栏
+        </NTooltip>
+        <button v-else class="collapse-btn" @click="sidebarStore.toggleCollapse">
+          <NIcon :size="18"><KeyboardDoubleArrowLeftOutlined /></NIcon>
+          <span class="collapse-label">收起</span>
+        </button>
+      </div>
+
       <div class="sidebar-spacer"></div>
+
+      <div class="sidebar-bottom-nav">
+        <div class="bottom-divider"></div>
+        <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+          <template #trigger>
+            <a class="nav-item" :class="{ active: isActive(settingsNavItem.key) }" @click="navigateTo(settingsNavItem.key)">
+              <NIcon :size="20"><component :is="settingsNavItem.icon" /></NIcon>
+              <span class="nav-label">{{ settingsNavItem.label }}</span>
+              <span v-if="showUpdateBadge" class="update-dot" />
+            </a>
+          </template>
+          {{ settingsNavItem.label }}
+        </NTooltip>
+        <a v-else class="nav-item" :class="{ active: isActive(settingsNavItem.key) }" @click="navigateTo(settingsNavItem.key)">
+          <NIcon :size="20"><component :is="settingsNavItem.icon" /></NIcon>
+          <span class="nav-label">{{ settingsNavItem.label }}</span>
+          <span v-if="showUpdateBadge" class="update-dot" />
+        </a>
+      </div>
 
       <div class="sidebar-footer">
         <span class="footer-version">v{{ appVersion }}</span>
       </div>
+
+      <!-- Resize handle -->
+      <div
+        class="sidebar-resize-handle"
+        @mousedown="onResizeStart"
+        @dblclick="onResizeDoubleClick"
+      ></div>
     </aside>
 
     <main class="main-content">
@@ -162,6 +263,10 @@ watch(() => route.path, () => {
   flex-shrink: 0;
   position: relative;
   animation: slideInLeft 0.4s var(--ease-out) backwards;
+  transition: width 0.3s var(--ease-out), background 0.3s ease, border-color 0.3s ease;
+}
+
+.sidebar.resizing {
   transition: background 0.3s ease, border-color 0.3s ease;
 }
 
@@ -184,6 +289,7 @@ watch(() => route.path, () => {
 
 .sidebar-header {
   padding: 24px 20px 16px;
+  transition: padding 0.3s var(--ease-out);
 }
 
 .sidebar-logo {
@@ -191,17 +297,24 @@ watch(() => route.path, () => {
   align-items: center;
   gap: 12px;
   animation: breathe 4s ease-in-out infinite;
+  transition: justify-content 0.3s var(--ease-out);
 }
 
 .logo-icon {
   filter: var(--logo-glow);
   border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .logo-text {
   display: flex;
   flex-direction: column;
   line-height: 1.15;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.2s ease, max-width 0.3s var(--ease-out);
+  max-width: 150px;
 }
 
 .logo-name {
@@ -227,6 +340,7 @@ watch(() => route.path, () => {
   background-size: 200% 100%;
   animation: shimmer 4s ease-in-out infinite;
   opacity: 0.4;
+  transition: margin 0.3s var(--ease-out);
 }
 
 /* ===== Navigation ===== */
@@ -235,6 +349,7 @@ watch(() => route.path, () => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transition: padding 0.3s var(--ease-out);
 }
 
 .nav-item {
@@ -254,6 +369,19 @@ watch(() => route.path, () => {
   border-left: 3px solid transparent;
   margin-left: -1px;
   animation: slideInLeft 0.4s var(--ease-out) backwards;
+  overflow: hidden;
+}
+
+.nav-item .n-icon {
+  flex-shrink: 0;
+}
+
+.nav-label {
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.2s ease, max-width 0.3s var(--ease-out);
+  max-width: 200px;
 }
 
 .nav-item:nth-child(1) { animation-delay: 0.12s; }
@@ -287,11 +415,62 @@ watch(() => route.path, () => {
   box-shadow: 0 0 6px var(--accent-glow);
   margin-left: auto;
   animation: pulse-dot 2s ease-in-out infinite;
+  flex-shrink: 0;
 }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* ===== Collapse Toggle ===== */
+.sidebar-collapse-toggle {
+  padding: 8px 12px 0;
+  transition: padding 0.3s var(--ease-out);
+}
+
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font-body);
+  transition: all 0.2s ease;
+}
+
+.collapse-btn:hover {
+  background: var(--bg-subtle-hover);
+  color: var(--text-2);
+  border-color: var(--border);
+}
+
+.collapse-label {
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ===== Bottom Nav (Settings) ===== */
+.sidebar-bottom-nav {
+  padding: 0 12px 4px;
+  transition: padding 0.3s var(--ease-out);
+}
+
+.bottom-divider {
+  height: 1px;
+  margin: 0 8px 8px;
+  background: var(--border);
+  opacity: 0.6;
+}
+
+.sidebar-bottom-nav .nav-item {
+  animation-delay: 0.36s;
 }
 
 /* ===== Sidebar Footer ===== */
@@ -302,6 +481,7 @@ watch(() => route.path, () => {
 .sidebar-footer {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
+  transition: padding 0.3s var(--ease-out), opacity 0.2s ease;
 }
 
 .footer-version {
@@ -310,6 +490,107 @@ watch(() => route.path, () => {
   color: var(--text-3);
   letter-spacing: 0.02em;
   animation: fadeIn 0.6s var(--ease-out) 0.5s backwards;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* ===== Resize Handle ===== */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background 0.2s ease;
+}
+
+.sidebar-resize-handle:hover {
+  background: var(--accent-border);
+}
+
+.sidebar-resize-handle:active {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* ===== Collapsed State ===== */
+.sidebar.collapsed .sidebar-header {
+  padding: 24px 0 16px;
+}
+
+.sidebar.collapsed .sidebar-logo {
+  justify-content: center;
+}
+
+.sidebar.collapsed .logo-text {
+  opacity: 0;
+  max-width: 0;
+}
+
+.sidebar.collapsed .sidebar-divider {
+  margin: 4px 12px 12px;
+}
+
+.sidebar.collapsed .sidebar-nav {
+  padding: 0 8px;
+}
+
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 11px 0;
+  border-left-color: transparent;
+  margin-left: 0;
+}
+
+.sidebar.collapsed .nav-item.active {
+  border-left-color: transparent;
+}
+
+.sidebar.collapsed .nav-label {
+  opacity: 0;
+  max-width: 0;
+}
+
+.sidebar.collapsed .update-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  margin-left: 0;
+  width: 7px;
+  height: 7px;
+}
+
+.sidebar.collapsed .sidebar-collapse-toggle {
+  padding: 8px 8px 0;
+}
+
+.sidebar.collapsed .collapse-btn {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.sidebar.collapsed .sidebar-bottom-nav {
+  padding: 0 8px 4px;
+}
+
+.sidebar.collapsed .bottom-divider {
+  margin: 0 4px 8px;
+}
+
+.sidebar.collapsed .sidebar-footer {
+  padding: 12px 8px;
+  text-align: center;
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  border-top: none;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-resize-handle {
+  display: none;
 }
 
 /* ===== Main Content ===== */
@@ -434,6 +715,7 @@ watch(() => route.path, () => {
     top: 0;
     left: 0;
     bottom: 0;
+    width: 230px !important;
     z-index: 200;
     transform: translateX(-100%);
     transition: transform 0.3s var(--ease-out);
@@ -443,6 +725,15 @@ watch(() => route.path, () => {
 
   .sidebar.open {
     transform: translateX(0);
+  }
+
+  /* Hide desktop-only features on mobile */
+  .sidebar-collapse-toggle {
+    display: none;
+  }
+
+  .sidebar-resize-handle {
+    display: none;
   }
 
   /* Main Content padding */

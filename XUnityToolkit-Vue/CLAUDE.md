@@ -14,7 +14,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 
 - **Theme:** Dark/light/system via `data-theme`; `useThemeStore` (localStorage + OS) is authoritative, not backend `AppSettings.Theme`; `ThemeMode = 'dark' | 'light' | 'system'`; use `resolvedTheme` (always `'dark'|'light'`) for rendering decisions, NOT `mode` (which can be `'system'`); default is `'system'`; `matchMedia` listener auto-updates when OS theme changes; light mode auto-darkens accent 15%
 - **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, etc.); theme-aware: use `--bg-subtle`/`--bg-muted` — never hardcode `rgba(255,255,255,...)`
-- **Layout:** Sidebar (230px) + scrollable content; responsive at 768px (tablet drawer) and 480px (phone single-column)
+- **Layout:** Sidebar (230px default, collapsible to 64px, resizable 180-400px via drag) + scrollable content; `useSidebarStore` persists state to localStorage (`sidebarCollapsed`, `sidebarWidth`); responsive at 768px (tablet drawer, collapse/resize disabled) and 480px (phone single-column)
 - **Cards:** `.section-card` with `.section-icon`/`.section-title` (base `--accent`; semantic `.danger`/`.warning` only); decorative colors → `--accent`; `color-mix()` for translucent backgrounds
 - **Shared CSS (main.css):** `.page-title`, `.page-title-icon`, `.section-card`, `.section-header`, `.section-title`, `.section-icon`, `.header-actions`, `.section-desc`, `.loading-state`, `.table-container`, `.add-entry-row`, `.unsaved-badge`, `.auto-save-badge`, `.empty-hint`, `.back-button` are global classes — do NOT redefine in scoped styles
 - **Sub-page layout:** Game sub-pages use `.sub-page` (24px title) + `.sub-page-header` + `.back-button`; top-level pages use `.page-title` directly (26px)
@@ -27,7 +27,7 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 
 ## Adding a New Page
 
-- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `navItems`
+- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `mainNavItems` (settings is separate as `settingsNavItem`)
 - **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`; sub-pages include `TermEditorView`, `TranslationEditorView`, `ConfigEditorView`, `AssetExtractionView`, `FontReplacementView`, `BepInExLogView`
 - **TermEditorView:** Unified term editor (replaces old GlossaryEditorView); filter chip bar for type (translate/doNotTranslate) and category; NDataTable with virtual scroll, inline editing, column visibility control; single `useAutoSave` instance; JSON/CSV import/export; cross-game import via modal
 - **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
@@ -39,8 +39,11 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 ## Patterns & Gotchas
 
 - **Pinia store mutation:** Never mutate store `ref` state directly from views (`store.x = y`); always use store actions — direct mutation bypasses devtools tracking and creates race conditions
+- **Games store setters:** `setViewMode`, `setSortBy`, `setCardSize`, `setGap`, `setShowLabels` — use these actions instead of direct assignment; `launchGame(id)` handles both API call and `lastPlayedAt` update
+- **GameCard launch:** Must use `gamesStore.launchGame(id)` — never mutate `props.game` directly (Vue prohibits prop mutation; bypasses store reactivity)
 - **Theme default:** CSS `:root` = dark theme; `loadInitialTheme()` defaults to `'system'`; OS detection via `matchMedia`; `resolveTheme('system')` falls back to `'dark'` when OS detection unavailable
 - **Scoped → global CSS:** Scoped styles (`.class[data-v-xxx]`) have higher specificity than global (`.class`); when extracting shared styles to `main.css`, must REMOVE scoped duplicates or they'll override; page-specific overrides stay in scoped with just the differing properties
+- **Collapse animation:** Use `display: grid; grid-template-rows: 1fr/0fr` pattern (matching global `.section-body` in `main.css`), NOT `max-height` — `max-height` causes sluggish easing since transition applies to full 0→Npx range, not actual content height; **the `-body-inner` element MUST NOT have `padding`** — padding doesn't collapse with `0fr` grid tracks; either use a nested wrapper for padding, or transition `padding-top/padding-bottom` to `0` when collapsed (see `.settings-group-body-inner` pattern in `AiTranslationView.vue`)
 - **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232
 - **KeepAlive:** Top-level views (Library, AiTranslation, FontGenerator, Log, Settings) are cached via `<KeepAlive :include>` in AppShell; each MUST have `defineOptions({ name: 'XxxView' })` after imports
 - **LogView level sync:** `selectedLevels` (default selection) and `levelDefs` (filter pill definitions) must both include a level for it to appear and be active; `levelClass()` styling must also have a matching CSS class (e.g., `.level-dbg`)
@@ -56,9 +59,11 @@ Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overvie
 - `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
 - **RouterView key:** `:key="route.path"` ensures transitions fire for same-component different-route navigations
 - **RouteMeta extension:** `env.d.ts` declares `depth?: number` on `RouteMeta` for TypeScript
+- **Pipeline fork CSS classes:** `.pipeline-fork` > `.fork-root` (received) + `.fork-spine` (connector) + `.fork-branches` > `.fork-branch` > `.branch-connector` + `.branch-body` > `.branch-header` + `.branch-flow` + `.branch-sub`; TM branch uses `--secondary` color; term extraction shown as `.sub-indicator` + `.sub-stat` inside LLM `.branch-sub`
 - **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
 - **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
 - After changes: verify with `npx vue-tsc --build` and `npm run build`
+- **Visual verification:** Always use Playwright MCP (`browser_navigate` + `browser_take_screenshot`) to verify UI changes before reporting completion — type-check and build success do NOT guarantee correct visual output
 - Verify icon: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
 - **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
