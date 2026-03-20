@@ -249,7 +249,7 @@ onMounted(async () => {
 
 onActivated(async () => {
   await aiStore.connect()
-  await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats()])
+  await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats(), loadSettings()])
   await nextTick()
   computeConnections()
   setupPipelineObserver()

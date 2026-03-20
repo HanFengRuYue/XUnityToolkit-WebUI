@@ -191,6 +191,9 @@ public sealed class LlmTranslationService(
             var enabledEndpoints = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
             if (enabledEndpoints.Count == 0)
             {
+                logger.LogWarning("没有可用的 AI 提供商: 总端点数={Total}, 各端点状态=[{Details}]",
+                    ai.Endpoints.Count,
+                    string.Join(", ", ai.Endpoints.Select(e => $"{e.Name}(Enabled={e.Enabled}, HasKey={!string.IsNullOrWhiteSpace(e.ApiKey)})")));
                 RecordError("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商", gameId: gameId);
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
@@ -829,7 +832,7 @@ public sealed class LlmTranslationService(
         string? overrideSystemPrompt = null)
     {
         Interlocked.Increment(ref _queued);
-        _ = BroadcastStats();
+        _ = BroadcastStats(force: true);
 
         bool semaphoreAcquired = false;
         try
@@ -845,14 +848,14 @@ public sealed class LlmTranslationService(
         {
             // Semaphore not acquired (timeout or cancellation): only decrement queued
             Interlocked.Decrement(ref _queued);
-            _ = BroadcastStats();
+            _ = BroadcastStats(force: true);
             throw;
         }
 
         // Acquired semaphore: transition from queued to translating
         Interlocked.Decrement(ref _queued);
         Interlocked.Increment(ref _translating);
-        _ = BroadcastStats();
+        _ = BroadcastStats(force: true);
 
         const int maxRetries = 2;
         ApiEndpointConfig? chosenEndpoint = null;
@@ -932,7 +935,7 @@ public sealed class LlmTranslationService(
             {
                 Interlocked.Decrement(ref _translating);
                 semaphore.Release();
-                _ = BroadcastStats();
+                _ = BroadcastStats(force: true);
             }
         }
     }

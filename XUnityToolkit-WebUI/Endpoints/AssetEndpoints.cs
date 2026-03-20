@@ -106,6 +106,7 @@ public static class AssetEndpoints
             PreTranslationService preTranslation,
             AppSettingsService settingsService,
             AppDataPaths paths,
+            ILogger<PreTranslationService> logger,
             CancellationToken ct) =>
         {
             if (!Guid.TryParse(id, out _))
@@ -115,7 +116,12 @@ public static class AssetEndpoints
             var ai = settings.AiTranslation;
             var hasProvider = ai.Endpoints.Any(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey));
             if (!hasProvider)
+            {
+                logger.LogWarning("预翻译检查失败: 总端点数={Total}, 各端点状态=[{Details}]",
+                    ai.Endpoints.Count,
+                    string.Join(", ", ai.Endpoints.Select(e => $"{e.Name}(Enabled={e.Enabled}, HasKey={!string.IsNullOrWhiteSpace(e.ApiKey)})")));
                 return Results.BadRequest(ApiResult.Fail("请先在 AI 翻译页面配置至少一个 AI 提供商"));
+            }
 
             var cachePath = paths.ExtractedTextsFile(id);
             if (!File.Exists(cachePath))
