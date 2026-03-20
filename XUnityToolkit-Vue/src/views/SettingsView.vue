@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, watch, nextTick } from 'vue'
 import {
   NButton,
   NInput,
@@ -106,7 +106,7 @@ const themeOptions = [
   { label: '浅色主题', value: 'light' },
 ]
 
-const { enable: enableAutoSave } = useAutoSave(
+const { enable: enableAutoSave, disable: disableAutoSave } = useAutoSave(
   () => settings.value,
   async () => {
     try {
@@ -129,6 +129,7 @@ watch(() => settings.value.accentColor, (newColor) => {
 })
 
 async function loadSettings() {
+  disableAutoSave()
   try {
     const loaded = await settingsApi.get()
     // Use frontend theme store as source of truth (localStorage + OS detection),
@@ -323,6 +324,8 @@ onMounted(() => {
   loadVersion()
   loadDataPath()
 })
+
+onActivated(() => loadSettings())
 </script>
 
 <template>
