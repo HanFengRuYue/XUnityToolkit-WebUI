@@ -56,6 +56,7 @@ public sealed class LlmTranslationService(
     private long _totalTranslated;
     private long _totalReceived; // total incoming translation requests
     private long _totalErrors;   // total failed translations
+    private long _totalFailedTexts; // total texts from failed TranslateAsync calls (for queue computation)
     private long _translating;   // text count actively calling LLM API (inside semaphore)
     private long _queued;        // text count waiting for semaphore slot
     private long _lastRequestTicks; // 0 = never
@@ -100,7 +101,9 @@ public sealed class LlmTranslationService(
     // ── BroadcastStats throttle ──
     private long _lastBroadcastTicks;
 
-    public bool HasPendingTranslations => Interlocked.Read(ref _translating) > 0 || Interlocked.Read(ref _queued) > 0;
+    public bool HasPendingTranslations =>
+        Interlocked.Read(ref _translating) > 0 ||
+        Interlocked.Read(ref _totalReceived) > Interlocked.Read(ref _totalTranslated) + Interlocked.Read(ref _totalFailedTexts);
 
     public bool Enabled
     {
@@ -120,10 +123,14 @@ public sealed class LlmTranslationService(
             ? (double)Interlocked.Read(ref _totalResponseTimeMs) / totalReqs
             : 0;
 
+        var totalReceived = Interlocked.Read(ref _totalReceived);
+        var totalTranslated = Interlocked.Read(ref _totalTranslated);
+        var totalFailedTexts = Interlocked.Read(ref _totalFailedTexts);
+
         return new TranslationStats(
-            TotalTranslated: Interlocked.Read(ref _totalTranslated),
+            TotalTranslated: totalTranslated,
             Translating: (int)Interlocked.Read(ref _translating),
-            Queued: (int)Interlocked.Read(ref _queued),
+            Queued: (int)Math.Max(0, totalReceived - totalTranslated - totalFailedTexts),
             LastRequestAt: Interlocked.Read(ref _lastRequestTicks) is var ticks and > 0
                 ? new DateTime(ticks, DateTimeKind.Utc)
                 : null,
@@ -132,7 +139,7 @@ public sealed class LlmTranslationService(
             RequestsPerMinute: _requestTimestamps.Count,
             Enabled: Volatile.Read(ref _enabled),
             RecentTranslations: _recentTranslations.ToArray(),
-            TotalReceived: Interlocked.Read(ref _totalReceived),
+            TotalReceived: totalReceived,
             TotalErrors: Interlocked.Read(ref _totalErrors),
             RecentErrors: _recentErrors.ToArray(),
             CurrentGameId: Volatile.Read(ref _currentGameId)
@@ -174,14 +181,14 @@ public sealed class LlmTranslationService(
             Volatile.Write(ref _currentGameId, gameId);
         _ = BroadcastStats();
 
-        if (!Volatile.Read(ref _enabled))
-        {
-            RecordError("AI 翻译功能已停用", gameId: gameId);
-            throw new InvalidOperationException("AI 翻译功能已停用");
-        }
-
+        bool completed = false;
         try
         {
+            if (!Volatile.Read(ref _enabled))
+            {
+                RecordError("AI 翻译功能已停用", gameId: gameId);
+                throw new InvalidOperationException("AI 翻译功能已停用");
+            }
             var settings = await settingsService.GetAsync(ct);
             var ai = settings.AiTranslation;
 
@@ -815,10 +822,13 @@ public sealed class LlmTranslationService(
             }
 
             Interlocked.Add(ref _totalTranslated, texts.Count);
+            completed = true;
             return translations;
         }
         finally
         {
+            if (!completed)
+                Interlocked.Add(ref _totalFailedTexts, texts.Count);
             _ = BroadcastStats(force: true);
         }
     }
