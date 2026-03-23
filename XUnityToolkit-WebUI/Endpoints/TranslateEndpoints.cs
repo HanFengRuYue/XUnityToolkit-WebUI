@@ -93,6 +93,14 @@ public static class TranslateEndpoints
             }
         });
 
+        // Lightweight ping endpoint — LLMTranslate.dll calls this on Initialize to verify connectivity
+        app.MapGet("/api/translate/ping", (string? gameId, PluginHealthCheckService healthService) =>
+        {
+            if (!string.IsNullOrEmpty(gameId))
+                healthService.RecordPing(gameId);
+            return Results.Ok(new { status = "ok" });
+        });
+
         app.MapGet("/api/translate/stats", (
             LlmTranslationService translationService,
             DynamicPatternService dynamicPatternService,

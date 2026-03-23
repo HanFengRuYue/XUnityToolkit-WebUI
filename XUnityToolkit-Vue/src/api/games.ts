@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -279,6 +279,12 @@ export const bepinexLogApi = {
   get: (id: string) => api.get<BepInExLogResponse>(`/api/games/${id}/bepinex-log`),
   analyze: (id: string) => api.post<BepInExLogAnalysis>(`/api/games/${id}/bepinex-log/analyze`, {}),
   getDownloadUrl: (id: string) => `/api/games/${id}/bepinex-log/download`,
+}
+
+// Plugin Health Check
+export const pluginHealthApi = {
+  check: (id: string) => api.get<PluginHealthReport>(`/api/games/${id}/health-check`),
+  verify: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/verify`, {}),
 }
 
 // Term Candidates

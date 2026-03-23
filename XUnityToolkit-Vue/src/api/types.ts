@@ -69,6 +69,7 @@ export type InstallStep =
   | 'GeneratingConfig'
   | 'ApplyingConfig'
   | 'ExtractingAssets'
+  | 'VerifyingHealth'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
   | 'Complete'
@@ -659,6 +660,24 @@ export interface BepInExLogAnalysis {
   report: string
   endpointName: string
   analyzedAt: string
+}
+
+// Plugin Health Check
+export type HealthStatus = 'Healthy' | 'Warning' | 'Error' | 'Unknown'
+
+export interface HealthCheckItem {
+  id: string
+  label: string
+  status: HealthStatus
+  detail?: string
+}
+
+export interface PluginHealthReport {
+  overall: HealthStatus
+  checks: HealthCheckItem[]
+  logLastModified?: string
+  gameNeverRun: boolean
+  checkedAt: string
 }
 
 // Online Update

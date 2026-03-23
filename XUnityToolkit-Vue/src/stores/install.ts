@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { gamesApi } from '@/api/games'
-import type { InstallationStatus, XUnityConfig } from '@/api/types'
+import type { InstallationStatus, XUnityConfig, PluginHealthReport } from '@/api/types'
 
 export type OperationType = 'install' | 'uninstall'
 
@@ -18,6 +18,7 @@ export const useInstallStore = defineStore('install', () => {
   const isDrawerOpen = ref(false)
   const activeGameId = ref<string | null>(null)
   const operationType = ref<OperationType>('install')
+  const healthReport = ref<PluginHealthReport | null>(null)
 
   let connection: signalR.HubConnection | null = null
 
@@ -34,6 +35,10 @@ export const useInstallStore = defineStore('install', () => {
 
     connection.on('progressUpdate', (update: InstallationStatus) => {
       status.value = update
+    })
+
+    connection.on('healthReportReady', (report: PluginHealthReport) => {
+      healthReport.value = report
     })
 
     connection.onreconnected(async () => {
@@ -96,6 +101,7 @@ export const useInstallStore = defineStore('install', () => {
 
     activeGameId.value = gameId
     operationType.value = 'install'
+    healthReport.value = null
     isDrawerOpen.value = true
 
     await connectHub(gameId)
@@ -155,6 +161,7 @@ export const useInstallStore = defineStore('install', () => {
       await disconnectHub()
       activeGameId.value = null
       status.value = null
+      healthReport.value = null
     }
   }
 
@@ -163,6 +170,7 @@ export const useInstallStore = defineStore('install', () => {
     isDrawerOpen,
     activeGameId,
     operationType,
+    healthReport,
     startInstall,
     startUninstall,
     cancel,

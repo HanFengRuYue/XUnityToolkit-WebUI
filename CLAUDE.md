@@ -41,11 +41,11 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Frontend:** Vue 3 + TypeScript + Naive UI + Pinia (in `XUnityToolkit-Vue/`)
 - **Sidebar State:** `useSidebarStore` (Pinia + localStorage) manages collapse/width; `effectiveWidth` computed returns 64px when collapsed, custom width otherwise; mobile (≤768px) ignores collapse/resize; collapsed nav items are 44×44px square buttons centered via `margin: 0 auto`; collapse toggle positioned above settings button
 - **AI Translation page layout:** Single-column — Stats strip → Pipeline Status → Settings (collapsible section-card with `collapsed.settings`) → Recent Translations → Errors; no two-column grid
-- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`); `preCacheStatsUpdate` broadcast to `ai-translation` group for pre-translation cache hit/miss stats
+- **Real-time:** SignalR via single `InstallProgressHub` (groups: `game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`); `preCacheStatsUpdate` broadcast to `ai-translation` group for pre-translation cache hit/miss stats; `healthReportReady` broadcast to `game-{id}` group after install verification step completes
 - **Persistence:** JSON files in `%AppData%\XUnityToolkit\` (`library.json`, `settings.json`); `AppData:Root` config key allows override for dev/test; API keys encrypted with DPAPI
 - **System Tray:** NotifyIcon on dedicated STA thread; `ShowNotification` marshals to STA via `SynchronizationContext.Post`; `_trayIcon`/`_syncContext` are `volatile`
 - **No console:** `OutputType=WinExe` — no console window; do NOT revert to `Exe`
-- **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section
+- **TranslatorEndpoint:** net35 `LLMTranslate.dll` — XUnity.AutoTranslator custom endpoint forwarding game text to `POST /api/translate`; configurable via `[LLMTranslate]` INI section; sends connectivity ping (`GET /api/translate/ping?gameId=`) on `Initialize()` via `WebClient.DownloadStringAsync` (fire-and-forget)
 - **AI Translation:** `LlmTranslationService` calls LLM APIs (OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom); multi-provider load balancing; batch mode bounded by `SemaphoreSlim`; per-game unified term list, translation memory, AI description; real-time stats via SignalR
 - **Local LLM:** `LocalLlmService` manages llama-server process; GPU detection via DXGI with WMI fallback; llama binaries bundled as ZIPs, lazy-extracted on first use; local mode forces concurrency=1, batch size=1, disables glossary extraction; term placeholder substitution + post-processing still active in local mode (system prompt terms skipped to save context tokens)
 - **Asset Extraction:** `AssetExtractionService` uses AssetsTools.NET to extract strings from Unity `.assets` and bundle files; `PreTranslationService` batch-translates and writes XUnity cache files
@@ -59,6 +59,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Font Replacement:** `FontReplacementService` uses AssetsTools.NET to scan and replace TMP_FontAsset in game `.assets` and bundle files; field-level replacement preserves PPtr references; automatic Addressables CRC clearing; backups at `{dataRoot}/font-backups/{gameId}/`; custom fonts at `{dataRoot}/custom-fonts/{gameId}/`
 - **Font Generation:** `TmpFontGeneratorService` renders AA bitmaps via FreeType (`FT_RENDER_MODE_NORMAL`) then generates SDF via `DistanceFieldGenerator` (Felzenszwalb EDT), replicating Unity's FontEngine approach; supports SDFAA/SDF8/SDF16/SDF32 render modes with upsampling (8x/16x/32x); dynamic padding (percentage/pixel mode); auto-sizing binary search; `GradientScale = padding + 1` injected into Material; RectpackSharp for atlas packing; multi-atlas support; `CharacterSetService` resolves stackable character sets (built-in/custom TXT/XUnity translation file); `BuiltinCharsets` enumerates GB2312/GBK/CJK Common/CJK Full/Japanese; disk-temp SDF bitmaps for memory control; generation reports saved as `.report.json` sidecars; outputs at `{dataRoot}/generated-fonts/`
 - **BepInEx Log:** `BepInExLogService` reads `{GamePath}/BepInEx/LogOutput.log` with `FileShare.ReadWrite`; AI analysis via `LlmTranslationService.CallLlmRawAsync` (no semaphore contention); diagnostic prompt is predefined Chinese; log truncated to last 4000 lines for LLM context; `hasBepInEx` computed includes `PartiallyInstalled` state
+- **Plugin Health Check:** `PluginHealthCheckService` performs passive, rule-based health checks (no AI dependency); Tier 1: file integrity (doorstop proxy, BepInEx core, XUnity plugin, config, LLMTranslate DLL); Tier 2: log-based checks via `[GeneratedRegex]` (BepInEx init, XUnity loaded, endpoint registered, error count); Tier 3: connectivity check — `LLMTranslate.dll` sends `GET /api/translate/ping?gameId=` on `Initialize()`, `RecordPing`/`HasRecentPing` track arrival; `VerifyAsync` auto-starts game, waits for log + ping, then analyzes; `VerifyForInstallAsync` bypasses `_activeVerifications` guard for `InstallOrchestrator` use (orchestrator owns concurrency); `PluginHealthCard.vue` only shows problematic items (filters Healthy), single "启动验证" button (no passive re-check button), accepts optional `initialReport` prop (skips passive check when provided); API: `GET /api/games/{id}/health-check`, `POST .../health-check/verify`
+- **Health check ↔ DLL log dependency:** `CheckEndpointRegistered` scans BepInEx log for `"LLMTranslate"` substring — requires DLL's `Log()` (unconditional) to output init banner; do NOT gate init messages behind `DebugLog()` or the health check will fail to detect the endpoint
 - **Online Update:** `UpdateService` checks GitHub Releases for new versions; manifest-based differential download (app/wwwroot/bundled-llama/bundled-fonts/bundled-plugins/bundled-misc component ZIPs); `Updater.exe` (AOT, no runtime dependency) handles file replacement and restart; staging at `data/update-staging/`; two-phase backup-then-replace for atomicity; rollback on failure; prerelease opt-in via `AppSettings.ReceivePreReleaseUpdates`
 
 ## Translation Pipeline
@@ -145,7 +147,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Config:** `GET/PUT /api/games/{id}/config` (PatchAsync read-modify-write on PUT), `GET/PUT .../config/raw`
 - **Settings:** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset` (deletes entire `paths.Root` directory, invalidates all service caches, recreates dirs), `GET .../data-path`, `POST .../export` (ZIP, **not ApiResult**), `POST .../import` (multipart ZIP), `POST .../open-data-folder`
 - **Dialogs:** `POST /api/dialog/{select-folder,select-file}`
-- **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`
+- **AI Translation:** `POST /api/translate` (**not ApiResult** — DLL calls directly; frontend must use raw `fetch`), `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=` (connectivity ping from LLMTranslate.dll)
 - **AI Control:** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **Local LLM:** `GET/PUT /api/local-llm/settings` (PUT merges gpuLayers/contextLength only), `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test` (requires Running), `POST .../start`, `POST .../stop`, `.../download` (model) + `/pause` + `/cancel` variants, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
 - **AI Endpoint:** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — manage `LLMTranslate.dll`; POST also patches `[LLMTranslate] ToolkitUrl` + `GameId` in INI
@@ -159,6 +161,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Translation Editor:** `GET/PUT .../translation-editor`, `POST .../import`, `GET .../export` (**not ApiResult**)
 - **Font Replacement:** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`, `DELETE .../font-replacement/custom-font?type={ttf|tmp}`
 - **BepInEx Log:** `GET /api/games/{id}/bepinex-log`, `GET .../download` (**not ApiResult**), `POST .../analyze`
+- **Plugin Health:** `GET /api/games/{id}/health-check`, `POST .../health-check/verify`
 - **Font Generation:** `POST /api/font-generation/upload` (multipart, 50MB), `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}` (**not ApiResult**), `GET .../history`, `DELETE .../{fileName}`, `POST .../install-tmp-font/{gameId}` (installs to `BepInEx/Font/` + patches INI), `GET .../charsets`, `POST .../charset/preview`, `POST .../charset/upload-custom`, `POST .../charset/upload-translation`, `GET .../report/{fileName}`
 - **Plugin Package:** `POST .../plugin-package/export` (ZIP, **not ApiResult**), `POST .../import`
 - **Logs:** `GET /api/logs?count=`, `GET .../history?lines=`, `GET .../download` (**not ApiResult**)
@@ -173,12 +176,12 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Reference DLLs:** `TranslatorEndpoint/libs/` auto-extracted from bundled XUnity ZIP by `build.ps1`; committed files serve as fallback
 - `DisableSpamChecks()` removes stabilization wait; `SetTranslationDelay(float)` min 0.1s; available v5.4.3+
 - `GetOrCreateSetting` reads existing INI; changing DLL defaults won't affect installed games — use `PatchSectionAsync`
-- **DebugMode:** Defaults to `false`; when `true`, logs game text to Unity console — do NOT default to `true` in production
+- **Dual-level logging:** `Log()` always outputs critical info (init banner, config, errors, request/completion summaries); `DebugLog()` gated by `DebugMode` for verbose details (text previews, response data, ServicePoint config); `DebugMode` defaults to `false` — do NOT default to `true` in production
 - **"Endpoint" vs "Provider":** "translation endpoint" = `LLMTranslate.dll`; "provider" = `ApiEndpointConfig` LLM API config
 
 ### Sync Points
 
-- **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`
+- **InstallStep enum:** Sync 4 places: `Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`; also update `GameDetailView.vue` `installStepLabel` map
 - **Adding AppSettings fields:** Sync 4 places: `Models/AppSettings.cs`, `src/api/types.ts`, store's `loadPreferences`/`savePreferences`, `SettingsView.vue`
 - **Adding AiTranslationSettings fields:** Sync 3 places: `Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue` (`DEFAULT_AI_TRANSLATION` + pipeline settings UI); real-time settings (`TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`) display in `AiTranslationView.vue`; pre-translation-only settings (`EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`) display in `AssetExtractionView.vue`
 - **Adding TermEntry fields:** Sync 2 places: `Models/TermEntry.cs`, `src/api/types.ts`; includes `Source` (`TermSource` enum, PascalCase JSON)
@@ -205,6 +208,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **LocalLlmDownloadProgress fields:** Sync 2 places: `Models/LocalLlmSettings.cs`, `src/api/types.ts`; display in `LocalAiPanel.vue`
 - **DataPathInfo:** Sync 2 places: `Endpoints/SettingsEndpoints.cs` (record), `src/api/types.ts`
 - **Adding AppDataPaths directories:** Also update export exclusion list in `SettingsEndpoints.cs` `/export` endpoint if the new directory contains large/regeneratable/machine-specific data; `translation-memory/`, `dynamic-patterns/`, `term-candidates/` are excluded from export (regeneratable)
+- **PluginHealthReport/HealthCheckItem fields:** Sync 2 places: `Models/PluginHealth.cs`, `src/api/types.ts`; display in `PluginHealthCard.vue`
 - **Log level sync points:** `Program.cs` `AddFilter` + `FileLoggerProvider` constructor `minLevel` + frontend `LogView.vue` `selectedLevels` + `levelDefs` — all four must agree when changing log level thresholds
 
 ### Build

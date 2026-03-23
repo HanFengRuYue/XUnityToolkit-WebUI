@@ -23,6 +23,7 @@ const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'GeneratingConfig', label: '生成配置' },
   { key: 'ApplyingConfig', label: '应用最佳配置' },
   { key: 'ExtractingAssets', label: '提取游戏资产' },
+  { key: 'VerifyingHealth', label: '验证插件状态' },
 ]
 
 const uninstallSteps: { key: InstallStep; label: string }[] = [

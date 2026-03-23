@@ -17,6 +17,7 @@ public sealed class InstallOrchestrator(
     ConfigurationService configService,
     AppSettingsService appSettingsService,
     AssetExtractionService assetExtraction,
+    PluginHealthCheckService healthCheckService,
     BundledAssetPaths bundledPaths,
     AppDataPaths appDataPaths,
     SystemTrayService trayService,
@@ -319,7 +320,7 @@ public sealed class InstallOrchestrator(
         }
 
         // Step 8: Extract game assets for language detection
-        await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "正在提取游戏资产以检测语言...");
+        await UpdateStatus(status, InstallStep.ExtractingAssets, 90, "正在提取游戏资产以检测语言...");
         try
         {
             var extractResult = await assetExtraction.ExtractTextsAsync(
@@ -332,7 +333,7 @@ public sealed class InstallOrchestrator(
                     {
                         ["FromLanguage"] = extractResult.DetectedLanguage
                     }, ct);
-                await UpdateStatus(status, InstallStep.ExtractingAssets, 99,
+                await UpdateStatus(status, InstallStep.ExtractingAssets, 93,
                     $"检测到游戏语言: {extractResult.DetectedLanguage} ({extractResult.TotalTextsExtracted} 条文本)");
                 logger.LogInformation("游戏语言检测完成: {Lang}, 提取 {Count} 条文本",
                     extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
@@ -358,14 +359,56 @@ public sealed class InstallOrchestrator(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "资产提取失败（不影响安装）");
-            await UpdateStatus(status, InstallStep.ExtractingAssets, 99, "资产提取失败（跳过）");
+            await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "资产提取失败（跳过）");
         }
 
-        // Step 9: Complete
+        // Mark as installed before verification — cancellation during verify preserves install state
         game.InstalledXUnityVersion = installedXUnityVersion;
         game.InstallState = InstallState.FullyInstalled;
         await gameLibrary.UpdateAsync(game, ct);
 
+        // Step 9: Verify plugin health
+        await UpdateStatus(status, InstallStep.VerifyingHealth, 93, "正在验证插件安装状态...");
+        PluginHealthReport? healthReport = null;
+        try
+        {
+            healthReport = await healthCheckService.VerifyForInstallAsync(game, ct);
+
+            if (healthReport.Overall == HealthStatus.Healthy)
+            {
+                await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证通过，所有检查项正常");
+                logger.LogInformation("安装验证通过，游戏 {GameId}", game.Id);
+            }
+            else
+            {
+                var problemCount = healthReport.Checks.Count(c => c.Status != HealthStatus.Healthy);
+                await UpdateStatus(status, InstallStep.VerifyingHealth, 99,
+                    $"验证完成，发现 {problemCount} 项问题（不影响安装）");
+                logger.LogWarning("安装验证发现 {Count} 项问题，游戏 {GameId}", problemCount, game.Id);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "插件验证失败（不影响安装），游戏 {GameId}", game.Id);
+            await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证失败（跳过）");
+        }
+
+        // Broadcast health report via SignalR for PluginHealthCard
+        if (healthReport != null)
+        {
+            try
+            {
+                await hubContext.Clients.Group($"game-{game.Id}")
+                    .SendAsync("healthReportReady", healthReport);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "健康报告推送失败: 游戏 {GameId}", game.Id);
+            }
+        }
+
+        // Step 10: Complete
         await UpdateStatus(status, InstallStep.Complete, 100, "Installation complete!");
         trayService.ShowNotification("安装完成", $"「{game.Name}」插件安装完成");
     }

@@ -11,6 +11,7 @@ public enum InstallStep
     GeneratingConfig,
     ApplyingConfig,
     ExtractingAssets,
+    VerifyingHealth,
     RemovingXUnity,
     RemovingBepInEx,
     Complete,
