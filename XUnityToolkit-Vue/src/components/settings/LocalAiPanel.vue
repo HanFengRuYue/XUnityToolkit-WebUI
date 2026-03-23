@@ -329,13 +329,13 @@ onBeforeUnmount(() => {
           <span class="form-hint">-1 = 全部卸载到 GPU，0 = 仅 CPU</span>
         </div>
         <div class="form-row">
-          <label class="form-label">上下文长度</label>
-          <NInputNumber
+          <label class="form-label">上下文长度（{{ contextLength }}）</label>
+          <NSlider
             v-model:value="contextLength"
             :min="512"
             :max="32768"
             :step="512"
-            style="width: 140px"
+            :tooltip="true"
             @update:value="handleSaveSettings"
           />
           <span class="form-hint">较大的上下文需要更多显存</span>

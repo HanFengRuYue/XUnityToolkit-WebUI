@@ -300,7 +300,8 @@ export interface FontReplacementStatus {
   isExternallyRestored: boolean
   replacedAt?: string
   fontSource?: string
-  customFontFileName?: string
+  customTtfFileName?: string
+  customTmpFileName?: string
 }
 
 export interface FontReplacementResult {

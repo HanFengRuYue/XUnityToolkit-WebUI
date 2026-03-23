@@ -38,7 +38,8 @@ public record FontReplacementStatus
     public bool IsExternallyRestored { get; init; }
     public DateTime? ReplacedAt { get; init; }
     public string? FontSource { get; init; }
-    public string? CustomFontFileName { get; init; }
+    public string? CustomTtfFileName { get; init; }
+    public string? CustomTmpFileName { get; init; }
 }
 
 public record FontReplacementResult

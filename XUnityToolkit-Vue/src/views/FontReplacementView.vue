@@ -203,9 +203,13 @@ function handleUploadError() {
   message.error('字体上传失败')
 }
 
-async function deleteCustomFont() {
+const hasCustomFont = computed(() =>
+  !!(status.value?.customTtfFileName || status.value?.customTmpFileName)
+)
+
+async function deleteCustomFont(type: 'ttf' | 'tmp') {
   try {
-    await api.del(`/api/games/${gameId.value}/font-replacement/custom-font`)
+    await api.del(`/api/games/${gameId.value}/font-replacement/custom-font?type=${type}`)
     message.success('已删除自定义字体')
     await loadStatus()
   } catch (e: any) {
@@ -270,7 +274,7 @@ onBeforeUnmount(async () => {
     </h1>
 
     <!-- Status & Custom Font Card -->
-    <div v-if="status?.isReplaced || status?.isExternallyRestored || status?.customFontFileName" class="section-card" style="animation-delay: 0.1s">
+    <div v-if="status?.isReplaced || status?.isExternallyRestored || hasCustomFont" class="section-card" style="animation-delay: 0.1s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -294,10 +298,18 @@ onBeforeUnmount(async () => {
           <NTag type="warning" size="small">已被外部还原</NTag>
           <span class="status-text">字体可能已通过 Steam 验证文件完整性还原，备份数据仍保留</span>
         </div>
-        <div v-if="status?.customFontFileName" class="status-row">
-          <NTag type="info" size="small">自定义字体</NTag>
-          <span class="status-text">{{ status.customFontFileName }}</span>
-          <NButton text size="small" type="error" @click="deleteCustomFont" :disabled="replacing">
+        <div v-if="status?.customTtfFileName" class="status-row">
+          <NTag type="success" size="small">TTF 字体</NTag>
+          <span class="status-text">{{ status.customTtfFileName }}</span>
+          <NButton text size="small" type="error" @click="deleteCustomFont('ttf')" :disabled="replacing">
+            <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
+            删除
+          </NButton>
+        </div>
+        <div v-if="status?.customTmpFileName" class="status-row">
+          <NTag type="info" size="small">TMP 资产</NTag>
+          <span class="status-text">{{ status.customTmpFileName }}</span>
+          <NButton text size="small" type="error" @click="deleteCustomFont('tmp')" :disabled="replacing">
             <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
             删除
           </NButton>
@@ -306,7 +318,7 @@ onBeforeUnmount(async () => {
     </div>
 
     <!-- Scan & Replace Card -->
-    <div class="section-card" :style="{ animationDelay: (status?.isReplaced || status?.isExternallyRestored || status?.customFontFileName) ? '0.15s' : '0.1s' }">
+    <div class="section-card" :style="{ animationDelay: (status?.isReplaced || status?.isExternallyRestored || hasCustomFont) ? '0.15s' : '0.1s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">

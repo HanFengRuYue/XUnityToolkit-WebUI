@@ -1702,22 +1702,37 @@ public sealed class FontReplacementService(
         logger.LogInformation("字体还原完成: GameId={GameId}", gameId);
     }
 
-    private string? GetCustomFontFileName(string gameId)
+    private string? GetCustomTtfFileName(string gameId)
     {
         var customDir = appDataPaths.GetCustomFontDirectory(gameId);
         if (!Directory.Exists(customDir)) return null;
-        var files = Directory.GetFiles(customDir);
-        return files.Length > 0 ? Path.GetFileName(files[0]) : null;
+        var file = Directory.GetFiles(customDir)
+            .FirstOrDefault(f => Path.GetExtension(f).ToLowerInvariant() is ".ttf" or ".otf");
+        return file != null ? Path.GetFileName(file) : null;
+    }
+
+    private string? GetCustomTmpFileName(string gameId)
+    {
+        var customDir = appDataPaths.GetCustomFontDirectory(gameId);
+        if (!Directory.Exists(customDir)) return null;
+        var file = Directory.GetFiles(customDir)
+            .FirstOrDefault(f => Path.GetExtension(f).ToLowerInvariant() is not ".ttf" and not ".otf");
+        return file != null ? Path.GetFileName(file) : null;
     }
 
     public async Task<FontReplacementStatus> GetStatusAsync(string gamePath, string gameId)
     {
         var backupDir = appDataPaths.GetFontBackupDirectory(gameId);
         var manifestPath = Path.Combine(backupDir, "manifest.json");
-        var customFontFileName = GetCustomFontFileName(gameId);
+        var customTtfFileName = GetCustomTtfFileName(gameId);
+        var customTmpFileName = GetCustomTmpFileName(gameId);
 
         if (!File.Exists(manifestPath))
-            return new FontReplacementStatus { CustomFontFileName = customFontFileName };
+            return new FontReplacementStatus
+            {
+                CustomTtfFileName = customTtfFileName,
+                CustomTmpFileName = customTmpFileName
+            };
 
         try
         {
@@ -1779,7 +1794,8 @@ public sealed class FontReplacementService(
                 FontSource = manifest.FontSource,
                 ReplacedFonts = replacedFonts,
                 IsExternallyRestored = externallyRestored,
-                CustomFontFileName = customFontFileName
+                CustomTtfFileName = customTtfFileName,
+                CustomTmpFileName = customTmpFileName
             };
         }
         catch (Exception ex)
