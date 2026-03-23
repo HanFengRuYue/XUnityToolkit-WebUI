@@ -146,7 +146,7 @@ ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, 
 - **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
 - **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
 - **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
-- **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomFontFileName` for frontend display; `DELETE .../custom-font` clears custom font
+- **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomTtfFileName`/`CustomTmpFileName` for frontend display; `DELETE .../custom-font?type={ttf|tmp}` clears specific type, no param clears all
 - **`FontReplacementService` DI:** depends on `TmpFontService`, `BundledAssetPaths`, `AppDataPaths`; `BundledAssetPaths` used for TTF bundled font path resolution (prefer over `Assembly.GetExecutingAssembly().Location` which fails in single-file publish)
 - **TTF replacement:** `ReplaceSingleTtfFont` replaces `m_FontData` byte array in `AssetClassID.Font` assets; preserves all layout metadata (`m_FontSize`, `m_LineSpacing`, etc.)
 - **Bundled TTF:** `bundled/fonts/SourceHanSansCN-Regular.ttf` (~10MB) used as default replacement source for TTF fonts

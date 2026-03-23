@@ -163,8 +163,8 @@ public static class FontReplacementEndpoints
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
 
-        // DELETE .../custom-font
-        group.MapDelete("/custom-font", (string id, AppDataPaths appDataPaths) =>
+        // DELETE .../custom-font?type={ttf|tmp}
+        group.MapDelete("/custom-font", (string id, string? type, AppDataPaths appDataPaths) =>
         {
             if (!Guid.TryParse(id, out _))
                 return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
@@ -173,7 +173,17 @@ public static class FontReplacementEndpoints
             if (Directory.Exists(customDir))
             {
                 foreach (var file in Directory.GetFiles(customDir))
-                    File.Delete(file);
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    var isTtfOrOtf = ext is ".ttf" or ".otf";
+
+                    if (type == "ttf" && isTtfOrOtf)
+                        File.Delete(file);
+                    else if (type == "tmp" && !isTtfOrOtf)
+                        File.Delete(file);
+                    else if (type is null)
+                        File.Delete(file);
+                }
             }
             return Results.Ok(ApiResult.Ok());
         });
