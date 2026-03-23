@@ -10,7 +10,6 @@ import {
   NSpin,
   NEmpty,
   NAlert,
-  NSelect,
   NRadioGroup,
   NRadio,
   NCheckboxGroup,
@@ -18,6 +17,7 @@ import {
   NSwitch,
   NBadge,
   NTooltip,
+  NPopselect,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -36,6 +36,7 @@ import {
   FilterAltOutlined,
   FindReplaceOutlined,
   RestartAltOutlined,
+  SwapVertOutlined,
 } from '@vicons/material'
 import { gamesApi, translationEditorApi } from '@/api/games'
 import type { Game, TranslationEntry, TermEntry } from '@/api/types'
@@ -116,6 +117,8 @@ const FEATURE_PATTERNS: Record<string, RegExp> = {
 
 const SORT_OPTIONS = [
   { label: '默认顺序', value: 'default' },
+  { label: '原文首字母（A→Z）', value: 'alpha-asc' },
+  { label: '原文首字母（Z→A）', value: 'alpha-desc' },
   { label: '原文长度（升序）', value: 'length-asc' },
   { label: '原文长度（降序）', value: 'length-desc' },
   { label: '未翻译优先', value: 'untranslated-first' },
@@ -176,6 +179,12 @@ function recomputeFilteredEntries() {
   } else if (panelSortMode.value !== 'default') {
     result = [...result]
     switch (panelSortMode.value) {
+      case 'alpha-asc':
+        result.sort((a, b) => collator.compare(a.original, b.original))
+        break
+      case 'alpha-desc':
+        result.sort((a, b) => collator.compare(b.original, a.original))
+        break
       case 'length-asc':
         result.sort((a, b) => a.original.length - b.original.length)
         break
@@ -235,7 +244,6 @@ const hasActiveFilters = computed(() => {
     || filterStatus.value !== 'all'
     || filterFeatures.value.length > 0
     || filterRegexPattern.value !== ''
-    || panelSortMode.value !== 'default'
 })
 
 const regexError = computed(() => {
@@ -282,7 +290,6 @@ const replaceMatchCount = computed(() => {
 })
 
 function resetFilters() {
-  panelSortMode.value = 'default'
   filterKeyword.value = ''
   filterStatus.value = 'all'
   filterFeatures.value = []
@@ -722,6 +729,23 @@ function handleExport() {
             <template #icon><NIcon :size="16"><DeleteSweepOutlined /></NIcon></template>
             清空
           </NButton>
+          <NBadge :show="panelSortMode !== 'default'" dot :offset="[-2, 2]">
+            <NPopselect
+              v-model:value="panelSortMode"
+              :options="SORT_OPTIONS"
+              trigger="click"
+              scrollable
+            >
+              <NButton
+                size="small"
+                :type="panelSortMode !== 'default' ? 'primary' : 'default'"
+                secondary
+              >
+                <template #icon><NIcon :size="16"><SwapVertOutlined /></NIcon></template>
+                排序
+              </NButton>
+            </NPopselect>
+          </NBadge>
           <NBadge :show="hasActiveFilters" dot :offset="[-2, 2]">
             <NButton
               size="small"
@@ -774,16 +798,6 @@ function handleExport() {
 
       <!-- Filter Panel -->
       <div v-if="showFilterPanel" class="filter-panel">
-        <div class="filter-row">
-          <span class="filter-label">排序方式</span>
-          <NSelect
-            v-model:value="panelSortMode"
-            :options="SORT_OPTIONS"
-            size="small"
-            style="width: 200px"
-          />
-        </div>
-
         <div class="filter-row">
           <span class="filter-label">关键词</span>
           <NInput
