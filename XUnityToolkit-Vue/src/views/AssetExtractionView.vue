@@ -48,7 +48,7 @@ const searchKeyword = ref('')
 const fromLang = ref('ja')
 const toLang = ref('zh')
 const hasAiProvider = ref(false)
-const enablePreTranslationCache = ref(false)
+const enablePreTranslationCache = ref(true)
 const enableLlmPatternAnalysis = ref(false)
 const enableMultiRoundTranslation = ref(false)
 const enableAutoTermExtraction = ref(false)
@@ -490,12 +490,17 @@ function langLabel(code: string): string {
             <NIcon :size="16"><TranslateOutlined /></NIcon>
           </span>
           预翻译
+          <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
         </h2>
       </div>
 
       <p class="section-desc">
         使用 AI 翻译引擎将提取的文本预先翻译，结果写入 XUnity 翻译缓存文件，游戏启动时即可使用。
       </p>
+
+      <NAlert type="warning" :bordered="false" style="margin-bottom: 12px">
+        预翻译功能仍处于实验阶段，效果因游戏而异。如遇到问题，请尝试重新提取资产或调整翻译设置。
+      </NAlert>
 
       <div v-if="!store.extractionResult" class="empty-hint">
         <NEmpty description="请先提取游戏资产" />
@@ -578,18 +583,13 @@ function langLabel(code: string): string {
               @update:value="(v: boolean) => handlePreTranslationSettingChange('autoApplyExtractedTerms', v)"
             />
           </div>
-        </div>
-
-        <!-- Pre-Translation Cache Toggle -->
-        <div class="cache-toggle-section">
-          <div class="cache-toggle-row">
+          <div class="setting-row">
+            <div class="setting-info">
+              <span class="setting-label">预翻译缓存优化</span>
+              <span class="setting-description">修改 XUnity 配置并生成正则翻译模式以提高缓存命中率</span>
+            </div>
             <NSwitch v-model:value="enablePreTranslationCache" @update:value="handleToggleCache" />
-            <span class="cache-toggle-label">预翻译缓存优化</span>
-            <NTag size="small" type="warning">实验性</NTag>
           </div>
-          <NAlert v-if="enablePreTranslationCache" type="warning" :bordered="false" class="cache-warning">
-            这是一个实验性功能。它会修改 XUnity.AutoTranslator 配置并生成正则翻译模式以提高预翻译缓存命中率。效果因游戏而异。如果启用后出现翻译问题，请关闭此功能并重新运行预翻译。
-          </NAlert>
         </div>
 
         <!-- Script Tag Cleaning Rules (collapsible) -->
@@ -983,28 +983,6 @@ function langLabel(code: string): string {
 
 .sub-setting {
   padding-left: 16px;
-}
-
-/* ===== Cache Toggle ===== */
-.cache-toggle-section {
-  margin-bottom: 16px;
-}
-
-.cache-toggle-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.cache-toggle-label {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-1);
-}
-
-.cache-warning {
-  margin-bottom: 12px;
 }
 
 /* ===== Script Tag Card (collapsible) ===== */

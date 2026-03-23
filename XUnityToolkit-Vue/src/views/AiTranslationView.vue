@@ -68,7 +68,7 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   localContextSize: 0,
   endpoints: [],
   glossaryExtractionEnabled: false,
-  enablePreTranslationCache: false,
+  enablePreTranslationCache: true,
   termAuditEnabled: true,
   naturalTranslationMode: true,
   enableTranslationMemory: true,
