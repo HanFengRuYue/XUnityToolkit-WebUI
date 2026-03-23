@@ -154,6 +154,7 @@ builder.Services.AddSingleton<FontReplacementService>();
 builder.Services.AddSingleton<TmpFontGeneratorService>();
 builder.Services.AddSingleton<CharacterSetService>();
 builder.Services.AddSingleton<BepInExLogService>();
+builder.Services.AddSingleton<PluginHealthCheckService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SystemTrayService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SystemTrayService>());
@@ -257,6 +258,7 @@ app.MapFontReplacementEndpoints();
 app.MapFontGenerationEndpoints();
 app.MapLocalLlmEndpoints();
 app.MapBepInExLogEndpoints();
+app.MapPluginHealthEndpoints();
 app.MapUpdateEndpoints();
 app.MapTranslationMemoryEndpoints();
 

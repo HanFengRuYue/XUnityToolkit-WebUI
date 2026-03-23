@@ -93,16 +93,31 @@ namespace LLMTranslate
             if (translationDelay >= 0.1f)
                 context.SetTranslationDelay(translationDelay);
 
-            DebugLog("=== LLMTranslate 插件初始化 ===");
-            DebugLog("  工具箱地址: " + _translateUrl);
-            DebugLog("  并发连接数: " + _maxConcurrency);
-            DebugLog("  每请求文本数: " + _maxTranslationsPerRequest);
-            DebugLog("  最大同时翻译: " + (_maxConcurrency * _maxTranslationsPerRequest));
+            Log("=== LLMTranslate 插件初始化 ===");
+            Log("  工具箱地址: " + _translateUrl);
+            Log("  并发连接数: " + _maxConcurrency);
+            Log("  每请求文本数: " + _maxTranslationsPerRequest);
+            Log("  最大同时翻译: " + (_maxConcurrency * _maxTranslationsPerRequest));
             DebugLog("  全局连接池默认: " + ServicePointManager.DefaultConnectionLimit);
-            DebugLog("  游戏 ID: " + (string.IsNullOrEmpty(_gameId) ? "(未设置)" : _gameId));
-            DebugLog("  禁用防刷检查: " + (disableSpamChecks ? "是" : "否"));
-            DebugLog("  翻译延迟: " + translationDelay + " 秒");
-            DebugLog("  调试模式: " + (_debugMode ? "开启" : "关闭"));
+            Log("  游戏 ID: " + (string.IsNullOrEmpty(_gameId) ? "(未设置)" : _gameId));
+            Log("  禁用防刷检查: " + (disableSpamChecks ? "是" : "否"));
+            Log("  翻译延迟: " + translationDelay + " 秒");
+            Log("  调试模式: " + (_debugMode ? "开启" : "关闭"));
+
+            // Connectivity ping — notify toolbox that the plugin has loaded
+            try
+            {
+                var pingUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate/ping";
+                if (!string.IsNullOrEmpty(_gameId))
+                    pingUrl += "?gameId=" + Uri.EscapeDataString(_gameId);
+                var pingClient = new WebClient();
+                pingClient.DownloadStringAsync(new Uri(pingUrl));
+                Log("  连通性测试已发送: " + pingUrl);
+            }
+            catch (Exception ex)
+            {
+                Log("  连通性测试发送失败: " + ex.Message);
+            }
         }
 
         public override void OnCreateRequest(IHttpRequestCreationContext context)
@@ -113,7 +128,7 @@ namespace LLMTranslate
                 context.DestinationLanguage,
                 _gameId);
 
-            DebugLog(string.Format("[请求] 发送 {0} 条文本到工具箱: {1} → {2}",
+            Log(string.Format("[请求] 发送 {0} 条文本到工具箱: {1} → {2}",
                 context.UntranslatedTexts.Length,
                 context.SourceLanguage,
                 context.DestinationLanguage));
@@ -144,7 +159,7 @@ namespace LLMTranslate
             var raw = context.Response.Data;
             if (string.IsNullOrEmpty(raw))
             {
-                DebugLog("[错误] 工具箱返回空响应");
+                Log("[错误] 工具箱返回空响应");
                 context.Fail("Empty response from toolkit backend.");
                 return;
             }
@@ -155,14 +170,14 @@ namespace LLMTranslate
 
             if (translations == null || translations.Length != context.UntranslatedTexts.Length)
             {
-                DebugLog(string.Format("[错误] 翻译数量不匹配: 期望 {0}, 实际 {1}",
+                Log(string.Format("[错误] 翻译数量不匹配: 期望 {0}, 实际 {1}",
                     context.UntranslatedTexts.Length,
                     translations != null ? translations.Length.ToString() : "null"));
                 context.Fail("Translation count mismatch.");
                 return;
             }
 
-            DebugLog(string.Format("[完成] 成功翻译 {0} 条文本", translations.Length));
+            Log(string.Format("[完成] 成功翻译 {0} 条文本", translations.Length));
             if (_debugMode && translations.Length > 0)
             {
                 for (int i = 0; i < translations.Length && i < 3; i++)
@@ -176,10 +191,15 @@ namespace LLMTranslate
             context.Complete(translations);
         }
 
+        private void Log(string message)
+        {
+            Console.WriteLine("[LLMTranslate] " + message);
+        }
+
         private void DebugLog(string message)
         {
             if (!_debugMode) return;
-            Console.WriteLine("[LLMTranslate] " + message);
+            Log(message);
         }
 
         // --- JSON helpers (no external JSON library available in .NET 3.5) ---

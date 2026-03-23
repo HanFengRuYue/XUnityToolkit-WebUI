@@ -45,6 +45,7 @@ import { useInstallStore } from '@/stores/install'
 import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
 import { gamesApi, pluginPackageApi, dialogApi } from '@/api/games'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
+import PluginHealthCard from '@/components/health/PluginHealthCard.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 import { defineAsyncComponent } from 'vue'
 
@@ -159,6 +160,7 @@ const installStepLabel = computed(() => {
     GeneratingConfig: '生成配置',
     ApplyingConfig: '应用最佳配置',
     ExtractingAssets: '提取游戏资产',
+    VerifyingHealth: '验证插件状态',
   }
   return labels[installStore.status?.step ?? ''] ?? '安装中'
 })
@@ -825,8 +827,16 @@ onBeforeUnmount(() => stopWatch())
       </div>
     </div>
 
+    <!-- Plugin Health Check Card -->
+    <PluginHealthCard
+      v-if="game.isUnityGame && hasBepInEx && !isInstalling"
+      :game-id="gameId"
+      :initial-report="installStore.activeGameId === gameId ? installStore.healthReport : null"
+      :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }"
+    />
+
     <!-- Translation Config Card (Unity only, separate full-width card) -->
-    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.config }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.25s' : '0.2s' }">
+    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.config }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
       <div class="section-header collapsible" @click="collapsed.config = !collapsed.config">
         <h2 class="section-title">
           <span class="section-icon translate">
@@ -850,7 +860,7 @@ onBeforeUnmount(() => stopWatch())
     </div>
 
     <!-- AI Translation Engine Card (only when fully installed) -->
-    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon ai">
@@ -897,7 +907,7 @@ onBeforeUnmount(() => stopWatch())
     </div>
 
     <!-- Game Tools Card -->
-    <div v-if="game.isUnityGame && isInstalled" class="section-card" :class="{ 'is-collapsed': collapsed.tools }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.35s' : '0.3s' }">
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :class="{ 'is-collapsed': collapsed.tools }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
       <div class="section-header collapsible" @click="collapsed.tools = !collapsed.tools">
         <h2 class="section-title">
           <span class="section-icon">
@@ -986,7 +996,7 @@ onBeforeUnmount(() => stopWatch())
     </div>
 
     <!-- AI Description Card (available for all Unity games, even before install) -->
-    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.description }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.4s' : '0.35s' }">
+    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.description }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
       <div class="section-header collapsible" @click="collapsed.description = !collapsed.description">
         <h2 class="section-title">
           <span class="section-icon">
@@ -1014,7 +1024,7 @@ onBeforeUnmount(() => stopWatch())
     </div>
 
     <!-- Plugin Package Card -->
-    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
+    <div v-if="game.isUnityGame" class="section-card" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.5s' : '0.45s' }">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
