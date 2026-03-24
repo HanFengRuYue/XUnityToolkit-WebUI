@@ -77,20 +77,46 @@ public sealed partial class UnityDetectionService(ILogger<UnityDetectionService>
         var architecture = DetectArchitecture(exePath);
         var backend = DetectBackend(gamePath, exePath);
         var unityVersion = DetectUnityVersion(gamePath, exePath);
+        var hasTextMeshPro = DetectTextMeshPro(gamePath, exePath, backend);
 
         var info = new UnityGameInfo
         {
             UnityVersion = unityVersion ?? "Unknown",
             Backend = backend,
             Architecture = architecture,
-            DetectedExecutable = Path.GetFileName(exePath)
+            DetectedExecutable = Path.GetFileName(exePath),
+            HasTextMeshPro = hasTextMeshPro
         };
 
         logger.LogInformation(
-            "检测结果: {Exe} | Unity {Version} | {Backend} | {Arch}",
-            info.DetectedExecutable, info.UnityVersion, info.Backend, info.Architecture);
+            "检测结果: {Exe} | Unity {Version} | {Backend} | {Arch} | TMP={HasTMP}",
+            info.DetectedExecutable, info.UnityVersion, info.Backend, info.Architecture,
+            hasTextMeshPro?.ToString() ?? "Unknown");
 
         return info;
+    }
+
+    private static bool? DetectTextMeshPro(string gamePath, string exePath, UnityBackend backend)
+    {
+        if (backend == UnityBackend.IL2CPP)
+            return null;
+
+        var gameName = Path.GetFileNameWithoutExtension(exePath);
+        var managedDir = Path.Combine(gamePath, $"{gameName}_Data", "Managed");
+
+        if (!Directory.Exists(managedDir))
+            return null;
+
+        try
+        {
+            var files = Directory.GetFiles(managedDir, "*.dll", SearchOption.TopDirectoryOnly);
+            return files.Any(f =>
+                Path.GetFileName(f).Contains("TextMeshPro", StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? FindGameExecutable(string gamePath)

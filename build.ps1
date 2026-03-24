@@ -65,8 +65,8 @@ $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 $hasUpdater = Test-Path $UpdaterProject
 
-# Generate version: 3.3.{YYYYMMDDHHmm}
-$BuildVersion = "3.3.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 3.4.{YYYYMMDDHHmm}
+$BuildVersion = "3.4.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"

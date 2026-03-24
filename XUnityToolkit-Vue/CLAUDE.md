@@ -1,99 +1,99 @@
 # XUnityToolkit-Vue
 
-Vue 3 frontend for XUnityToolkit-WebUI. See root `CLAUDE.md` for project overview, API endpoints, and build commands.
+XUnityToolkit-WebUI 的 Vue 3 前端。项目概览、API 端点和构建命令请参见根目录 `CLAUDE.md`。
 
-## Code Conventions
+## 代码规范
 
-- Vue 3 Composition API with `<script setup lang="ts">`
-- Scoped `<style scoped>`; use CSS variables from `main.css`
-- Icons: `@vicons/material` and `@vicons/ionicons5` wrapped in Naive UI `NIcon`
-- API client: `api.get`, `api.post`, `api.put`, `api.del` (NOT `.delete` — JS reserved word); import from `@/api/client` (NOT `@/api` — it's a directory, Vite fails with EISDIR)
-- API layer: `src/api/client.ts` (axios wrapper), `src/api/types.ts` (shared types), `src/api/games.ts` (game API methods)
+- 使用 Vue 3 Composition API 和 `<script setup lang="ts">`
+- 使用 `<style scoped>` 作用域样式；使用 `main.css` 中的 CSS 变量
+- 图标：`@vicons/material` 和 `@vicons/ionicons5`，通过 Naive UI `NIcon` 包裹使用
+- API 客户端：`api.get`、`api.post`、`api.put`、`api.del`（不要用 `.delete` —— 这是 JS 保留字）；从 `@/api/client` 导入（不要用 `@/api` —— 它是一个目录，Vite 会报 EISDIR 错误）
+- API 层：`src/api/client.ts`（axios 封装）、`src/api/types.ts`（共享类型）、`src/api/games.ts`（游戏 API 方法）
 
-## Design System
+## 设计系统
 
-- **Theme:** Dark/light/system via `data-theme`; `useThemeStore` (localStorage + OS) is authoritative, not backend `AppSettings.Theme`; `ThemeMode = 'dark' | 'light' | 'system'`; use `resolvedTheme` (always `'dark'|'light'`) for rendering decisions, NOT `mode` (which can be `'system'`); default is `'system'`; `matchMedia` listener auto-updates when OS theme changes; light mode auto-darkens accent 15%
-- **CSS Variables:** Defined in `main.css` (`--bg-root`, `--accent`, `--text-1`, etc.); theme-aware: use `--bg-subtle`/`--bg-muted` — never hardcode `rgba(255,255,255,...)`
-- **Layout:** Sidebar (230px default, collapsible to 64px, resizable 180-400px via drag) + scrollable content; `useSidebarStore` persists state to localStorage (`sidebarCollapsed`, `sidebarWidth`); responsive at 768px (tablet drawer, collapse/resize disabled) and 480px (phone single-column)
-- **Cards:** `.section-card` with `.section-icon`/`.section-title` (base `--accent`; semantic `.danger`/`.warning` only); decorative colors → `--accent`; `color-mix()` for translucent backgrounds
-- **Shared CSS (main.css):** `.page-title`, `.page-title-icon`, `.section-card`, `.section-header`, `.section-title`, `.section-icon`, `.header-actions`, `.section-desc`, `.loading-state`, `.table-container`, `.add-entry-row`, `.unsaved-badge`, `.auto-save-badge`, `.empty-hint`, `.back-button` are global classes — do NOT redefine in scoped styles
-- **Sub-page layout:** Game sub-pages use `.sub-page` (24px title) + `.sub-page-header` + `.back-button`; top-level pages use `.page-title` directly (26px)
-- **Header actions:** Use `.header-actions` (NOT `.header-btn-group`) for button groups in section headers
-- **Typography:** Do NOT use `font-family: monospace` for UI text (version numbers, labels, etc.) — it clashes with the system font; only use monospace inside code blocks or developer-facing output
-- **Content padding:** `24px 28px` (desktop), `20px 20px` (tablet), `16px 12px` (phone) — hero backdrop negative margins must match; do NOT set padding on page-level containers (`.main-content` already provides it); do NOT use `max-width` on page containers unless content truly needs constraining; use `gap: 16px` for page-level flex column
-- **CSS variable naming:** NEVER use `--error-color`, `--success-color`, `--border-color`, `--text-secondary`, `--text-color-3` — these don't exist; use `--danger`, `--success`, `--border`, `--text-3` respectively; use `color-mix(in srgb, var(--danger) N%, transparent)` for translucent semantic colors
-- **Component casing:** Always use PascalCase for Naive UI components (`NSwitch`, `NTag`, `NAlert`, `NProgress`, `NCollapse`), not lowercase kebab-case (`n-switch`, `n-tag`)
-- **Inline styles:** Avoid `style="..."` for layout/colors; create proper scoped CSS classes using design system variables; only acceptable for one-off `animation-delay` values
+- **主题：** 通过 `data-theme` 实现深色/浅色/跟随系统切换；`useThemeStore`（localStorage + 操作系统检测）为权威数据源，不是后端的 `AppSettings.Theme`；`ThemeMode = 'dark' | 'light' | 'system'`；渲染决策使用 `resolvedTheme`（始终为 `'dark'|'light'`），不要用 `mode`（可能为 `'system'`）；默认值为 `'system'`；`matchMedia` 监听器在操作系统主题变化时自动更新；浅色模式自动将强调色加深 15%
+- **CSS 变量：** 在 `main.css` 中定义（`--bg-root`、`--accent`、`--text-1` 等）；支持主题感知：使用 `--bg-subtle`/`--bg-muted` —— 绝不硬编码 `rgba(255,255,255,...)`
+- **布局：** 侧边栏（默认 230px，可折叠至 64px，通过拖拽可调整 180-400px）+ 可滚动内容区；`useSidebarStore` 将状态持久化到 localStorage（`sidebarCollapsed`、`sidebarWidth`）；768px 响应式断点（平板使用抽屉模式，禁用折叠/调整大小），480px 断点（手机单列布局）
+- **卡片：** `.section-card` 搭配 `.section-icon`/`.section-title`（基础色为 `--accent`；仅在语义场景使用 `.danger`/`.warning`）；装饰色使用 `--accent`；用 `color-mix()` 实现半透明背景
+- **共享 CSS（main.css）：** `.page-title`、`.page-title-icon`、`.section-card`、`.section-header`、`.section-title`、`.section-icon`、`.header-actions`、`.section-desc`、`.loading-state`、`.table-container`、`.add-entry-row`、`.unsaved-badge`、`.auto-save-badge`、`.empty-hint`、`.back-button` 均为全局类 —— 不要在作用域样式中重新定义
+- **子页面布局：** 游戏子页面使用 `.sub-page`（24px 标题）+ `.sub-page-header` + `.back-button`；顶层页面直接使用 `.page-title`（26px）
+- **头部操作区：** 使用 `.header-actions`（不要用 `.header-btn-group`）来布局区块头部的按钮组
+- **字体排版：** 不要对 UI 文本（版本号、标签等）使用 `font-family: monospace` —— 这与系统字体冲突；仅在代码块或面向开发者的输出中使用等宽字体
+- **内容内边距：** `24px 28px`（桌面端）、`20px 20px`（平板端）、`16px 12px`（手机端）—— hero 背景的负外边距必须与之匹配；不要在页面级容器上设置 padding（`.main-content` 已提供）；不要在页面容器上使用 `max-width`，除非内容确实需要约束宽度；页面级 flex 列使用 `gap: 16px`
+- **CSS 变量命名：** 绝不使用 `--error-color`、`--success-color`、`--border-color`、`--text-secondary`、`--text-color-3` —— 这些不存在；应使用 `--danger`、`--success`、`--border`、`--text-3`；用 `color-mix(in srgb, var(--danger) N%, transparent)` 实现半透明语义色
+- **组件命名大小写：** Naive UI 组件始终使用 PascalCase（`NSwitch`、`NTag`、`NAlert`、`NProgress`、`NCollapse`），不要用小写短横线形式（`n-switch`、`n-tag`）
+- **内联样式：** 避免使用 `style="..."` 做布局/颜色；应创建使用设计系统变量的作用域 CSS 类；仅在一次性的 `animation-delay` 值时可接受内联样式
 
-## Adding a New Page
+## 添加新页面
 
-- **Top-level page:** Add view in `src/views/`, lazy route in `router/index.ts`, nav item in `AppShell.vue` `mainNavItems` (settings is separate as `settingsNavItem`)
-- **Game sub-page:** lazy route at `/games/:id/{name}`, button in `GameDetailView.vue` — do NOT add to `navItems`; sub-pages include `TermEditorView`, `TranslationEditorView`, `ConfigEditorView`, `AssetExtractionView`, `FontReplacementView`, `BepInExLogView`
-- **TermEditorView:** Unified term editor (replaces old GlossaryEditorView); filter chip bar for type (translate/doNotTranslate) and category; NDataTable with virtual scroll, inline editing, column visibility control; single `useAutoSave` instance; JSON/CSV import/export; cross-game import via modal
-- **Page transitions:** `meta.depth` on routes (1=top-level, 2=game detail, 3=game sub-pages); adding a new route requires `meta: { depth: N }`
-- SignalR store: guard `connect()` with `state !== Disconnected`, re-join group in `onreconnected`
-- **SignalR in KeepAlive views:** NEVER create `HubConnection` at module/script level — always create inside `onMounted` and clean up in BOTH `onDeactivated` AND `onBeforeUnmount` (KeepAlive views are deactivated, not unmounted — `onBeforeUnmount` alone won't fire); extract cleanup into a shared function to avoid duplication; type `let connection: HubConnection | null = null` and assign in `onMounted`
-- **Window listeners in KeepAlive views:** `window.addEventListener` in `onMounted` must pair with `removeEventListener` in BOTH `onDeactivated` AND `onBeforeUnmount`; re-add in `onActivated` — otherwise listener stays active when view is deactivated, or accumulates on re-activation
-- **`onBeforeUnmount` not `onUnmounted`:** Always use `onBeforeUnmount` (not `onUnmounted`) for cleanup — `onUnmounted` fires after the component is already destroyed, too late for safe teardown; `onUnmounted` also never fires for KeepAlive views during normal navigation
-- **KeepAlive child components:** Child components rendered inside KeepAlive-cached views (e.g., `LocalAiPanel` inside `AiTranslationView`) also receive `onActivated`/`onDeactivated` — if they manage SignalR or other resources, they MUST use these hooks (not just `onMounted`/`onBeforeUnmount`)
-- **FontGeneratorView KeepAlive SignalR:** `FontGeneratorView` is cached in `<KeepAlive>` — must create new `HubConnection` in `onActivated` (not just `onMounted`) and tear down in `onDeactivated`; same pattern as other KeepAlive views
+- **顶层页面：** 在 `src/views/` 中添加视图，在 `router/index.ts` 中添加懒加载路由，在 `AppShell.vue` 的 `mainNavItems` 中添加导航项（设置页独立为 `settingsNavItem`）
+- **游戏子页面：** 懒加载路由位于 `/games/:id/{name}`，在 `GameDetailView.vue` 中添加按钮 —— 不要添加到 `navItems`；子页面包括 `TermEditorView`、`TranslationEditorView`、`ConfigEditorView`、`AssetExtractionView`、`FontReplacementView`、`BepInExLogView`
+- **TermEditorView：** 统一的术语编辑器（替代旧的 GlossaryEditorView）；提供类型（translate/doNotTranslate）和分类的筛选标签栏；NDataTable 虚拟滚动、行内编辑、列显示控制；单个 `useAutoSave` 实例；JSON/CSV 导入导出；通过弹窗实现跨游戏导入
+- **页面过渡：** 路由的 `meta.depth`（1=顶层页面，2=游戏详情，3=游戏子页面）；添加新路由必须包含 `meta: { depth: N }`
+- SignalR store：在 `connect()` 前检查 `state !== Disconnected`，在 `onreconnected` 中重新加入组
+- **KeepAlive 视图中的 SignalR：** 绝不在模块/脚本顶层创建 `HubConnection` —— 始终在 `onMounted` 中创建，并在 `onDeactivated` 和 `onBeforeUnmount` 中都进行清理（KeepAlive 视图被停用而非卸载 —— 单独使用 `onBeforeUnmount` 不会触发）；将清理逻辑提取为共享函数以避免重复；声明 `let connection: HubConnection | null = null` 并在 `onMounted` 中赋值
+- **KeepAlive 视图中的 Window 监听器：** `onMounted` 中的 `window.addEventListener` 必须在 `onDeactivated` 和 `onBeforeUnmount` 中都配对 `removeEventListener`；在 `onActivated` 中重新添加 —— 否则监听器在视图停用时仍保持活跃，或在重新激活时累积
+- **`onBeforeUnmount` 而非 `onUnmounted`：** 始终使用 `onBeforeUnmount`（不要用 `onUnmounted`）进行清理 —— `onUnmounted` 在组件已销毁后才触发，来不及安全地拆卸资源；KeepAlive 视图在正常导航期间 `onUnmounted` 也永远不会触发
+- **KeepAlive 子组件：** 在 KeepAlive 缓存视图内渲染的子组件（如 `AiTranslationView` 中的 `LocalAiPanel`）也会接收 `onActivated`/`onDeactivated` —— 如果它们管理 SignalR 或其他资源，必须使用这些钩子（而不仅是 `onMounted`/`onBeforeUnmount`）
+- **FontGeneratorView 的 KeepAlive SignalR：** `FontGeneratorView` 被 `<KeepAlive>` 缓存 —— 必须在 `onActivated`（而非仅 `onMounted`）中创建新的 `HubConnection`，并在 `onDeactivated` 中拆卸；与其他 KeepAlive 视图模式相同
 
-## Patterns & Gotchas
+## 模式与注意事项
 
-- **Pinia store mutation:** Never mutate store `ref` state directly from views or composables (`store.x = y`, `store.arr.push()`); always use store actions — direct mutation bypasses devtools tracking and creates race conditions
-- **Games store setters:** `setViewMode`, `setSortBy`, `setCardSize`, `setGap`, `setShowLabels` — use these actions instead of direct assignment; `launchGame(id)` handles both API call and `lastPlayedAt` update
-- **GameCard launch:** Must use `gamesStore.launchGame(id)` — never mutate `props.game` directly (Vue prohibits prop mutation; bypasses store reactivity)
-- **Theme default:** CSS `:root` = dark theme; `loadInitialTheme()` defaults to `'system'`; OS detection via `matchMedia`; `resolveTheme('system')` falls back to `'dark'` when OS detection unavailable
-- **Scoped → global CSS:** Scoped styles (`.class[data-v-xxx]`) have higher specificity than global (`.class`); when extracting shared styles to `main.css`, must REMOVE scoped duplicates or they'll override; page-specific overrides stay in scoped with just the differing properties
-- **Collapse animation:** Use `display: grid; grid-template-rows: 1fr/0fr` pattern (matching global `.section-body` in `main.css`), NOT `max-height` — `max-height` causes sluggish easing since transition applies to full 0→Npx range, not actual content height; **the `-body-inner` element MUST NOT have `padding`** — padding doesn't collapse with `0fr` grid tracks; either use a nested wrapper for padding, or transition `padding-top/padding-bottom` to `0` when collapsed (see `.settings-group-body-inner` pattern in `AiTranslationView.vue`)
-- **Flex `gap` with hidden children:** When hiding flex children via `max-width: 0; opacity: 0` (for smooth collapse transitions), flex `gap` still applies — pushes visible items off-center. Always set `gap: 0` on the parent in collapsed state. Affects sidebar logo, nav items, and any flex container with transition-hidden children.
-- **Flex column child stretching:** Items in `flex-direction: column` containers stretch to full width by default. For collapsed sidebar square buttons, set explicit `width`/`height` + `margin: 0 auto` to prevent rectangular stretching.
-- **Nested collapsible `@click.stop`:** When a `.section-card` with a collapsible header contains inner collapsible groups (e.g., settings groups), inner group headers need `@click.stop` to prevent bubbling to the outer collapse toggle.
-- **`defineOptions` placement:** Must go AFTER all `import` statements in `<script setup>`, never before — otherwise subsequent imports fail with TS1232
-- **KeepAlive:** Top-level views (Library, AiTranslation, FontGenerator, Log, Settings) are cached via `<KeepAlive :include>` in AppShell; each MUST have `defineOptions({ name: 'XxxView' })` after imports
-- **LogView level sync:** `selectedLevels` (default selection) and `levelDefs` (filter pill definitions) must both include a level for it to appear and be active; `levelClass()` styling must also have a matching CSS class (e.g., `.level-dbg`)
-- **Install state recovery:** `startInstall`/`startUninstall` must query backend `GET /api/games/{id}/status` as fallback — Pinia store state is lost on page reload while backend install continues running
-- Use composables (`src/composables/`) for complex multi-step UI flows; `useAddGameFlow` (add-game wizard), `useAutoSave` (debounced auto-save)
-- **Auto-save:** `useAutoSave(source, saveFn, { debounceMs, deep })`; `disable()` → load → `nextTick()` → `enable()`; `disable()` MUST clear pending timer; `onBeforeUnmount` auto-flushes; manual save MUST `disable()` before data reassign, `enable()` in `finally`
-- **KeepAlive settings overwrite hazard:** `AiTranslationView` and `SettingsView` both auto-save the FULL `AppSettings` via `PUT /api/settings`. Both MUST reload settings in `onActivated` (`loadSettings()`) — otherwise a stale KeepAlive copy overwrites the other page's changes (e.g., newly added endpoints get lost). Pattern: `disableAutoSave()` → fetch → assign → `nextTick()` → `enableAutoSave()`
-- **ConfigPanel** auto-saves internally (2s), no `save` event
-- Naive UI: light theme pass `null`; `NDrawer` width numbers only; `NForm` label-placement via computed (not CSS); `NInput` `string?` use `:value` + `@update:value`; `NInput` blur+enter double-fire → flag guard; `NDialogOptions.onPositiveClick`: returning a `Promise` keeps dialog open until resolved — fire-and-forget long async work (e.g., `() => { doWork() }`) to close immediately
-- `NInputNumber`: `@update:value` emits `number | null` — when user clears the field, value is `null`; handlers saving to API must guard `if (val === null) return`
-- `NDataTable`: `virtual-scroll` and `pagination` mutually exclusive; empty state guard with `filteredEntries.length > 0`; `row-key` must be globally unique — if ID can collide across categories, use composite key like `` `${category}:${id}` ``; columns without explicit `width`/`minWidth` get squeezed to 0px when fixed-width columns sum exceeds container — always set `minWidth` on flexible columns; **sort stability with in-cell editing**: `computed` re-triggers on every cell mutation via deep reactivity — use a `ref` cache + version counter (`entriesVersion`) and explicit `watch` on filter/sort settings to decouple; **controlled sort mode**: use `sorter: true` + `@update:sorters` + reactive `sortOrder` on columns, apply sorting manually in data pipeline (not NDataTable's built-in sort); type is `DataTableSortState` (NOT `SortState`)
-- `NBadge`: use `:show` prop to control dot visibility (NOT `:value` with `dot: true` — `show` defaults to `true` so dot always appears if only `dot` is set)
-- `NPopselect`: use for dropdown selection buttons (e.g., sort mode picker) — wraps a `NButton` trigger, shows selectable options with checked state; preferable to `NSelect` when the control should look like a button, not a form field
-- `NColorPicker`: `#trigger` slot replaces entire trigger element; `#label` only customizes text inside default rectangular trigger — use `#trigger` for custom trigger buttons; always set `:modes="['hex']"` when consuming hex values (default allows rgb/hsl/hsv switching, which breaks `hexToRgb()`); manage visibility manually via `:show`/`@update:show` — do NOT also call slot's provided `onClick` (it only opens, never toggles)
-- `v-show` + `loading="lazy"` deadlock: use `opacity: 0` + `position: absolute`
-- `onBeforeRouteLeave` with async: must `return new Promise<boolean>()` — NOT `next()` callback
-- **RouterView key:** `:key="route.path"` ensures transitions fire for same-component different-route navigations
-- **RouteMeta extension:** `env.d.ts` declares `depth?: number` on `RouteMeta` for TypeScript
-- **Pipeline flow CSS classes:** `.pipeline-flow` (position: relative) > `.pipeline-svg` (SVG overlay, z-index: 1) + `.pipeline-hbox` (horizontal flex, z-index: 2) > `.pipeline-root` + `.pipeline-branches` > `.pipeline-branch` > `.branch-header` + `.branch-nodes`; nodes use `flex: 1 1 0` to fill width; root node uses `flex: 0 0 auto`; SVG connections use right-angle paths (`L` segments, NOT bezier curves); animated particles via CSS `offset-path`; term extraction is inline in LLM `.branch-nodes` (NOT a separate `.branch-sub`); TM branch uses single `.tm-node` with `.tm-chips-inline` (NOT separate `.tm-chip` cards); TM colors use accent-based `color-mix()` variants (NOT `--secondary`); all pipeline nodes wrapped in `NPopover` for hover tooltips; `ResizeObserver` on `.pipeline-flow` recomputes SVG paths; cleanup in both `onDeactivated` and `onBeforeUnmount` (KeepAlive)
-- **GameDetailView animation:** 0.05s increments; inserting a card shifts ALL subsequent delays
-- **Blob download:** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
-- After changes: verify with `npx vue-tsc --build` and `npm run build`
-- **Visual verification:** Always use Playwright MCP (`browser_navigate` + `browser_take_screenshot`) to verify UI changes before reporting completion — type-check and build success do NOT guarantee correct visual output
-- Verify icon: `node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
-- **`embedded` prop pattern:** conditionally render card wrapper based on standalone vs nested usage
-- **`LocalAiPanel.vue`:** receives settings via `v-model`; shared settings flow through parent's `useAutoSave`; local-only settings saved via `PUT /api/local-llm/settings`
-- TypeScript: `Object.assign({}, obj, patch)` not spread for typed objects; lazy modals: `defineAsyncComponent`
-- **Dynamic field access on typed objects:** `(obj as Record<string, unknown>)[field]` fails strict TS; use `(obj as unknown as Record<string, unknown>)[field]`
-- **Markdown rendering:** `marked` package (ships own types, no `@types/marked`); use `marked.parse(md, { async: false }) as string` — `as string` cast required (overload returns `string | Promise<string>`)
-- **Regex match groups:** `match[1]` is `string | undefined` in strict TS — always check `match && match[1]`
-- **Scoped `:deep()` nesting:** Never chain `:deep()` — `.x :deep(a) :deep(b)` silently fails; use `:deep(a b)` for descendant selectors inside a single `:deep()` call
-- **`NTabs` equal-width segments:** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
-- **`NTabs type="segment"` dark theme:** segment tabs blend into background; override with `:deep(.n-tabs-tab--active)` using `color: var(--accent)`, `background: color-mix(in srgb, var(--accent) 12%, var(--bg-card))`, `border: 1px solid var(--accent-border)`
-- **`NUpload` in flex containers:** NUpload wraps trigger in extra divs that break flex alignment; fix with `:deep(.n-upload), :deep(.n-upload-trigger) { display: flex; align-items: center; }`
-- **Cross-page term access:** Other views (e.g., TranslationEditorView) can add entries via `gamesApi.getTerms` → check duplicate → `unshift` → `gamesApi.saveTerms`; no shared Pinia store — each page fetches/saves independently
-- **Bulk clear pattern:** "Clear all" = set reactive array to `[]`; for auto-save views (GlossaryEditor) this triggers auto-save of empty array; for manual-save views (TranslationEditor) it marks dirty state; always use `dialog.warning` confirmation
+- **Pinia store 状态变更：** 绝不从视图或组合式函数中直接修改 store 的 `ref` 状态（`store.x = y`、`store.arr.push()`）；始终使用 store actions —— 直接修改会绕过 devtools 追踪并产生竞态条件
+- **Games store 设置器：** `setViewMode`、`setSortBy`、`setCardSize`、`setGap`、`setShowLabels` —— 使用这些 actions 而非直接赋值；`launchGame(id)` 同时处理 API 调用和 `lastPlayedAt` 更新
+- **GameCard 启动：** 必须使用 `gamesStore.launchGame(id)` —— 绝不直接修改 `props.game`（Vue 禁止 prop 修改；会绕过 store 响应式）
+- **主题默认值：** CSS `:root` = 深色主题；`loadInitialTheme()` 默认为 `'system'`；通过 `matchMedia` 检测操作系统主题；`resolveTheme('system')` 在操作系统检测不可用时回退到 `'dark'`
+- **作用域样式 → 全局 CSS：** 作用域样式（`.class[data-v-xxx]`）的优先级高于全局样式（`.class`）；将共享样式提取到 `main.css` 时，必须移除作用域中的重复定义，否则它们会覆盖全局样式；页面特有的覆盖保留在作用域中，仅包含有差异的属性
+- **折叠动画：** 使用 `display: grid; grid-template-rows: 1fr/0fr` 模式（与 `main.css` 中全局 `.section-body` 一致），不要用 `max-height` —— `max-height` 会导致缓动迟滞，因为过渡应用于完整的 0→Npx 范围，而非实际内容高度；**`-body-inner` 元素不得有 `padding`** —— padding 不会随 `0fr` grid 轨道折叠；要么使用嵌套包裹元素来设置 padding，要么在折叠时将 `padding-top/padding-bottom` 过渡为 `0`（参见 `AiTranslationView.vue` 中的 `.settings-group-body-inner` 模式）
+- **Flex `gap` 与隐藏子元素：** 通过 `max-width: 0; opacity: 0`（用于平滑折叠过渡）隐藏 flex 子元素时，flex `gap` 仍然生效 —— 会将可见项推离中心。必须在折叠状态下将父元素的 `gap` 设为 `0`。影响侧边栏 logo、导航项，以及任何包含过渡隐藏子元素的 flex 容器。
+- **Flex 列子元素拉伸：** `flex-direction: column` 容器中的子项默认拉伸至全宽。对于折叠侧边栏的方形按钮，需设置明确的 `width`/`height` + `margin: 0 auto` 以防止矩形拉伸。
+- **嵌套可折叠区域 `@click.stop`：** 当带有可折叠头部的 `.section-card` 包含内层可折叠分组时（如设置分组），内层分组头部需要 `@click.stop` 以防止事件冒泡到外层折叠切换。
+- **`defineOptions` 位置：** 必须放在 `<script setup>` 中所有 `import` 语句之后，绝不放在之前 —— 否则后续导入会报 TS1232 错误
+- **KeepAlive：** 顶层视图（Library、AiTranslation、FontGenerator、Log、Settings）通过 AppShell 中的 `<KeepAlive :include>` 缓存；每个视图必须在导入语句之后有 `defineOptions({ name: 'XxxView' })`
+- **LogView 日志级别同步：** `selectedLevels`（默认选中项）和 `levelDefs`（筛选标签定义）都必须包含某个级别，该级别才会显示并处于激活状态；`levelClass()` 样式也必须有对应的 CSS 类（如 `.level-dbg`）
+- **安装状态恢复：** `startInstall`/`startUninstall` 必须将后端 `GET /api/games/{id}/status` 作为回退方案查询 —— 页面刷新时 Pinia store 状态会丢失，而后端安装仍在继续运行
+- 对于复杂的多步骤 UI 流程使用组合式函数（`src/composables/`）；`useAddGameFlow`（添加游戏向导）、`useAutoSave`（防抖自动保存）
+- **自动保存：** `useAutoSave(source, saveFn, { debounceMs, deep })`；`disable()` → 加载数据 → `nextTick()` → `enable()`；`disable()` 必须清除待处理的定时器；`onBeforeUnmount` 自动刷新；手动保存必须在数据重新赋值前 `disable()`，在 `finally` 中 `enable()`
+- **KeepAlive 设置覆写风险：** `AiTranslationView` 和 `SettingsView` 都通过 `PUT /api/settings` 自动保存完整的 `AppSettings`。两者都必须在 `onActivated` 中重新加载设置（`loadSettings()`）—— 否则过期的 KeepAlive 副本会覆盖另一个页面的更改（如新添加的端点会丢失）。模式：`disableAutoSave()` → 获取 → 赋值 → `nextTick()` → `enableAutoSave()`
+- **ConfigPanel** 内部自动保存（2 秒），不发出 `save` 事件
+- Naive UI：浅色主题传 `null`；`NDrawer` 宽度只接受数字；`NForm` 的 label-placement 通过 computed 设置（不用 CSS）；`NInput` 的 `string?` 使用 `:value` + `@update:value`；`NInput` 的 blur+enter 双触发 —— 用标志位防护；`NDialogOptions.onPositiveClick`：返回 `Promise` 会保持对话框打开直到 resolve —— 对耗时异步操作使用即发即忘方式（如 `() => { doWork() }`）以立即关闭
+- `NInputNumber`：`@update:value` 发出 `number | null` —— 用户清空字段时值为 `null`；保存到 API 的处理函数必须检查 `if (val === null) return`
+- `NDataTable`：`virtual-scroll` 和 `pagination` 互斥；用 `filteredEntries.length > 0` 做空状态保护；`row-key` 必须全局唯一 —— 如果 ID 可能跨分类冲突，使用组合键如 `` `${category}:${id}` ``；没有明确 `width`/`minWidth` 的列在固定宽度列总和超过容器时会被压缩到 0px —— 弹性列必须设置 `minWidth`；**行内编辑的排序稳定性**：`computed` 因深层响应式在每次单元格修改时重新触发 —— 使用 `ref` 缓存 + 版本计数器（`entriesVersion`）并显式 `watch` 筛选/排序设置来解耦；**受控排序模式**：使用 `sorter: true` + `@update:sorters` + 响应式 `sortOrder` 在列上，手动在数据管道中应用排序（不要用 NDataTable 的内置排序）；类型为 `DataTableSortState`（不是 `SortState`）
+- `NBadge`：使用 `:show` 属性控制圆点可见性（不要用 `:value` 配合 `dot: true` —— `show` 默认为 `true`，所以仅设 `dot` 时圆点会始终显示）
+- `NPopselect`：用于下拉选择按钮（如排序模式选择器）—— 包裹一个 `NButton` 触发器，显示带选中状态的可选选项；当控件应呈现为按钮而非表单字段时，优于 `NSelect`
+- `NColorPicker`：`#trigger` 插槽替换整个触发元素；`#label` 仅自定义默认矩形触发器内的文本 —— 自定义触发按钮使用 `#trigger`；消费 hex 值时始终设置 `:modes="['hex']"`（默认允许 rgb/hsl/hsv 切换，会导致 `hexToRgb()` 失败）；通过 `:show`/`@update:show` 手动管理可见性 —— 不要同时调用插槽提供的 `onClick`（它只能打开，不能切换）
+- `v-show` + `loading="lazy"` 死锁：使用 `opacity: 0` + `position: absolute` 替代
+- `onBeforeRouteLeave` 配合 async：必须 `return new Promise<boolean>()` —— 不要用 `next()` 回调
+- **RouterView key：** `:key="route.path"` 确保相同组件不同路由导航时触发过渡动画
+- **RouteMeta 扩展：** `env.d.ts` 为 TypeScript 在 `RouteMeta` 上声明了 `depth?: number`
+- **流水线流程 CSS 类：** `.pipeline-flow`（position: relative）> `.pipeline-svg`（SVG 叠加层，z-index: 1）+ `.pipeline-hbox`（水平 flex，z-index: 2）> `.pipeline-root` + `.pipeline-branches` > `.pipeline-branch` > `.branch-header` + `.branch-nodes`；节点使用 `flex: 1 1 0` 填满宽度；根节点使用 `flex: 0 0 auto`；SVG 连线使用直角路径（`L` 线段，不是贝塞尔曲线）；通过 CSS `offset-path` 实现动画粒子；术语提取内联于 LLM `.branch-nodes` 中（不是单独的 `.branch-sub`）；TM 分支使用单个 `.tm-node` 配合 `.tm-chips-inline`（不是单独的 `.tm-chip` 卡片）；TM 颜色使用基于强调色的 `color-mix()` 变体（不是 `--secondary`）；所有流水线节点都用 `NPopover` 包裹以显示悬浮提示；`.pipeline-flow` 上的 `ResizeObserver` 重新计算 SVG 路径；在 `onDeactivated` 和 `onBeforeUnmount` 中都进行清理（KeepAlive）
+- **GameDetailView 动画：** 每项间隔 0.05s；插入一张卡片会移动所有后续卡片的延迟
+- **Blob 下载：** `fetch` → `blob()` → `createObjectURL` → `a.click()` → `setTimeout(revokeObjectURL, 1000)`
+- 修改后：使用 `npx vue-tsc --build` 和 `npm run build` 验证
+- **视觉验证：** 始终使用 Playwright MCP（`browser_navigate` + `browser_take_screenshot`）在报告完成前验证 UI 更改 —— 类型检查和构建成功不能保证正确的视觉输出
+- 验证图标：`node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
+- **`embedded` 属性模式：** 根据独立使用或嵌套使用来条件渲染卡片包裹
+- **`LocalAiPanel.vue`：** 通过 `v-model` 接收设置；共享设置通过父组件的 `useAutoSave` 流转；本地专属设置通过 `PUT /api/local-llm/settings` 保存
+- TypeScript：对类型化对象使用 `Object.assign({}, obj, patch)` 而非展开运算符；懒加载弹窗：`defineAsyncComponent`
+- **类型化对象的动态字段访问：** `(obj as Record<string, unknown>)[field]` 在严格 TS 下失败；使用 `(obj as unknown as Record<string, unknown>)[field]`
+- **Markdown 渲染：** `marked` 包（自带类型定义，不需要 `@types/marked`）；使用 `marked.parse(md, { async: false }) as string` —— 需要 `as string` 类型断言（重载返回 `string | Promise<string>`）
+- **正则匹配分组：** 在严格 TS 中 `match[1]` 为 `string | undefined` —— 始终检查 `match && match[1]`
+- **作用域 `:deep()` 嵌套：** 绝不链式使用 `:deep()` —— `.x :deep(a) :deep(b)` 会静默失败；在单个 `:deep()` 调用中使用后代选择器 `:deep(a b)`
+- **`NTabs` 等宽分段：** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`
+- **`NTabs type="segment"` 深色主题：** 分段标签会融入背景；通过 `:deep(.n-tabs-tab--active)` 覆写，使用 `color: var(--accent)`、`background: color-mix(in srgb, var(--accent) 12%, var(--bg-card))`、`border: 1px solid var(--accent-border)`
+- **`NUpload` 在 flex 容器中：** NUpload 用额外 div 包裹触发器，会破坏 flex 对齐；通过 `:deep(.n-upload), :deep(.n-upload-trigger) { display: flex; align-items: center; }` 修复
+- **跨页面术语访问：** 其他视图（如 TranslationEditorView）可通过 `gamesApi.getTerms` → 检查重复 → `unshift` → `gamesApi.saveTerms` 添加条目；没有共享的 Pinia store —— 每个页面独立获取/保存
+- **批量清除模式：** "全部清除" = 将响应式数组设为 `[]`；对于自动保存视图（GlossaryEditor），这会触发空数组的自动保存；对于手动保存视图（TranslationEditor），这会标记脏状态；始终使用 `dialog.warning` 确认
 
-## Game Detail Background Image
+## 游戏详情背景图片
 
-- **Hero backdrop:** `GameDetailView.vue` — absolute-positioned behind content; NO blur on image (`filter: brightness(0.65) saturate(1.1)` only); gradient + vignette overlays fade to `--bg-root`
-- **Acrylic cards:** `.section-card` uses `backdrop-filter: blur(20px)` with semi-transparent `--bg-card` — cards blur the background, not the image itself
-- **Parallax:** scroll listener on `.main-content` (parent); `translateY(scrollTop * 0.3)` on hero img; `passive: true`
-- **bgTimestamp:** separate `ref(Date.now())` for cache-busting background URL independently of `game.updatedAt`
+- **Hero 背景：** `GameDetailView.vue` —— 绝对定位于内容后方；图片不要加模糊（仅使用 `filter: brightness(0.65) saturate(1.1)`）；渐变 + 暗角叠加层淡出至 `--bg-root`
+- **亚克力卡片：** `.section-card` 使用 `backdrop-filter: blur(20px)` 配合半透明 `--bg-card` —— 是卡片模糊背景，而非图片本身模糊
+- **视差效果：** 滚动监听器在 `.main-content`（父元素）上；hero 图片使用 `translateY(scrollTop * 0.3)`；`passive: true`
+- **bgTimestamp：** 独立的 `ref(Date.now())` 用于独立于 `game.updatedAt` 对背景 URL 进行缓存失效
 
-## Web Image Search (Frontend)
+## 网页图片搜索（前端）
 
-- **`WebImageSearchTab` modes:** `'cover'` | `'icon'` | `'background'` — each with distinct search suffix, size filter, and grid aspect ratio
-- **GameDetailView title-icon:** left-click → IconPickerModal; right-click → context menu (Change Cover / Change Background / Search Icon / Upload Icon / Delete Icon / Delete Background)
+- **`WebImageSearchTab` 模式：** `'cover'` | `'icon'` | `'background'` —— 各自有不同的搜索后缀、尺寸筛选和网格宽高比
+- **GameDetailView 标题图标：** 左键点击 → IconPickerModal；右键点击 → 上下文菜单（更换封面 / 更换背景 / 搜索图标 / 上传图标 / 删除图标 / 删除背景）

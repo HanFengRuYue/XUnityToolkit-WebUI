@@ -151,14 +151,13 @@ public sealed class InstallOrchestrator(
     private async Task ExecuteInstallAsync(
         Game game, InstallationStatus status, XUnityConfig? config, CancellationToken ct)
     {
-        // Step 1: Detect game
+        // Step 1: Detect game (always re-detect to ensure latest info, e.g. HasTextMeshPro)
         await UpdateStatus(status, InstallStep.DetectingGame, 5, "Detecting Unity game info...");
 
-        if (game.DetectedInfo is null)
         {
             var info = await detection.DetectAsync(game.GamePath, ct);
             game.DetectedInfo = info;
-            game.ExecutableName = info.DetectedExecutable;
+            game.ExecutableName ??= info.DetectedExecutable;
             await gameLibrary.UpdateAsync(game, ct);
         }
 
@@ -187,21 +186,29 @@ public sealed class InstallOrchestrator(
         await xUnityInstaller.InstallAsync(game.GamePath, xUnityZip, ct);
         await UpdateStatus(status, InstallStep.InstallingXUnity, 65, "XUnity.AutoTranslator 安装完成");
 
-        // Step 4: Install TMP font
+        // Step 4: Install TMP font (skip if game doesn't use TextMeshPro)
         await UpdateStatus(status, InstallStep.InstallingTmpFont, 66, "正在安装 TMP 字体...");
         string? tmpFontConfigValue = null;
-        try
+        if (gameInfo.HasTextMeshPro == false)
         {
-            tmpFontConfigValue = tmpFontService.InstallFont(game.GamePath, gameInfo);
-            if (tmpFontConfigValue != null)
-                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体已安装");
-            else
-                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体不可用（跳过）");
+            logger.LogInformation("游戏不使用 TextMeshPro，跳过 TMP 字体安装");
+            await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "游戏不使用 TextMeshPro（跳过）");
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning(ex, "TMP 字体安装失败（不影响安装）");
-            await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体安装失败（跳过）");
+            try
+            {
+                tmpFontConfigValue = tmpFontService.InstallFont(game.GamePath, gameInfo);
+                if (tmpFontConfigValue != null)
+                    await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体已安装");
+                else
+                    await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体不可用（跳过）");
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "TMP 字体安装失败（不影响安装）");
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体安装失败（跳过）");
+            }
         }
 
         // Step 5: Deploy LLMTranslate translator endpoint DLL

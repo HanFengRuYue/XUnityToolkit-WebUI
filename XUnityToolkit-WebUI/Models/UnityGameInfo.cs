@@ -11,4 +11,5 @@ public sealed class UnityGameInfo
     public Architecture Architecture { get; init; }
     public required string DetectedExecutable { get; init; }
     public DateTime DetectedAt { get; init; } = DateTime.UtcNow;
+    public bool? HasTextMeshPro { get; init; }
 }
