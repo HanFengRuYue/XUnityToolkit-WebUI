@@ -360,12 +360,15 @@ function computeConnections() {
     result.push({ id: 'done-extraction', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
   }
 
+  // TM animation should only play while translation is actively flowing
+  const tmActive = tmTotalHits.value > 0 && (s?.queued ?? 0) + (s?.translating ?? 0) > 0
+
   // root → TM node (right-angle fork: right, down, right)
   if (root && tmChips) {
     const pathD = rightAngleH(root.right, root.cy, tmChips.left, tmChips.cy)
     const vol = Math.min(20, tmTotalHits.value)
     const pp = particleParams(vol)
-    result.push({ id: 'tm-root-chips', pathD, active: tmTotalHits.value > 0, particleCount: pp.count, duration: pp.duration, isTm: true })
+    result.push({ id: 'tm-root-chips', pathD, active: tmActive, particleCount: pp.count, duration: pp.duration, isTm: true })
   }
 
   // TM node → TM done
@@ -373,7 +376,7 @@ function computeConnections() {
     const pathD = rightAngleH(tmChips.right, tmChips.cy, tmDone.left, tmDone.cy)
     const vol = Math.min(20, tmTotalHits.value)
     const pp = particleParams(vol)
-    result.push({ id: 'tm-chips-done', pathD, active: tmTotalHits.value > 0, particleCount: pp.count, duration: pp.duration, isTm: true })
+    result.push({ id: 'tm-chips-done', pathD, active: tmActive, particleCount: pp.count, duration: pp.duration, isTm: true })
   }
 
   connections.value = result
