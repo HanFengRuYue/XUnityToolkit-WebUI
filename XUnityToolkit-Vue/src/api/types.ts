@@ -15,6 +15,7 @@ export interface UnityGameInfo {
   architecture: Architecture
   detectedExecutable: string
   detectedAt: string
+  hasTextMeshPro?: boolean | null
 }
 
 export type ModFrameworkType =
@@ -665,11 +666,18 @@ export interface BepInExLogAnalysis {
 // Plugin Health Check
 export type HealthStatus = 'Healthy' | 'Warning' | 'Error' | 'Unknown'
 
+export interface HealthCheckDetail {
+  category: string
+  excerpt: string
+  suggestion?: string
+}
+
 export interface HealthCheckItem {
   id: string
   label: string
   status: HealthStatus
   detail?: string
+  details?: HealthCheckDetail[]
 }
 
 export interface PluginHealthReport {

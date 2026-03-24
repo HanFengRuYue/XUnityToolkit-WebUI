@@ -339,16 +339,80 @@ public sealed partial class PluginHealthCheckService(ILogger<PluginHealthCheckSe
 
     private static void CheckLogErrors(List<HealthCheckItem> checks, string[] lines)
     {
-        var errorCount = lines.Count(l => PluginErrorRegex().IsMatch(l));
+        var details = new List<HealthCheckDetail>();
+        var seenCategories = new Dictionary<string, int>();
 
-        if (errorCount == 0)
+        // Pre-scan: check if TMP font fallback is unsupported (non-critical error)
+        var fontFallbackUnsupported = lines.Any(l => FontFallbackNotSupportedRegex().IsMatch(l));
+
+        // Pass 1: Scan [Error:] lines for general error patterns
+        var errorCount = 0;
+        foreach (var line in lines)
+        {
+            if (!PluginErrorRegex().IsMatch(line)) continue;
+
+            // Skip font-missing errors when the game doesn't support TMP font fallback
+            if (fontFallbackUnsupported && FontAssetMissingRegex().IsMatch(line))
+                continue;
+
+            errorCount++;
+            MatchErrorPatterns(line, GeneralErrorPatterns, details, seenCategories);
+        }
+
+        // Pass 2: Scan ALL lines for LLMTranslate endpoint-specific errors
+        // (DLL logs via Console.WriteLine → appears as [Info/Message:], not [Error:])
+        foreach (var line in lines)
+        {
+            if (!LlmTranslateLineRegex().IsMatch(line)) continue;
+            MatchErrorPatterns(line, EndpointErrorPatterns, details, seenCategories);
+        }
+
+        // Cap total details
+        if (details.Count > MaxTotalDetails)
+            details = details[..MaxTotalDetails];
+
+        var hasDetails = details.Count > 0;
+        var detailList = hasDetails ? details : null;
+
+        if (errorCount == 0 && !hasDetails)
+        {
             checks.Add(new("logErrors", "运行错误日志", HealthStatus.Healthy, null));
-        else if (errorCount < 5)
+        }
+        else if (errorCount == 0 && hasDetails)
+        {
+            // Only endpoint-level issues found (no [Error:] lines)
             checks.Add(new("logErrors", "运行错误日志", HealthStatus.Warning,
-                $"发现 {errorCount} 条插件相关错误日志，请查看 BepInEx 日志了解详情"));
+                $"发现 {details.Count} 条翻译端点相关问题", detailList));
+        }
+        else if (errorCount < 5)
+        {
+            checks.Add(new("logErrors", "运行错误日志", HealthStatus.Warning,
+                $"发现 {errorCount} 条插件相关错误日志", detailList));
+        }
         else
+        {
             checks.Add(new("logErrors", "运行错误日志", HealthStatus.Error,
-                $"发现 {errorCount} 条插件相关错误日志，插件可能存在严重问题。请查看 BepInEx 日志分析"));
+                $"发现 {errorCount} 条插件相关错误日志，插件可能存在严重问题", detailList));
+        }
+    }
+
+    private static void MatchErrorPatterns(
+        string line,
+        IReadOnlyList<ErrorPattern> patterns,
+        List<HealthCheckDetail> details,
+        Dictionary<string, int> seenCategories)
+    {
+        foreach (var pattern in patterns)
+        {
+            if (!pattern.Matcher.IsMatch(line)) continue;
+            seenCategories.TryGetValue(pattern.Category, out var count);
+            if (count < MaxDetailsPerCategory)
+            {
+                details.Add(new(pattern.Category, SafeExcerpt(line), pattern.Suggestion));
+                seenCategories[pattern.Category] = count + 1;
+            }
+            break; // first match wins per line
+        }
     }
 
     // ─── Overall Status ───────────────────────────────────────────────────
@@ -365,6 +429,72 @@ public sealed partial class PluginHealthCheckService(ILogger<PluginHealthCheckSe
         return HealthStatus.Healthy;
     }
 
+    // ─── Error Pattern Matching ─────────────────────────────────────────
+
+    private const int MaxDetailsPerCategory = 2;
+    private const int MaxTotalDetails = 10;
+
+    private record ErrorPattern(string Category, Regex Matcher, string? Suggestion);
+
+    private static readonly IReadOnlyList<ErrorPattern> GeneralErrorPatterns =
+    [
+        new("IL2CPP 兼容性错误", Il2CppErrorRegex(),
+            "检查 BepInEx 6 版本是否支持当前游戏的 IL2CPP 版本"),
+        new("Harmony 补丁失败", HarmonyPatchRegex(),
+            "可能存在插件冲突，尝试移除其他 BepInEx 插件"),
+        new("程序集版本冲突", AssemblyVersionRegex(),
+            "游戏更新可能导致 DLL 版本不匹配，尝试重新安装"),
+        new("类型/方法加载错误", TypeLoadRegex(),
+            "通常由游戏更新引起，尝试更新 XUnity.AutoTranslator 版本"),
+        new("插件加载失败", PluginLoadRegex(),
+            "检查插件 DLL 是否完整，尝试重新安装"),
+        new("字体资源缺失", FontAssetMissingRegex(),
+            "在游戏详情页的 TMP 字体功能中重新安装字体"),
+        new("文件/资源未找到", FileNotFoundRegex(),
+            "检查杀毒软件是否删除了文件"),
+        new("访问权限错误", AccessDeniedRegex(),
+            "以管理员权限运行工具箱，或将游戏目录添加至杀毒软件白名单"),
+        new("空引用崩溃", NullReferenceRegex(), null),
+        new("网络连接错误", NetworkErrorRegex(),
+            "检查防火墙设置或在 AI 翻译设置中修改监听端口"),
+        new("XUnity 翻译异常", XUnityHookRegex(),
+            "当前游戏版本可能不完全兼容 XUnity"),
+    ];
+
+    private static readonly IReadOnlyList<ErrorPattern> EndpointErrorPatterns =
+    [
+        new("工具箱连接失败", EndpointConnectFailRegex(),
+            "确认工具箱已启动且端口正确（默认 51821）"),
+        new("翻译返回空响应", EndpointEmptyResponseRegex(),
+            "检查 AI 翻译设置中的 API 密钥是否有效"),
+        new("翻译数量不匹配", EndpointCountMismatchRegex(),
+            "AI 模型响应格式异常，尝试更换模型或降低批量大小"),
+        new("本地模型未启动", EndpointLocalLlmRegex(),
+            "需要在工具箱的本地 AI 页面先启动模型"),
+        new("翻译端点被禁用", EndpointDisabledRegex(),
+            "XUnity 因连续失败自动禁用了翻译端点，需重启游戏"),
+        new("API 调用失败", EndpointApiFailRegex(),
+            "检查 AI 翻译提供商配置和网络连接"),
+    ];
+
+    private static string SafeExcerpt(string line)
+    {
+        // Strip BepInEx log prefix: [Level : Source]
+        var cleaned = LogPrefixRegex().Replace(line.Trim(), "");
+
+        // Replace absolute path segments with filename only
+        cleaned = AbsolutePathRegex().Replace(cleaned, m =>
+        {
+            var name = Path.GetFileName(m.Value.TrimEnd(')', ']', ',', ';', '"', '\''));
+            return string.IsNullOrEmpty(name) ? "[path]" : name;
+        });
+
+        if (cleaned.Length > 120)
+            cleaned = string.Concat(cleaned.AsSpan(0, 120), "…");
+
+        return cleaned;
+    }
+
     // ─── Compiled Regex Patterns ──────────────────────────────────────────
 
     [GeneratedRegex(@"\[Info\s*:\s*BepInEx\]|BepInEx \d+\.\d+")]
@@ -375,4 +505,71 @@ public sealed partial class PluginHealthCheckService(ILogger<PluginHealthCheckSe
 
     [GeneratedRegex(@"\[Error\s*:.*(?:XUnity|AutoTranslator|LLMTranslate|BepInEx)", RegexOptions.IgnoreCase)]
     private static partial Regex PluginErrorRegex();
+
+    // Pre-filter for lines that might contain LLMTranslate endpoint errors
+    [GeneratedRegex(@"LLMTranslate|consecutive.*error|endpoint.*disabled", RegexOptions.IgnoreCase)]
+    private static partial Regex LlmTranslateLineRegex();
+
+    // General error patterns (#1-#10)
+    [GeneratedRegex(@"Il2Cpp|Unhollower|Il2CppInterop|il2cpp_", RegexOptions.IgnoreCase)]
+    private static partial Regex Il2CppErrorRegex();
+
+    [GeneratedRegex(@"HarmonyException|HarmonyLib.*Exception|Failed to patch|Harmony.*[Pp]atch.*[Ff]ailed|PatchProcessor", RegexOptions.IgnoreCase)]
+    private static partial Regex HarmonyPatchRegex();
+
+    [GeneratedRegex(@"AssemblyResolutionException|version conflict|Could not resolve assembly|wrong version|version mismatch", RegexOptions.IgnoreCase)]
+    private static partial Regex AssemblyVersionRegex();
+
+    [GeneratedRegex(@"TypeLoadException|MissingMethodException|MissingFieldException|Could not load type", RegexOptions.IgnoreCase)]
+    private static partial Regex TypeLoadRegex();
+
+    [GeneratedRegex(@"Could not load.*plugin|Failed to load.*plugin|Error loading plugin|ReflectionTypeLoadException|PluginException", RegexOptions.IgnoreCase)]
+    private static partial Regex PluginLoadRegex();
+
+    [GeneratedRegex(@"[Ff]ont.*(?:not found|missing|Could not find)|Could not find.*[Ff]ont", RegexOptions.IgnoreCase)]
+    private static partial Regex FontAssetMissingRegex();
+
+    [GeneratedRegex(@"Cannot use fallback font.*not supported", RegexOptions.IgnoreCase)]
+    private static partial Regex FontFallbackNotSupportedRegex();
+
+    [GeneratedRegex(@"FileNotFoundException|Could not find|No such file|file.*not found|not found.*file", RegexOptions.IgnoreCase)]
+    private static partial Regex FileNotFoundRegex();
+
+    [GeneratedRegex(@"UnauthorizedAccessException|Access.*denied|Access to the path.*is denied", RegexOptions.IgnoreCase)]
+    private static partial Regex AccessDeniedRegex();
+
+    [GeneratedRegex(@"NullReferenceException")]
+    private static partial Regex NullReferenceRegex();
+
+    [GeneratedRegex(@"WebException|SocketException|HttpRequestException|connection.*refused|Unable to connect", RegexOptions.IgnoreCase)]
+    private static partial Regex NetworkErrorRegex();
+
+    [GeneratedRegex(@"[Ff]ailed.*[Hh]ook|[Hh]ook.*[Ff]ailed|TextHook|Cannot.*translat|AutoTranslator.*[Ff]ailed", RegexOptions.IgnoreCase)]
+    private static partial Regex XUnityHookRegex();
+
+    // LLMTranslate endpoint-specific patterns (#11-#16)
+    [GeneratedRegex(@"LLMTranslate.*(?:Unable to connect|ConnectFailure|连接.*失败|NameResolutionFailure)", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointConnectFailRegex();
+
+    [GeneratedRegex(@"LLMTranslate.*(?:空响应|Empty response)", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointEmptyResponseRegex();
+
+    [GeneratedRegex(@"LLMTranslate.*(?:数量不匹配|count mismatch)", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointCountMismatchRegex();
+
+    [GeneratedRegex(@"LLMTranslate.*503|(?:本地模型未启动|本地模型未运行)", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointLocalLlmRegex();
+
+    [GeneratedRegex(@"consecutive.*error.*LLMTranslate|endpoint.*disabled.*LLMTranslate|Disabl.*LLMTranslate|LLMTranslate.*Disabl", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointDisabledRegex();
+
+    [GeneratedRegex(@"LLMTranslate.*(?:50[0-9]|Failed|失败|Timeout|超时)", RegexOptions.IgnoreCase)]
+    private static partial Regex EndpointApiFailRegex();
+
+    // Utility patterns for SafeExcerpt
+    [GeneratedRegex(@"^\[[\w\s]+\s*:\s*[\w\.\s]+\]\s*")]
+    private static partial Regex LogPrefixRegex();
+
+    [GeneratedRegex(@"[A-Za-z]:\\[^\s,;""']+|/(?:home|usr|var|opt|tmp)/[^\s,;""']+")]
+    private static partial Regex AbsolutePathRegex();
 }

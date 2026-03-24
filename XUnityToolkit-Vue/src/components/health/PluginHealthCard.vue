@@ -126,6 +126,11 @@ watch(() => props.initialReport, (newReport) => {
 
     <!-- Report loaded -->
     <template v-else-if="report">
+      <!-- Reference hint -->
+      <NAlert type="info" :bordered="false" class="card-alert reference-hint">
+        检查结果仅供参考，以实际运行情况为准
+      </NAlert>
+
       <!-- Error from verify -->
       <NAlert v-if="error" type="error" closable class="card-alert" @close="error = null">
         {{ error }}
@@ -154,11 +159,20 @@ watch(() => props.initialReport, (newReport) => {
           v-for="item in problemItems"
           :key="item.id"
           class="check-item"
-          :class="statusClass(item.status)"
+          :class="[statusClass(item.status), { 'has-details': item.details?.length }]"
         >
-          <NIcon :size="16" class="check-icon"><component :is="statusIcon(item.status)" /></NIcon>
-          <span class="check-label">{{ item.label }}</span>
-          <span v-if="item.detail" class="check-detail">{{ item.detail }}</span>
+          <div class="check-item-main">
+            <NIcon :size="16" class="check-icon"><component :is="statusIcon(item.status)" /></NIcon>
+            <span class="check-label">{{ item.label }}</span>
+            <span v-if="item.detail" class="check-detail">{{ item.detail }}</span>
+          </div>
+          <ul v-if="item.details?.length" class="check-detail-list">
+            <li v-for="(d, i) in item.details" :key="i" class="detail-entry">
+              <span class="detail-category">{{ d.category }}</span>
+              <span class="detail-excerpt">{{ d.excerpt }}</span>
+              <span v-if="d.suggestion" class="detail-suggestion">{{ d.suggestion }}</span>
+            </li>
+          </ul>
         </div>
       </div>
     </template>
@@ -177,6 +191,11 @@ watch(() => props.initialReport, (newReport) => {
 
 .card-alert {
   margin-bottom: 12px;
+}
+
+.reference-hint {
+  font-size: 12px;
+  opacity: 0.75;
 }
 
 .overall-status {
@@ -214,9 +233,61 @@ watch(() => props.initialReport, (newReport) => {
   font-size: 13px;
 }
 
+.check-item.has-details {
+  flex-direction: column;
+  gap: 0;
+}
+
+.check-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .check-icon {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+.check-detail-list {
+  list-style: none;
+  padding: 4px 0 2px 24px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 3px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.detail-entry:last-child {
+  border-bottom: none;
+}
+
+.detail-category {
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.detail-excerpt {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.detail-suggestion {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text-3));
+  font-size: 11px;
 }
 
 .check-item.status-warning .check-icon {

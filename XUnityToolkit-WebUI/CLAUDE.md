@@ -1,217 +1,217 @@
-# XUnityToolkit-WebUI Backend
+# XUnityToolkit-WebUI 后端
 
-ASP.NET Core backend. See root `CLAUDE.md` for project overview, API endpoints, and build commands.
+ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录 `CLAUDE.md`。
 
-## Core
+## 核心
 
-- **No migration code:** Project is pre-stable — no backward-compat migrations or old-format converters
-- **Key infrastructure services:** `GameLibraryService` (in-memory game library CRUD), `AppSettingsService` (settings cache), `ConfigurationService` (INI read/write/patch), `UnityDetectionService` (game detection), `GameImageService` (icon/cover/background management)
-- `AppSettingsService`: in-memory cache; `GetAsync()` no disk I/O; must NOT mutate returned object — use `UpdateAsync`/`SaveAsync`
-- **Data storage:** `%AppData%\XUnityToolkit\` for all runtime data; `AppDataPaths` centralizes paths; shipped assets (`bundled/`, `wwwroot/`) stay at program root
-- **Sensitive data encryption:** `DpapiProtector` (DPAPI CurrentUser) encrypts `ApiEndpointConfig.ApiKey` and `SteamGridDbApiKey`; prefix `ENC:DPAPI:` + Base64; encrypt/decrypt in `AppSettingsService.ReadAsync`/`WriteAsync` boundary; decryption failure preserves ciphertext + creates `.bak` backup
-- **Pre-DI paths:** `Program.cs` reads `builder.Configuration["AppData:Root"]` fallback to `%AppData%\XUnityToolkit\` before DI — must stay in sync with `AppDataPaths._root` formula
-- **App URL:** `http://127.0.0.1:{port}` default `51821`; **MUST use `127.0.0.1` not `localhost`** (Unity Mono resolves to IPv6 `::1`); port configurable via `settings.json` → `aiTranslation.port` (read pre-DI in `Program.cs`)
-- **Static file caching:** `UseStaticFiles` sets `Cache-Control: public, max-age=31536000, immutable` for `/assets/*` (Vite content-hashed); `no-cache` for root files (`index.html`, `favicon.ico`); `MapFallbackToFile` also sets `no-cache` on `index.html` — both must be configured separately
-- Named `HttpClient`: `"LLM"` (120s/200conn), `"SteamGridDB"` (30s), `"LocalLlmDownload"` (12h), `"WebImageSearch"` (15s, browser UA), `"GitHubUpdate"` (60s), `"GitHubCdn"` (30s, CDN/web requests)
-- **Multipart upload endpoints:** Must chain `.DisableAntiforgery()` on `MapPost` — otherwise ASP.NET rejects `multipart/form-data` requests
-- **Updater AOT constraints:** `Updater/` targets `net10.0` (not `-windows`), `PublishAot=true`, `InvariantGlobalization`; no `JsonSerializer` reflection — use manual string formatting for JSON; no WinForms or UI frameworks
-- **InformationalVersion gotcha:** .NET SDK appends `+commitHash` suffix; always `Split('+')[0]` before version comparison
-- **GitHub API JSON:** `JsonOptions` uses `CamelCase`; GitHub API returns snake_case (`tag_name`, `browser_download_url`) — `GitHubRelease`/`GitHubAsset` models use `[JsonPropertyName]` to override; any new GitHub API model properties must also use explicit `[JsonPropertyName("snake_case")]`
-- **GitHub API rate limit:** Unauthenticated ETag/`If-None-Match` 304 responses **still count** against the 60/hour limit — only authenticated 304s are exempt; CDN (`objects.githubusercontent.com`) and web (`github.com`) requests have separate, more generous limits
-- **Update check three-layer strategy:** CDN (`update-check.json` asset) → Atom Feed (`/releases.atom`) → GitHub API fallback; when extracting methods that throw `InvalidOperationException` (e.g., rate limit), caller **must** still set `_status` to Error and broadcast via SignalR — otherwise status gets stuck at `Checking`
-- **Mirror:** `AppSettings.HfMirrorUrl`; HF host-replacement for model downloads; plugins/llama binaries are bundled (no runtime GitHub downloads)
-- **Fire-and-forget:** `CancellationToken.None` in `Task.Run`; `CancellationTokenSource` dicts for user cancellation
-- **Fire-and-forget SignalR invariant:** When fire-and-forget `Task.Run` wraps an async service call and the frontend resets state via a SignalR completion event, the endpoint handler MUST broadcast completion on failure/cancel paths too — services may only broadcast on success; otherwise frontend state gets permanently stuck; always wrap the entire body in `try/catch` with error broadcast in `catch`
-- **SignalR error broadcast:** In fire-and-forget `catch (Exception ex)` blocks that broadcast errors via SignalR, use static error messages (e.g., `"字体生成失败，请检查字体文件格式"`), NOT `ex.Message` — log the exception server-side via `ILogger` instead
-- **Endpoint return pattern:** Always wrap return values with `Results.Ok(ApiResult<T>.Ok(...))` — returning `ApiResult<T>` directly (without `Results.Ok()`) bypasses configured `JsonSerializerOptions` and may produce different enum casing
-- **Validation error HTTP codes:** Always use `Results.BadRequest(ApiResult.Fail(...))` for input validation failures — never `Results.Ok(ApiResult.Fail(...))` (returns 200 on error, confusing clients)
-- **Update endpoint error codes:** `/api/update/apply` pre-condition failures (active operations) → 409 Conflict; download/apply service errors → 500; `InvalidOperationException` from check → 400
-- **HTTP Range 416:** Verify completeness via `Content-Range`; size mismatch → delete and restart
-- `Console.OutputEncoding = UTF8` before `WebApplication.CreateBuilder()`
-- P/Invoke: `[DllImport]` not `[LibraryImport]`; renaming methods → search all call sites
-- **Dialog foreground:** `DialogEndpoints.ForceForegroundWindow` uses `AttachThreadInput` — do NOT simplify to bare `SetForegroundWindow` (silently fails from background)
-- **File upload security:** Always use `Path.GetFileName(file.FileName)` on uploaded file names — `Path.Combine` does NOT prevent path traversal from malicious filenames
-- **Per-game data cleanup:** When adding new per-game data directories, must also add cleanup in `DELETE /api/games/{id}` handler (`GameEndpoints.cs`) + cache eviction if service has `RemoveCache` (e.g., `termService.RemoveCache`, `scriptTagService.RemoveCache`)
-- **Service cache clearing:** `TermService.ClearAllCache()`, `ScriptTagService.ClearAllCache()`, `TranslationMemoryService.ClearAllCache()`, `DynamicPatternService.ClearAllCache()`, `TermExtractionService.ClearAllCache()` clear all in-memory caches; used by settings reset (`POST /api/settings/reset`) and settings import (`POST /api/settings/import`); `RemoveCache(gameId)` clears single game
-- **`ClearAllCache` dispose invariant:** Services with per-game `ConcurrentDictionary<string, SemaphoreSlim>` locks MUST dispose all semaphores in `ClearAllCache()` (iterate `.Values` → `.Dispose()` → `.Clear()`); matches `RemoveCache` pattern
-- **Settings reset/import cache invalidation:** Both `/reset` and `/import` must call all 7 invalidations: `settingsService.InvalidateCache()`, `termService.ClearAllCache()`, `scriptTagService.ClearAllCache()`, `tmService.ClearAllCache()`, `dynamicPatternService.ClearAllCache()`, `extractionService.ClearAllCache()`, `cacheMonitor.UnloadCache()` — missing any one leaves stale in-memory state
-- **Settings reset log suspension:** `POST /api/settings/reset` calls `FileLoggerProvider.SuspendFileLog()` before deleting data directory (releases log file handle), then `ResumeFileLog()` in `finally`; do NOT replace whole-directory deletion with per-subdirectory deletion (previously caused incomplete cleanup)
-- **Bundled file build copy:** New files in `bundled/` require `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">` in `.csproj` — `build.ps1` only runs on publish, `dotnet run` uses build output
-- **`ScriptTagService` DI:** `AddSingleton`; follows `TermService` pattern (SemaphoreSlim + ConcurrentDictionary cache + atomic file writes); preset auto-update in `GetAsync`; compiled regex cache invalidated on save/auto-update
-- **Log level config:** `Program.cs` has two-layer filtering: `AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)` (ASP.NET pipeline) + `FileLoggerProvider(logsDirectory, LogLevel.Debug)` (provider); both must be ≤ desired level or logs are silently dropped
-- **Static method logging pattern:** Static methods can't access `ILogger` — either pass `ILogger? log = null` parameter and use `log?.LogDebug(...)`, or add logging at the instance-method call site where `logger` is available; prefer call-site logging when only aggregate info (counts, before/after) is needed
-- Reading log files: must use `FileShare.ReadWrite` to avoid `IOException`
-- **C# `[GeneratedRegex]` with quotes:** Raw string literals (`"""..."""`) fail when regex contains `"` — use regular escaped strings instead
-- **`Lock` type API (.NET 9+):** Use `_lock.Enter()`/`_lock.Exit()` — do NOT use `Monitor.Enter(_lock)`/`Monitor.Exit(_lock)` (CS9216 warning; `Lock` is not `object`-based)
-- **Per-game locking pattern:** Services with per-game data files (`TranslationMemoryService`, `DynamicPatternService`) use `ConcurrentDictionary<string, SemaphoreSlim>` for per-game locks — do NOT use a single global `SemaphoreSlim` for multi-game services
+- **无迁移代码：** 项目处于预稳定阶段——不做向后兼容的迁移或旧格式转换
+- **关键基础设施服务：** `GameLibraryService`（内存中的游戏库增删改查）、`AppSettingsService`（设置缓存）、`ConfigurationService`（INI 读写/补丁）、`UnityDetectionService`（游戏检测）、`GameImageService`（图标/封面/背景管理）
+- `AppSettingsService`：内存缓存；`GetAsync()` 无磁盘 I/O；不要修改返回的对象——使用 `UpdateAsync`/`SaveAsync`
+- **数据存储：** 所有运行时数据存储在 `%AppData%\XUnityToolkit\`；`AppDataPaths` 集中管理路径；随附资源（`bundled/`、`wwwroot/`）保留在程序根目录
+- **敏感数据加密：** `DpapiProtector`（DPAPI CurrentUser）加密 `ApiEndpointConfig.ApiKey` 和 `SteamGridDbApiKey`；前缀 `ENC:DPAPI:` + Base64；在 `AppSettingsService.ReadAsync`/`WriteAsync` 边界加解密；解密失败时保留密文并创建 `.bak` 备份
+- **DI 之前的路径：** `Program.cs` 在 DI 之前读取 `builder.Configuration["AppData:Root"]` 并回退到 `%AppData%\XUnityToolkit\`——必须与 `AppDataPaths._root` 的公式保持同步
+- **应用 URL：** `http://127.0.0.1:{port}` 默认 `51821`；**必须使用 `127.0.0.1` 而非 `localhost`**（Unity Mono 会解析为 IPv6 `::1`）；端口可通过 `settings.json` → `aiTranslation.port` 配置（在 `Program.cs` 中 DI 之前读取）
+- **静态文件缓存：** `UseStaticFiles` 为 `/assets/*`（Vite 内容哈希）设置 `Cache-Control: public, max-age=31536000, immutable`；根文件（`index.html`、`favicon.ico`）设置 `no-cache`；`MapFallbackToFile` 也为 `index.html` 设置 `no-cache`——两处必须分别配置
+- 命名 `HttpClient`：`"LLM"`（120s/200conn）、`"SteamGridDB"`（30s）、`"LocalLlmDownload"`（12h）、`"WebImageSearch"`（15s，浏览器 UA）、`"GitHubUpdate"`（60s）、`"GitHubCdn"`（30s，CDN/Web 请求）
+- **Multipart 上传端点：** 必须在 `MapPost` 上链式调用 `.DisableAntiforgery()`——否则 ASP.NET 会拒绝 `multipart/form-data` 请求
+- **Updater AOT 约束：** `Updater/` 目标框架为 `net10.0`（非 `-windows`），`PublishAot=true`，`InvariantGlobalization`；不能使用 `JsonSerializer` 反射——必须使用手动字符串拼接生成 JSON；不能使用 WinForms 或 UI 框架
+- **InformationalVersion 陷阱：** .NET SDK 会附加 `+commitHash` 后缀；版本比较前必须 `Split('+')[0]`
+- **GitHub API JSON：** `JsonOptions` 使用 `CamelCase`；GitHub API 返回 snake_case（`tag_name`、`browser_download_url`）——`GitHubRelease`/`GitHubAsset` 模型使用 `[JsonPropertyName]` 覆盖；任何新的 GitHub API 模型属性也必须使用显式 `[JsonPropertyName("snake_case")]`
+- **GitHub API 速率限制：** 未认证的 ETag/`If-None-Match` 304 响应**仍然计入** 60 次/小时的限制——只有认证的 304 才豁免；CDN（`objects.githubusercontent.com`）和 Web（`github.com`）请求有独立的、更宽松的限制
+- **更新检查三层策略：** CDN（`update-check.json` 资源）→ Atom Feed（`/releases.atom`）→ GitHub API 兜底；提取抛出 `InvalidOperationException` 的方法时（如速率限制），调用方**必须**仍然将 `_status` 设为 Error 并通过 SignalR 广播——否则状态会卡在 `Checking`
+- **镜像：** `AppSettings.HfMirrorUrl`；用于模型下载的 HF 主机替换；插件/llama 二进制文件是捆绑的（无运行时 GitHub 下载）
+- **触发即忘（Fire-and-forget）：** `Task.Run` 中使用 `CancellationToken.None`；`CancellationTokenSource` 字典用于用户取消
+- **触发即忘 SignalR 不变量：** 当触发即忘的 `Task.Run` 包装异步服务调用，且前端通过 SignalR 完成事件重置状态时，端点处理器必须在失败/取消路径也广播完成信号——服务可能仅在成功时广播；否则前端状态会永久卡住；始终将整个主体包装在 `try/catch` 中，并在 `catch` 中广播错误
+- **SignalR 错误广播：** 在触发即忘的 `catch (Exception ex)` 块中通过 SignalR 广播错误时，使用静态错误消息（如 `"字体生成失败，请检查字体文件格式"`），不要使用 `ex.Message`——通过 `ILogger` 在服务端记录异常
+- **端点返回模式：** 始终使用 `Results.Ok(ApiResult<T>.Ok(...))` 包装返回值——直接返回 `ApiResult<T>`（不用 `Results.Ok()`）会绕过配置的 `JsonSerializerOptions`，可能产生不同的枚举大小写
+- **验证错误 HTTP 状态码：** 输入验证失败时始终使用 `Results.BadRequest(ApiResult.Fail(...))`——绝不使用 `Results.Ok(ApiResult.Fail(...))`（对错误返回 200，令客户端困惑）
+- **更新端点错误码：** `/api/update/apply` 前置条件失败（活跃操作）→ 409 Conflict；下载/应用服务错误 → 500；`InvalidOperationException` 来自 check → 400
+- **HTTP Range 416：** 通过 `Content-Range` 验证完整性；大小不匹配 → 删除并重新开始
+- `WebApplication.CreateBuilder()` 之前设置 `Console.OutputEncoding = UTF8`
+- P/Invoke：使用 `[DllImport]` 而非 `[LibraryImport]`；重命名方法时 → 搜索所有调用点
+- **对话框前景窗口：** `DialogEndpoints.ForceForegroundWindow` 使用 `AttachThreadInput`——不要简化为裸 `SetForegroundWindow`（从后台调用时会静默失败）
+- **文件上传安全：** 始终对上传的文件名使用 `Path.GetFileName(file.FileName)`——`Path.Combine` 不能防止恶意文件名的路径穿越
+- **每游戏数据清理：** 添加新的每游戏数据目录时，必须在 `DELETE /api/games/{id}` 处理器（`GameEndpoints.cs`）中添加清理 + 如果服务有 `RemoveCache` 则进行缓存驱逐（如 `termService.RemoveCache`、`scriptTagService.RemoveCache`）
+- **服务缓存清除：** `TermService.ClearAllCache()`、`ScriptTagService.ClearAllCache()`、`TranslationMemoryService.ClearAllCache()`、`DynamicPatternService.ClearAllCache()`、`TermExtractionService.ClearAllCache()` 清除所有内存缓存；用于设置重置（`POST /api/settings/reset`）和设置导入（`POST /api/settings/import`）；`RemoveCache(gameId)` 清除单个游戏的缓存
+- **`ClearAllCache` 释放不变量：** 有每游戏 `ConcurrentDictionary<string, SemaphoreSlim>` 锁的服务必须在 `ClearAllCache()` 中释放所有信号量（遍历 `.Values` → `.Dispose()` → `.Clear()`）；与 `RemoveCache` 模式一致
+- **设置重置/导入缓存失效：** `/reset` 和 `/import` 都必须调用全部 7 个失效操作：`settingsService.InvalidateCache()`、`termService.ClearAllCache()`、`scriptTagService.ClearAllCache()`、`tmService.ClearAllCache()`、`dynamicPatternService.ClearAllCache()`、`extractionService.ClearAllCache()`、`cacheMonitor.UnloadCache()`——遗漏任何一个都会留下过期的内存状态
+- **设置重置日志挂起：** `POST /api/settings/reset` 在删除数据目录前调用 `FileLoggerProvider.SuspendFileLog()`（释放日志文件句柄），然后在 `finally` 中调用 `ResumeFileLog()`；不要用按子目录删除替代整目录删除（此前导致清理不完整）
+- **捆绑文件构建复制：** `bundled/` 中的新文件需要在 `.csproj` 中添加 `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">`——`build.ps1` 仅在发布时运行，`dotnet run` 使用构建输出
+- **`ScriptTagService` DI：** `AddSingleton`；遵循 `TermService` 模式（SemaphoreSlim + ConcurrentDictionary 缓存 + 原子文件写入）；预设在 `GetAsync` 中自动更新；保存/自动更新时使编译正则缓存失效
+- **日志级别配置：** `Program.cs` 有两层过滤：`AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)`（ASP.NET 管线）+ `FileLoggerProvider(logsDirectory, LogLevel.Debug)`（提供者）；两者都必须 ≤ 期望级别，否则日志会被静默丢弃
+- **静态方法日志模式：** 静态方法无法访问 `ILogger`——要么传递 `ILogger? log = null` 参数并使用 `log?.LogDebug(...)`，要么在有 `logger` 可用的实例方法调用点添加日志；仅需聚合信息（计数、前后对比）时优先使用调用点日志
+- 读取日志文件：必须使用 `FileShare.ReadWrite` 以避免 `IOException`
+- **C# `[GeneratedRegex]` 与引号：** 原始字符串字面量（`"""..."""`）在正则包含 `"` 时会失败——改用常规转义字符串
+- **`Lock` 类型 API（.NET 9+）：** 使用 `_lock.Enter()`/`_lock.Exit()`——不要使用 `Monitor.Enter(_lock)`/`Monitor.Exit(_lock)`（CS9216 警告；`Lock` 不是基于 `object` 的）
+- **每游戏锁模式：** 有每游戏数据文件的服务（`TranslationMemoryService`、`DynamicPatternService`）使用 `ConcurrentDictionary<string, SemaphoreSlim>` 进行每游戏加锁——不要对多游戏服务使用单个全局 `SemaphoreSlim`
 
-## INI Configuration
+## INI 配置
 
-- **Never generate XUnity config from scratch** — always `PatchAsync` read-modify-write
-- Config filename: `AutoTranslatorConfig.ini` at `BepInEx/config/`
-- PatchAsync null semantics: `null` = skip, `""` = clear value
-- `ApplyOptimalDefaultsAsync` sets `[General] Language = zh`, `OverrideFont = Microsoft YaHei`, `Endpoint = LLMTranslate` with `FallbackEndpoint = GoogleTranslateV2`
-- **Sensitive sections** (sanitize for export): `GoogleLegitimate`, `BingLegitimate`, `Baidu`, `Yandex`, `DeepLLegitimate`, `PapagoTranslate`, `LingoCloud`, `Watson`, `Custom`, `LecPowerTranslator15`, `ezTrans`
+- **绝不从头生成 XUnity 配置**——始终使用 `PatchAsync` 读改写
+- 配置文件名：`AutoTranslatorConfig.ini`，位于 `BepInEx/config/`
+- PatchAsync null 语义：`null` = 跳过，`""` = 清除值
+- `ApplyOptimalDefaultsAsync` 设置 `[General] Language = zh`、`OverrideFont = Microsoft YaHei`、`Endpoint = LLMTranslate` 及 `FallbackEndpoint = GoogleTranslateV2`
+- **敏感节（导出时需脱敏）：** `GoogleLegitimate`、`BingLegitimate`、`Baidu`、`Yandex`、`DeepLLegitimate`、`PapagoTranslate`、`LingoCloud`、`Watson`、`Custom`、`LecPowerTranslator15`、`ezTrans`
 
-## Glossary Extraction
+## 术语提取
 
-- `GlossaryExtractionService`: buffer → trigger → drain → LLM extract → filter DNT terms → merge; depends on `TermService` to exclude DoNotTranslate-type terms from extraction (both via prompt hint and hard filter before merge)
-- **TermEntry model:** `Type` (Translate/DoNotTranslate), `Original`, `Translation`, `Category`, `Description`, `IsRegex`, `CaseSensitive`, `ExactMatch`, `Priority`
-- **Critical:** settings check (async) BEFORE buffer drain — otherwise pairs lost when disabled
-- `TryTriggerExtraction` is synchronous (hot-path); async work deferred to `DrainAndExtractAsync`
-- DLL must send `gameId` in `POST /api/translate` — requires `[LLMTranslate] GameId` in INI
-- **All translation paths** must call `BufferTranslation` + `TryTriggerExtraction`, guarded by `!string.IsNullOrEmpty(gameId)` AND `!isLocalMode`
+- `GlossaryExtractionService`：缓冲 → 触发 → 排空 → LLM 提取 → 过滤 DNT 术语 → 合并；依赖 `TermService` 排除 DoNotTranslate 类型的术语（通过提示词暗示和合并前的硬过滤两种方式）
+- **TermEntry 模型：** `Type`（Translate/DoNotTranslate）、`Original`、`Translation`、`Category`、`Description`、`IsRegex`、`CaseSensitive`、`ExactMatch`、`Priority`
+- **关键：** 设置检查（异步）必须在缓冲排空之前——否则禁用时翻译对会丢失
+- `TryTriggerExtraction` 是同步的（热路径）；异步工作延迟到 `DrainAndExtractAsync`
+- DLL 必须在 `POST /api/translate` 中发送 `gameId`——需要 INI 中的 `[LLMTranslate] GameId`
+- **所有翻译路径**都必须调用 `BufferTranslation` + `TryTriggerExtraction`，以 `!string.IsNullOrEmpty(gameId)` 且 `!isLocalMode` 作为条件守卫
 
-## Concurrency & Performance
+## 并发与性能
 
-- **Hot-path:** `POST /api/translate` receives 100+ req/s; all I/O must use in-memory caches, never disk per request
-- `SemaphoreSlim`: one slot per batch; `EnsureSemaphore` delays Dispose 3 min; 60s timeout → 503; **critical:** semaphore wait and LLM call in separate `try` blocks; **local mode batch splitting:** `TranslateAsync` loops single-text `TranslateBatchAsync` calls so `_translating` shows 1 (not batch size)
-- **Semaphore release guard:** `finally` blocks that release a semaphore MUST check `if (semaphoreAcquired)` — unconditional `Release()` after timeout/cancellation corrupts the semaphore count; same applies to stat counters like `_translating`
-- **Hot-path caching:** Never `GameLibraryService.GetByIdAsync` on hot path; use `ConcurrentDictionary` + explicit invalidation
-- `BroadcastStats`: CAS throttle 200ms; `force: true` for completion/errors AND all `TranslateBatchAsync` state transitions (`_queued++/--`, `_translating++/--`) — non-forced broadcasts are silently dropped because they fire within the throttle window of the caller's broadcast, making intermediate pipeline states invisible to the frontend
-- **Stats counters unit:** `_queued` and `_translating` count API requests (±1 per `TranslateBatchAsync` call); `_totalReceived` and `_totalTranslated` count individual texts; `MaxConcurrency` in `TranslationStats` reflects `_currentMaxConcurrency`
-- **`TranslationStats.Queued` is computed:** `max(0, TotalReceived - TotalTranslated - _totalFailedTexts)` — NOT read from `_queued`; `_queued` only used internally for semaphore-level tracking/logging; `_totalFailedTexts` tracks texts from failed `TranslateAsync` calls to keep the queue balanced; `TranslateAsync` uses `bool completed` flag + `finally` block to ensure `_totalFailedTexts` is incremented on all failure paths
-- **RecordError:** `LlmTranslationService.RecordError` is sole site — endpoint catch must NOT double-count
-- `volatile` vs `Volatile.Read`: don't combine; `DateTime?` → `long` ticks + `Interlocked`; async cannot have `ref`/`in`/`out` → wrapper class
-- **`Volatile.Read` consistency:** When a field uses `Volatile.Read`/`Volatile.Write`, ALL access sites must use them — a single direct read (e.g., in stats snapshots) bypasses memory barriers and can return stale values
-- **ConcurrentDictionary iteration safety:** Iterating `.Keys` while concurrent modifications happen (e.g., `ClearAllCache` while `Add` inserts) can miss entries; use `.Keys.ToList()` to snapshot before mutating
-- **CTS atomic swap:** When guarding "only one operation at a time" with a nullable `CancellationTokenSource` field, use `Interlocked.CompareExchange(ref _cts, newCts, null)` — not `if (_cts is not null) throw; _cts = new...` (TOCTOU race)
-- **CTS replacement in debounce:** When replacing a CTS in a `ConcurrentDictionary`, write the new CTS first, THEN cancel/dispose the old — avoids a window where concurrent code finds neither entry
-- **CTS debounce atomic swap:** `_dict.GetValueOrDefault(key)` + `_dict[key] = newCts` is NOT thread-safe — concurrent callers can orphan a CTS (leaked background task) or double-dispose old CTS; use `GetOrAdd`/`TryUpdate` CAS loop pattern instead
-- **CTS atomic cleanup in finally:** Use `Interlocked.Exchange(ref _cts, null)?.Dispose()` — NOT `var cts = _cts; _cts = null; cts?.Dispose()` (non-atomic read-null-dispose allows concurrent `.Cancel()` on already-disposed CTS)
-- **`await using` early close:** When a stream must be closed before subsequent code reads the file, use a block scope `{ await using var s = ...; }` instead of calling `s.Close()` (redundant with `await using` implicit dispose)
-- **Plugin concurrency:** DLL 10x10 = 100 texts; Mono >15 connections deadlocks — batch instead
-- **XUnity HTTP:** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`; no `Connection: close` (CLOSE_WAIT bug)
-- **Pre-translation:** `Parallel.ForEachAsync` over batches of 10 (local mode: batch=1, parallelism=1); CAS-throttled 200ms progress; `catch (OperationCanceledException) when (ct.IsCancellationRequested)` guards prevent HTTP `TaskCanceledException` from aborting entire operation — **always use `when` guard** in `Parallel.ForEachAsync` bodies
-- **`when` guard in sequential LLM loops:** `DynamicPatternService`/`TermExtractionService` batch loops also require `catch (OperationCanceledException) when (ct.IsCancellationRequested)` — bare `catch (OperationCanceledException) { throw; }` catches HTTP timeout `TaskCanceledException` and aborts all remaining batches on a single timeout
-- **LLM retry:** `TranslateBatchAsync` retries transient errors (`TaskCanceledException`, `HttpRequestException`, `TimeoutException`) up to 2 times with exponential backoff (2s, 4s); retry loop is inside semaphore-acquired block; `IsTransientError` helper determines retryability
-- **TM debounced persistence:** `TranslationMemoryService.Add()` is synchronous (in-memory); persistence debounced 5s via `ScheduleDebouncedPersist`; `FlushAsync` for immediate persist after batch completion; per-game `SemaphoreSlim` locks (not global)
+- **热路径：** `POST /api/translate` 接收 100+ 请求/秒；所有 I/O 必须使用内存缓存，绝不每请求访问磁盘
+- `SemaphoreSlim`：每批一个槽位；`EnsureSemaphore` 延迟 Dispose 3 分钟；60s 超时 → 503；**关键：** 信号量等待和 LLM 调用放在不同的 `try` 块中；**本地模式批处理拆分：** `TranslateAsync` 循环单文本的 `TranslateBatchAsync` 调用，使 `_translating` 显示 1（而非批大小）
+- **信号量释放守卫：** 释放信号量的 `finally` 块必须检查 `if (semaphoreAcquired)`——超时/取消后无条件 `Release()` 会损坏信号量计数；统计计数器如 `_translating` 同理
+- **热路径缓存：** 绝不在热路径上调用 `GameLibraryService.GetByIdAsync`；使用 `ConcurrentDictionary` + 显式失效
+- `BroadcastStats`：CAS 节流 200ms；完成/错误时使用 `force: true`，以及所有 `TranslateBatchAsync` 状态转换（`_queued++/--`、`_translating++/--`）——非强制广播会被静默丢弃，因为它们触发时正处于调用方广播的节流窗口内，导致中间管线状态对前端不可见
+- **统计计数器单位：** `_queued` 和 `_translating` 按 API 请求计数（每次 `TranslateBatchAsync` 调用 ±1）；`_totalReceived` 和 `_totalTranslated` 按单条文本计数；`TranslationStats` 中的 `MaxConcurrency` 反映 `_currentMaxConcurrency`
+- **`TranslationStats.Queued` 是计算字段：** `max(0, TotalReceived - TotalTranslated - _totalFailedTexts)`——不是从 `_queued` 读取；`_queued` 仅内部用于信号量级别的跟踪/日志；`_totalFailedTexts` 追踪失败的 `TranslateAsync` 调用中的文本数以保持队列平衡；`TranslateAsync` 使用 `bool completed` 标志 + `finally` 块确保在所有失败路径上递增 `_totalFailedTexts`
+- **RecordError：** `LlmTranslationService.RecordError` 是唯一的记录点——端点的 catch 不得重复计数
+- `volatile` vs `Volatile.Read`：不要混用；`DateTime?` → `long` ticks + `Interlocked`；async 不能有 `ref`/`in`/`out` → 包装类
+- **`Volatile.Read` 一致性：** 当字段使用 `Volatile.Read`/`Volatile.Write` 时，所有访问点都必须使用它们——单次直接读取（如统计快照中）会绕过内存屏障，可能返回过期值
+- **ConcurrentDictionary 迭代安全性：** 在并发修改时迭代 `.Keys`（如 `ClearAllCache` 与 `Add` 插入同时发生）可能遗漏条目；使用 `.Keys.ToList()` 在修改前创建快照
+- **CTS 原子交换：** 用可空 `CancellationTokenSource` 字段守卫"同一时间只有一个操作"时，使用 `Interlocked.CompareExchange(ref _cts, newCts, null)`——不要用 `if (_cts is not null) throw; _cts = new...`（TOCTOU 竞态）
+- **去抖动中的 CTS 替换：** 在 `ConcurrentDictionary` 中替换 CTS 时，先写入新 CTS，然后再取消/释放旧的——避免并发代码找不到任何条目的窗口期
+- **CTS 去抖动原子交换：** `_dict.GetValueOrDefault(key)` + `_dict[key] = newCts` 不是线程安全的——并发调用者可能孤立一个 CTS（泄漏后台任务）或双重释放旧 CTS；使用 `GetOrAdd`/`TryUpdate` CAS 循环模式
+- **CTS finally 中的原子清理：** 使用 `Interlocked.Exchange(ref _cts, null)?.Dispose()`——不要用 `var cts = _cts; _cts = null; cts?.Dispose()`（非原子的读-置空-释放允许并发 `.Cancel()` 在已释放的 CTS 上执行）
+- **`await using` 提前关闭：** 当流必须在后续代码读取文件之前关闭时，使用块作用域 `{ await using var s = ...; }` 而非调用 `s.Close()`（与 `await using` 隐式 dispose 冗余）
+- **插件并发：** DLL 10×10 = 100 条文本；Mono >15 连接会死锁——改用批处理
+- **XUnity HTTP：** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`；无 `Connection: close`（CLOSE_WAIT bug）
+- **预翻译：** 对每批 10 条使用 `Parallel.ForEachAsync`（本地模式：批=1，并行度=1）；CAS 节流 200ms 进度；`catch (OperationCanceledException) when (ct.IsCancellationRequested)` 守卫防止 HTTP `TaskCanceledException` 中止整个操作——在 `Parallel.ForEachAsync` 主体中**始终使用 `when` 守卫**
+- **顺序 LLM 循环中的 `when` 守卫：** `DynamicPatternService`/`TermExtractionService` 批处理循环也需要 `catch (OperationCanceledException) when (ct.IsCancellationRequested)`——裸 `catch (OperationCanceledException) { throw; }` 会捕获 HTTP 超时的 `TaskCanceledException` 并在单次超时时中止所有剩余批次
+- **LLM 重试：** `TranslateBatchAsync` 对瞬态错误（`TaskCanceledException`、`HttpRequestException`、`TimeoutException`）最多重试 2 次，指数退避（2s、4s）；重试循环在信号量获取块内；`IsTransientError` 辅助方法判断可重试性
+- **TM 去抖动持久化：** `TranslationMemoryService.Add()` 是同步的（仅内存）；持久化通过 `ScheduleDebouncedPersist` 去抖动 5s；`FlushAsync` 在批处理完成后立即持久化；每游戏 `SemaphoreSlim` 锁（非全局）
 
-## AI Translation Context
+## AI 翻译上下文
 
-- **Batch mode:** entire batch as one LLM call; JSON array I/O
-- **Translation memory:** per-game volatile; cloud `ContextSize` (10, max 100), local `LocalContextSize` (0, max 10)
-- **Game description:** `Game.AiDescription`; `_descriptionCache` invalidated by `PUT /description`; truncated to 500 chars
-- **Multi-phase pipeline:** Phase 0 (TM lookup) → Phase 1 (natural, cloud only) → Phase 2 (placeholder substitution) → Phase 3 (force correction); `TermAuditService` verifies compliance between phases; `NaturalTranslationMode` and `TermAuditEnabled` control phases
-- **Translation Memory Phase 0:** Inserted before Phase 1 in `TranslateAsync`; `phase0Resolved` HashSet tracks TM-resolved indices; Phase 1/2/3 filter loops must skip these indices; `perTextTranslationSource` array tracks `"tmExact"`/`"tmFuzzy"`/`"tmPattern"` per text; TM hits undergo `TermAuditService` validation before acceptance
-- **SystemPrompt order:** template → description → terms → memory → [texts]
-- **Adding SystemPrompt sections:** New params must thread through: `TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → all 8 provider switch arms → `Call*Async` → `BuildSystemPrompt`; also update `TestTranslateAsync` (passes `null`)
-- **ParseTranslationArray:** strips `<think>...</think>` then extracts JSON array (handles non-fenced)
-- **`CallLlmRawAsync`:** `Task<(string content, long tokens)> CallLlmRawAsync(ApiEndpointConfig endpoint, string systemPrompt, string userContent, double temperature, CancellationToken ct)` — returns tuple, must destructure `var (content, _) = await ...`; public method for arbitrary LLM calls without semaphore; used by `GlossaryExtractionService`, `BepInExLogService`, `DynamicPatternService`, `TermExtractionService`; endpoint selection: `OrderByDescending(e => e.Priority)` (higher value = preferred, consistent with `CalculateScore`)
-- **Test vs Translate endpoint divergence:** `TestTranslateAsync` uses endpoints directly from the request body; `TranslateAsync` reads from stored settings via `settingsService.GetAsync()`. Test can pass while translation fails if settings aren't persisted — always check both paths when debugging "没有可用的AI提供商" errors
-- **Gemini auth:** Use `x-goog-api-key` HTTP header, NOT URL query parameter `?key=` — URL params leak in exception messages, logs, and HTTP traces
-- **Placeholder bypass:** When ENTIRE input text is a single placeholder (`{{G_x}}`/`{{DNT_x}}`), pre-compute the result directly and skip LLM call — LLMs unreliably preserve placeholders; pre-computed results skip `ApplyGlossaryPostProcess` but still go through term audit (counted as phase2Pass); `preComputed` dictionary tracks these indices
-- **Prompt terms:** In cloud mode, ALL translate-type term entries (including non-regex) remain in system prompt even when placeholders are used — do NOT filter to regex-only. In local mode, `promptTerms` is set to `null` to save context tokens; term enforcement relies solely on placeholder substitution (non-regex) and `ApplyGlossaryPostProcess` (regex + fallback)
-- **Term prompt annotation:** `AppendTermAnnotation` formats Category (`GetCategoryLabel` → 角色/地点/物品/技能/组织/通用) + Description; Phase 1 uses full-width `（）`, Phase 2 uses half-width `()`; both phases include category and description in term listings sent to LLM
-- **`AppendTermAnnotation` bracket format:** Full-width directly appends `（`; half-width directly appends `(` — do NOT insert a leading space before `(`; both close with matching bracket
-- **Term substring protection:** `ApplyGlossaryPostProcess`, Phase 3 force correction, and `TermAuditService` all use protected-span tracking to prevent shorter terms from corrupting substrings inside longer terms' translations (e.g., `Settings`→`设置` must NOT replace the `Settings` inside `SaveSettings.es3`→`SaveSettings.es3`); `TermAuditService` sorts terms longest-first and skips audit for short terms subsumed by a longer passed term; any new code doing `string.Replace` with term originals/translations MUST respect this pattern
-- **Empty translation guard:** LLM may return `""` for untranslatable texts (plugin names, abbreviations); XUnity.AutoTranslator treats empty translations as errors — 5 consecutive errors trigger automatic translator Shutdown; `TranslateAsync` must fall back to original text when translation is empty/whitespace
+- **批处理模式：** 整批作为一次 LLM 调用；JSON 数组 I/O
+- **翻译记忆：** 每游戏易失；云端 `ContextSize`（10，最大 100），本地 `LocalContextSize`（0，最大 10）
+- **游戏描述：** `Game.AiDescription`；`_descriptionCache` 在 `PUT /description` 时失效；截断到 500 字符
+- **多阶段管线：** Phase 0（TM 查找）→ Phase 1（自然模式，仅云端）→ Phase 2（占位符替换）→ Phase 3（强制纠正）；`TermAuditService` 在阶段间验证合规性；`NaturalTranslationMode` 和 `TermAuditEnabled` 控制阶段
+- **翻译记忆 Phase 0：** 在 `TranslateAsync` 中插入于 Phase 1 之前；`phase0Resolved` HashSet 追踪 TM 已解决的索引；Phase 1/2/3 过滤循环必须跳过这些索引；`perTextTranslationSource` 数组追踪每条文本的 `"tmExact"`/`"tmFuzzy"`/`"tmPattern"`；TM 命中在接受前经过 `TermAuditService` 验证
+- **SystemPrompt 顺序：** 模板 → 描述 → 术语 → 记忆 → [文本]
+- **添加 SystemPrompt 段落：** 新参数必须贯穿：`TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → 全部 8 个提供商分支 → `Call*Async` → `BuildSystemPrompt`；同时更新 `TestTranslateAsync`（传 `null`）
+- **ParseTranslationArray：** 先去除 `<think>...</think>` 再提取 JSON 数组（处理无围栏情况）
+- **`CallLlmRawAsync`：** `Task<(string content, long tokens)> CallLlmRawAsync(ApiEndpointConfig endpoint, string systemPrompt, string userContent, double temperature, CancellationToken ct)`——返回元组，必须解构 `var (content, _) = await ...`；无信号量的公共任意 LLM 调用方法；被 `GlossaryExtractionService`、`BepInExLogService`、`DynamicPatternService`、`TermExtractionService` 使用；端点选择：`OrderByDescending(e => e.Priority)`（值越高越优先，与 `CalculateScore` 一致）
+- **测试与翻译端点的差异：** `TestTranslateAsync` 直接使用请求体中的端点；`TranslateAsync` 通过 `settingsService.GetAsync()` 读取已存储的设置。设置未持久化时测试可能通过但翻译失败——调试"没有可用的AI提供商"错误时始终检查两条路径
+- **Gemini 认证：** 使用 `x-goog-api-key` HTTP 头，不要用 URL 查询参数 `?key=`——URL 参数会在异常消息、日志和 HTTP 跟踪中泄露
+- **占位符旁路：** 当整个输入文本是单个占位符（`{{G_x}}`/`{{DNT_x}}`）时，直接预计算结果并跳过 LLM 调用——LLM 对保留占位符不可靠；预计算结果跳过 `ApplyGlossaryPostProcess` 但仍经过术语审计（计入 phase2Pass 统计）；`preComputed` 字典追踪这些索引
+- **提示词中的术语：** 在云端模式下，所有翻译类型的术语条目（包括非正则）都保留在系统提示词中，即使使用了占位符——不要过滤为仅正则。在本地模式下，`promptTerms` 设为 `null` 以节省上下文 token；术语执行仅依赖占位符替换（非正则）和 `ApplyGlossaryPostProcess`（正则 + 兜底）
+- **术语提示词标注：** `AppendTermAnnotation` 格式化 Category（`GetCategoryLabel` → 角色/地点/物品/技能/组织/通用）+ Description；Phase 1 使用全角 `（）`，Phase 2 使用半角 `()`；两个阶段都在发送给 LLM 的术语列表中包含类别和描述
+- **`AppendTermAnnotation` 括号格式：** 全角直接追加 `（`；半角直接追加 `(`——不要在 `(` 前插入前导空格；两种都以匹配的右括号结束
+- **术语子串保护：** `ApplyGlossaryPostProcess`、Phase 3 强制纠正和 `TermAuditService` 都使用受保护区间追踪，防止较短术语破坏较长术语翻译中的子串（如 `Settings`→`设置` 不得替换 `SaveSettings.es3`→`SaveSettings.es3` 中的 `Settings`）；`TermAuditService` 按最长优先排序术语，跳过被更长已通过术语包含的短术语审计；任何对术语原文/译文进行 `string.Replace` 的新代码必须遵循此模式
+- **空翻译守卫：** LLM 可能对不可翻译文本（插件名、缩写）返回 `""`；XUnity.AutoTranslator 将空翻译视为错误——5 次连续错误触发翻译器自动关闭；`TranslateAsync` 在翻译为空/空白时必须回退到原文
 
-## Pre-Translation Cache Monitor
+## 预翻译缓存监控
 
-- **Lazy loading:** `EnsureCacheAsync(gameId, toLang, ct)` called from `POST /api/translate`; reads `_PreTranslated.txt` once per game; `_loadAttemptedForGameId` prevents repeated attempts (even if file missing); `UnloadCache()` resets attempt tracking
-- **Hot-path guard:** After initial load, `EnsureCacheAsync` is a single `volatile` read — no lock contention on steady state
-- **Dependencies:** `GameLibraryService` + `AppSettingsService` (both in-memory cached); `GetByIdAsync` only called on game change, not per-request
-- **IDisposable:** `PreTranslationCacheMonitor` implements `IDisposable` — disposes `_summaryTimer` and `_loadLock` on shutdown
+- **懒加载：** `EnsureCacheAsync(gameId, toLang, ct)` 从 `POST /api/translate` 调用；每游戏读取一次 `_PreTranslated.txt`；`_loadAttemptedForGameId` 防止重复尝试（即使文件不存在）；`UnloadCache()` 重置尝试追踪
+- **热路径守卫：** 初始加载后，`EnsureCacheAsync` 是单次 `volatile` 读取——稳态时无锁竞争
+- **依赖：** `GameLibraryService` + `AppSettingsService`（都有内存缓存）；`GetByIdAsync` 仅在游戏切换时调用，非每请求调用
+- **IDisposable：** `PreTranslationCacheMonitor` 实现 `IDisposable`——关闭时释放 `_summaryTimer` 和 `_loadLock`
 
-## Asset Extraction (AssetsTools.NET)
+## 资源提取（AssetsTools.NET）
 
-- `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` both in `AssetsTools.NET.Extra`; IL2CPP: fully qualified `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
-- **`classdata.tpk`:** embedded as resource; auto-updated from [AssetRipper/Tpk](https://github.com/AssetRipper/Tpk) CI by `build.ps1` (requires `gh` CLI); committed file serves as fallback
-- `LoadAssetsFile()` holds file handles — must `UnloadAssetsFile()` per iteration
-- **Bundle files:** `LoadBundleFile(path, true)` → iterate DirectoryInfos (skip `.resource`/`.resS`) → `LoadAssetsFileFromBundle` → `UnloadBundleFile`
-- **TypeTree fallback:** bundles usually embed type trees — check `afile.Metadata.TypeTreeEnabled`
-- Install flow auto-extracts → detects language → patches `[General] FromLanguage` → caches; failure doesn't block install
-- **Language detection:** Proportion-based; Latin >80% → English immediately; non-Latin needs ≥50 chars AND ≥2% of total; Japanese requires kana ≥5% of CJK+kana; default is `"en"` (not `"ja"`); `IsGameText` is heuristic exclusion filter
-- **`IsGameText` path filter:** Path detection requires no-space heuristic — `text.Contains('/') && text.Contains('.') && !text.Contains(' ')` for Unix paths; `text.Contains(":\\")` for Windows paths; natural text with `/` and `.` (rich text closing tags like `</b>`, dialogue with periods) preserved; backslash paths also require no spaces
-- **`CollectStrings` depth:** Recursion limit is 20 (supports deeply nested frameworks like GameCreator 2)
-- **TextAsset JSON detection:** For games storing structured data as JSON TextAssets (e.g., VIDE dialogues), add detection in the TextAsset extraction loop (`TryExtract*` returning `List<ExtractedText>?`) BEFORE the generic `ExtractTextLines` fallback; use `System.Text.Json.JsonDocument` for parsing; return `null` to fall back to generic extraction
-- **GameCreator 2 support:** `DetectGameCreatorDialogueType` identifies Dialogue/Quest/Actor/Stat types; type-specific extraction with `GameCreator:{Type}:{Name}` source tags; `DetectAndLogTemplateVariables` scans for `{Variable}` patterns (e.g., `{PC}`, `{M}`) and logs DNT term suggestions
-- XUnity cache format: `encoded_original=encoded_translation`; escapes `\\`, `\n`, `\r`, `\=`; `XUnityTranslationFormat` static class
-- **`{Lang}` in OutputFile:** substitute with `config.TargetLanguage`; guard against path traversal
+- `MonoCecilTempGenerator`/`Cpp2IlTempGenerator` 都在 `AssetsTools.NET.Extra` 中；IL2CPP：完全限定名 `AssetsTools.NET.Cpp2IL.Cpp2IlTempGenerator`
+- **`classdata.tpk`：** 作为资源嵌入；由 `build.ps1` 从 [AssetRipper/Tpk](https://github.com/AssetRipper/Tpk) CI 自动更新（需要 `gh` CLI）；已提交的文件作为兜底
+- `LoadAssetsFile()` 持有文件句柄——每次迭代必须 `UnloadAssetsFile()`
+- **Bundle 文件：** `LoadBundleFile(path, true)` → 遍历 DirectoryInfos（跳过 `.resource`/`.resS`）→ `LoadAssetsFileFromBundle` → `UnloadBundleFile`
+- **TypeTree 兜底：** bundle 通常嵌入类型树——检查 `afile.Metadata.TypeTreeEnabled`
+- 安装流程自动提取 → 检测语言 → 补丁 `[General] FromLanguage` → 缓存；失败不阻塞安装
+- **语言检测：** 基于比例；拉丁 >80% → 立即判定英语；非拉丁需要 ≥50 字符且占总量 ≥2%；日语需要假名占 CJK+假名的 ≥5%；默认为 `"en"`（非 `"ja"`）；`IsGameText` 是启发式排除过滤器
+- **`IsGameText` 路径过滤：** 路径检测需要无空格启发式——Unix 路径使用 `text.Contains('/') && text.Contains('.') && !text.Contains(' ')`；Windows 路径使用 `text.Contains(":\\")`；带 `/` 和 `.` 的自然文本（如富文本关闭标签 `</b>`、带句号的对话）保留；反斜杠路径同样要求无空格
+- **`CollectStrings` 深度：** 递归限制为 20（支持 GameCreator 2 等深度嵌套框架）
+- **TextAsset JSON 检测：** 对于将结构化数据存储为 JSON TextAsset 的游戏（如 VIDE 对话），在 TextAsset 提取循环中添加检测（返回 `List<ExtractedText>?` 的 `TryExtract*`），在通用 `ExtractTextLines` 兜底之前；使用 `System.Text.Json.JsonDocument` 解析；返回 `null` 则回退到通用提取
+- **GameCreator 2 支持：** `DetectGameCreatorDialogueType` 识别 Dialogue/Quest/Actor/Stat 类型；类型特定的提取使用 `GameCreator:{Type}:{Name}` 来源标签；`DetectAndLogTemplateVariables` 扫描 `{Variable}` 模式（如 `{PC}`、`{M}`）并记录 DNT 术语建议
+- XUnity 缓存格式：`encoded_original=encoded_translation`；转义 `\\`、`\n`、`\r`、`\=`；`XUnityTranslationFormat` 静态类
+- **OutputFile 中的 `{Lang}`：** 用 `config.TargetLanguage` 替换；防范路径穿越
 
-## Font Replacement (AssetsTools.NET)
+## 字体替换（AssetsTools.NET）
 
-- **TMP_FontAsset detection:** MonoBehaviour with `m_Version` + `m_GlyphTable` fields = v1.1.0 (supported); `m_fontInfo` + `m_glyphInfoList` = v1.0.0 (unsupported)
-- **Font scanning class DB fallback:** When `LoadClassDatabaseFromPackage` fails and no embedded type tree, skip MonoBehaviour scan but still attempt `AssetClassID.Font` scan — TTF Font assets use raw classId matching (`GetAssetsOfType`) which works without class DB in format version >= 16; `GetBaseField` may still fail (caught per-asset); also scan `*.bundle` files in `{GameName}_Data/` top level (not just `StreamingAssets/`)
-- **Safe deep copy:** `DeepCopyFieldValues` recursively copies values matching by field name, preserving destination's type tree structure for cross-TMP-version compatibility; `RebuildArrayEntries` creates new array entries from destination's `TemplateField` to avoid serialization mismatch; copies `m_AtlasPopulationMode` and `m_IsMultiAtlasTexturesEnabled` in addition to data fields; DO NOT touch PPtr fields (`material`, `m_SourceFontFile`, `m_FallbackFontAssetTable`); `m_AtlasTextures` is handled separately by multi-atlas logic
-- **Bundle backup optimization:** `EnsureBackup` uses `File.Move` (instant on same volume) after file handle released; `EnsureBackupCopy` (File.Copy) for loose files where handle may be open; same-volume detection via `Path.GetPathRoot`
-- **Multi-atlas replacement:** `ReplaceSingleFont` reads ALL source atlas pages via `List<SourceAtlasPage>`; replaces existing destination textures; creates new Texture2D assets for extra pages (globally unique PathId via `AssetInfos.Max(PathId) + 1`); updates `m_AtlasTextures` PPtr array
-- **Texture replacement:** `AssetsTools.NET.Texture` v3.0.2 (latest); API uses `TextureFile.ReadTextureFile()` → `SetPictureData()`/`FillPictureData()` → `WriteTo()`; clear `m_StreamData` (path/offset/size) after replacing embedded texture
-- **New Texture2D pitfall:** `ValueBuilder.DefaultValueFieldFromTemplate` creates ZEROED fields; `TextureFile.ReadTextureFile(zeroedField)` → m_MipCount=0, m_TextureDimension=0 — Unity won't render; MUST `ReadTextureFile(existingTexture)` to inherit metadata, then override format/data/dimensions via `SetPictureData` + `WriteTo`
-- **`TextureFile` field coverage:** `WriteTo` writes ALL 31 texture fields; `SetPictureData` only sets 5 (width, height, data, completeImageSize, streamData) — other metadata (m_MipCount, m_TextureSettings, m_IsReadable, m_TextureDimension, m_ImageCount, m_ColorSpace) must come from `ReadTextureFile` source
-- **SDF atlas texture metadata:** When generating SDF atlas textures, MUST explicitly set `m_MipCount=1, m_MipMap=false, m_StreamingMipmaps=false, m_IsReadable=true` — template textures may have mipmaps enabled, and inheriting those settings causes black stripe artifacts (SDF distance values don't downscale correctly via mipmap averaging)
-- **`AssetFileInfo.Create` (v>=16):** `TypeIdOrIndex` = raw classId (not index); does NOT add TypeTreeType — existing type tree entry for that classId must already exist in metadata
-- **Bundle write pattern:** modify assets → `DirectoryInfos[i].SetNewData(afile)` → write uncompressed `.tmp` → re-read → `Pack(writer, LZ4)` → delete tmp → move to original
-- **Addressables CRC:** regex zero-out `"Crc"\s*:\s*\d+` in `catalog.json`; delete `catalog.hash`; `catalog.bundle` contains TextAsset with JSON
-- **Backup naming:** relative path from game root, separators replaced with `_` (e.g., `XXX_Data_sharedassets0.assets`)
-- **External restore detection:** SHA256 hash stored in manifest, compared on `GET .../status`; wrap hash computation in `Task.Run` (files can be hundreds of MB)
-- **Custom font auto-resolution:** `ReplaceFontsAsync` checks `data/custom-fonts/{gameId}/` before falling back to bundled font; `GetStatusAsync` returns `CustomTtfFileName`/`CustomTmpFileName` for frontend display; `DELETE .../custom-font?type={ttf|tmp}` clears specific type, no param clears all
-- **`FontReplacementService` DI:** depends on `TmpFontService`, `BundledAssetPaths`, `AppDataPaths`; `BundledAssetPaths` used for TTF bundled font path resolution (prefer over `Assembly.GetExecutingAssembly().Location` which fails in single-file publish)
-- **TTF replacement:** `ReplaceSingleTtfFont` replaces `m_FontData` byte array in `AssetClassID.Font` assets; preserves all layout metadata (`m_FontSize`, `m_LineSpacing`, etc.)
-- **Bundled TTF:** `bundled/fonts/SourceHanSansCN-Regular.ttf` (~10MB) used as default replacement source for TTF fonts
-- **Custom font coexistence:** `data/custom-fonts/{gameId}/` can hold both an AssetBundle (for TMP) and a TTF/OTF (for TTF) simultaneously; files distinguished by extension; upload endpoint uses magic bytes (`00 01 00 00` TTF, `4F 54 54 4F` OTF) for format detection
-- **TMP source filtering:** `ReplaceFontsAsync` custom font auto-resolve filters by extension (excludes `.ttf`/`.otf` from TMP source, excludes non-TTF from TTF source)
-- **Creating new array entries:** `ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField)` creates a new field instance from an existing entry's template; use first array child as prototype, clone per-entry, set values, then assign `array.Children = newList`
+- **TMP_FontAsset 检测：** 具有 `m_Version` + `m_GlyphTable` 字段的 MonoBehaviour = v1.1.0（支持）；`m_fontInfo` + `m_glyphInfoList` = v1.0.0（不支持）
+- **字体扫描类数据库兜底：** 当 `LoadClassDatabaseFromPackage` 失败且无嵌入类型树时，跳过 MonoBehaviour 扫描但仍尝试 `AssetClassID.Font` 扫描——TTF Font 资源使用原始 classId 匹配（`GetAssetsOfType`），在格式版本 >= 16 时无需类数据库即可工作；`GetBaseField` 仍可能失败（每资源捕获）；同时扫描 `{GameName}_Data/` 顶层（不仅是 `StreamingAssets/`）的 `*.bundle` 文件
+- **安全深拷贝：** `DeepCopyFieldValues` 按字段名匹配递归复制值，保留目标的类型树结构以实现跨 TMP 版本兼容；`RebuildArrayEntries` 从目标的 `TemplateField` 创建新数组条目以避免序列化不匹配；除数据字段外还复制 `m_AtlasPopulationMode` 和 `m_IsMultiAtlasTexturesEnabled`；不要触碰 PPtr 字段（`material`、`m_SourceFontFile`、`m_FallbackFontAssetTable`）；`m_AtlasTextures` 由多图集逻辑单独处理
+- **Bundle 备份优化：** `EnsureBackup` 在文件句柄释放后使用 `File.Move`（同卷上瞬时完成）；`EnsureBackupCopy`（File.Copy）用于句柄可能打开的零散文件；通过 `Path.GetPathRoot` 检测是否同卷
+- **多图集替换：** `ReplaceSingleFont` 通过 `List<SourceAtlasPage>` 读取所有源图集页；替换现有目标纹理；为额外页创建新 Texture2D 资源（通过 `AssetInfos.Max(PathId) + 1` 获取全局唯一 PathId）；更新 `m_AtlasTextures` PPtr 数组
+- **纹理替换：** `AssetsTools.NET.Texture` v3.0.2（最新）；API 使用 `TextureFile.ReadTextureFile()` → `SetPictureData()`/`FillPictureData()` → `WriteTo()`；替换嵌入纹理后清除 `m_StreamData`（path/offset/size）
+- **新 Texture2D 陷阱：** `ValueBuilder.DefaultValueFieldFromTemplate` 创建值全为零的字段；`TextureFile.ReadTextureFile(zeroedField)` → m_MipCount=0，m_TextureDimension=0——Unity 不会渲染；必须 `ReadTextureFile(existingTexture)` 继承元数据，然后通过 `SetPictureData` + `WriteTo` 覆盖格式/数据/尺寸
+- **`TextureFile` 字段覆盖范围：** `WriteTo` 写入全部 31 个纹理字段；`SetPictureData` 仅设置 5 个（width、height、data、completeImageSize、streamData）——其他元数据（m_MipCount、m_TextureSettings、m_IsReadable、m_TextureDimension、m_ImageCount、m_ColorSpace）必须来自 `ReadTextureFile` 源
+- **SDF 图集纹理元数据：** 生成 SDF 图集纹理时，必须显式设置 `m_MipCount=1, m_MipMap=false, m_StreamingMipmaps=false, m_IsReadable=true`——模板纹理可能启用了 mipmap，继承这些设置会导致黑色条纹伪影（SDF 距离值在 mipmap 平均降采样时不能正确缩小）
+- **`AssetFileInfo.Create`（v>=16）：** `TypeIdOrIndex` = 原始 classId（非索引）；不会添加 TypeTreeType——元数据中必须已有该 classId 的类型树条目
+- **Bundle 写入模式：** 修改资源 → `DirectoryInfos[i].SetNewData(afile)` → 写入未压缩的 `.tmp` → 重新读取 → `Pack(writer, LZ4)` → 删除 tmp → 移动到原位
+- **Addressables CRC：** 在 `catalog.json` 中正则置零 `"Crc"\s*:\s*\d+`；删除 `catalog.hash`；`catalog.bundle` 包含带 JSON 的 TextAsset
+- **备份命名：** 从游戏根目录的相对路径，分隔符替换为 `_`（如 `XXX_Data_sharedassets0.assets`）
+- **外部恢复检测：** 清单中存储 SHA256 哈希值，在 `GET .../status` 时比较；将哈希计算包装在 `Task.Run` 中（文件可能有数百 MB）
+- **自定义字体自动解析：** `ReplaceFontsAsync` 先检查 `data/custom-fonts/{gameId}/`，再回退到捆绑字体；`GetStatusAsync` 返回 `CustomTtfFileName`/`CustomTmpFileName` 供前端显示；`DELETE .../custom-font?type={ttf|tmp}` 清除特定类型，无参数时清除全部
+- **`FontReplacementService` DI：** 依赖 `TmpFontService`、`BundledAssetPaths`、`AppDataPaths`；`BundledAssetPaths` 用于 TTF 捆绑字体路径解析（优先于 `Assembly.GetExecutingAssembly().Location`，后者在单文件发布中会失败）
+- **TTF 替换：** `ReplaceSingleTtfFont` 替换 `AssetClassID.Font` 资源中的 `m_FontData` 字节数组；保留所有布局元数据（`m_FontSize`、`m_LineSpacing` 等）
+- **捆绑 TTF：** `bundled/fonts/SourceHanSansCN-Regular.ttf`（约 10MB）用作 TTF 字体的默认替换源
+- **自定义字体共存：** `data/custom-fonts/{gameId}/` 可同时存放 AssetBundle（用于 TMP）和 TTF/OTF（用于 TTF）；通过扩展名区分文件；上传端点使用魔术字节（`00 01 00 00` TTF，`4F 54 54 4F` OTF）进行格式检测
+- **TMP 源过滤：** `ReplaceFontsAsync` 自定义字体自动解析按扩展名过滤（从 TMP 源中排除 `.ttf`/`.otf`，从 TTF 源中排除非 TTF）
+- **创建新数组条目：** `ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField)` 从现有条目的模板创建新字段实例；使用第一个数组子元素作为原型，逐条目克隆，设置值，然后赋值 `array.Children = newList`
 
-## Font Generation (FreeTypeSharp + Felzenszwalb EDT)
+## 字体生成（FreeTypeSharp + Felzenszwalb EDT）
 
-- **SDF pipeline (Unity-faithful):** `FT_RENDER_MODE_NORMAL` → AA bitmap → `DistanceFieldGenerator.GenerateSdf()` (Felzenszwalb EDT) → SDF with padding; replicates Unity's FontEngine approach; do NOT use `FT_RENDER_MODE_SDF` (outline-based, produces different results from Unity)
-- **`DistanceFieldGenerator`:** static class; **critical: `outside` field MUST init to 0 (not INF)** — padding area is outside the glyph; `inside` field inits to INF; v≥1 pixels must explicitly set `outside=INF`; SDFAA uses edge-centered sub-pixel seeding `(0.5-v)²`/`(v-0.5)²` (edge at v=0.5; do NOT use `v²`/`(1-v)²`); SDF8/16/32 uses binary initialization at threshold 128; Felzenszwalb 1D→2D parabola envelope; bilinear downsample for upsampled modes; **normalization must divide by `padding * upsampling`**; reference: TinySDF (`gridInner.fill(0)`, `gridOuter.fill(INF)`)
-- **Render modes:** SDFAA (1x, default), SDF8 (8x), SDF16 (16x), SDF32 (32x upsampling); `AtlasRenderMode` enum: SDFAA=4165, SDF8=4168, SDF16=4169, SDF32=4170; constraint: `samplingSize × upsampling ≤ 16384`
-- **Padding:** dynamic calculation — percentage mode `(int)(samplingSize * percent / 100)` or pixel mode; minimum 1; `GradientScale = padding + 1` injected into Material `m_SavedProperties.m_Floats`; `m_AtlasPadding` must match
-- **SDF bitmap includes padding:** `BitmapWidth/Height` in GlyphData are padded dimensions; packing uses padded size directly (no double-padding); `GlyphRect` references inner glyph region (`AtlasX + padding`, unpadded width); `UsedGlyphRects` references full padded region
-- **Auto-sizing:** `AutoSizeSamplingSize` binary search (15 iterations); samples 200 glyphs to estimate area; initial max = `sqrt(atlasArea / count) × 3`; recalculates padding if percentage mode
-- **FreeTypeSharp:** v3.1.0 raw unsafe P/Invoke (bundles FreeType 2.13.2); requires `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` in csproj; `FT_LOAD` is enum not int — use `FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING` directly (no cast)
-- **Atlas Y-axis:** FreeType bitmaps are top-down (Y=0 at top); Unity Texture2D/TMP GlyphRect are bottom-up (Y=0 at bottom); atlas bytes must be row-flipped and GlyphRect Y converted (`atlasHeight - y - height`) before injection
-- **`TmpFontService.ResolveFontFile` callers:** game install passes full version (`"2022.3.62f3"`), font generation passes major-only (`"6000"`); `ParseMajorVersion` must handle both formats (with and without dots)
-- **Multi-atlas:** `PackGlyphs` tries single page first; binary search + 90% safety margin for max glyphs per page; `RectanglePacker.Pack` does NOT throw on overflow — must check returned `bounds` against atlas dimensions
-- **async/unsafe conflict:** `GenerateCore` is `unsafe` (FreeType pointers) — character resolution via `CharacterSetService.ResolveCharactersAsync` MUST happen in `GenerateAsync` before `Task.Run`, never inside `GenerateCore`
-- **`HashSet<int>` not `HashSet<char>`:** CJK Extension B (U+20000+) requires supplementary plane support; `char` is 16-bit; use `int` codepoints throughout pipeline; `StringInfo.GetTextElementEnumerator()` for surrogate pair handling
-- **Disk-temp SDF bitmaps:** For large charsets (70K+ chars), SDF bitmaps saved to `data/font-generation/temp/{sessionId}/` during rendering, read back per-page during compositing, cleaned up in `finally`
-- **CharacterSetService:** singleton; depends on `AppDataPaths`, `GameLibraryService`; `ResolveCharactersAsync` merges built-in + custom TXT + translation file sources; superset warnings from `BuiltinCharsets.SupersetOf`; translation file path resolved from game INI `[Files] OutputFile` + `[General] Language`
-- **Always-included charsets:** `ResolveCharactersAsync` unconditionally unions `Ascii()` + `CommonPunctuation()` into every generated font; `CommonPunctuation()` covers CJK Symbols & Punctuation (U+3000–U+303F), CJK Compatibility Forms (U+FE30–U+FE4F), Fullwidth ASCII (U+FF01–U+FF60), and select General Punctuation (dashes, quotes, ellipsis); adding new always-included ranges: add to `CommonPunctuation()` in `BuiltinCharsets.cs` + mirror in fallback path of `TmpFontGeneratorService.GenerateAsync`
-- **Zero-size glyph GlyphRect:** Glyphs with `BitmapWidth==0 || BitmapHeight==0` (space, control chars) MUST have GlyphRect `{0,0,0,0}` — `BitmapWidth - 2*padding` produces negative values that TMP rejects; zero-size glyphs skip atlas packing but are included in GlyphTable/CharacterTable for valid metrics
-- **FT_Load/Render failure tracking:** `FT_Load_Glyph`/`FT_Render_Glyph` failures MUST add the character to `missingChars` — bare `continue` silently drops characters from both the font and the report
-- **Install as TMP font:** `POST /install-tmp-font/{gameId}` copies generated bundle to `{GamePath}/BepInEx/Font/{fontName}` (preserves actual name, strips `.bundle` ext) and patches `[Behaviour] FallbackFontTextMeshPro`; uses `TmpFontService.InstallCustomFont`
-- **`TmpFontService` API:** `InstallFont(gamePath, gameInfo)` returns `string?` config path (e.g. `"BepInEx/Font/SourceHanSans_U2022"`), null if unavailable; `InstallCustomFont(gamePath, srcPath, destFileName)` static method for generated fonts; `RemoveFont` deletes all files in `BepInEx/Font/`; no `FontFileName`/`ConfigValue` constants
-- **`FallbackFontTextMeshPro` config:** NOT in `ApplyOptimalDefaultsAsync` defaults; set by `InstallOrchestrator` after font install and by `POST /{id}/tmp-font` endpoint
+- **SDF 管线（忠实于 Unity）：** `FT_RENDER_MODE_NORMAL` → AA 位图 → `DistanceFieldGenerator.GenerateSdf()`（Felzenszwalb EDT）→ 带 padding 的 SDF；复制 Unity 的 FontEngine 方法；不要使用 `FT_RENDER_MODE_SDF`（基于轮廓，与 Unity 产生不同结果）
+- **`DistanceFieldGenerator`：** 静态类；**关键：`outside` 字段必须初始化为 0（非 INF）**——padding 区域在字形外部；`inside` 字段初始化为 INF；v≥1 的像素必须显式设置 `outside=INF`；SDFAA 使用边缘居中的亚像素播种 `(0.5-v)²`/`(v-0.5)²`（边缘在 v=0.5 处；不要使用 `v²`/`(1-v)²`）；SDF8/16/32 在阈值 128 处使用二值初始化；Felzenszwalb 1D→2D 抛物线包络；上采样模式使用双线性降采样；**归一化必须除以 `padding * upsampling`**；参考：TinySDF（`gridInner.fill(0)`、`gridOuter.fill(INF)`）
+- **渲染模式：** SDFAA（1x，默认）、SDF8（8x）、SDF16（16x）、SDF32（32x 上采样）；`AtlasRenderMode` 枚举：SDFAA=4165、SDF8=4168、SDF16=4169、SDF32=4170；约束：`samplingSize × upsampling ≤ 16384`
+- **Padding：** 动态计算——百分比模式 `(int)(samplingSize * percent / 100)` 或像素模式；最小值 1；`GradientScale = padding + 1` 注入到 Material `m_SavedProperties.m_Floats` 中；`m_AtlasPadding` 必须匹配
+- **SDF 位图包含 padding：** `GlyphData` 中的 `BitmapWidth/Height` 是含 padding 的尺寸；打包直接使用含 padding 的大小（无双重 padding）；`GlyphRect` 引用内部字形区域（`AtlasX + padding`，不含 padding 的宽度）；`UsedGlyphRects` 引用完整含 padding 的区域
+- **自动大小：** `AutoSizeSamplingSize` 二分搜索（15 次迭代）；采样 200 个字形估算面积；初始最大值 = `sqrt(atlasArea / count) × 3`；百分比模式时重新计算 padding
+- **FreeTypeSharp：** v3.1.0 原始 unsafe P/Invoke（捆绑 FreeType 2.13.2）；csproj 中需要 `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>`；`FT_LOAD` 是枚举不是 int——直接使用 `FT_LOAD.FT_LOAD_NO_BITMAP | FT_LOAD.FT_LOAD_NO_HINTING`（无需强制转换）
+- **图集 Y 轴：** FreeType 位图是自上而下的（Y=0 在顶部）；Unity Texture2D/TMP GlyphRect 是自下而上的（Y=0 在底部）；图集字节必须行翻转，GlyphRect Y 需转换（`atlasHeight - y - height`）后才能注入
+- **`TmpFontService.ResolveFontFile` 调用方：** 游戏安装传完整版本（`"2022.3.62f3"`），字体生成传主版本号（`"6000"`）；`ParseMajorVersion` 必须同时处理两种格式（带点和不带点）
+- **多图集：** `PackGlyphs` 先尝试单页；二分搜索 + 90% 安全边际计算每页最大字形数；`RectanglePacker.Pack` 溢出时不会抛异常——必须检查返回的 `bounds` 是否超过图集尺寸
+- **async/unsafe 冲突：** `GenerateCore` 是 `unsafe` 的（FreeType 指针）——通过 `CharacterSetService.ResolveCharactersAsync` 的字符解析必须在 `GenerateAsync` 中 `Task.Run` 之前完成，绝不在 `GenerateCore` 内部
+- **`HashSet<int>` 而非 `HashSet<char>`：** CJK Extension B（U+20000+）需要辅助平面支持；`char` 是 16 位的；整个管线使用 `int` 码点；`StringInfo.GetTextElementEnumerator()` 处理代理对
+- **磁盘临时 SDF 位图：** 对于大字符集（70K+ 字符），SDF 位图在渲染期间保存到 `data/font-generation/temp/{sessionId}/`，合成时逐页读回，在 `finally` 中清理
+- **CharacterSetService：** 单例；依赖 `AppDataPaths`、`GameLibraryService`；`ResolveCharactersAsync` 合并内置 + 自定义 TXT + 翻译文件来源；来自 `BuiltinCharsets.SupersetOf` 的超集警告；翻译文件路径从游戏 INI `[Files] OutputFile` + `[General] Language` 解析
+- **始终包含的字符集：** `ResolveCharactersAsync` 无条件合并 `Ascii()` + `CommonPunctuation()` 到每个生成的字体中；`CommonPunctuation()` 覆盖 CJK 符号与标点（U+3000–U+303F）、CJK 兼容形式（U+FE30–U+FE4F）、全角 ASCII（U+FF01–U+FF60）和部分通用标点（破折号、引号、省略号）；添加新的始终包含范围：在 `BuiltinCharsets.cs` 的 `CommonPunctuation()` 中添加 + 在 `TmpFontGeneratorService.GenerateAsync` 的兜底路径中镜像
+- **零大小字形 GlyphRect：** `BitmapWidth==0 || BitmapHeight==0` 的字形（空格、控制字符）必须使 GlyphRect 为 `{0,0,0,0}`——`BitmapWidth - 2*padding` 会产生负值，TMP 会拒绝；零大小字形跳过图集打包但包含在 GlyphTable/CharacterTable 中以提供有效度量
+- **FT_Load/Render 失败追踪：** `FT_Load_Glyph`/`FT_Render_Glyph` 失败必须将字符添加到 `missingChars`——裸 `continue` 会静默丢失字符，使其既不在字体中也不在报告中
+- **安装为 TMP 字体：** `POST /install-tmp-font/{gameId}` 将生成的 bundle 复制到 `{GamePath}/BepInEx/Font/{fontName}`（保留实际名称，去掉 `.bundle` 扩展名）并补丁 `[Behaviour] FallbackFontTextMeshPro`；使用 `TmpFontService.InstallCustomFont`
+- **`TmpFontService` API：** `InstallFont(gamePath, gameInfo)` 返回 `string?` 配置路径（如 `"BepInEx/Font/SourceHanSans_U2022"`），不可用时返回 null；`InstallCustomFont(gamePath, srcPath, destFileName)` 用于生成字体的静态方法；`RemoveFont` 删除 `BepInEx/Font/` 中的所有文件；无 `FontFileName`/`ConfigValue` 常量
+- **`FallbackFontTextMeshPro` 配置：** 不在 `ApplyOptimalDefaultsAsync` 默认值中；由 `InstallOrchestrator` 在字体安装后和 `POST /{id}/tmp-font` 端点设置
 
-## Local LLM
+## 本地 LLM
 
-- GPU detection: `DxgiGpuDetector` (DXGI, 64-bit VRAM, PCI VendorId) primary; WMI fallback (uint32 caps at 4GB)
-- Backend selection: NVIDIA→CUDA, AMD/Intel→Vulkan, none→CPU; binaries at `{dataRoot}/llama/{cuda,vulkan,cpu}/`
-- **Bundled binaries:** ZIPs in `bundled/llama/`; lazy-extracted on first `POST /start` via `ExtractLlamaZipAsync`
-- **Model downloads:** `.downloading` temp files + HTTP Range; `_pauseRequests` differentiates pause from cancel; dual source: HuggingFace (`/resolve/main/`) or ModelScope (`/models/{repo}/resolve/master/` — note `master` not `main`); `_downloadModelScopeState` tracks active source; cleanup checks both sources' temp files
-- **ModelScope URL:** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}` — supports Range headers for resume; public models need no auth
-- **GPU monitoring:** nvidia-smi polled every 3s when CUDA running
-- **Reasoning disabled:** `--reasoning-budget 0` prevents `<think>` blocks
-- Endpoint auto-registers as `Custom` provider with Priority=8; stable `EndpointId`
-- **Endpoint lifecycle:** `RegisterEndpointAsync` sets `Enabled=true` on `StartAsync` (after health check); `UnregisterEndpointAsync` sets `Enabled=false` on `StopAsync`; **startup cleanup** in `Program.cs` forces `Enabled=false` for `ApiKey=="local"` endpoints (local LLM never runs on fresh start; guards against crash-orphaned state)
-- **Translation gate:** `POST /api/translate` injects `LocalLlmService` and blocks requests when `ActiveMode=="local" && !IsRunning` (503); this prevents XUnity error accumulation (5 consecutive errors → translator shutdown)
-- Settings: `data/local-llm-settings.json`; mirror settings unified in `AppSettings`
+- GPU 检测：`DxgiGpuDetector`（DXGI，64 位 VRAM，PCI VendorId）为主；WMI 兜底（uint32 上限 4GB）
+- 后端选择：NVIDIA→CUDA，AMD/Intel→Vulkan，无→CPU；二进制文件在 `{dataRoot}/llama/{cuda,vulkan,cpu}/`
+- **捆绑二进制文件：** ZIP 在 `bundled/llama/`；首次 `POST /start` 时通过 `ExtractLlamaZipAsync` 懒提取
+- **模型下载：** `.downloading` 临时文件 + HTTP Range；`_pauseRequests` 区分暂停和取消；双源：HuggingFace（`/resolve/main/`）或 ModelScope（`/models/{repo}/resolve/master/`——注意是 `master` 非 `main`）；`_downloadModelScopeState` 追踪活跃源；清理时检查两个源的临时文件
+- **ModelScope URL：** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}`——支持 Range 头用于断点续传；公开模型无需认证
+- **GPU 监控：** CUDA 运行时每 3 秒轮询 nvidia-smi
+- **推理已禁用：** `--reasoning-budget 0` 防止 `<think>` 块
+- 端点自动注册为 `Custom` 提供商，Priority=8；稳定的 `EndpointId`
+- **端点生命周期：** `RegisterEndpointAsync` 在 `StartAsync`（健康检查后）时设置 `Enabled=true`；`UnregisterEndpointAsync` 在 `StopAsync` 时设置 `Enabled=false`；`Program.cs` 中的**启动清理**强制将 `ApiKey=="local"` 的端点设为 `Enabled=false`（本地 LLM 在全新启动时绝不运行；防范崩溃孤立状态）
+- **翻译门控：** `POST /api/translate` 注入 `LocalLlmService`，当 `ActiveMode=="local" && !IsRunning` 时阻止请求（503）；防止 XUnity 错误累积（5 次连续错误 → 翻译器关闭）
+- 设置：`data/local-llm-settings.json`；镜像设置统一在 `AppSettings` 中
 
-## BepInEx Installation (Bundled)
+## BepInEx 安装（捆绑式）
 
-- **Mono games:** BepInEx 5 from `bundled/bepinex5/` (x64 + x86)
-- **IL2CPP games:** BepInEx 6 BE from `bundled/bepinex6/` (x64 + x86); supports IL2CPP metadata v31+
-- `BepInExInstallerService.InstallAsync` is plain ZIP extraction; version parsed from filename
+- **Mono 游戏：** BepInEx 5 来自 `bundled/bepinex5/`（x64 + x86）
+- **IL2CPP 游戏：** BepInEx 6 BE 来自 `bundled/bepinex6/`（x64 + x86）；支持 IL2CPP 元数据 v31+
+- `BepInExInstallerService.InstallAsync` 是简单的 ZIP 解压；版本从文件名解析
 
-## Plugin Package (Export/Import)
+## 插件包（导出/导入）
 
-- `PluginPackageService`: exports BepInEx + XUnity as ZIP (max compression)
-- **INI sanitization:** blanks sensitive section values; `[LLMTranslate]` only blanks `GameId`
-- **ZIP filename:** `{sanitized game name}_{target language}_{yyyy-MM-dd}.zip`
-- **Import with font replacement:** `_font_replacement_manifest.json` sentinel in ZIP; import MUST backup target asset files BEFORE extraction (ZIP overwrites originals); update `OriginalPath` in manifest to match importing game's directory
+- `PluginPackageService`：将 BepInEx + XUnity 导出为 ZIP（最大压缩）
+- **INI 脱敏：** 清空敏感节的值；`[LLMTranslate]` 仅清空 `GameId`
+- **ZIP 文件名：** `{脱敏后的游戏名}_{目标语言}_{yyyy-MM-dd}.zip`
+- **带字体替换的导入：** ZIP 中的 `_font_replacement_manifest.json` 标记文件；导入必须在解压前备份目标资源文件（ZIP 会覆盖原始文件）；更新清单中的 `OriginalPath` 以匹配导入游戏的目录
 
-## DI & Provider Gotchas
+## DI 与提供者注意事项
 
-- Pre-constructed `ILoggerProvider`: use `AddSingleton<T>(_ => instance)` to avoid double-dispose
-- `IHubContext<T>.SendAsync` is extension method — requires `using Microsoft.AspNetCore.SignalR;`
-- **`SystemTrayService` DI:** `AddSingleton` + `AddHostedService(sp => sp.GetRequired...)` for injection + hosting
+- 预构造的 `ILoggerProvider`：使用 `AddSingleton<T>(_ => instance)` 避免双重释放
+- `IHubContext<T>.SendAsync` 是扩展方法——需要 `using Microsoft.AspNetCore.SignalR;`
+- **`SystemTrayService` DI：** `AddSingleton` + `AddHostedService(sp => sp.GetRequired...)` 用于注入 + 托管
 
-## Web Image Search
+## Web 图片搜索
 
-- **`WebImageSearchService`:** Scrapes Bing and Google for image results; no API key needed
-- **SSRF protection:** `ValidateImageUrl` rejects non-http(s), loopback, private IPs before server-side download
-- **Content-Type validation:** Must check `IsAllowedContentType` before saving downloaded images
+- **`WebImageSearchService`：** 抓取 Bing 和 Google 的图片搜索结果；无需 API 密钥
+- **SSRF 防护：** `ValidateImageUrl` 在服务端下载前拒绝非 http(s)、环回地址、私有 IP
+- **Content-Type 验证：** 保存下载的图片前必须检查 `IsAllowedContentType`
