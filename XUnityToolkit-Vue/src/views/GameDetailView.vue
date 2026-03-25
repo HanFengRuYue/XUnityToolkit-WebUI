@@ -977,24 +977,6 @@ onBeforeUnmount(() => stopWatch())
       </div>
     </div>
 
-    <!-- Font Replacement Card (non-installed Unity games only) -->
-    <div v-if="game.isUnityGame && !isInstalled" class="section-card" :style="{ animationDelay: '0.2s' }">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><FontDownloadOutlined /></NIcon>
-          </span>
-          字体替换
-        </h2>
-        <NButton size="small" type="primary" @click="router.push(`/games/${gameId}/font-replacement`)">
-          打开
-        </NButton>
-      </div>
-      <p class="asset-extraction-desc">
-        直接修改游戏资产文件中的 TMP 字体，适用于 XUnity 插件字体替换不生效的情况。支持扫描、选择性替换和一键还原。
-      </p>
-    </div>
-
     <!-- AI Description Card (available for all Unity games, even before install) -->
     <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.description }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.45s' : '0.4s' }">
       <div class="section-header collapsible" @click="collapsed.description = !collapsed.description">
