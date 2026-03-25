@@ -8,11 +8,6 @@ namespace XUnityToolkit_WebUI.Endpoints;
 
 public static class AssetEndpoints
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false
-    };
 
     public static void MapAssetEndpoints(this WebApplication app)
     {
@@ -41,7 +36,7 @@ public static class AssetEndpoints
                 // Cache the result (use temp-then-move for atomicity)
                 var cachePath = paths.ExtractedTextsFile(id);
                 Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                var json = JsonSerializer.Serialize(result, JsonOptions);
+                var json = JsonSerializer.Serialize(result, FileHelper.DataJsonOptions);
                 var tmpPath = cachePath + ".tmp";
                 await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
                 File.Move(tmpPath, cachePath, overwrite: true);
@@ -82,7 +77,7 @@ public static class AssetEndpoints
                 return Results.Ok(ApiResult<AssetExtractionResult?>.Ok(null));
 
             var json = await File.ReadAllTextAsync(cachePath, ct);
-            var result = JsonSerializer.Deserialize<AssetExtractionResult>(json, JsonOptions);
+            var result = JsonSerializer.Deserialize<AssetExtractionResult>(json, FileHelper.DataJsonOptions);
             return Results.Ok(ApiResult<AssetExtractionResult?>.Ok(result));
         });
 
@@ -128,7 +123,7 @@ public static class AssetEndpoints
                 return Results.BadRequest(ApiResult.Fail("请先提取游戏资产"));
 
             var json = await File.ReadAllTextAsync(cachePath, ct);
-            var extractResult = JsonSerializer.Deserialize<AssetExtractionResult>(json, JsonOptions);
+            var extractResult = JsonSerializer.Deserialize<AssetExtractionResult>(json, FileHelper.DataJsonOptions);
             if (extractResult is null || extractResult.Texts.Count == 0)
                 return Results.BadRequest(ApiResult.Fail("没有可翻译的文本"));
 

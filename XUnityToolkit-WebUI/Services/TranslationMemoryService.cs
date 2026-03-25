@@ -218,9 +218,10 @@ public sealed class TranslationMemoryService(
         foreach (var gameId in _debounceTimers.Keys.ToList())
             CancelDebounceTimer(gameId);
         _stores.Clear();
-        foreach (var kvp in _persistLocks)
-            kvp.Value.Dispose();
+        var locks = _persistLocks.Values.ToList();
         _persistLocks.Clear();
+        foreach (var sem in locks)
+            sem.Dispose();
     }
 
     public async Task DeleteAsync(string gameId, CancellationToken ct = default)
@@ -253,7 +254,7 @@ public sealed class TranslationMemoryService(
     public void Dispose()
     {
         // Flush all dirty stores synchronously on shutdown
-        foreach (var gameId in _dirtyTimestamps.Keys)
+        foreach (var gameId in _dirtyTimestamps.Keys.ToList())
         {
             CancelDebounceTimer(gameId);
             if (_dirtyTimestamps.TryRemove(gameId, out _) && _stores.TryGetValue(gameId, out var store))
@@ -263,9 +264,10 @@ public sealed class TranslationMemoryService(
             }
         }
 
-        foreach (var kvp in _persistLocks)
-            kvp.Value.Dispose();
+        var locks = _persistLocks.Values.ToList();
         _persistLocks.Clear();
+        foreach (var sem in locks)
+            sem.Dispose();
     }
 
     // ── Debounce infrastructure ──

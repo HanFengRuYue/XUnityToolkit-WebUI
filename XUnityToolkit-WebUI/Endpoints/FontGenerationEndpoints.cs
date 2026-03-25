@@ -142,7 +142,7 @@ public static class FontGenerationEndpoints
                     hasReport = true;
                     try
                     {
-                        var reportJson = File.ReadAllText(reportPath);
+                        var reportJson = await File.ReadAllTextAsync(reportPath);
                         var report = JsonSerializer.Deserialize<FontGenerationReport>(reportJson);
                         if (report != null)
                             glyphCount = report.SuccessfulGlyphs;

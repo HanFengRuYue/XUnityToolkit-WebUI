@@ -131,9 +131,9 @@ public sealed class GlossaryExtractionService(
             chunks.Add(pairs.GetRange(i, Math.Min(ChunkSize, pairs.Count - i)));
         }
 
-        // Process chunks concurrently
-        var tasks = chunks.Select(chunk => ExtractChunkAsync(gameId, chunk, ai));
-        await Task.WhenAll(tasks);
+        // Process chunks with bounded concurrency matching the semaphore size
+        await Parallel.ForEachAsync(chunks, new ParallelOptions { MaxDegreeOfParallelism = 3 },
+            async (chunk, ct) => await ExtractChunkAsync(gameId, chunk, ai));
     }
 
     private async Task ExtractChunkAsync(string gameId, List<TranslationPair> pairs, AiTranslationSettings ai)

@@ -149,12 +149,17 @@ public sealed class TermExtractionService(
         if (_cache.TryGetValue(gameId, out var cached))
             return cached;
 
-        var file = paths.TermCandidatesFile(gameId);
-        if (!File.Exists(file))
-            return new TermCandidateStore();
-
+        var lk = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await lk.WaitAsync(ct);
         try
         {
+            if (_cache.TryGetValue(gameId, out cached))
+                return cached;
+
+            var file = paths.TermCandidatesFile(gameId);
+            if (!File.Exists(file))
+                return new TermCandidateStore();
+
             var json = await File.ReadAllTextAsync(file, ct);
             var store = JsonSerializer.Deserialize<TermCandidateStore>(json, FileHelper.DataJsonOptions)
                 ?? new TermCandidateStore();
@@ -164,6 +169,10 @@ public sealed class TermExtractionService(
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
             return new TermCandidateStore();
+        }
+        finally
+        {
+            lk.Release();
         }
     }
 

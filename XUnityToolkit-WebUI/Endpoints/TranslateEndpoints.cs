@@ -33,10 +33,11 @@ public static class TranslateEndpoints
             }
 
             // Record texts for pre-translation cache monitoring
-            if (!string.IsNullOrEmpty(request.GameId))
+            var validGameId = !string.IsNullOrEmpty(request.GameId) && Guid.TryParse(request.GameId, out _);
+            if (validGameId)
             {
-                await cacheMonitor.EnsureCacheAsync(request.GameId, request.To ?? "zh", ct);
-                cacheMonitor.RecordTexts(request.GameId, request.Texts);
+                await cacheMonitor.EnsureCacheAsync(request.GameId!, request.To ?? "zh", ct);
+                cacheMonitor.RecordTexts(request.GameId!, request.Texts);
             }
 
             try
@@ -49,11 +50,11 @@ public static class TranslateEndpoints
                 // Buffer for glossary extraction (fire-and-forget, non-blocking)
                 // Disabled in local mode — local models can't handle extra inference
                 var isLocalMode = string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
-                if (!isLocalMode && !string.IsNullOrEmpty(request.GameId))
+                if (!isLocalMode && validGameId)
                 {
                     for (int i = 0; i < request.Texts.Count; i++)
-                        extractionService.BufferTranslation(request.GameId, request.Texts[i], translations[i]);
-                    extractionService.TryTriggerExtraction(request.GameId);
+                        extractionService.BufferTranslation(request.GameId!, request.Texts[i], translations[i]);
+                    extractionService.TryTriggerExtraction(request.GameId!);
                 }
 
                 return Results.Ok(new TranslateResponse(translations));

@@ -11,7 +11,7 @@ public sealed class ScriptTagService(
     BundledAssetPaths bundledPaths,
     ILogger<ScriptTagService> logger)
 {
-    private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
     private readonly ConcurrentDictionary<string, ScriptTagConfig> _cache = new();
     private readonly ConcurrentDictionary<string, CompiledRuleSet> _compiled = new();
     private volatile ScriptTagPreset? _presetCache;
@@ -47,7 +47,8 @@ public sealed class ScriptTagService(
     {
         if (_cache.TryGetValue(gameId, out var cached)) return cached;
 
-        await _lock.WaitAsync(ct);
+        var lk = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await lk.WaitAsync(ct);
         try
         {
             if (_cache.TryGetValue(gameId, out cached)) return cached;
@@ -107,13 +108,14 @@ public sealed class ScriptTagService(
         }
         finally
         {
-            _lock.Release();
+            lk.Release();
         }
     }
 
     public async Task SaveAsync(string gameId, ScriptTagConfig config, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        var lk = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
+        await lk.WaitAsync(ct);
         try
         {
             var file = paths.ScriptTagFile(gameId);
@@ -128,7 +130,7 @@ public sealed class ScriptTagService(
         }
         finally
         {
-            _lock.Release();
+            lk.Release();
         }
     }
 
@@ -136,12 +138,18 @@ public sealed class ScriptTagService(
     {
         _cache.TryRemove(gameId, out _);
         _compiled.TryRemove(gameId, out _);
+        if (_locks.TryRemove(gameId, out var sem))
+            sem.Dispose();
     }
 
     public void ClearAllCache()
     {
         _cache.Clear();
         _compiled.Clear();
+        var locks = _locks.Values.ToList();
+        _locks.Clear();
+        foreach (var sem in locks)
+            sem.Dispose();
     }
 
     // ── Core cleaning methods ──

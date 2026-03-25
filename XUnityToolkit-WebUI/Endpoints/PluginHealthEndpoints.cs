@@ -33,8 +33,8 @@ public static class PluginHealthEndpoints
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
-            if (game.InstallState == InstallState.NotInstalled)
-                return Results.BadRequest(ApiResult.Fail("游戏未安装插件"));
+            if (game.InstallState is InstallState.NotInstalled or InstallState.BepInExOnly)
+                return Results.BadRequest(ApiResult.Fail("需要完整安装 BepInEx 和 XUnity.AutoTranslator 才能执行连通性验证"));
 
             // Prevent conflict with active install/uninstall
             var installStatus = orchestrator.GetStatus(id);

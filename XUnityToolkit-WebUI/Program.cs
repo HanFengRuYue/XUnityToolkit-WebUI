@@ -166,6 +166,12 @@ builder.Services.AddSignalR()
         options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
+// 缩短关闭超时，避免浏览器 WebSocket 连接导致退出延迟
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.ShutdownTimeout = TimeSpan.FromSeconds(3);
+});
+
 var app = builder.Build();
 
 // Ensure app data directories exist

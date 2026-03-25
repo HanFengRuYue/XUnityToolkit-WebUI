@@ -42,6 +42,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
 - **AI 翻译页面布局：** 单列布局 — 统计条 → 管线状态 → 设置（可折叠区块卡片，`collapsed.settings`）→ 最近翻译 → 错误；无两列网格
 - **实时通信：** 通过单个 `InstallProgressHub` 使用 SignalR（分组：`game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`）；`preCacheStatsUpdate` 广播到 `ai-translation` 分组用于预翻译缓存命中/未命中统计；`healthReportReady` 在安装验证步骤完成后广播到 `game-{id}` 分组
+- **关闭超时：** `HostOptions.ShutdownTimeout = 3s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
 - **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许为开发/测试覆盖路径；API 密钥使用 DPAPI 加密
 - **系统托盘：** NotifyIcon 在专用 STA 线程上运行；`ShowNotification` 通过 `SynchronizationContext.Post` 调度到 STA；`_trayIcon`/`_syncContext` 为 `volatile`
 - **无控制台：** `OutputType=WinExe` — 无控制台窗口；不要改回 `Exe`
@@ -61,6 +62,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **BepInEx 日志：** `BepInExLogService` 使用 `FileShare.ReadWrite` 读取 `{GamePath}/BepInEx/LogOutput.log`；AI 分析通过 `LlmTranslationService.CallLlmRawAsync`（不占用信号量）；诊断提示词为预定义中文；日志截断到最后 4000 行供 LLM 上下文使用；`hasBepInEx` 计算包含 `PartiallyInstalled` 状态
 - **插件健康检查：** `PluginHealthCheckService` 执行被动的、基于规则的健康检查（不依赖 AI）；第 1 级：文件完整性（doorstop 代理、BepInEx 核心、XUnity 插件、配置、LLMTranslate DLL）；第 2 级：基于日志的检查，通过 `[GeneratedRegex]`（BepInEx 初始化、XUnity 已加载、端点已注册、错误分析）；第 3 级：连通性检查 — `LLMTranslate.dll` 在 `Initialize()` 时发送 `GET /api/translate/ping?gameId=`，`RecordPing`/`HasRecentPing` 跟踪到达情况；`VerifyAsync` 自动启动游戏，等待日志 + ping，然后分析；`VerifyForInstallAsync` 绕过 `_activeVerifications` 守卫供 `InstallOrchestrator` 使用（编排器自己管理并发）；`PluginHealthCard.vue` 只显示有问题的项目（过滤 Healthy），单个"启动验证"按钮（无被动重检按钮），接受可选 `initialReport` prop（提供时跳过被动检查）；API：`GET /api/games/{id}/health-check`, `POST .../health-check/verify`
 - **健康检查错误分析：** `CheckLogErrors` 双遍扫描：Pass 1 扫描 `[Error:]` 行匹配通用错误模式（IL2CPP、Harmony、程序集版本、类型加载、插件加载、字体缺失、文件未找到、权限、空引用、网络、XUnity 钩子）；Pass 2 扫描所有行匹配 LLMTranslate 端点专属模式（工具箱连接、空响应、数量不匹配、本地模型、端点禁用、API 失败）——DLL 通过 `Console.WriteLine` 输出，在 BepInEx 中显示为 `[Info/Message:]` 级别而非 `[Error:]`，因此必须独立扫描；`HealthCheckDetail(Category, Excerpt, Suggestion?)` 携带分类诊断；`SafeExcerpt` 剥离日志前缀并用 `Path.GetFileName` 替换绝对路径；每类最多 2 条、总计最多 10 条；添加新错误模式：在 `GeneralErrorPatterns` 或 `EndpointErrorPatterns` 列表中添加 `ErrorPattern` + 对应 `[GeneratedRegex]`
+- **插件健康验证前置条件：** `POST .../health-check/verify` 需要 `FullyInstalled` 或 `PartiallyInstalled` 状态；`BepInExOnly` 时 LLMTranslate.dll 未安装，ping 永远不会到达，验证必定超时
 - **健康检查 ↔ DLL 日志依赖：** `CheckEndpointRegistered` 扫描 BepInEx 日志中的 `"LLMTranslate"` 子串 — 需要 DLL 的 `Log()`（无条件）输出初始化 banner；不要将初始化消息限制在 `DebugLog()` 后面，否则健康检查将无法检测到端点
 - **在线更新：** `UpdateService` 检查 GitHub Releases 的新版本；基于清单的差异下载（app/wwwroot/bundled-llama/bundled-fonts/bundled-plugins/bundled-misc 组件 ZIP）；`Updater.exe`（AOT，无运行时依赖）处理文件替换和重启；暂存在 `data/update-staging/`；两阶段备份-替换保证原子性；失败时回滚；通过 `AppSettings.ReceivePreReleaseUpdates` 选择预发布版本
 
@@ -178,6 +180,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - `DisableSpamChecks()` 移除稳定化等待；`SetTranslationDelay(float)` 最小 0.1 秒；v5.4.3+ 可用
 - `GetOrCreateSetting` 读取已有 INI；更改 DLL 默认值不会影响已安装的游戏 — 使用 `PatchSectionAsync`
 - **双级日志：** `Log()` 始终输出关键信息（初始化 banner、配置、错误、请求/完成摘要）；`DebugLog()` 受 `DebugMode` 控制用于详细信息（文本预览、响应数据、ServicePoint 配置）；`DebugMode` 默认为 `false` — 不要在生产环境中默认为 `true`
+- **`EscapeJsonString` 代理对处理：** 补充平面字符（U+10000+）在 .NET 中是代理对；循环中检测 `char.IsHighSurrogate` + `char.IsLowSurrogate` 配对后直接追加两个 char；孤立代理用 `\uXXXX` 转义
 - **"Endpoint" 与 "Provider"：** "translation endpoint" = `LLMTranslate.dll`；"provider" = `ApiEndpointConfig` LLM API 配置
 
 ### 同步点

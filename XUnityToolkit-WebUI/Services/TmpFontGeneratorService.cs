@@ -88,7 +88,7 @@ public sealed class TmpFontGeneratorService(
 
     public void Cancel()
     {
-        _cts?.Cancel();
+        Volatile.Read(ref _cts)?.Cancel();
         logger.LogInformation("字体生成已取消");
     }
 
@@ -130,8 +130,7 @@ public sealed class TmpFontGeneratorService(
             logger.LogError(ex, "字符集解析失败");
             _isGenerating = false;
             _phase = null;
-            _cts?.Dispose();
-            _cts = null;
+            Interlocked.Exchange(ref _cts, null)?.Dispose();
             _generationSemaphore.Release();
             return new FontGenerationResult(false, null, null, 0, 0, 0, "字符集解析失败，请检查字符集配置");
         }
@@ -156,8 +155,7 @@ public sealed class TmpFontGeneratorService(
             _phase = null;
             _current = 0;
             _total = 0;
-            _cts?.Dispose();
-            _cts = null;
+            Interlocked.Exchange(ref _cts, null)?.Dispose();
             _generationSemaphore.Release();
         }
     }
