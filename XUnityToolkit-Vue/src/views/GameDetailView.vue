@@ -39,6 +39,7 @@ import {
   FontDownloadOutlined,
   ArticleOutlined,
   ExpandMoreOutlined,
+  RefreshOutlined,
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
@@ -396,6 +397,19 @@ async function handleInstallAiEndpoint() {
     message.success('AI 翻译引擎已安装')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
+  } finally {
+    aiEndpointLoading.value = false
+  }
+}
+
+async function handleReinstallAiEndpoint() {
+  aiEndpointLoading.value = true
+  try {
+    const result = await gamesApi.installAiEndpoint(gameId)
+    aiEndpointInstalled.value = result.installed
+    message.success('AI 翻译引擎已重装')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '重装失败')
   } finally {
     aiEndpointLoading.value = false
   }
@@ -893,15 +907,24 @@ onBeforeUnmount(() => stopWatch())
             <template #icon><NIcon :size="16"><SmartToyOutlined /></NIcon></template>
             安装 AI 翻译引擎
           </NButton>
-          <NButton
-            v-else
-            type="error"
-            ghost
-            :loading="aiEndpointLoading"
-            @click="handleUninstallAiEndpoint"
-          >
-            卸载引擎
-          </NButton>
+          <template v-else>
+            <NButton
+              ghost
+              :loading="aiEndpointLoading"
+              @click="handleReinstallAiEndpoint"
+            >
+              <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
+              重装引擎
+            </NButton>
+            <NButton
+              type="error"
+              ghost
+              :loading="aiEndpointLoading"
+              @click="handleUninstallAiEndpoint"
+            >
+              卸载引擎
+            </NButton>
+          </template>
         </div>
       </div>
     </div>
@@ -1791,6 +1814,9 @@ onBeforeUnmount(() => stopWatch())
 }
 
 .ai-endpoint-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
