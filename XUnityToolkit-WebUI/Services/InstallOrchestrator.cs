@@ -260,20 +260,9 @@ public sealed class InstallOrchestrator(
         }
         finally
         {
-            if (gameProcess != null && !gameProcess.HasExited)
-            {
-                try
-                {
-                    gameProcess.Kill();
-                    gameProcess.WaitForExit(5000);
-                    logger.LogInformation("已关闭游戏进程");
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "关闭游戏进程失败");
-                }
-            }
-            gameProcess?.Dispose();
+            // UseShellExecute=true may return a shell launcher (e.g. Steam) that exits
+            // immediately while the real game runs separately. Kill by process name as fallback.
+            await GameProcessHelper.KillGameProcessAsync(gameProcess, exeName, game.GamePath, logger);
         }
 
         // Step 7: Apply optimal defaults and user config

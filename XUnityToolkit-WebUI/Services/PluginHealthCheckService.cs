@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -160,20 +161,9 @@ public sealed partial class PluginHealthCheckService(ILogger<PluginHealthCheckSe
         }
         finally
         {
-            if (gameProcess != null && !gameProcess.HasExited)
-            {
-                try
-                {
-                    gameProcess.Kill();
-                    gameProcess.WaitForExit(5000);
-                    logger.LogInformation("已关闭验证游戏进程");
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "关闭游戏进程失败");
-                }
-            }
-            gameProcess?.Dispose();
+            // UseShellExecute=true may return a shell launcher (e.g. Steam) that exits
+            // immediately while the real game runs separately. Kill by process name as fallback.
+            await GameProcessHelper.KillGameProcessAsync(gameProcess, exeName, game.GamePath, logger);
         }
 
         var pingReceived = HasRecentPing(game.Id, verifyStartTime);
