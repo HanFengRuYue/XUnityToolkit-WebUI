@@ -57,6 +57,12 @@ const router = createRouter({
       meta: { depth: 3 },
     },
     {
+      path: '/games/:id/plugin-manager',
+      name: 'plugin-manager',
+      component: () => import('@/views/PluginManagerView.vue'),
+      meta: { depth: 3 },
+    },
+    {
       path: '/ai-translation',
       name: 'ai-translation',
       component: () => import('@/views/AiTranslationView.vue'),

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -285,6 +285,32 @@ export const bepinexLogApi = {
 export const pluginHealthApi = {
   check: (id: string) => api.get<PluginHealthReport>(`/api/games/${id}/health-check`),
   verify: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/verify`, {}),
+}
+
+// BepInEx Plugin Management
+export const bepinexPluginApi = {
+  list: (gameId: string) =>
+    api.get<BepInExPlugin[]>(`/api/games/${gameId}/plugins`),
+  install: (gameId: string, filePath: string) =>
+    api.post(`/api/games/${gameId}/plugins/install`, { filePath }),
+  upload: async (gameId: string, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const resp = await fetch(`/api/games/${gameId}/plugins/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok) {
+      const result = await resp.json().catch(() => null)
+      throw new Error(result?.error || '上传失败')
+    }
+  },
+  uninstall: (gameId: string, relativePath: string) =>
+    api.del(`/api/games/${gameId}/plugins?relativePath=${encodeURIComponent(relativePath)}`),
+  toggle: (gameId: string, relativePath: string) =>
+    api.post<BepInExPlugin>(`/api/games/${gameId}/plugins/toggle`, { relativePath }),
+  getConfig: (gameId: string, configFile: string) =>
+    api.get<string>(`/api/games/${gameId}/plugins/config?configFile=${encodeURIComponent(configFile)}`),
 }
 
 // Term Candidates

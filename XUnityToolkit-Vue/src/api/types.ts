@@ -688,6 +688,19 @@ export interface PluginHealthReport {
   checkedAt: string
 }
 
+// BepInEx Plugin Management
+export interface BepInExPlugin {
+  fileName: string
+  relativePath: string
+  enabled: boolean
+  fileSize: number
+  pluginGuid: string | null
+  pluginName: string | null
+  pluginVersion: string | null
+  isToolkitManaged: boolean
+  configFileName: string | null
+}
+
 // Online Update
 export type UpdateState = 'None' | 'Checking' | 'Available' | 'Downloading' | 'Ready' | 'Applying' | 'Error'
 
