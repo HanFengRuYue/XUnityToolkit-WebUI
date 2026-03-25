@@ -995,6 +995,16 @@ onBeforeUnmount(() => stopWatch())
               </div>
               <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
+            <div v-if="hasBepInEx" class="tool-item" @click="router.push(`/games/${gameId}/plugin-manager`)">
+              <div class="tool-item-icon">
+                <NIcon :size="18"><WidgetsOutlined /></NIcon>
+              </div>
+              <div class="tool-item-content">
+                <span class="tool-item-title">插件管理</span>
+                <span class="tool-item-desc">安装、卸载和管理第三方 BepInEx 插件</span>
+              </div>
+              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
           </div>
         </div>
       </div>
