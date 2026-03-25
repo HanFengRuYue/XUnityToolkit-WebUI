@@ -872,6 +872,7 @@ onActivated(() => loadSettings())
   align-items: center;
   justify-content: center;
   padding: 0;
+  appearance: none;
 }
 
 .accent-swatch:hover {
@@ -893,7 +894,7 @@ onActivated(() => loadSettings())
 .custom-swatch:not(.active) {
   background: conic-gradient(
     #f43f5e, #f97316, #f59e0b, #10b981, #06b6d4, #3b82f6, #8b5cf6, #f43f5e
-  );
+  ) border-box;
 }
 
 /* ===== Data Management ===== */
