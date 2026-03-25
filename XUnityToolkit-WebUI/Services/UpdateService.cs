@@ -534,7 +534,7 @@ public sealed class UpdateService(
 
     public void CancelDownload()
     {
-        _downloadCts?.Cancel();
+        Volatile.Read(ref _downloadCts)?.Cancel();
     }
 
     public async Task<string> ApplyUpdateAsync(CancellationToken ct = default)

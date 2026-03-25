@@ -107,12 +107,18 @@ var stagingFiles = Directory
 Log($"Staging contains {stagingFiles.Count} file(s).");
 
 string backupDir = Path.Combine(effectiveDataDir, "update-backup");
+string normalizedAppDir = Path.GetFullPath(appDir) + Path.DirectorySeparatorChar;
 
 // ── Phase 1: BACKUP ALL ──────────────────────────────────────────────────────
 Log("Phase 1: Backing up existing files...");
 foreach (string rel in stagingFiles)
 {
-    string src = Path.Combine(appDir, rel);
+    string src = Path.GetFullPath(Path.Combine(appDir, rel));
+    if (!src.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
+    {
+        Log($"  [SKIP] {rel} (rejected: path outside app directory)");
+        continue;
+    }
     if (!File.Exists(src))
     {
         Log($"  [SKIP] {rel} (new file, no backup needed)");
@@ -141,7 +147,12 @@ string? replaceError = null;
 foreach (string rel in stagingFiles)
 {
     string src = Path.Combine(stagingDir, rel);
-    string dst = Path.Combine(appDir, rel);
+    string dst = Path.GetFullPath(Path.Combine(appDir, rel));
+    if (!dst.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
+    {
+        Log($"  [SKIP] {rel} (rejected: path outside app directory)");
+        continue;
+    }
     try
     {
         Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
@@ -175,7 +186,6 @@ if (deleteListPath is not null && File.Exists(deleteListPath))
         .ToList();
 
     Log($"  Delete list has {toDelete.Count} entry/entries.");
-    string normalizedAppDir = Path.GetFullPath(appDir) + Path.DirectorySeparatorChar;
     string? deleteError = null;
     foreach (string rel in toDelete)
     {

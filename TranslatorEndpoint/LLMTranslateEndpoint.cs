@@ -111,6 +111,7 @@ namespace LLMTranslate
                 if (!string.IsNullOrEmpty(_gameId))
                     pingUrl += "?gameId=" + Uri.EscapeDataString(_gameId);
                 var pingClient = new WebClient();
+                pingClient.DownloadStringCompleted += (s, e) => ((WebClient)s).Dispose();
                 pingClient.DownloadStringAsync(new Uri(pingUrl));
                 Log("  连通性测试已发送: " + pingUrl);
             }
@@ -253,7 +254,12 @@ namespace LLMTranslate
                     case '\b': sb.Append("\\b"); break;
                     case '\f': sb.Append("\\f"); break;
                     default:
-                        if (c < 0x20)
+                        if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
+                        {
+                            sb.Append(c);
+                            sb.Append(value[++i]);
+                        }
+                        else if (c < 0x20 || char.IsSurrogate(c))
                             sb.AppendFormat("\\u{0:x4}", (int)c);
                         else
                             sb.Append(c);

@@ -15,6 +15,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 - 命名 `HttpClient`：`"LLM"`（120s/200conn）、`"SteamGridDB"`（30s）、`"LocalLlmDownload"`（12h）、`"WebImageSearch"`（15s，浏览器 UA）、`"GitHubUpdate"`（60s）、`"GitHubCdn"`（30s，CDN/Web 请求）
 - **Multipart 上传端点：** 必须在 `MapPost` 上链式调用 `.DisableAntiforgery()`——否则 ASP.NET 会拒绝 `multipart/form-data` 请求
 - **Updater AOT 约束：** `Updater/` 目标框架为 `net10.0`（非 `-windows`），`PublishAot=true`，`InvariantGlobalization`；不能使用 `JsonSerializer` 反射——必须使用手动字符串拼接生成 JSON；不能使用 WinForms 或 UI 框架
+- **Updater 路径遍历验证：** Phase 1（备份）、Phase 2（替换）和 Phase 3（删除）都必须使用 `Path.GetFullPath` + `StartsWith(normalizedAppDir)` 验证目标路径在 appDir 内
 - **InformationalVersion 陷阱：** .NET SDK 会附加 `+commitHash` 后缀；版本比较前必须 `Split('+')[0]`
 - **GitHub API JSON：** `JsonOptions` 使用 `CamelCase`；GitHub API 返回 snake_case（`tag_name`、`browser_download_url`）——`GitHubRelease`/`GitHubAsset` 模型使用 `[JsonPropertyName]` 覆盖；任何新的 GitHub API 模型属性也必须使用显式 `[JsonPropertyName("snake_case")]`
 - **GitHub API 速率限制：** 未认证的 ETag/`If-None-Match` 304 响应**仍然计入** 60 次/小时的限制——只有认证的 304 才豁免；CDN（`objects.githubusercontent.com`）和 Web（`github.com`）请求有独立的、更宽松的限制
@@ -55,7 +56,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 
 ## 术语提取
 
-- `GlossaryExtractionService`：缓冲 → 触发 → 排空 → LLM 提取 → 过滤 DNT 术语 → 合并；依赖 `TermService` 排除 DoNotTranslate 类型的术语（通过提示词暗示和合并前的硬过滤两种方式）
+- `GlossaryExtractionService`：缓冲 → 触发 → 排空 → LLM 提取 → 过滤 DNT 术语 → 合并；依赖 `TermService` 排除 DoNotTranslate 类型的术语（通过提示词暗示和合并前的硬过滤两种方式）；chunk 处理使用 `Parallel.ForEachAsync(MaxDegreeOfParallelism: 3)` 匹配信号量容量——不要用 `Task.WhenAll` 同时启动所有 chunk（会导致大量信号量超时和无效重排队）
 - **TermEntry 模型：** `Type`（Translate/DoNotTranslate）、`Original`、`Translation`、`Category`、`Description`、`IsRegex`、`CaseSensitive`、`ExactMatch`、`Priority`
 - **关键：** 设置检查（异步）必须在缓冲排空之前——否则禁用时翻译对会丢失
 - `TryTriggerExtraction` 是同步的（热路径）；异步工作延迟到 `DrainAndExtractAsync`

@@ -174,9 +174,10 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     public void ClearAllCache()
     {
         _cache.Clear();
-        foreach (var kvp in _locks)
-            kvp.Value.Dispose();
+        var locks = _locks.Values.ToList();
         _locks.Clear();
+        foreach (var sem in locks)
+            sem.Dispose();
     }
 
     /// <summary>
