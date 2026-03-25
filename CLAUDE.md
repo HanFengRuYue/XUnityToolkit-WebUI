@@ -220,7 +220,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - `dotnet build` 自动运行前端；跳过使用 `-p:SkipFrontendBuild=true`
 - `build.ps1`：本地构建 — 下载内置资源 → 提取 XUnity 引用 DLL → 更新 classdata.tpk → 前端 → TranslatorEndpoint → Updater (AOT) → 发布到 `Release/win-x64/`；`-SkipDownload` 跳过资源下载；无清单/组件 ZIP、无 MSI（CI `build.yml` 独立处理完整发布构建）；清理：删除 `web.config`、`*.pdb`、`*.staticwebassets.endpoints.json`
-- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.4.{YYYYMMDDHHmm}`（CI 使用 `3.4.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
+- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.5.{YYYYMMDDHHmm}`（CI 使用 `3.5.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
 - **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框使用操作系统本地化）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
