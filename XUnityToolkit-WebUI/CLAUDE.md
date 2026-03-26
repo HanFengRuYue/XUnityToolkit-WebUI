@@ -16,6 +16,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 - **Multipart 上传端点：** 必须在 `MapPost` 上链式调用 `.DisableAntiforgery()`——否则 ASP.NET 会拒绝 `multipart/form-data` 请求
 - **Updater AOT 约束：** `Updater/` 目标框架为 `net10.0`（非 `-windows`），`PublishAot=true`，`InvariantGlobalization`；不能使用 `JsonSerializer` 反射——必须使用手动字符串拼接生成 JSON；不能使用 WinForms 或 UI 框架
 - **Updater 路径遍历验证：** Phase 1（备份）、Phase 2（替换）和 Phase 3（删除）都必须使用 `Path.GetFullPath` + `StartsWith(normalizedAppDir)` 验证目标路径在 appDir 内
+- **Updater `normalizedAppDir` 构造：** 必须 `Path.GetFullPath(appDir).TrimEnd(separators) + DirectorySeparatorChar`——`AppContext.BaseDirectory` 始终带尾部 `\`，`GetFullPath` 保留它，不做 `TrimEnd` 会产生双反斜杠导致所有 `StartsWith` 检查失败（文件替换静默跳过）；`UpdateService` 传给 Updater 的 `appDir` 也需 `TrimEnd` 以兼容旧版 Updater
 - **InformationalVersion 陷阱：** .NET SDK 会附加 `+commitHash` 后缀；版本比较前必须 `Split('+')[0]`
 - **GitHub API JSON：** `JsonOptions` 使用 `CamelCase`；GitHub API 返回 snake_case（`tag_name`、`browser_download_url`）——`GitHubRelease`/`GitHubAsset` 模型使用 `[JsonPropertyName]` 覆盖；任何新的 GitHub API 模型属性也必须使用显式 `[JsonPropertyName("snake_case")]`
 - **GitHub API 速率限制：** 未认证的 ETag/`If-None-Match` 304 响应**仍然计入** 60 次/小时的限制——只有认证的 304 才豁免；CDN（`objects.githubusercontent.com`）和 Web（`github.com`）请求有独立的、更宽松的限制

@@ -246,6 +246,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - **更新器：** `Updater/Updater.csproj` (net10.0, PublishAot)；仅 win-x64；`--data-dir` CLI 参数将日志/备份路径指向 `paths.Root`
 - **更新器 AOT P/Invoke：** `DllImport`/`const`/`static readonly` 不能在顶级语句中使用 — 必须包装在 `partial class Program` 中；不能使用 `Microsoft.Win32.Registry` — 必须直接 P/Invoke advapi32.dll
+- **更新器 AOT 构建环境：** `PublishAot` 需要 Visual Studio C++ 工具链（`vswhere.exe` + MSVC linker）；仅测试逻辑时可用 `dotnet publish -p:PublishAot=false --self-contained`
+- **更新器测试方法：** 创建模拟目录（app dir + staging dir + delete list），不指定 `--pid` 运行 Updater，验证文件被正确替换/删除；注意 `--app-dir` 须测试带和不带尾部 `\` 两种情况
 - **MSI 安装程序：** `Installer/Installer.wixproj` (WixToolset.Sdk)；每用户安装到 `%LocalAppData%\Programs\`；`build.ps1` 从发布输出自动生成 `Installer/Generated/HarvestedFiles.wxs`；MSI 版本：`{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}`（所有段在 MSI 限制内：major<256, minor<256, build<65536）
 - **MSI + 更新器共存：** Updater.exe 在增量更新后通过 P/Invoke（AOT 安全）同步 HKCU Uninstall 键中的 `DisplayVersion`/`InstallDate`
 - **MSI 注册表键：** 由 MSI 写入（`Components.wxs`），由 `Updater/Program.cs` 读取（MsiProductCode, InstallDir）；`DataPath` 键由 MSI 写入仅用于 `RemoveFolderEx` 清理 — 应用不再读取它；键路径：`HKCU\Software\XUnityToolkit`
