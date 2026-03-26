@@ -575,7 +575,7 @@ public sealed class UpdateService(
         startInfo.ArgumentList.Add("--pid");
         startInfo.ArgumentList.Add(pid.ToString());
         startInfo.ArgumentList.Add("--app-dir");
-        startInfo.ArgumentList.Add(appDir);
+        startInfo.ArgumentList.Add(appDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         startInfo.ArgumentList.Add("--staging-dir");
         startInfo.ArgumentList.Add(filesDir);
         startInfo.ArgumentList.Add("--exe-name");
