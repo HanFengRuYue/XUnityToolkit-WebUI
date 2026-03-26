@@ -176,11 +176,6 @@ export const assetApi = {
     api.post<void>(`/api/games/${id}/pre-translate/cancel`, {}),
 }
 
-export const dialogApi = {
-  selectFolder: () => api.post<string>('/api/dialog/select-folder'),
-  selectFile: (filter?: string) => api.post<string>('/api/dialog/select-file', { filter }),
-}
-
 export const settingsApi = {
   get: () => api.get<AppSettings>('/api/settings'),
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),

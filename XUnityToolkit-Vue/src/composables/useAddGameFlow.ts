@@ -1,19 +1,16 @@
 import type { MessageApiInjection } from 'naive-ui/es/message/src/MessageProvider'
-import { gamesApi, dialogApi } from '@/api/games'
+import { gamesApi } from '@/api/games'
 import type { Game } from '@/api/types'
 import { useGamesStore } from '@/stores/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 
 export function useAddGameFlow(message: MessageApiInjection) {
   const gamesStore = useGamesStore()
+  const { selectFile, selectFolder } = useFileExplorer()
 
   async function addGame(): Promise<Game | null> {
     // Step 1: select folder
-    let folderPath: string | null
-    try {
-      folderPath = await dialogApi.selectFolder()
-    } catch {
-      return null
-    }
+    const folderPath = await selectFolder({ title: '选择游戏文件夹' })
     if (!folderPath) return null
 
     // Step 2: add with detection
@@ -27,12 +24,11 @@ export function useAddGameFlow(message: MessageApiInjection) {
 
     // Branch A: no exe found — ask user to pick one
     if (result.needsExeSelection) {
-      let exePath: string | null
-      try {
-        exePath = await dialogApi.selectFile('可执行文件 (*.exe)|*.exe')
-      } catch {
-        return null
-      }
+      const exePath = await selectFile({
+        title: '选择游戏可执行文件',
+        filters: [{ label: '可执行文件', extensions: ['.exe'] }],
+        initialPath: folderPath,
+      })
       if (!exePath) return null
 
       // Re-call addWithDetection with the explicit exe path

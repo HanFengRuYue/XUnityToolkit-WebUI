@@ -30,7 +30,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 - **HTTP Range 416：** 通过 `Content-Range` 验证完整性；大小不匹配 → 删除并重新开始
 - `WebApplication.CreateBuilder()` 之前设置 `Console.OutputEncoding = UTF8`
 - P/Invoke：使用 `[DllImport]` 而非 `[LibraryImport]`；重命名方法时 → 搜索所有调用点
-- **对话框前景窗口：** `DialogEndpoints.ForceForegroundWindow` 使用 `AttachThreadInput`——不要简化为裸 `SetForegroundWindow`（从后台调用时会静默失败）
+
 - **文件上传安全：** 始终对上传的文件名使用 `Path.GetFileName(file.FileName)`——`Path.Combine` 不能防止恶意文件名的路径穿越
 - **每游戏数据清理：** 添加新的每游戏数据目录时，必须在 `DELETE /api/games/{id}` 处理器（`GameEndpoints.cs`）中添加清理 + 如果服务有 `RemoveCache` 则进行缓存驱逐（如 `termService.RemoveCache`、`scriptTagService.RemoveCache`）
 - **服务缓存清除：** `TermService.ClearAllCache()`、`ScriptTagService.ClearAllCache()`、`TranslationMemoryService.ClearAllCache()`、`DynamicPatternService.ClearAllCache()`、`TermExtractionService.ClearAllCache()` 清除所有内存缓存；用于设置重置（`POST /api/settings/reset`）和设置导入（`POST /api/settings/import`）；`RemoveCache(gameId)` 清除单个游戏的缓存

@@ -252,7 +252,7 @@ app.MapGameEndpoints();
 app.MapDetectionEndpoints();
 app.MapInstallEndpoints();
 app.MapConfigEndpoints();
-app.MapDialogEndpoints();
+app.MapFileExplorerEndpoints();
 app.MapSettingsEndpoints();
 app.MapTranslateEndpoints();
 app.MapImageEndpoints();

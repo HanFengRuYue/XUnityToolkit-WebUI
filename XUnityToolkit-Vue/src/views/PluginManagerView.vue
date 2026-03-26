@@ -13,13 +13,15 @@ import {
   RefreshOutlined
 } from '@vicons/material'
 import type { Game, BepInExPlugin } from '@/api/types'
-import { gamesApi, bepinexPluginApi, dialogApi } from '@/api/games'
+import { gamesApi, bepinexPluginApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import { formatBytes } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const { selectFile } = useFileExplorer()
 
 const gameId = computed(() => route.params.id as string)
 const game = ref<Game | null>(null)
@@ -119,9 +121,14 @@ async function loadPlugins() {
 
 async function selectAndInstall() {
   try {
-    const filePath = await dialogApi.selectFile(
-      'DLL 文件 (*.dll)|*.dll|ZIP 压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*'
-    )
+    const filePath = await selectFile({
+      title: '选择插件文件',
+      filters: [
+        { label: 'DLL 文件', extensions: ['.dll'] },
+        { label: 'ZIP 压缩包', extensions: ['.zip'] },
+        { label: '所有文件', extensions: [] },
+      ],
+    })
     if (!filePath) return
 
     installing.value = true

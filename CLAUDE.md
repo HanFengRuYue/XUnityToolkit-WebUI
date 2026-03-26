@@ -37,7 +37,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 ## 架构
 
-- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 用于原生对话框)
+- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 仅用于系统托盘 NotifyIcon)
 - **前端：** Vue 3 + TypeScript + Naive UI + Pinia（位于 `XUnityToolkit-Vue/`）
 - **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
 - **AI 翻译页面布局：** 单列布局 — 统计条 → 管线状态 → 设置（可折叠区块卡片，`collapsed.settings`）→ 最近翻译 → 错误；无两列网格
@@ -64,6 +64,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **健康检查错误分析：** `CheckLogErrors` 双遍扫描：Pass 1 扫描 `[Error:]` 行匹配通用错误模式（IL2CPP、Harmony、程序集版本、类型加载、插件加载、字体缺失、文件未找到、权限、空引用、网络、XUnity 钩子）；Pass 2 扫描所有行匹配 LLMTranslate 端点专属模式（工具箱连接、空响应、数量不匹配、本地模型、端点禁用、API 失败）——DLL 通过 `Console.WriteLine` 输出，在 BepInEx 中显示为 `[Info/Message:]` 级别而非 `[Error:]`，因此必须独立扫描；`HealthCheckDetail(Category, Excerpt, Suggestion?)` 携带分类诊断；`SafeExcerpt` 剥离日志前缀并用 `Path.GetFileName` 替换绝对路径；每类最多 2 条、总计最多 10 条；添加新错误模式：在 `GeneralErrorPatterns` 或 `EndpointErrorPatterns` 列表中添加 `ErrorPattern` + 对应 `[GeneratedRegex]`
 - **插件健康验证前置条件：** `POST .../health-check/verify` 需要 `FullyInstalled` 或 `PartiallyInstalled` 状态；`BepInExOnly` 时 LLMTranslate.dll 未安装，ping 永远不会到达，验证必定超时
 - **健康检查 ↔ DLL 日志依赖：** `CheckEndpointRegistered` 扫描 BepInEx 日志中的 `"LLMTranslate"` 子串 — 需要 DLL 的 `Log()`（无条件）输出初始化 banner；不要将初始化消息限制在 `DebugLog()` 后面，否则健康检查将无法检测到端点
+- **文件浏览器：** `FileExplorerModal.vue`（`defineAsyncComponent` 懒加载）在 `App.vue` 全局挂载一次；`useFileExplorer()` composable 使用模块级 reactive 单例提供 `selectFile()`/`selectFolder()` → `Promise<string | null>`；返回服务端文件路径，兼容现有所有路径 API
 - **在线更新：** `UpdateService` 检查 GitHub Releases 的新版本；基于清单的差异下载（app/wwwroot/bundled-llama/bundled-fonts/bundled-plugins/bundled-misc 组件 ZIP）；`Updater.exe`（AOT，无运行时依赖）处理文件替换和重启；暂存在 `data/update-staging/`；两阶段备份-替换保证原子性；失败时回滚；通过 `AppSettings.ReceivePreReleaseUpdates` 选择预发布版本
 
 ## 翻译管线
@@ -150,7 +151,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **背景：** `GET .../background`, `POST .../background/upload`（10MB）, `POST .../background/{search,heroes,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../background`
 - **配置：** `GET/PUT /api/games/{id}/config`（PUT 时 PatchAsync 读-修改-写）, `GET/PUT .../config/raw`
 - **设置：** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`（删除整个 `paths.Root` 目录，使所有服务缓存失效，重建目录）, `GET .../data-path`, `POST .../export`（ZIP，**非 ApiResult**）, `POST .../import`（multipart ZIP）, `POST .../open-data-folder`
-- **对话框：** `POST /api/dialog/{select-folder,select-file}`
+- **文件浏览器：** `GET /api/filesystem/drives`, `POST /api/filesystem/list`（前端文件浏览器弹窗用于替代 Windows 原生对话框）
 - **AI 翻译：** `POST /api/translate`（**非 ApiResult** — DLL 直接调用；前端必须使用原始 `fetch`）, `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=`（来自 LLMTranslate.dll 的连通性 ping）
 - **AI 控制：** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
@@ -213,6 +214,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **添加 BuiltInModelInfo 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **DataPathInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`
+- **FileExplorer 模型：** 在 2 处同步：`Models/FileExplorer.cs`, `src/api/types.ts`
 - **添加 UnityGameInfo 字段：** 在 2 处同步：`Models/UnityGameInfo.cs`, `src/api/types.ts`；安装编排器 Step 1 始终重新检测（`DetectAsync`），新字段自动生效无需额外处理
 - **添加 AppDataPaths 目录：** 还要更新 `SettingsEndpoints.cs` `/export` 端点中的导出排除列表，如果新目录包含大型/可重新生成/机器特定的数据；`translation-memory/`、`dynamic-patterns/`、`term-candidates/` 被排除在导出之外（可重新生成）
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
@@ -225,7 +227,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - `build.ps1`：本地构建 — 下载内置资源 → 提取 XUnity 引用 DLL → 更新 classdata.tpk → 前端 → TranslatorEndpoint → Updater (AOT) → 发布到 `Release/win-x64/`；`-SkipDownload` 跳过资源下载；无清单/组件 ZIP、无 MSI（CI `build.yml` 独立处理完整发布构建）；清理：删除 `web.config`、`*.pdb`、`*.staticwebassets.endpoints.json`
 - **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.6.{YYYYMMDDHHmm}`（CI 使用 `3.6.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
-- **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框使用操作系统本地化）
+- **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框已移除）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
 - **AppDataPaths 配置回写：** 在 `Program.cs` 中修改 `appDataRoot` 来源后，**必须**执行 `builder.Configuration["AppData:Root"] = appDataRoot` — 否则 `AppDataPaths`（通过 DI 读取 `IConfiguration`）不会获取新值
 - **内置资源：** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity 通过 API 自动检测最新版本；llama.cpp 固定在 b8416（更改 build.ps1/build.yml 中的 `$llamaTag`）；CUDA 12.4；发布后复制
@@ -238,7 +240,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - 日志：`{dataRoot}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`；500 条环形缓冲区 + `LogBroadcast`
 - 截图清理：测试后删除项目根目录的 `*.png` 和 `.playwright-mcp/`
 - **UI 预览：** 使用后端端口 51821 预览 UI（后端同时提供静态前端文件）；5173 是 Vite dev server（需代理 API），不适合独立预览完整功能
-- **BepInEx 插件安装双路径：** `POST .../plugins/install`（本地路径，原生文件对话框）用于本机场景；`POST .../plugins/upload`（multipart 上传）用于远程访问场景；目前 upload 的 API 客户端已实现（`bepinexPluginApi.upload`）但前端无 UI 入口
+- **BepInEx 插件安装双路径：** `POST .../plugins/install`（本地路径，前端文件浏览器选择）用于本机场景；`POST .../plugins/upload`（multipart 上传）用于远程访问场景；目前 upload 的 API 客户端已实现（`bepinexPluginApi.upload`）但前端无 UI 入口
 
 ### 更新器与 MSI 安装程序
 
