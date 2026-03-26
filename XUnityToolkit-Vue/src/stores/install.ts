@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { gamesApi } from '@/api/games'
-import type { InstallationStatus, XUnityConfig, PluginHealthReport } from '@/api/types'
+import type { InstallationStatus, XUnityConfig, InstallOptions, PluginHealthReport } from '@/api/types'
 
 export type OperationType = 'install' | 'uninstall'
 
@@ -19,6 +19,7 @@ export const useInstallStore = defineStore('install', () => {
   const activeGameId = ref<string | null>(null)
   const operationType = ref<OperationType>('install')
   const healthReport = ref<PluginHealthReport | null>(null)
+  const skippedSteps = ref<Set<string>>(new Set())
 
   let connection: signalR.HubConnection | null = null
 
@@ -77,11 +78,29 @@ export const useInstallStore = defineStore('install', () => {
       ? 'uninstall'
       : 'install'
     status.value = backendStatus
+    // Restore skipped steps from persisted settings
+    try {
+      const { settingsApi } = await import('@/api/games')
+      const appSettings = await settingsApi.get()
+      skippedSteps.value = computeSkippedSteps(appSettings.installOptions)
+    } catch { /* best effort */ }
     isDrawerOpen.value = true
     await connectHub(gameId)
   }
 
-  async function startInstall(gameId: string, config?: XUnityConfig) {
+  function computeSkippedSteps(options?: InstallOptions): Set<string> {
+    if (!options) return new Set()
+    const steps = new Set<string>()
+    if (!options.autoInstallTmpFont) steps.add('InstallingTmpFont')
+    if (!options.autoDeployAiEndpoint) steps.add('InstallingAiTranslation')
+    if (!options.autoGenerateConfig) steps.add('GeneratingConfig')
+    if (!options.autoApplyOptimalConfig) steps.add('ApplyingConfig')
+    if (!options.autoExtractAssets) steps.add('ExtractingAssets')
+    if (!options.autoVerifyHealth) steps.add('VerifyingHealth')
+    return steps
+  }
+
+  async function startInstall(gameId: string, config?: XUnityConfig, options?: InstallOptions) {
     // Fast path: frontend state says this game is already installing → reopen drawer
     if (activeGameId.value === gameId && statusIsInProgress(status.value)) {
       isDrawerOpen.value = true
@@ -102,11 +121,12 @@ export const useInstallStore = defineStore('install', () => {
     activeGameId.value = gameId
     operationType.value = 'install'
     healthReport.value = null
+    skippedSteps.value = computeSkippedSteps(options)
     isDrawerOpen.value = true
 
     await connectHub(gameId)
     try {
-      status.value = await gamesApi.install(gameId, config)
+      status.value = await gamesApi.install(gameId, config, options)
     } catch (e) {
       await disconnectHub()
       isDrawerOpen.value = false
@@ -162,6 +182,7 @@ export const useInstallStore = defineStore('install', () => {
       activeGameId.value = null
       status.value = null
       healthReport.value = null
+      skippedSteps.value = new Set()
     }
   }
 
@@ -171,6 +192,7 @@ export const useInstallStore = defineStore('install', () => {
     activeGameId,
     operationType,
     healthReport,
+    skippedSteps,
     startInstall,
     startUninstall,
     cancel,
