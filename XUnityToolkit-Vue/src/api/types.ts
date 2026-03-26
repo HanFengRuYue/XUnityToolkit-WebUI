@@ -766,3 +766,27 @@ export interface ScriptTagPreset {
   version: number
   rules: Omit<ScriptTagRule, 'isBuiltin'>[]
 }
+
+// File Explorer
+export interface DriveEntry {
+  name: string
+  rootPath: string
+  label: string | null
+  totalSize: number | null
+  freeSpace: number | null
+}
+
+export interface FileSystemEntry {
+  name: string
+  fullPath: string
+  isDirectory: boolean
+  size: number | null
+  lastModified: string | null
+  extension: string | null
+}
+
+export interface ListDirectoryResponse {
+  currentPath: string
+  parentPath: string | null
+  entries: FileSystemEntry[]
+}

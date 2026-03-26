@@ -25,7 +25,8 @@ import {
   ScienceOutlined,
 } from '@vicons/material'
 import { useLocalLlmStore } from '@/stores/localLlm'
-import { localLlmApi, dialogApi } from '@/api/games'
+import { localLlmApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { AiTranslationSettings, BuiltInModelInfo, LocalModelEntry } from '@/api/types'
 import { DEFAULT_SYSTEM_PROMPT } from '@/constants/prompts'
 import { formatBytes, formatSpeed } from '@/utils/format'
@@ -43,6 +44,7 @@ function updateAiSettings(patch: Partial<AiTranslationSettings>) {
 }
 
 const store = useLocalLlmStore()
+const { selectFile } = useFileExplorer()
 const message = useMessage()
 
 const gpuLayers = ref(-1)
@@ -163,7 +165,10 @@ async function handleCancelDownload(catalogId: string) {
 
 async function handleAddModel() {
   try {
-    const filePath = await dialogApi.selectFile('GGUF 模型文件 (*.gguf)|*.gguf')
+    const filePath = await selectFile({
+      title: '选择 GGUF 模型文件',
+      filters: [{ label: 'GGUF 模型', extensions: ['.gguf'] }],
+    })
     if (!filePath) return
     const name = filePath.split(/[\\/]/).pop()?.replace('.gguf', '') ?? 'Custom Model'
     await localLlmApi.addModel(filePath, name)

@@ -44,7 +44,8 @@ import {
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
 import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
-import { gamesApi, pluginPackageApi, dialogApi } from '@/api/games'
+import { gamesApi, pluginPackageApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
 import PluginHealthCard from '@/components/health/PluginHealthCard.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -68,6 +69,7 @@ const gamesStore = useGamesStore()
 const installStore = useInstallStore()
 const message = useMessage()
 const dialog = useDialog()
+const { selectFile } = useFileExplorer()
 
 const gameId = route.params['id'] as string
 const game = ref<Game | null>(null)
@@ -473,7 +475,10 @@ async function handleExportPackage() {
 async function handleImportPackage() {
   packageImporting.value = true
   try {
-    const filePath = await dialogApi.selectFile('ZIP 压缩包 (*.zip)|*.zip')
+    const filePath = await selectFile({
+      title: '选择汉化包',
+      filters: [{ label: 'ZIP 压缩包', extensions: ['.zip'] }],
+    })
     if (!filePath) return
     await pluginPackageApi.importPackage(gameId, filePath)
     message.success('汉化包导入成功')

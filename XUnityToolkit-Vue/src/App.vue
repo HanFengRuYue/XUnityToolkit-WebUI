@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN } from 'naive-ui'
 import type { GlobalThemeOverrides } from 'naive-ui'
 import AppShell from '@/components/layout/AppShell.vue'
 import { useThemeStore, getAccentVariants } from '@/stores/theme'
+
+const FileExplorerModal = defineAsyncComponent(
+  () => import('@/components/common/FileExplorerModal.vue'),
+)
 
 const themeStore = useThemeStore()
 
@@ -191,6 +195,7 @@ const themeOverrides = computed<GlobalThemeOverrides>(() => {
     <NMessageProvider>
       <NDialogProvider>
         <AppShell />
+        <FileExplorerModal />
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>
