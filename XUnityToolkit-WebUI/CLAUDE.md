@@ -39,6 +39,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 - **设置重置日志挂起：** `POST /api/settings/reset` 在删除数据目录前调用 `FileLoggerProvider.SuspendFileLog()`（释放日志文件句柄），然后在 `finally` 中调用 `ResumeFileLog()`；不要用按子目录删除替代整目录删除（此前导致清理不完整）
 - **捆绑文件构建复制：** `bundled/` 中的新文件需要在 `.csproj` 中添加 `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">`——`build.ps1` 仅在发布时运行，`dotnet run` 使用构建输出
 - **`ScriptTagService` DI：** `AddSingleton`；遵循 `TermService` 模式（SemaphoreSlim + ConcurrentDictionary 缓存 + 原子文件写入）；预设在 `GetAsync` 中自动更新；保存/自动更新时使编译正则缓存失效
+- **`BepInExPluginService` DI：** `AddSingleton`；扫描 `BepInEx/plugins/` 目录列出插件；使用 `MetadataLoadContext` 安全反射读取 DLL 元数据（GUID/Name/Version）——不加载到 AppDomain；toolkit-managed 插件（XUnity、LLMTranslate）通过 `IsToolkitManaged()` 保护，禁止修改/卸载；启用/禁用通过 `.disabled` 文件后缀实现；上传端点需要 `.DisableAntiforgery()`（multipart）；所有端点要求 BepInEx 已安装状态
 - **日志级别配置：** `Program.cs` 有两层过滤：`AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)`（ASP.NET 管线）+ `FileLoggerProvider(logsDirectory, LogLevel.Debug)`（提供者）；两者都必须 ≤ 期望级别，否则日志会被静默丢弃
 - **静态方法日志模式：** 静态方法无法访问 `ILogger`——要么传递 `ILogger? log = null` 参数并使用 `log?.LogDebug(...)`，要么在有 `logger` 可用的实例方法调用点添加日志；仅需聚合信息（计数、前后对比）时优先使用调用点日志
 - 读取日志文件：必须使用 `FileShare.ReadWrite` 以避免 `IOException`

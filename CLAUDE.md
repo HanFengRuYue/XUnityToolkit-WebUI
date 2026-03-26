@@ -123,6 +123,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **`LlmResponseParser`：** `ExtractJsonArray(content)` 去除 `<think>` 块 + markdown 围栏 + 提取 `[...]`；`ExtractJsonContent(content)` 用于通用 JSON（数组或对象）；被 `GlossaryExtractionService`、`TermExtractionService`、`LlmTranslationService`、`DynamicPatternService` 使用
 - **`EndpointSelector`：** `SelectBestEndpoint(endpoints)` 返回最高优先级的已启用端点；`SelectEndpoint(endpoints, preferredId)` 先尝试指定端点，回退到最佳；被 `GlossaryExtractionService`、`TermExtractionService`、`DynamicPatternService`、`BepInExLogService` 使用
 - **`TermCategoryMapping.FromString`：** `Models/TermEntry.cs` 中的共享 `Dictionary<string, TermCategory>`；被 `GlossaryExtractionService` 和 `TermExtractionService` 用于 LLM 响应解析
+- **`GameProcessHelper.KillGameProcessAsync`：** `Infrastructure/GameProcessHelper.cs`；静态方法，处理通过 shell 启动（如 Steam）的游戏进程关闭——`UseShellExecute=true` 返回的 shell 启动器会立即退出而实际游戏作为独立进程运行；按可执行文件名 + 游戏目录匹配真实进程；kill 后延迟 1 秒确保文件句柄释放
 
 ## 前端共享工具
 
@@ -165,6 +166,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **字体替换：** `POST .../font-replacement/scan`, `POST .../replace`, `POST .../restore`, `GET .../status`, `POST .../upload`, `POST .../cancel`, `DELETE .../font-replacement/custom-font?type={ttf|tmp}`
 - **BepInEx 日志：** `GET /api/games/{id}/bepinex-log`, `GET .../download`（**非 ApiResult**）, `POST .../analyze`
 - **插件健康：** `GET /api/games/{id}/health-check`, `POST .../health-check/verify`
+- **BepInEx 插件：** `GET /api/games/{id}/plugins`, `POST .../plugins/install`（本地路径）, `POST .../plugins/upload`（multipart, 50MB）, `DELETE .../plugins?relativePath=`（卸载）, `POST .../plugins/toggle`（启用/禁用）, `GET .../plugins/config?configFile=`
 - **字体生成：** `POST /api/font-generation/upload`（multipart, 50MB）, `POST .../generate`, `GET .../status`, `POST .../cancel`, `GET .../download/{fileName}`（**非 ApiResult**）, `GET .../history`, `DELETE .../{fileName}`, `POST .../install-tmp-font/{gameId}`（安装到 `BepInEx/Font/` + 修补 INI）, `GET .../charsets`, `POST .../charset/preview`, `POST .../charset/upload-custom`, `POST .../charset/upload-translation`, `GET .../report/{fileName}`
 - **插件包：** `POST .../plugin-package/export`（ZIP，**非 ApiResult**）, `POST .../import`
 - **日志：** `GET /api/logs?count=`, `GET .../history?lines=`, `GET .../download`（**非 ApiResult**）
@@ -214,13 +216,14 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **添加 UnityGameInfo 字段：** 在 2 处同步：`Models/UnityGameInfo.cs`, `src/api/types.ts`；安装编排器 Step 1 始终重新检测（`DetectAsync`），新字段自动生效无需额外处理
 - **添加 AppDataPaths 目录：** 还要更新 `SettingsEndpoints.cs` `/export` 端点中的导出排除列表，如果新目录包含大型/可重新生成/机器特定的数据；`translation-memory/`、`dynamic-patterns/`、`term-candidates/` 被排除在导出之外（可重新生成）
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
+- **BepInExPlugin 字段：** 在 2 处同步：`Models/BepInExPlugin.cs`, `src/api/types.ts`；API 方法在 `src/api/games.ts`；在 `PluginManagerView.vue` 中显示
 - **日志级别同步点：** `Program.cs` `AddFilter` + `FileLoggerProvider` 构造函数 `minLevel` + 前端 `LogView.vue` `selectedLevels` + `levelDefs` — 修改日志级别阈值时四处必须一致
 
 ### 构建
 
 - `dotnet build` 自动运行前端；跳过使用 `-p:SkipFrontendBuild=true`
 - `build.ps1`：本地构建 — 下载内置资源 → 提取 XUnity 引用 DLL → 更新 classdata.tpk → 前端 → TranslatorEndpoint → Updater (AOT) → 发布到 `Release/win-x64/`；`-SkipDownload` 跳过资源下载；无清单/组件 ZIP、无 MSI（CI `build.yml` 独立处理完整发布构建）；清理：删除 `web.config`、`*.pdb`、`*.staticwebassets.endpoints.json`
-- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.5.{YYYYMMDDHHmm}`（CI 使用 `3.5.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
+- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.6.{YYYYMMDDHHmm}`（CI 使用 `3.6.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
 - **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框使用操作系统本地化）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
@@ -234,6 +237,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - 默认系统提示词：中文，7 条规则；`{from}`/`{to}` 会被替换；`{0}` 等为字面量
 - 日志：`{dataRoot}/logs/XUnityToolkit_YYYY-MM-DD_HH-mm-ss.log`；500 条环形缓冲区 + `LogBroadcast`
 - 截图清理：测试后删除项目根目录的 `*.png` 和 `.playwright-mcp/`
+- **UI 预览：** 使用后端端口 51821 预览 UI（后端同时提供静态前端文件）；5173 是 Vite dev server（需代理 API），不适合独立预览完整功能
+- **BepInEx 插件安装双路径：** `POST .../plugins/install`（本地路径，原生文件对话框）用于本机场景；`POST .../plugins/upload`（multipart 上传）用于远程访问场景；目前 upload 的 API 客户端已实现（`bepinexPluginApi.upload`）但前端无 UI 入口
 
 ### 更新器与 MSI 安装程序
 

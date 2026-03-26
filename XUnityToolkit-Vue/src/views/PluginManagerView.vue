@@ -3,14 +3,14 @@ import { ref, computed, onMounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NIcon, NTag, NSwitch, NDrawer, NDrawerContent,
-  NUpload, NEmpty, NSpin,
+  NEmpty, NSpin,
   useMessage, useDialog,
-  type DataTableColumns, type UploadFileInfo
+  type DataTableColumns
 } from 'naive-ui'
 import {
-  ArrowBackOutlined, WidgetsOutlined, AddOutlined,
+  ArrowBackOutlined, WidgetsOutlined,
   DeleteOutlineOutlined, SettingsOutlined, FolderOpenOutlined,
-  CloudUploadOutlined, RefreshOutlined
+  RefreshOutlined
 } from '@vicons/material'
 import type { Game, BepInExPlugin } from '@/api/types'
 import { gamesApi, bepinexPluginApi, dialogApi } from '@/api/games'
@@ -49,19 +49,6 @@ const columns = computed<DataTableColumns<BepInExPlugin>>(() => [
       }
       return h('div', { class: 'plugin-name-cell' }, children)
     }
-  },
-  {
-    title: 'GUID',
-    key: 'pluginGuid',
-    minWidth: 160,
-    ellipsis: { tooltip: true },
-    render: (row) => row.pluginGuid ?? '—'
-  },
-  {
-    title: '版本',
-    key: 'pluginVersion',
-    width: 100,
-    render: (row) => row.pluginVersion ?? '—'
   },
   {
     title: '大小',
@@ -143,20 +130,6 @@ async function selectAndInstall() {
     await loadPlugins()
   } catch (e: any) {
     message.error(e?.message || '安装插件失败')
-  } finally {
-    installing.value = false
-  }
-}
-
-async function handleUpload({ file }: { file: UploadFileInfo }) {
-  if (!file.file) return
-  installing.value = true
-  try {
-    await bepinexPluginApi.upload(gameId.value, file.file)
-    message.success('插件上传安装成功')
-    await loadPlugins()
-  } catch (e: any) {
-    message.error(e?.message || '上传插件失败')
   } finally {
     installing.value = false
   }
@@ -254,17 +227,6 @@ onMounted(loadGame)
             <template #icon><NIcon :size="16"><FolderOpenOutlined /></NIcon></template>
             选择文件安装
           </NButton>
-          <NUpload
-            :show-file-list="false"
-            accept=".dll,.zip"
-            :custom-request="() => {}"
-            @change="handleUpload"
-          >
-            <NButton size="small" :loading="installing">
-              <template #icon><NIcon :size="16"><CloudUploadOutlined /></NIcon></template>
-              上传安装
-            </NButton>
-          </NUpload>
         </div>
       </div>
 
