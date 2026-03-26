@@ -98,6 +98,14 @@ const settings = ref<AppSettings>({
   libraryGap: 'normal',
   libraryShowLabels: true,
   receivePreReleaseUpdates: false,
+  installOptions: {
+    autoInstallTmpFont: true,
+    autoDeployAiEndpoint: true,
+    autoGenerateConfig: true,
+    autoApplyOptimalConfig: true,
+    autoExtractAssets: true,
+    autoVerifyHealth: true,
+  },
 })
 
 const themeOptions = [
