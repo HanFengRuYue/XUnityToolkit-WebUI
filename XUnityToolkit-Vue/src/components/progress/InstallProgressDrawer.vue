@@ -36,7 +36,12 @@ const isUninstalling = computed(() => installStore.operationType === 'uninstall'
 const steps = computed(() => isUninstalling.value ? uninstallSteps : installSteps)
 const stepOrder = computed(() => steps.value.map((s) => s.key))
 
+function isStepSkipped(stepKey: InstallStep): boolean {
+  return installStore.skippedSteps.has(stepKey)
+}
+
 function getStepType(stepKey: InstallStep): 'default' | 'success' | 'error' | 'info' {
+  if (isStepSkipped(stepKey)) return 'default'
   if (!installStore.status) return 'default'
   const current = installStore.status.step
   if (current === 'Failed') return 'error'
@@ -48,6 +53,10 @@ function getStepType(stepKey: InstallStep): 'default' | 'success' | 'error' | 'i
   if (stepIndex < currentIndex) return 'success'
   if (stepIndex === currentIndex) return 'info'
   return 'default'
+}
+
+function getStepLabel(step: { key: InstallStep; label: string }): string {
+  return isStepSkipped(step.key) ? `${step.label}（已跳过）` : step.label
 }
 
 const isComplete = computed(() => installStore.status?.step === 'Complete')
@@ -87,7 +96,8 @@ onBeforeUnmount(() => {
               v-for="(step, index) in steps"
               :key="step.key"
               :type="getStepType(step.key)"
-              :title="step.label"
+              :title="getStepLabel(step)"
+              :class="{ 'step-skipped': isStepSkipped(step.key) }"
             />
           </NTimeline>
         </div>
@@ -161,6 +171,11 @@ onBeforeUnmount(() => {
   background: var(--bg-subtle);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
+}
+
+.step-skipped :deep(.n-timeline-item-content__title) {
+  text-decoration: line-through;
+  opacity: 0.45;
 }
 
 .drawer-footer {

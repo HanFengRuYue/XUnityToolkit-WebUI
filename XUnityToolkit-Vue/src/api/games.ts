@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -33,8 +33,8 @@ export const gamesApi = {
   saveRawConfig: (id: string, content: string) =>
     api.put<string>(`/api/games/${id}/config/raw`, { content }),
 
-  install: (id: string, config?: XUnityConfig) =>
-    api.post<InstallationStatus>(`/api/games/${id}/install`, { config }),
+  install: (id: string, config?: XUnityConfig, options?: InstallOptions) =>
+    api.post<InstallationStatus>(`/api/games/${id}/install`, { config, options }),
 
   uninstall: (id: string) => api.del<InstallationStatus>(`/api/games/${id}/install`),
 

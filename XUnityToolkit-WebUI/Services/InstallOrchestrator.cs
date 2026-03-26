@@ -36,7 +36,7 @@ public sealed class InstallOrchestrator(
         return _statuses.GetOrAdd(gameId, id => new InstallationStatus { GameId = id });
     }
 
-    public async Task<InstallationStatus> StartInstallAsync(string gameId, XUnityConfig? config = null)
+    public async Task<InstallationStatus> StartInstallAsync(string gameId, XUnityConfig? config = null, InstallOptions? options = null)
     {
         var gameLock = _locks.GetOrAdd(gameId, _ => new SemaphoreSlim(1, 1));
         await gameLock.WaitAsync();
@@ -63,7 +63,7 @@ public sealed class InstallOrchestrator(
             {
                 try
                 {
-                    await ExecuteInstallAsync(game, status, config, cts.Token);
+                    await ExecuteInstallAsync(game, status, config, options ?? new InstallOptions(), cts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -149,7 +149,7 @@ public sealed class InstallOrchestrator(
     }
 
     private async Task ExecuteInstallAsync(
-        Game game, InstallationStatus status, XUnityConfig? config, CancellationToken ct)
+        Game game, InstallationStatus status, XUnityConfig? config, InstallOptions options, CancellationToken ct)
     {
         // Step 1: Detect game (always re-detect to ensure latest info, e.g. HasTextMeshPro)
         await UpdateStatus(status, InstallStep.DetectingGame, 5, "Detecting Unity game info...");
@@ -189,7 +189,12 @@ public sealed class InstallOrchestrator(
         // Step 4: Install TMP font (skip if game doesn't use TextMeshPro)
         await UpdateStatus(status, InstallStep.InstallingTmpFont, 66, "正在安装 TMP 字体...");
         string? tmpFontConfigValue = null;
-        if (gameInfo.HasTextMeshPro == false)
+        if (!options.AutoInstallTmpFont)
+        {
+            logger.LogInformation("用户已关闭自动安装 TMP 字体");
+            await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "自动安装 TMP 字体（已跳过）");
+        }
+        else if (gameInfo.HasTextMeshPro == false)
         {
             logger.LogInformation("游戏不使用 TextMeshPro，跳过 TMP 字体安装");
             await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "游戏不使用 TextMeshPro（跳过）");
@@ -213,81 +218,123 @@ public sealed class InstallOrchestrator(
 
         // Step 5: Deploy LLMTranslate translator endpoint DLL
         await UpdateStatus(status, InstallStep.InstallingAiTranslation, 70, "正在部署 AI 翻译端点...");
-        if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
+        if (!options.AutoDeployAiEndpoint)
+        {
+            logger.LogInformation("用户已关闭自动部署 AI 翻译端点");
+            await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "部署 AI 翻译端点（已跳过）");
+        }
+        else if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
             await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点已部署");
         else
             await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点不可用（跳过）");
 
         // Step 6: Launch game to generate config file
-        await UpdateStatus(status, InstallStep.GeneratingConfig, 73, "正在启动游戏以生成配置文件...");
-
         var configPath = configService.GetConfigPath(game.GamePath);
-        var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable
-            ?? throw new InvalidOperationException("无法确定游戏可执行文件路径。");
-        var exePath = Path.GetFullPath(Path.Combine(game.GamePath, exeName));
-        var normalizedGamePath = Path.GetFullPath(game.GamePath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!exePath.StartsWith(normalizedGamePath, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("可执行文件路径不在游戏目录内。");
-
-        Process? gameProcess = null;
-        try
+        if (!options.AutoGenerateConfig)
         {
-            gameProcess = Process.Start(new ProcessStartInfo
-            {
-                FileName = exePath,
-                WorkingDirectory = game.GamePath,
-                UseShellExecute = true
-            });
-
-            var timeout = TimeSpan.FromSeconds(60);
-            var elapsed = TimeSpan.Zero;
-            var interval = TimeSpan.FromSeconds(1);
-
-            while (!File.Exists(configPath) && elapsed < timeout)
-            {
-                ct.ThrowIfCancellationRequested();
-                await Task.Delay(interval, ct);
-                elapsed += interval;
-                await UpdateStatus(status, InstallStep.GeneratingConfig,
-                    73 + (int)(elapsed.TotalSeconds / timeout.TotalSeconds * 12),
-                    $"等待配置文件生成... ({(int)elapsed.TotalSeconds}s)");
-            }
-
-            if (File.Exists(configPath))
-                logger.LogInformation("配置文件已生成: {Path}", configPath);
-            else
-                logger.LogWarning("配置文件生成超时，将在下次启动游戏时自动生成");
+            await UpdateStatus(status, InstallStep.GeneratingConfig, 85, "启动游戏生成配置（已跳过）");
+            logger.LogInformation("用户已关闭自动启动游戏生成配置");
         }
-        finally
+        else
         {
-            // UseShellExecute=true may return a shell launcher (e.g. Steam) that exits
-            // immediately while the real game runs separately. Kill by process name as fallback.
-            await GameProcessHelper.KillGameProcessAsync(gameProcess, exeName, game.GamePath, logger);
+            await UpdateStatus(status, InstallStep.GeneratingConfig, 73, "正在启动游戏以生成配置文件...");
+
+            var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable
+                ?? throw new InvalidOperationException("无法确定游戏可执行文件路径。");
+            var exePath = Path.GetFullPath(Path.Combine(game.GamePath, exeName));
+            var normalizedGamePath = Path.GetFullPath(game.GamePath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!exePath.StartsWith(normalizedGamePath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("可执行文件路径不在游戏目录内。");
+
+            Process? gameProcess = null;
+            try
+            {
+                gameProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = exePath,
+                    WorkingDirectory = game.GamePath,
+                    UseShellExecute = true
+                });
+
+                var timeout = TimeSpan.FromSeconds(60);
+                var elapsed = TimeSpan.Zero;
+                var interval = TimeSpan.FromSeconds(1);
+
+                while (!File.Exists(configPath) && elapsed < timeout)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    await Task.Delay(interval, ct);
+                    elapsed += interval;
+                    await UpdateStatus(status, InstallStep.GeneratingConfig,
+                        73 + (int)(elapsed.TotalSeconds / timeout.TotalSeconds * 12),
+                        $"等待配置文件生成... ({(int)elapsed.TotalSeconds}s)");
+                }
+
+                if (File.Exists(configPath))
+                    logger.LogInformation("配置文件已生成: {Path}", configPath);
+                else
+                    logger.LogWarning("配置文件生成超时，将在下次启动游戏时自动生成");
+            }
+            finally
+            {
+                // UseShellExecute=true may return a shell launcher (e.g. Steam) that exits
+                // immediately while the real game runs separately. Kill by process name as fallback.
+                await GameProcessHelper.KillGameProcessAsync(gameProcess, exeName, game.GamePath, logger);
+            }
         }
 
         // Step 7: Apply optimal defaults and user config
-        await UpdateStatus(status, InstallStep.ApplyingConfig, 86, "正在应用最佳默认配置...");
-        await configService.ApplyOptimalDefaultsAsync(game.GamePath, ct);
-
-        // Patch TMP font config value (must happen after defaults, since defaults no longer set it)
-        if (tmpFontConfigValue != null)
+        if (!options.AutoApplyOptimalConfig)
         {
-            await configService.PatchSectionAsync(game.GamePath, "Behaviour",
-                new Dictionary<string, string>
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "应用最佳配置（已跳过）");
+            logger.LogInformation("用户已关闭自动应用最佳配置");
+        }
+        else if (!File.Exists(configPath))
+        {
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "配置文件不存在，无法应用配置（跳过）");
+            logger.LogWarning("配置文件不存在，跳过应用最佳配置");
+        }
+        else
+        {
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 86, "正在应用最佳默认配置...");
+            await configService.ApplyOptimalDefaultsAsync(game.GamePath, ct);
+
+            // Patch TMP font config value (must happen after defaults, since defaults no longer set it)
+            if (tmpFontConfigValue != null)
+            {
+                await configService.PatchSectionAsync(game.GamePath, "Behaviour",
+                    new Dictionary<string, string>
+                    {
+                        ["FallbackFontTextMeshPro"] = tmpFontConfigValue
+                    }, ct);
+            }
+
+            if (config != null)
+            {
+                await UpdateStatus(status, InstallStep.ApplyingConfig, 89, "正在应用用户配置...");
+                await configService.PatchAsync(game.GamePath, config, ct);
+            }
+
+            await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "配置应用完成");
+
+            // Apply pre-translation cache optimization config if enabled
+            {
+                var aiSettings = await appSettingsService.GetAsync(ct);
+                if (aiSettings.AiTranslation.EnablePreTranslationCache)
                 {
-                    ["FallbackFontTextMeshPro"] = tmpFontConfigValue
-                }, ct);
+                    await configService.PatchSectionAsync(game.GamePath, "Behaviour", new Dictionary<string, string>
+                    {
+                        ["CacheWhitespaceDifferences"] = "False",
+                        ["IgnoreWhitespaceInDialogue"] = "True",
+                        ["MinDialogueChars"] = "4",
+                        ["TemplateAllNumberAway"] = "True"
+                    }, ct);
+                }
+            }
         }
 
-        if (config != null)
-        {
-            await UpdateStatus(status, InstallStep.ApplyingConfig, 89, "正在应用用户配置...");
-            await configService.PatchAsync(game.GamePath, config, ct);
-        }
-
-        await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "配置应用完成");
-
-        // Patch LLMTranslate section with GameId and ToolkitUrl
+        // Patch LLMTranslate section with GameId and ToolkitUrl (independent of optimal config —
+        // required for AI endpoint to work correctly)
         if (File.Exists(configPath) && xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath))
         {
             var appSettings = await appSettingsService.GetAsync(ct);
@@ -300,62 +347,55 @@ public sealed class InstallOrchestrator(
                 }, ct);
         }
 
-        // Apply pre-translation cache optimization config if enabled
-        {
-            var aiSettings = await appSettingsService.GetAsync(ct);
-            if (aiSettings.AiTranslation.EnablePreTranslationCache)
-            {
-                await configService.PatchSectionAsync(game.GamePath, "Behaviour", new Dictionary<string, string>
-                {
-                    ["CacheWhitespaceDifferences"] = "False",
-                    ["IgnoreWhitespaceInDialogue"] = "True",
-                    ["MinDialogueChars"] = "4",
-                    ["TemplateAllNumberAway"] = "True"
-                }, ct);
-            }
-        }
-
         // Step 8: Extract game assets for language detection
-        await UpdateStatus(status, InstallStep.ExtractingAssets, 90, "正在提取游戏资产以检测语言...");
-        try
+        if (!options.AutoExtractAssets)
         {
-            var extractResult = await assetExtraction.ExtractTextsAsync(
-                game.GamePath, game.ExecutableName, gameInfo, ct: ct);
-
-            if (extractResult.DetectedLanguage is not null)
-            {
-                await configService.PatchSectionAsync(game.GamePath, "General",
-                    new Dictionary<string, string>
-                    {
-                        ["FromLanguage"] = extractResult.DetectedLanguage
-                    }, ct);
-                await UpdateStatus(status, InstallStep.ExtractingAssets, 93,
-                    $"检测到游戏语言: {extractResult.DetectedLanguage} ({extractResult.TotalTextsExtracted} 条文本)");
-                logger.LogInformation("游戏语言检测完成: {Lang}, 提取 {Count} 条文本",
-                    extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
-            }
-
-            var cachePath = appDataPaths.ExtractedTextsFile(game.Id);
-            if (!File.Exists(cachePath) && extractResult.Texts.Count > 0)
-            {
-                extractResult.GameId = game.Id;
-                var json = JsonSerializer.Serialize(extractResult, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                    WriteIndented = false
-                });
-                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                var tmpPath = cachePath + ".tmp";
-                await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
-                File.Move(tmpPath, cachePath, overwrite: true);
-                logger.LogInformation("安装时提取的文本已缓存: {Count} 条, 游戏 {GameId}",
-                    extractResult.TotalTextsExtracted, game.Id);
-            }
+            await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "提取游戏资产（已跳过）");
+            logger.LogInformation("用户已关闭自动提取游戏资产");
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning(ex, "资产提取失败（不影响安装）");
-            await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "资产提取失败（跳过）");
+            await UpdateStatus(status, InstallStep.ExtractingAssets, 90, "正在提取游戏资产以检测语言...");
+            try
+            {
+                var extractResult = await assetExtraction.ExtractTextsAsync(
+                    game.GamePath, game.ExecutableName, gameInfo, ct: ct);
+
+                if (extractResult.DetectedLanguage is not null)
+                {
+                    await configService.PatchSectionAsync(game.GamePath, "General",
+                        new Dictionary<string, string>
+                        {
+                            ["FromLanguage"] = extractResult.DetectedLanguage
+                        }, ct);
+                    await UpdateStatus(status, InstallStep.ExtractingAssets, 93,
+                        $"检测到游戏语言: {extractResult.DetectedLanguage} ({extractResult.TotalTextsExtracted} 条文本)");
+                    logger.LogInformation("游戏语言检测完成: {Lang}, 提取 {Count} 条文本",
+                        extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
+                }
+
+                var cachePath = appDataPaths.ExtractedTextsFile(game.Id);
+                if (!File.Exists(cachePath) && extractResult.Texts.Count > 0)
+                {
+                    extractResult.GameId = game.Id;
+                    var json = JsonSerializer.Serialize(extractResult, new JsonSerializerOptions
+                    {
+                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                        WriteIndented = false
+                    });
+                    Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                    var tmpPath = cachePath + ".tmp";
+                    await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
+                    File.Move(tmpPath, cachePath, overwrite: true);
+                    logger.LogInformation("安装时提取的文本已缓存: {Count} 条, 游戏 {GameId}",
+                        extractResult.TotalTextsExtracted, game.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "资产提取失败（不影响安装）");
+                await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "资产提取失败（跳过）");
+            }
         }
 
         // Mark as installed before verification — cancellation during verify preserves install state
@@ -364,43 +404,51 @@ public sealed class InstallOrchestrator(
         await gameLibrary.UpdateAsync(game, ct);
 
         // Step 9: Verify plugin health
-        await UpdateStatus(status, InstallStep.VerifyingHealth, 93, "正在验证插件安装状态...");
         PluginHealthReport? healthReport = null;
-        try
+        if (!options.AutoVerifyHealth)
         {
-            healthReport = await healthCheckService.VerifyForInstallAsync(game, ct);
-
-            if (healthReport.Overall == HealthStatus.Healthy)
-            {
-                await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证通过，所有检查项正常");
-                logger.LogInformation("安装验证通过，游戏 {GameId}", game.Id);
-            }
-            else
-            {
-                var problemCount = healthReport.Checks.Count(c => c.Status != HealthStatus.Healthy);
-                await UpdateStatus(status, InstallStep.VerifyingHealth, 99,
-                    $"验证完成，发现 {problemCount} 项问题（不影响安装）");
-                logger.LogWarning("安装验证发现 {Count} 项问题，游戏 {GameId}", problemCount, game.Id);
-            }
+            await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "验证插件状态（已跳过）");
+            logger.LogInformation("用户已关闭自动验证插件状态");
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning(ex, "插件验证失败（不影响安装），游戏 {GameId}", game.Id);
-            await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证失败（跳过）");
-        }
-
-        // Broadcast health report via SignalR for PluginHealthCard
-        if (healthReport != null)
-        {
+            await UpdateStatus(status, InstallStep.VerifyingHealth, 93, "正在验证插件安装状态...");
             try
             {
-                await hubContext.Clients.Group($"game-{game.Id}")
-                    .SendAsync("healthReportReady", healthReport);
+                healthReport = await healthCheckService.VerifyForInstallAsync(game, ct);
+
+                if (healthReport.Overall == HealthStatus.Healthy)
+                {
+                    await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证通过，所有检查项正常");
+                    logger.LogInformation("安装验证通过，游戏 {GameId}", game.Id);
+                }
+                else
+                {
+                    var problemCount = healthReport.Checks.Count(c => c.Status != HealthStatus.Healthy);
+                    await UpdateStatus(status, InstallStep.VerifyingHealth, 99,
+                        $"验证完成，发现 {problemCount} 项问题（不影响安装）");
+                    logger.LogWarning("安装验证发现 {Count} 项问题，游戏 {GameId}", problemCount, game.Id);
+                }
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "健康报告推送失败: 游戏 {GameId}", game.Id);
+                logger.LogWarning(ex, "插件验证失败（不影响安装），游戏 {GameId}", game.Id);
+                await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证失败（跳过）");
+            }
+
+            // Broadcast health report via SignalR for PluginHealthCard
+            if (healthReport != null)
+            {
+                try
+                {
+                    await hubContext.Clients.Group($"game-{game.Id}")
+                        .SendAsync("healthReportReady", healthReport);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "健康报告推送失败: 游戏 {GameId}", game.Id);
+                }
             }
         }
 

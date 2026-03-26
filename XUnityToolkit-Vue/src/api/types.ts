@@ -84,6 +84,15 @@ export interface InstallationStatus {
   error?: string
 }
 
+export interface InstallOptions {
+  autoInstallTmpFont: boolean
+  autoDeployAiEndpoint: boolean
+  autoGenerateConfig: boolean
+  autoApplyOptimalConfig: boolean
+  autoExtractAssets: boolean
+  autoVerifyHealth: boolean
+}
+
 export interface XUnityConfig {
   // [Service]
   translationEngine: string
@@ -199,6 +208,7 @@ export interface AppSettings {
   libraryGap: string
   libraryShowLabels: boolean
   receivePreReleaseUpdates: boolean
+  installOptions: InstallOptions
 }
 
 export interface VersionInfo {
