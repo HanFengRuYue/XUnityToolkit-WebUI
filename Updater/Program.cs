@@ -107,7 +107,7 @@ var stagingFiles = Directory
 Log($"Staging contains {stagingFiles.Count} file(s).");
 
 string backupDir = Path.Combine(effectiveDataDir, "update-backup");
-string normalizedAppDir = Path.GetFullPath(appDir) + Path.DirectorySeparatorChar;
+string normalizedAppDir = Path.GetFullPath(appDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
 // ── Phase 1: BACKUP ALL ──────────────────────────────────────────────────────
 Log("Phase 1: Backing up existing files...");
