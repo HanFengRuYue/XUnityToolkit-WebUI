@@ -7,6 +7,7 @@ import {
   NIcon,
   NInput,
   NDropdown,
+  NSwitch,
   useMessage,
   useDialog,
 } from 'naive-ui'
@@ -43,8 +44,8 @@ import {
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
-import type { Game, XUnityConfig, ModFrameworkType } from '@/api/types'
-import { gamesApi, pluginPackageApi } from '@/api/games'
+import type { Game, XUnityConfig, InstallOptions, ModFrameworkType } from '@/api/types'
+import { gamesApi, settingsApi, pluginPackageApi } from '@/api/games'
 import { useFileExplorer } from '@/composables/useFileExplorer'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
 import PluginHealthCard from '@/components/health/PluginHealthCard.vue'
@@ -61,7 +62,7 @@ const BackgroundPickerModal = defineAsyncComponent(
   () => import('@/components/library/BackgroundPickerModal.vue')
 )
 
-const collapsed = reactive({ config: true, description: true, tools: false })
+const collapsed = reactive({ config: true, description: true, tools: false, installOptions: true })
 
 const route = useRoute()
 const router = useRouter()
@@ -83,6 +84,14 @@ const showIconPicker = ref(false)
 const showBackgroundPicker = ref(false)
 const packageExporting = ref(false)
 const packageImporting = ref(false)
+const installOptions = ref<InstallOptions>({
+  autoInstallTmpFont: true,
+  autoDeployAiEndpoint: true,
+  autoGenerateConfig: true,
+  autoApplyOptimalConfig: true,
+  autoExtractAssets: true,
+  autoVerifyHealth: true,
+})
 
 // Name editing state
 const editingName = ref(false)
@@ -223,6 +232,13 @@ async function loadGame() {
       config.value = null
       aiEndpointInstalled.value = null
     }
+    // Load install options from global settings
+    try {
+      const appSettings = await settingsApi.get()
+      if (appSettings.installOptions) {
+        installOptions.value = { ...installOptions.value, ...appSettings.installOptions }
+      }
+    } catch { /* use defaults */ }
     // Description is always available (not gated by install state)
     aiDescription.value = game.value?.aiDescription ?? ''
   } catch {
@@ -236,7 +252,13 @@ async function loadGame() {
 
 async function handleInstall() {
   try {
-    await installStore.startInstall(gameId, config.value ?? undefined)
+    // Save install options to global settings before starting
+    try {
+      const appSettings = await settingsApi.get()
+      appSettings.installOptions = installOptions.value
+      await settingsApi.save(appSettings)
+    } catch { /* non-critical */ }
+    await installStore.startInstall(gameId, config.value ?? undefined, installOptions.value)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
   }
@@ -786,34 +808,94 @@ onBeforeUnmount(() => stopWatch())
       </div>
 
       <!-- Uninstalled State -->
-      <div v-else-if="!isInstalled" class="install-cta-horizontal">
-        <div class="cta-left">
-          <div class="cta-visual">
-            <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
-              <rect x="4" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
-              <path d="M20 12V24M20 24L14 18M20 24L26 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 28H28" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
+      <div v-else-if="!isInstalled" class="install-uninstalled-area">
+        <div class="install-cta-horizontal">
+          <div class="cta-left">
+            <div class="cta-visual">
+              <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
+                <rect x="4" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
+                <path d="M20 12V24M20 24L14 18M20 24L26 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 28H28" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="cta-text">
+              <span class="cta-title">准备安装翻译插件</span>
+              <span class="cta-desc">将自动安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
+            </div>
           </div>
-          <div class="cta-text">
-            <span class="cta-title">准备安装翻译插件</span>
-            <span class="cta-desc">将自动安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
+          <NButton
+            type="primary"
+            size="large"
+            :disabled="!game.detectedInfo"
+            @click="handleInstall"
+            class="install-button"
+          >
+            <template #icon>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </template>
+            一键安装
+          </NButton>
+        </div>
+
+        <!-- Advanced Install Options -->
+        <div class="install-options-toggle" @click="collapsed.installOptions = !collapsed.installOptions">
+          <span class="install-options-label">高级选项</span>
+          <svg
+            class="install-options-arrow"
+            :class="{ expanded: !collapsed.installOptions }"
+            width="16" height="16" viewBox="0 0 16 16" fill="none"
+          >
+            <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="install-options-body" :class="{ collapsed: collapsed.installOptions }">
+          <div class="install-options-body-inner">
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">安装 TMP 字体</span>
+                <span class="install-option-desc">自动安装匹配游戏 Unity 版本的中文 TMP 字体</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoInstallTmpFont" size="small" />
+            </div>
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">部署 AI 翻译端点</span>
+                <span class="install-option-desc">安装 LLMTranslate.dll，允许游戏连接本工具进行 AI 翻译</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoDeployAiEndpoint" size="small" />
+            </div>
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">启动游戏生成配置</span>
+                <span class="install-option-desc">自动启动游戏以生成 AutoTranslatorConfig.ini 配置文件</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoGenerateConfig" size="small" />
+            </div>
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">应用最佳配置</span>
+                <span class="install-option-desc">自动写入推荐的翻译插件配置（语言、字体、翻译引擎等）</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoApplyOptimalConfig" size="small" />
+            </div>
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">提取游戏资产</span>
+                <span class="install-option-desc">提取游戏文本并自动检测源语言</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoExtractAssets" size="small" />
+            </div>
+            <div class="install-option-row">
+              <div class="install-option-info">
+                <span class="install-option-name">验证插件状态</span>
+                <span class="install-option-desc">安装后启动游戏验证插件是否正常工作</span>
+              </div>
+              <NSwitch v-model:value="installOptions.autoVerifyHealth" size="small" />
+            </div>
           </div>
         </div>
-        <NButton
-          type="primary"
-          size="large"
-          :disabled="!game.detectedInfo"
-          @click="handleInstall"
-          class="install-button"
-        >
-          <template #icon>
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-              <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </template>
-          一键安装
-        </NButton>
       </div>
 
       <!-- Installed State -->
@@ -1613,6 +1695,91 @@ onBeforeUnmount(() => stopWatch())
   line-height: 1.5;
 }
 
+/* ===== Install Advanced Options ===== */
+.install-uninstalled-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.install-options-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 12px;
+  cursor: pointer;
+  user-select: none;
+  align-self: flex-start;
+}
+
+.install-options-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.install-options-arrow {
+  color: var(--text-3);
+  transition: transform 0.2s ease;
+}
+
+.install-options-arrow.expanded {
+  transform: rotate(180deg);
+}
+
+.install-options-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.install-options-body.collapsed {
+  grid-template-rows: 0fr;
+}
+
+.install-options-body-inner {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.install-option-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.install-option-row:first-child {
+  padding-top: 12px;
+}
+
+.install-option-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.install-option-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.install-option-name {
+  font-size: 13px;
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+.install-option-desc {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
 /* ===== Installed State Horizontal ===== */
 .installed-info-horizontal {
   display: flex;
@@ -1965,6 +2132,10 @@ onBeforeUnmount(() => stopWatch())
   .install-cta-horizontal .cta-left {
     flex-direction: column;
     align-items: center;
+  }
+
+  .install-options-toggle {
+    align-self: center;
   }
 
   .installed-info-horizontal {

@@ -19,7 +19,7 @@ public static class InstallEndpoints
         {
             try
             {
-                var status = await orchestrator.StartInstallAsync(id, request?.Config);
+                var status = await orchestrator.StartInstallAsync(id, request?.Config, request?.Options);
                 return Results.Accepted($"/api/games/{id}/status",
                     ApiResult<InstallationStatus>.Ok(status));
             }
@@ -60,4 +60,4 @@ public static class InstallEndpoints
     }
 }
 
-public record InstallRequest(XUnityConfig? Config = null);
+public record InstallRequest(XUnityConfig? Config = null, InstallOptions? Options = null);
