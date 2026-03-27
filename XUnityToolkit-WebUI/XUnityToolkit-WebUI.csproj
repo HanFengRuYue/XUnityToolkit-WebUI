@@ -11,7 +11,13 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <SpaRoot>..\XUnityToolkit-Vue\</SpaRoot>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Edition Condition="'$(Edition)' == ''">full</Edition>
   </PropertyGroup>
+
+  <!-- Inject edition as assembly metadata for runtime detection -->
+  <ItemGroup>
+    <AssemblyMetadata Include="Edition" Value="$(Edition)" />
+  </ItemGroup>
 
   <!-- Embed LLMTranslate.dll if it has been built -->
   <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll')">

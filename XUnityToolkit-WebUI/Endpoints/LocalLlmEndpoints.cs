@@ -93,6 +93,33 @@ public static class LocalLlmEndpoints
         group.MapPost("/stop", async (LocalLlmService svc, CancellationToken ct) =>
             Results.Ok(ApiResult<LocalLlmStatus>.Ok(await svc.StopAsync(ct))));
 
+        // ── llama.cpp binary download ──
+
+        group.MapPost("/llama-download", (LocalLlmService svc) =>
+        {
+            if (svc.IsDownloadingLlama)
+                return Results.BadRequest(ApiResult.Fail("llama 二进制文件正在下载中"));
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await svc.DownloadLlamaAsync(CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Errors broadcast via SignalR in DownloadLlamaAsync
+                }
+            });
+            return Results.Accepted(value: ApiResult.Ok());
+        });
+
+        group.MapPost("/llama-download/cancel", (LocalLlmService svc) =>
+        {
+            svc.CancelLlamaDownload();
+            return Results.Ok(ApiResult.Ok());
+        });
+
         // ── Model download ──
 
         group.MapPost("/download", (LocalLlmService svc, DownloadModelRequest req) =>

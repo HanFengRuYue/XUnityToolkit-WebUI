@@ -54,6 +54,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置；在 `Initialize()` 时通过 `WebClient.DownloadStringAsync` 发送连通性 ping（`GET /api/translate/ping?gameId=`）（即发即忘）
 - **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；批量模式由 `SemaphoreSlim` 限制；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
 - **本地 LLM：** `LocalLlmService` 管理 llama-server 进程；通过 DXGI 检测 GPU，WMI 作为后备；llama 二进制文件打包为 ZIP，首次使用时延迟解压；本地模式强制 concurrency=1、batch size=1、禁用术语提取；术语占位符替换 + 后处理在本地模式下仍然有效（跳过系统提示词中的术语以节省上下文 token）
+- **模块化版本：** 三个版本 — Full（自包含+LLAMA）、No-LLAMA（自包含）、Lite（框架依赖）；`EditionInfo`（`Infrastructure/EditionInfo.cs`）通过 `AssemblyMetadataAttribute("Edition")` 在构建时注入，运行时静态读取；`EditionInfo.Current` 返回 `AppEdition` 枚举；`EditionInfo.HasBundledLlama` 仅 Full 为 true；通过 `-p:Edition=full|no-llama|lite` 传递；`UpdateService` 使用 `GetManifestRid()` 获取版本特定的清单 RID（`win-x64`/`win-x64-no-llama`/`win-x64-lite`）
+- **LLAMA 运行时下载：** `LocalLlmService.DownloadLlamaAsync` 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；`POST .../llama-download/cancel` 取消；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅
 - **资源提取：** `AssetExtractionService` 使用 AssetsTools.NET 从 Unity `.assets` 和 bundle 文件中提取字符串；`PreTranslationService` 批量翻译并写入 XUnity 缓存文件
 - **I2 Localization 提取：** `AssetExtractionService.ExtractI2LocalizationTerms` 通过 `mSource.mTerms`+`mLanguages` 字段存在性检测 I2 `LanguageSourceAsset`；使用 `I2:{langCode}:{termKey}` source tag 提取每种语言的术语值；跳过 `IsGameText` 过滤（I2 术语是已知的游戏文本）；对非 I2 MonoBehaviour 回退到通用 `CollectStrings`
 - **GameCreator 2 提取：** `AssetExtractionService` 检测 GameCreator Dialogue (`m_Story`+`m_Nodes`)、Quest (`m_Tasks`+`m_Title`/`m_Description`)、Actor (`m_ActorName`/`m_PrimaryActorName`) 和 Stat (`m_Acronym`+`m_Title`) 类型；使用 `GameCreator:{Type}:{Name}` source tag 提取；遍历对话节点树（`m_Content`, `m_ContentChoice`, `m_Values*`）、任务层级和指令子字段；剩余字段回退到通用 `CollectStrings`；`DetectAndLogTemplateVariables` 扫描提取的文本中的 `{Variable}` 模式并记录建议配置 DoNotTranslate 术语
@@ -160,7 +162,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Path-based 上传：** 所有文件上传端点均有 `*-from-path` 变体，接受 `UploadFromPathRequest { FilePath }` JSON 请求体，用于内置文件浏览器场景；multipart 端点保留用于拖拽上传；涉及：`font-generation/upload-from-path`、`font-replacement/upload-from-path`、`cover/upload-from-path`、`background/upload-from-path`、`icon/upload-from-path`、`settings/import-from-path`、`charset/upload-custom-from-path`、`charset/upload-translation-from-path`
 - **AI 翻译：** `POST /api/translate`（**非 ApiResult** — DLL 直接调用；前端必须使用原始 `fetch`）, `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=`（来自 LLMTranslate.dll 的连通性 ping）
 - **AI 控制：** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
-- **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
+- **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`, `POST .../llama-download`（下载 llama 二进制）, `POST .../llama-download/cancel`
 - **AI 端点：** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — 管理 `LLMTranslate.dll`；POST 还会修补 INI 中的 `[LLMTranslate] ToolkitUrl` + `GameId`
 - **术语：** `GET/PUT /api/games/{id}/terms` — 统一术语 CRUD（替代独立的 glossary/DNT）；`POST /api/games/{id}/terms/import-from-game` — 跨游戏导入 | **描述：** `GET/PUT .../description`
 - **术语表（兼容）：** `GET/PUT /api/games/{id}/glossary` — 旧版兼容层，通过 TermService 读写
@@ -219,6 +221,12 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **AppSettings.ReceivePreReleaseUpdates：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue`（设置默认值 + NSwitch）
 - **添加 BuiltInModelInfo 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
+- **VersionInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`；包含 `Version`、`Edition`
+- **LlamaDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`
+- **LlamaStatus.IsDownloading 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`
+- **Edition 构建参数：** 在 2 处同步：`build.ps1`（`-Edition` 参数）和 `build.yml`（editions 数组）——必须手动同步
+- **清单命名约定：** `manifest-{rid}.json`（full）、`manifest-{rid}-no-llama.json`、`manifest-{rid}-lite.json`
+- **`bundled/llama/` 删除列表排除：** `UpdateService` 中的关键不变量——非 full 版本不得删除用户下载的 llama 文件
 - **DataPathInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`
 - **FileExplorer 模型：** 在 2 处同步：`Models/FileExplorer.cs`, `src/api/types.ts`；包含 `QuickAccessEntry`、`ReadTextResponse`；`UploadFromPathRequest` 为所有 path-based 上传端点共享的请求记录
 - **添加 UnityGameInfo 字段：** 在 2 处同步：`Models/UnityGameInfo.cs`, `src/api/types.ts`；安装编排器 Step 1 始终重新检测（`DetectAsync`），新字段自动生效无需额外处理

@@ -214,6 +214,7 @@ export interface AppSettings {
 
 export interface VersionInfo {
   version: string
+  edition: string
 }
 
 export interface DataPathInfo {
@@ -546,6 +547,15 @@ export interface LlamaStatus {
   bundledVersion: string
   backends: LlamaBackendInfo[]
   recommendedBackend: GpuBackend
+  isDownloading?: boolean
+}
+
+export interface LlamaDownloadProgress {
+  bytesDownloaded: number
+  totalBytes: number
+  speedBytesPerSec: number
+  done: boolean
+  error?: string
 }
 
 export interface BuiltInModelInfo {

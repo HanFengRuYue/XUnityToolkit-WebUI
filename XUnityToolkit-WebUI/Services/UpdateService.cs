@@ -48,9 +48,9 @@ public sealed class UpdateService(
     private string? _resolvedTag;
     private DateTime _lastCheckTime = DateTime.MinValue;
 
-    private static string GetPackageZipName(string package, string rid)
+    private static string GetPackageZipName(string package)
     {
-        return package == "app" ? $"app-{rid}.zip" : $"{package}.zip";
+        return package == "app" ? $"app-{GetManifestRid()}.zip" : $"{package}.zip";
     }
 
     private static string GetCurrentRid()
@@ -60,6 +60,21 @@ public sealed class UpdateService(
         {
             System.Runtime.InteropServices.Architecture.X64 => "win-x64",
             _ => throw new PlatformNotSupportedException($"Unsupported architecture: {arch}")
+        };
+    }
+
+    /// <summary>
+    /// Returns the edition-specific manifest RID used for update manifests and app ZIPs.
+    /// Full edition uses plain RID (e.g., "win-x64"), others append edition suffix.
+    /// </summary>
+    private static string GetManifestRid()
+    {
+        var rid = GetCurrentRid();
+        return EditionInfo.Current switch
+        {
+            AppEdition.NoLlama => $"{rid}-no-llama",
+            AppEdition.Lite => $"{rid}-lite",
+            _ => rid
         };
     }
 
@@ -194,23 +209,24 @@ public sealed class UpdateService(
                 return _lastCheckResult;
             }
 
-            // Download remote manifest
+            // Download remote manifest (edition-specific)
+            var manifestRid = GetManifestRid();
             string? manifestJson;
             if (tag is not null)
             {
                 // CDN path
                 var cdnClient = httpClientFactory.CreateClient("GitHubCdn");
-                var manifestUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/manifest-{rid}.json";
+                var manifestUrl = $"https://github.com/{GitHubOwner}/{GitHubRepo}/releases/download/{tag}/manifest-{manifestRid}.json";
                 manifestJson = await cdnClient.GetStringAsync(manifestUrl, ct);
             }
             else if (_releaseAssets is not null)
             {
                 // API fallback path
                 var apiClient = httpClientFactory.CreateClient("GitHubUpdate");
-                var manifestAsset = _releaseAssets.FirstOrDefault(a => a.Name == $"manifest-{rid}.json");
+                var manifestAsset = _releaseAssets.FirstOrDefault(a => a.Name == $"manifest-{manifestRid}.json");
                 if (manifestAsset is null)
                 {
-                    logger.LogWarning("Release {Version} 缺少 manifest-{Rid}.json", remoteVersion, rid);
+                    logger.LogWarning("Release {Version} 缺少 manifest-{Rid}.json", remoteVersion, manifestRid);
                     _status = new UpdateStatusInfo { State = UpdateState.None };
                     await BroadcastStatus();
                     _lastCheckResult = new UpdateCheckResult();
@@ -268,7 +284,7 @@ public sealed class UpdateService(
             long downloadSize = 0;
             foreach (var pkg in changedPackages)
             {
-                var zipName = GetPackageZipName(pkg, rid);
+                var zipName = GetPackageZipName(pkg);
                 if (_resolvedTag is not null)
                 {
                     // CDN/Atom path: use UpdateCheckInfo.Assets
@@ -384,7 +400,7 @@ public sealed class UpdateService(
             {
                 token.ThrowIfCancellationRequested();
 
-                var zipName = GetPackageZipName(pkg, rid);
+                var zipName = GetPackageZipName(pkg);
                 string downloadUrl;
                 if (_resolvedTag is not null)
                 {
@@ -466,6 +482,10 @@ public sealed class UpdateService(
                 if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) continue;
                 if (relative.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!ManagedExtensions.Contains(Path.GetExtension(filePath))) continue;
+                // Non-full editions: don't delete user-downloaded llama binaries
+                if (relative.StartsWith("bundled/llama/", StringComparison.OrdinalIgnoreCase)
+                    && !EditionInfo.HasBundledLlama)
+                    continue;
                 if (!_remoteManifest.Files.ContainsKey(relative))
                     deleteList.Add(relative);
             }

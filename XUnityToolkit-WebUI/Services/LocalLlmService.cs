@@ -36,6 +36,11 @@ public sealed class LocalLlmService(
     private readonly ConcurrentDictionary<string, bool> _downloadMirrorState = new();
     private readonly ConcurrentDictionary<string, bool> _downloadModelScopeState = new();
 
+    // LLAMA binary download
+    private CancellationTokenSource? _llamaDownloadCts;
+    private volatile bool _isDownloadingLlama;
+    public bool IsDownloadingLlama => _isDownloadingLlama;
+
     // GPU cache
     private List<GpuInfo>? _gpuCache;
 
@@ -180,7 +185,7 @@ public sealed class LocalLlmService(
                 isInstalled ? LlamaVersion : ""));
         }
 
-        return new LlamaStatus(LlamaVersion, backends, recommended);
+        return new LlamaStatus(LlamaVersion, backends, recommended, _isDownloadingLlama);
     }
 
     /// <summary>
@@ -967,6 +972,181 @@ public sealed class LocalLlmService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "本地 LLM 下载进度推送失败");
+        }
+    }
+
+    // ── LLAMA Binary Download ──
+
+    private const string GitHubOwner = "HanFengRuYue";
+    private const string GitHubRepo = "XUnityToolkit-WebUI";
+
+    private static readonly JsonSerializerOptions GitHubJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    public async Task DownloadLlamaAsync(CancellationToken ct)
+    {
+        var newCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (Interlocked.CompareExchange(ref _llamaDownloadCts, newCts, null) is not null)
+        {
+            newCts.Dispose();
+            throw new InvalidOperationException("llama 二进制文件正在下载中");
+        }
+
+        var token = newCts.Token;
+        _isDownloadingLlama = true;
+        var tempFile = Path.Combine(AppContext.BaseDirectory, "bundled-llama.zip.downloading");
+
+        try
+        {
+            await BroadcastLlamaDownloadProgress(new LlamaDownloadProgress(0, 0, 0, false, null));
+
+            // Resolve latest release to get bundled-llama.zip URL
+            var client = httpClientFactory.CreateClient("GitHubUpdate");
+            var releaseUrl = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/releases/latest";
+            using var releaseResponse = await client.GetAsync(releaseUrl, token);
+
+            if (releaseResponse.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+                throw new InvalidOperationException("GitHub API 请求频率超限，请稍后再试");
+
+            releaseResponse.EnsureSuccessStatusCode();
+
+            var releaseJson = await releaseResponse.Content.ReadAsStringAsync(token);
+            var release = JsonSerializer.Deserialize<GitHubRelease>(releaseJson, GitHubJsonOptions)
+                ?? throw new InvalidOperationException("无法解析 GitHub Release 信息");
+
+            var asset = release.Assets.FirstOrDefault(a =>
+                a.Name.Equals("bundled-llama.zip", StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException("最新发行版中未找到 bundled-llama.zip");
+
+            var downloadUrl = asset.BrowserDownloadUrl;
+            var totalBytes = asset.Size;
+
+            logger.LogInformation("开始下载 llama 二进制文件: {Url} ({Size:N0} bytes)", downloadUrl, totalBytes);
+
+            // Stream download with progress
+            var cdnClient = httpClientFactory.CreateClient("GitHubCdn");
+            using var downloadResponse = await cdnClient.GetAsync(
+                downloadUrl, HttpCompletionOption.ResponseHeadersRead, token);
+            downloadResponse.EnsureSuccessStatusCode();
+
+            if (totalBytes == 0)
+                totalBytes = downloadResponse.Content.Headers.ContentLength ?? 0;
+
+            await using var stream = await downloadResponse.Content.ReadAsStreamAsync(token);
+            await using var fileStream = File.Create(tempFile);
+
+            var buffer = new byte[81920];
+            long downloadedBytes = 0;
+            var lastBroadcast = Stopwatch.GetTimestamp();
+            var speedWindow = new Queue<(long ticks, long bytes)>();
+            int bytesRead;
+
+            while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
+            {
+                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                downloadedBytes += bytesRead;
+
+                var now = Stopwatch.GetTimestamp();
+                speedWindow.Enqueue((now, downloadedBytes));
+                while (speedWindow.Count > 0 &&
+                       Stopwatch.GetElapsedTime(speedWindow.Peek().ticks, now).TotalSeconds > 2)
+                    speedWindow.Dequeue();
+
+                if (Stopwatch.GetElapsedTime(lastBroadcast, now).TotalMilliseconds >= 200)
+                {
+                    lastBroadcast = now;
+                    long speed = 0;
+                    if (speedWindow.Count > 1)
+                    {
+                        var first = speedWindow.Peek();
+                        var elapsed = Stopwatch.GetElapsedTime(first.ticks, now).TotalSeconds;
+                        if (elapsed > 0)
+                            speed = (long)((downloadedBytes - first.bytes) / elapsed);
+                    }
+                    await BroadcastLlamaDownloadProgress(
+                        new LlamaDownloadProgress(downloadedBytes, totalBytes, speed, false, null));
+                }
+            }
+
+            // Close file stream before moving
+            await fileStream.FlushAsync(token);
+            fileStream.Close();
+
+            logger.LogInformation("llama 二进制文件下载完成: {Size:N0} bytes", downloadedBytes);
+
+            // Extract bundled-llama.zip to bundled/llama/
+            var llamaDir = bundledPaths.LlamaDirectory;
+            if (Directory.Exists(llamaDir))
+                Directory.Delete(llamaDir, true);
+            Directory.CreateDirectory(llamaDir);
+
+            using (var archive = ZipFile.OpenRead(tempFile))
+            {
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                    // Entries are prefixed with bundled/llama/ — strip that prefix
+                    var entryPath = entry.FullName.Replace('\\', '/');
+                    const string prefix = "bundled/llama/";
+                    if (!entryPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var relativeName = entryPath[prefix.Length..];
+                    if (string.IsNullOrEmpty(relativeName)) continue;
+
+                    var destPath = PathSecurity.SafeJoin(llamaDir, relativeName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                    entry.ExtractToFile(destPath, overwrite: true);
+                }
+            }
+
+            // Clean up temp file
+            File.Delete(tempFile);
+
+            logger.LogInformation("llama 二进制文件已解压到 {Dir}", llamaDir);
+
+            await BroadcastLlamaDownloadProgress(
+                new LlamaDownloadProgress(downloadedBytes, totalBytes, 0, true, null));
+        }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("llama 二进制文件下载已取消");
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            await BroadcastLlamaDownloadProgress(
+                new LlamaDownloadProgress(0, 0, 0, true, "下载已取消"));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "下载 llama 二进制文件失败");
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            await BroadcastLlamaDownloadProgress(
+                new LlamaDownloadProgress(0, 0, 0, true, "下载 llama 引擎失败，请检查网络连接"));
+        }
+        finally
+        {
+            _isDownloadingLlama = false;
+            Interlocked.Exchange(ref _llamaDownloadCts, null)?.Dispose();
+        }
+    }
+
+    public void CancelLlamaDownload()
+    {
+        Volatile.Read(ref _llamaDownloadCts)?.Cancel();
+    }
+
+    private async Task BroadcastLlamaDownloadProgress(LlamaDownloadProgress progress)
+    {
+        try
+        {
+            await hubContext.Clients.Group("local-llm")
+                .SendAsync("llamaDownloadProgress", progress);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "llama 下载进度推送失败");
         }
     }
 }
