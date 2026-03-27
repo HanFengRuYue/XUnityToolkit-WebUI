@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+
+/** Captured once at module load, before any CSS zoom is applied.
+ *  CSS zoom does NOT change devicePixelRatio in Chromium. */
+const baseDpr = window.devicePixelRatio || 1
 
 export type ThemeMode = 'dark' | 'light' | 'system'
 
@@ -64,9 +68,15 @@ export function getAccentVariants(hex: string, mode: ThemeMode) {
 export const useThemeStore = defineStore('theme', () => {
   const mode = ref<ThemeMode>(loadInitialTheme())
   const accentColor = ref<string>(loadInitialAccent())
+  const pageZoom = ref<number>(loadInitialZoom())
 
   /** The resolved display theme (always 'dark' or 'light', never 'system') */
   const resolvedTheme = ref<'dark' | 'light'>(resolveTheme(mode.value))
+
+  /** Effective zoom percentage (resolves 0=auto to DPR-based default) */
+  const effectiveZoom = computed(() =>
+    pageZoom.value === 0 ? getDefaultZoom() : pageZoom.value
+  )
 
   function loadInitialTheme(): ThemeMode {
     const saved = localStorage.getItem('theme')
@@ -77,6 +87,31 @@ export const useThemeStore = defineStore('theme', () => {
 
   function loadInitialAccent(): string {
     return localStorage.getItem('accentColor') || '#3b82f6'
+  }
+
+  function loadInitialZoom(): number {
+    const saved = localStorage.getItem('pageZoom')
+    if (saved !== null) {
+      const parsed = parseInt(saved, 10)
+      if (parsed === 0 || (parsed >= 50 && parsed <= 200)) return parsed
+    }
+    return 0
+  }
+
+  function getDefaultZoom(): number {
+    return Math.round(baseDpr * 100 / 5) * 5
+  }
+
+  function setPageZoom(value: number) {
+    pageZoom.value = value
+    localStorage.setItem('pageZoom', String(value))
+    applyZoom()
+  }
+
+  function applyZoom() {
+    const zoom = pageZoom.value === 0 ? getDefaultZoom() : pageZoom.value
+    const cssZoom = zoom / (baseDpr * 100)
+    document.documentElement.style.zoom = String(cssZoom)
   }
 
   function getSystemTheme(): 'dark' | 'light' {
@@ -151,6 +186,7 @@ export const useThemeStore = defineStore('theme', () => {
 
   // Apply on init
   applyCurrentTheme()
+  applyZoom()
 
-  return { mode, accentColor, resolvedTheme, setTheme, toggle, setAccentColor }
+  return { mode, accentColor, resolvedTheme, pageZoom, effectiveZoom, setTheme, toggle, setAccentColor, setPageZoom }
 })

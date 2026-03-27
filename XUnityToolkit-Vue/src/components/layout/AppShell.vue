@@ -31,12 +31,12 @@ onMounted(async () => {
     appVersion.value = '1.0.0'
   }
   updateStore.init()
-  window.addEventListener('resize', updateMobile)
+  window.addEventListener('resize', updateViewport)
 })
 
 onBeforeUnmount(() => {
   removeGuard()
-  window.removeEventListener('resize', updateMobile)
+  window.removeEventListener('resize', updateViewport)
   document.removeEventListener('mousemove', onResizeMove)
   document.removeEventListener('mouseup', onResizeEnd)
 })
@@ -83,15 +83,19 @@ watch(() => route.path, () => {
   sidebarOpen.value = false
 })
 
-// Mobile detection
-const isMobile = ref(window.innerWidth <= 768)
-function updateMobile() {
-  isMobile.value = window.innerWidth <= 768
+// Viewport & responsive breakpoints
+const viewportWidth = ref(window.innerWidth)
+const isMobile = computed(() => viewportWidth.value <= 768)
+const isNarrowDesktop = computed(() => !isMobile.value && viewportWidth.value <= 900)
+
+function updateViewport() {
+  viewportWidth.value = window.innerWidth
 }
 
-// Sidebar width (inline style, not applied on mobile)
+// Sidebar width (inline style, not applied on mobile; auto-collapse on narrow desktop)
 const sidebarStyle = computed(() => {
   if (isMobile.value) return undefined
+  if (isNarrowDesktop.value) return { width: sidebarStore.COLLAPSED_WIDTH + 'px' }
   return { width: sidebarStore.effectiveWidth + 'px' }
 })
 
@@ -101,7 +105,7 @@ let startX = 0
 let startWidth = 0
 
 function onResizeStart(e: MouseEvent) {
-  if (sidebarStore.collapsed || isMobile.value) return
+  if (sidebarStore.collapsed || isNarrowDesktop.value || isMobile.value) return
   e.preventDefault()
   isResizing.value = true
   startX = e.clientX
@@ -158,7 +162,7 @@ function onResizeDoubleClick() {
     </div>
 
     <!-- Mobile Top Bar -->
-    <header class="mobile-topbar">
+    <header class="mobile-topbar" :class="{ 'has-wv2-controls': isWebView2 }">
       <button class="hamburger" @click="sidebarOpen = !sidebarOpen" :class="{ active: sidebarOpen }">
         <span></span>
         <span></span>
@@ -167,6 +171,26 @@ function onResizeDoubleClick() {
       <div class="topbar-logo">
         <img class="logo-icon" src="/logo.png" width="24" height="24" alt="XUnity Toolkit" />
         <span class="topbar-title">XUnity Toolkit</span>
+      </div>
+      <!-- Window controls in mobile topbar (WebView2 only) -->
+      <div v-if="isWebView2" class="topbar-window-controls">
+        <button class="win-btn win-minimize" @click="minimize" title="最小化">
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
+        </button>
+        <button class="win-btn win-maximize" @click="toggleMaximize" :title="isMaximized ? '向下还原' : '最大化'">
+          <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
+            <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1" />
+          </svg>
+          <svg v-else width="10" height="10" viewBox="0 0 10 10">
+            <rect x="2.5" y="0.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1" />
+            <rect x="0.5" y="2.5" width="7" height="7" rx="1" fill="var(--bg-surface)" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn win-close" @click="closeWindow" title="关闭">
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -177,7 +201,7 @@ function onResizeDoubleClick() {
 
     <aside
       class="sidebar"
-      :class="{ open: sidebarOpen, collapsed: sidebarStore.collapsed && !isMobile, resizing: isResizing }"
+      :class="{ open: sidebarOpen, collapsed: (sidebarStore.collapsed || isNarrowDesktop) && !isMobile, resizing: isResizing }"
       :style="sidebarStyle"
     >
       <div class="sidebar-header">
@@ -194,7 +218,7 @@ function onResizeDoubleClick() {
 
       <nav class="sidebar-nav">
         <template v-for="item in mainNavItems" :key="item.key">
-          <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+          <NTooltip v-if="(sidebarStore.collapsed || isNarrowDesktop) && !isMobile" placement="right" :show-arrow="false">
             <template #trigger>
               <a class="nav-item" :class="{ active: isActive(item.key) }" @click="navigateTo(item.key)">
                 <NIcon :size="20"><component :is="item.icon" /></NIcon>
@@ -213,7 +237,7 @@ function onResizeDoubleClick() {
       <div class="sidebar-spacer"></div>
 
       <div class="sidebar-collapse-toggle">
-        <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+        <NTooltip v-if="(sidebarStore.collapsed || isNarrowDesktop) && !isMobile" placement="right" :show-arrow="false">
           <template #trigger>
             <a class="nav-item collapse-item" @click="sidebarStore.toggleCollapse">
               <NIcon :size="20"><KeyboardDoubleArrowRightOutlined /></NIcon>
@@ -230,7 +254,7 @@ function onResizeDoubleClick() {
 
       <div class="sidebar-bottom-nav">
         <div class="bottom-divider"></div>
-        <NTooltip v-if="sidebarStore.collapsed && !isMobile" placement="right" :show-arrow="false">
+        <NTooltip v-if="(sidebarStore.collapsed || isNarrowDesktop) && !isMobile" placement="right" :show-arrow="false">
           <template #trigger>
             <a class="nav-item" :class="{ active: isActive(settingsNavItem.key) }" @click="navigateTo(settingsNavItem.key)">
               <NIcon :size="20"><component :is="settingsNavItem.icon" /></NIcon>
@@ -795,7 +819,7 @@ function onResizeDoubleClick() {
     padding: 20px 20px;
   }
 
-  /* Hide custom title bar on mobile */
+  /* Hide custom title bar on mobile -- controls are in the mobile topbar */
   .window-titlebar {
     display: none;
   }
@@ -804,6 +828,26 @@ function onResizeDoubleClick() {
   }
   .app-layout.has-titlebar .main-content {
     padding-top: 20px;
+  }
+
+  /* WebView2 mode: make mobile topbar draggable for window movement */
+  .mobile-topbar.has-wv2-controls {
+    app-region: drag;
+  }
+  .mobile-topbar.has-wv2-controls .hamburger,
+  .mobile-topbar.has-wv2-controls .topbar-window-controls {
+    app-region: no-drag;
+  }
+
+  /* Window controls in mobile topbar */
+  .topbar-window-controls {
+    display: flex;
+    margin-left: auto;
+    align-items: center;
+  }
+  .topbar-window-controls .win-btn {
+    width: 40px;
+    height: 32px;
   }
 }
 

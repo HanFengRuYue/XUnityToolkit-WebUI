@@ -28,6 +28,7 @@ public static class SettingsEndpoints
             settings.AiTranslation.LocalContextSize = Math.Clamp(settings.AiTranslation.LocalContextSize, 0, 10);
             settings.AiTranslation.Temperature = Math.Clamp(settings.AiTranslation.Temperature, 0.0, 2.0);
             settings.AiTranslation.FuzzyMatchThreshold = Math.Clamp(settings.AiTranslation.FuzzyMatchThreshold, 0, 100);
+            settings.PageZoom = settings.PageZoom == 0 ? 0 : Math.Clamp(settings.PageZoom, 50, 200);
 
             var saved = await settingsService.SaveAsync(settings);
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));

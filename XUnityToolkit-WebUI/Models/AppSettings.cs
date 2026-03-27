@@ -16,5 +16,6 @@ public sealed class AppSettings
     public string LibraryGap { get; set; } = "normal";
     public bool LibraryShowLabels { get; set; } = true;
     public bool ReceivePreReleaseUpdates { get; set; }
+    public int PageZoom { get; set; }
     public InstallOptions InstallOptions { get; set; } = new();
 }

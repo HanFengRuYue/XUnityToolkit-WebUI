@@ -82,10 +82,13 @@ export const useGamesStore = defineStore('games', () => {
         gap.value = settings.libraryGap
       if (typeof settings.libraryShowLabels === 'boolean')
         showLabels.value = settings.libraryShowLabels
-      // Sync accent color from backend (overrides localStorage if different)
+      // Sync accent color and page zoom from backend (overrides localStorage if different)
+      const themeStore = useThemeStore()
       if (settings.accentColor) {
-        const themeStore = useThemeStore()
         themeStore.setAccentColor(settings.accentColor)
+      }
+      if (typeof settings.pageZoom === 'number') {
+        themeStore.setPageZoom(settings.pageZoom)
       }
     } catch { /* ignore */ }
   }
