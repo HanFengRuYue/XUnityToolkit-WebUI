@@ -80,6 +80,8 @@ export const gamesApi = {
       throw new Error(message)
     }
   },
+  uploadIconFromPath: (id: string, filePath: string) =>
+    api.post<void>(`/api/games/${id}/icon/upload-from-path`, { filePath }),
   deleteCustomIcon: (id: string) => api.del<void>(`/api/games/${id}/icon/custom`),
   searchIconGames: (id: string, query: string) =>
     api.post<SteamGridDbSearchResult[]>(`/api/games/${id}/icon/search`, { query }),
@@ -121,6 +123,8 @@ export const gamesApi = {
   // Web image search
   searchWebImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
     api.post<WebImageResult[]>(`/api/games/${id}/cover/web-search`, { query, engine, sizeFilter }),
+  uploadCoverFromPath: (id: string, filePath: string) =>
+    api.post<CoverInfo>(`/api/games/${id}/cover/upload-from-path`, { filePath }),
   selectWebCover: (id: string, imageUrl: string) =>
     api.post<CoverInfo>(`/api/games/${id}/cover/web-select`, { imageUrl }),
   searchWebIconImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
@@ -154,6 +158,8 @@ export const gamesApi = {
       throw new Error(message)
     }
   },
+  uploadBackgroundFromPath: (id: string, filePath: string) =>
+    api.post<void>(`/api/games/${id}/background/upload-from-path`, { filePath }),
   deleteBackground: (id: string) => api.del<void>(`/api/games/${id}/background`),
   searchWebBackgroundImages: (id: string, query: string, engine: string, sizeFilter?: string) =>
     api.post<WebImageResult[]>(`/api/games/${id}/background/web-search`, { query, engine, sizeFilter }),
@@ -207,6 +213,8 @@ export const settingsApi = {
       throw new Error(data?.error ?? '导入失败')
     }
   },
+  importFromPath: (filePath: string) =>
+    api.post<void>('/api/settings/import-from-path', { filePath }),
 }
 
 export const translateApi = {

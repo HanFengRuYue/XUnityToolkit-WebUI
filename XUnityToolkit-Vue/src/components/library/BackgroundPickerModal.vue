@@ -3,6 +3,7 @@ import { ref, watch, onMounted } from 'vue'
 import { NModal, NInput, NButton, NIcon, NTabs, NTabPane, NSpin, useMessage } from 'naive-ui'
 import { SearchRound, CloudUploadOutlined } from '@vicons/material'
 import { gamesApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { Game, SteamGridDbSearchResult, SteamGridDbImage, SteamStoreSearchResult } from '@/api/types'
 import WebImageSearchTab from './WebImageSearchTab.vue'
 
@@ -35,7 +36,7 @@ const savingBackground = ref(false)
 
 // Upload state
 const uploading = ref(false)
-const fileInput = ref<HTMLInputElement | null>(null)
+const { selectFile } = useFileExplorer()
 
 // Auto-search Steam on mount
 onMounted(() => {
@@ -143,26 +144,15 @@ function handleWebSearchSaved() {
 }
 
 // Upload
-function triggerUpload() {
-  fileInput.value?.click()
-}
-
-async function handleFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    message.error('仅支持 JPEG、PNG 或 WebP 格式')
-    return
-  }
-  if (file.size > 10 * 1024 * 1024) {
-    message.error('图片文件不能超过 10 MB')
-    return
-  }
+async function handleSelectBackgroundFile() {
+  const path = await selectFile({
+    title: '选择背景图片',
+    filters: [{ label: '图片文件', extensions: ['.jpg', '.jpeg', '.png', '.webp'] }],
+  })
+  if (!path) return
   uploading.value = true
   try {
-    await gamesApi.uploadBackground(props.game.id, file)
+    await gamesApi.uploadBackgroundFromPath(props.game.id, path)
     message.success('背景图已上传')
     emit('saved')
     close()
@@ -302,17 +292,10 @@ async function handleFileSelect(e: Event) {
           <div class="upload-hint">
             建议使用 16:9 横屏图片，如游戏截图、宣传图或壁纸。
           </div>
-          <NButton :loading="uploading" @click="triggerUpload">
+          <NButton :loading="uploading" @click="handleSelectBackgroundFile">
             <template #icon><NIcon><CloudUploadOutlined /></NIcon></template>
             选择图片文件
           </NButton>
-          <input
-            ref="fileInput"
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            style="display: none"
-            @change="handleFileSelect"
-          />
         </div>
       </NTabPane>
     </NTabs>

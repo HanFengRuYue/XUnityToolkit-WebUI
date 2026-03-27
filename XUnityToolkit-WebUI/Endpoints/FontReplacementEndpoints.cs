@@ -163,6 +163,67 @@ public static class FontReplacementEndpoints
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
 
+        // POST .../upload-from-path
+        group.MapPost("/upload-from-path", async (string id, UploadFromPathRequest request,
+            GameLibraryService library, FontReplacementService fontReplacementService,
+            AppDataPaths appDataPaths) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 50 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("文件大小超过 50MB 限制。"));
+
+            var customDir = appDataPaths.GetCustomFontDirectory(id);
+            Directory.CreateDirectory(customDir);
+
+            var safeFileName = Path.GetFileName(request.FilePath);
+            var destPath = Path.Combine(customDir, safeFileName);
+
+            // Read first 4 bytes for magic detection
+            byte[] magic = new byte[4];
+            await using (var peekStream = File.OpenRead(request.FilePath))
+                await peekStream.ReadExactlyAsync(magic);
+
+            bool isTtfOrOtf = (magic[0] == 0x00 && magic[1] == 0x01 && magic[2] == 0x00 && magic[3] == 0x00)
+                            || (magic[0] == 0x4F && magic[1] == 0x54 && magic[2] == 0x54 && magic[3] == 0x4F);
+
+            if (isTtfOrOtf)
+            {
+                foreach (var existing in Directory.GetFiles(customDir))
+                {
+                    var ext = Path.GetExtension(existing).ToLowerInvariant();
+                    if (ext is ".ttf" or ".otf")
+                        File.Delete(existing);
+                }
+                File.Copy(request.FilePath, destPath, overwrite: true);
+            }
+            else
+            {
+                foreach (var existing in Directory.GetFiles(customDir))
+                {
+                    var ext = Path.GetExtension(existing).ToLowerInvariant();
+                    if (ext is not ".ttf" and not ".otf")
+                        File.Delete(existing);
+                }
+                File.Copy(request.FilePath, destPath, overwrite: true);
+
+                if (!fontReplacementService.ValidateCustomFont(destPath))
+                {
+                    File.Delete(destPath);
+                    return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
+                }
+            }
+
+            return Results.Ok(ApiResult.Ok());
+        });
+
         // DELETE .../custom-font?type={ttf|tmp}
         group.MapDelete("/custom-font", (string id, string? type, AppDataPaths appDataPaths) =>
         {

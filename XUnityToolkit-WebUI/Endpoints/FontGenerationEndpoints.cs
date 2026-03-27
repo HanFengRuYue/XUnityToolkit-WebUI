@@ -52,6 +52,35 @@ public static class FontGenerationEndpoints
             }));
         }).DisableAntiforgery();
 
+        group.MapPost("/upload-from-path", (UploadFromPathRequest request, AppDataPaths appDataPaths) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 50 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("文件大小不能超过 50MB"));
+
+            var ext = Path.GetExtension(request.FilePath).ToLowerInvariant();
+            if (ext is not ".ttf" and not ".otf")
+                return Results.BadRequest(ApiResult.Fail("仅支持 .ttf 和 .otf 格式"));
+
+            var savedName = $"{Guid.NewGuid():N}{ext}";
+            var savedPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory, savedName);
+            File.Copy(request.FilePath, savedPath, overwrite: true);
+
+            var fontName = ExtractFontName(savedPath);
+
+            return Results.Ok(ApiResult<FontUploadInfo>.Ok(new FontUploadInfo
+            {
+                FileName = savedName,
+                FontName = fontName,
+                FileSize = info.Length,
+            }));
+        });
+
         group.MapPost("/generate", (FontGenerationStartRequest body,
             TmpFontGeneratorService generator, AppDataPaths appDataPaths,
             IHubContext<InstallProgressHub> hubContext,
@@ -240,6 +269,38 @@ public static class FontGenerationEndpoints
             return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = charCount.Count }));
         }).DisableAntiforgery();
 
+        group.MapPost("/charset/upload-custom-from-path", async (UploadFromPathRequest request, AppDataPaths appDataPaths) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("字符集文件大小不能超过 10MB"));
+
+            var ext = Path.GetExtension(request.FilePath).ToLowerInvariant();
+            if (ext != ".txt")
+                return Results.BadRequest(ApiResult.Fail("仅支持 .txt 格式"));
+
+            var safeName = $"{Guid.NewGuid():N}{ext}";
+            var savePath = Path.Combine(appDataPaths.FontGenerationCharsetUploadsDirectory, safeName);
+            File.Copy(request.FilePath, savePath, overwrite: true);
+
+            var text = await File.ReadAllTextAsync(savePath);
+            var charCount = new HashSet<int>();
+            var enumerator = System.Globalization.StringInfo.GetTextElementEnumerator(text);
+            while (enumerator.MoveNext())
+            {
+                var cp = char.ConvertToUtf32(enumerator.GetTextElement(), 0);
+                if (cp > 0xFFFF || !char.IsWhiteSpace((char)cp))
+                    charCount.Add(cp);
+            }
+
+            return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = charCount.Count }));
+        });
+
         // POST /charset/upload-translation — upload translation file
         group.MapPost("/charset/upload-translation", async (HttpRequest request, AppDataPaths appDataPaths) =>
         {
@@ -264,6 +325,27 @@ public static class FontGenerationEndpoints
 
             return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = chars.Count }));
         }).DisableAntiforgery();
+
+        group.MapPost("/charset/upload-translation-from-path", (UploadFromPathRequest request,
+            AppDataPaths appDataPaths, CharacterSetService charsetService) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("翻译文件大小不能超过 10MB"));
+
+            var safeName = $"{Guid.NewGuid():N}.txt";
+            var savePath = Path.Combine(appDataPaths.FontGenerationTranslationUploadsDirectory, safeName);
+            File.Copy(request.FilePath, savePath, overwrite: true);
+
+            var chars = charsetService.ExtractFromTranslationFile(savePath);
+
+            return Results.Ok(ApiResult<object>.Ok(new { fileName = safeName, characterCount = chars.Count }));
+        });
 
         // GET /report/{fileName} — get historical generation report
         group.MapGet("/report/{fileName}", async (string fileName, AppDataPaths appDataPaths) =>

@@ -55,6 +55,38 @@ public static class ImageEndpoints
                 new CoverInfo(true, "upload", game.SteamGridDbGameId)));
         }).DisableAntiforgery();
 
+        // Upload cover from local path
+        group.MapPost("/cover/upload-from-path", async (
+            UploadFromPathRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 5 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("图片文件不能超过 5 MB。"));
+
+            var contentType = GetImageContentType(request.FilePath);
+            if (contentType is null || !GameImageService.IsAllowedContentType(contentType))
+                return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
+
+            await using var stream = File.OpenRead(request.FilePath);
+            await imageService.SaveCoverFromUploadAsync(id, stream, contentType, ct);
+
+            return Results.Ok(ApiResult<CoverInfo>.Ok(
+                new CoverInfo(true, "upload", game.SteamGridDbGameId)));
+        });
+
         // Search SteamGridDB for games
         group.MapPost("/cover/search", async (
             CoverSearchRequest request,
@@ -452,6 +484,37 @@ public static class ImageEndpoints
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
 
+        // Upload background from local path
+        group.MapPost("/background/upload-from-path", async (
+            UploadFromPathRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("图片文件不能超过 10 MB。"));
+
+            var contentType = GetImageContentType(request.FilePath);
+            if (contentType is null || !GameImageService.IsAllowedContentType(contentType))
+                return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
+
+            await using var stream = File.OpenRead(request.FilePath);
+            await imageService.SaveBackgroundFromUploadAsync(id, stream, contentType, ct);
+
+            return Results.Ok(ApiResult.Ok());
+        });
+
         // Web image search for background
         group.MapPost("/background/web-search", async (
             WebImageSearchRequest request,
@@ -533,6 +596,18 @@ public static class ImageEndpoints
             await imageService.DeleteCoverAsync(id, ct);
             return Results.Ok(ApiResult.Ok());
         });
+    }
+
+    private static string? GetImageContentType(string filePath)
+    {
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        return ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => null,
+        };
     }
 }
 

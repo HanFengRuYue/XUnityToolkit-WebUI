@@ -35,6 +35,7 @@ import {
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
@@ -51,6 +52,7 @@ const collapsed = reactive({
 
 const message = useMessage()
 const dialog = useDialog()
+const { selectFile } = useFileExplorer()
 const themeStore = useThemeStore()
 const updateStore = useUpdateStore()
 
@@ -289,32 +291,29 @@ async function handleExport() {
   }
 }
 
-function handleImport() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.zip'
-  input.onchange = async () => {
-    const file = input.files?.[0]
-    if (!file) return
-    dialog.warning({
-      title: '导入配置',
-      content: '导入将覆盖当前所有配置数据，导入完成后需要重启程序。确定要继续吗？',
-      positiveText: '确认导入',
-      negativeText: '取消',
-      onPositiveClick: async () => {
-        importLoading.value = true
-        try {
-          await settingsApi.importData(file)
-          message.success('导入成功，请重启程序以使配置生效')
-        } catch (e) {
-          message.error(e instanceof Error ? e.message : '导入失败')
-        } finally {
-          importLoading.value = false
-        }
-      },
-    })
-  }
-  input.click()
+async function handleImport() {
+  const path = await selectFile({
+    title: '导入配置文件',
+    filters: [{ label: 'ZIP 文件', extensions: ['.zip'] }],
+  })
+  if (!path) return
+  dialog.warning({
+    title: '导入配置',
+    content: '导入将覆盖当前所有配置数据，导入完成后需要重启程序。确定要继续吗？',
+    positiveText: '确认导入',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      importLoading.value = true
+      try {
+        await settingsApi.importFromPath(path)
+        message.success('导入成功，请重启程序以使配置生效')
+      } catch (e) {
+        message.error(e instanceof Error ? e.message : '导入失败')
+      } finally {
+        importLoading.value = false
+      }
+    },
+  })
 }
 
 const hasChecked = ref(false)

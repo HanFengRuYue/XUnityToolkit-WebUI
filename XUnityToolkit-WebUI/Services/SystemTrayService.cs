@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Web.WebView2.Core;
 
 namespace XUnityToolkit_WebUI.Services;
 
@@ -10,6 +11,10 @@ public sealed class SystemTrayService(
     private Thread? _staThread;
     private volatile NotifyIcon? _trayIcon;
     private volatile SynchronizationContext? _syncContext;
+    private volatile WebViewWindow? _mainWindow;
+    private volatile bool _webView2Available;
+    private ToolStripMenuItem? _openMenuItem;
+    private readonly TaskCompletionSource _kestrelReady = new();
 
     private string AppUrl
     {
@@ -22,23 +27,13 @@ public sealed class SystemTrayService(
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        DetectWebView2Runtime();
+
         _staThread = new Thread(RunTrayLoop) { IsBackground = true };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
 
-        // Auto-open browser
-        Task.Run(() =>
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo { FileName = AppUrl, UseShellExecute = true });
-                logger.LogInformation("已在浏览器中打开: {Url}", AppUrl);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "自动打开浏览器失败");
-            }
-        }, cancellationToken);
+        lifetime.ApplicationStarted.Register(() => _kestrelReady.TrySetResult());
 
         // No console hiding needed — WinExe subsystem doesn't create a console window
 
@@ -47,7 +42,7 @@ public sealed class SystemTrayService(
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        // Only call Application.Exit() — the STA thread owns the NotifyIcon lifecycle
+        // Only call Application.Exit() — the STA thread owns the NotifyIcon and WebViewWindow lifecycle
         Application.Exit();
         return Task.CompletedTask;
     }
@@ -63,16 +58,115 @@ public sealed class SystemTrayService(
         _syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _trayIcon = trayIcon;
 
-        trayIcon.ShowBalloonTip(
-            3000,
-            "XUnity Toolkit WebUI",
-            "程序已在后台运行，双击托盘图标打开浏览器",
-            ToolTipIcon.Info);
+        WaitForKestrelThenShowUI();
 
         Application.Run(); // Blocks until Application.Exit() is called
 
+        // Dispose WebViewWindow if Application.Exit() didn't close it
+        // (e.g., form was never shown so not in OpenForms)
+        var window = _mainWindow;
+        _mainWindow = null;
         _trayIcon = null;
         trayIcon.Visible = false;
+        try { window?.Dispose(); }
+        catch { /* best effort */ }
+    }
+
+    private void DetectWebView2Runtime()
+    {
+        try
+        {
+            var version = CoreWebView2Environment.GetAvailableBrowserVersionString();
+            _webView2Available = !string.IsNullOrEmpty(version);
+            if (_webView2Available)
+                logger.LogInformation("WebView2 runtime detected: {Version}", version);
+            else
+                logger.LogWarning("WebView2 runtime not available, falling back to default browser");
+        }
+        catch (Exception ex)
+        {
+            _webView2Available = false;
+            logger.LogWarning(ex, "WebView2 runtime detection failed, falling back to default browser");
+        }
+    }
+
+    private void WaitForKestrelThenShowUI()
+    {
+        var ctx = _syncContext!;
+        _ = Task.Run(async () =>
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            try
+            {
+                await _kestrelReady.Task.WaitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning("Kestrel did not become ready within 30s, proceeding anyway");
+            }
+
+            ctx.Post(_ => ShowUIOnStaThread(), null);
+        });
+    }
+
+    private void ShowUIOnStaThread()
+    {
+        if (_webView2Available)
+        {
+            try
+            {
+                var userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "XUnityToolkit", "webview2-cache");
+                var window = new WebViewWindow(AppUrl, userDataFolder, logger);
+                _ = InitializeAndShowWindow(window);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to create WebView2 window, falling back to default browser");
+                FallbackToBrowser();
+            }
+        }
+        else
+        {
+            OpenInDefaultBrowser();
+            _trayIcon?.ShowBalloonTip(
+                3000,
+                "XUnity Toolkit WebUI",
+                "程序已在后台运行，双击托盘图标打开浏览器",
+                ToolTipIcon.Info);
+        }
+    }
+
+    private async Task InitializeAndShowWindow(WebViewWindow window)
+    {
+        try
+        {
+            await window.InitializeAsync();
+            window.Show();
+            _mainWindow = window; // Only expose after fully initialized and shown
+
+            _trayIcon?.ShowBalloonTip(
+                3000,
+                "XUnity Toolkit WebUI",
+                "程序已在后台运行，关闭窗口将最小化到托盘",
+                ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "WebView2 initialization failed, falling back to default browser");
+            window.Dispose();
+            FallbackToBrowser();
+        }
+    }
+
+    private void FallbackToBrowser()
+    {
+        _webView2Available = false;
+        _mainWindow = null;
+        if (_openMenuItem is not null)
+            _openMenuItem.Text = "打开浏览器";
+        OpenInDefaultBrowser();
     }
 
     public void ShowNotification(string title, string body, ToolTipIcon icon = ToolTipIcon.Info)
@@ -97,7 +191,7 @@ public sealed class SystemTrayService(
             ContextMenuStrip = BuildContextMenu()
         };
 
-        icon.DoubleClick += (_, _) => OpenBrowser();
+        icon.DoubleClick += (_, _) => ShowOrOpenUI();
         return icon;
     }
 
@@ -105,8 +199,8 @@ public sealed class SystemTrayService(
     {
         var menu = new ContextMenuStrip();
 
-        var openItem = new ToolStripMenuItem("打开浏览器");
-        openItem.Click += (_, _) => OpenBrowser();
+        _openMenuItem = new ToolStripMenuItem(_webView2Available ? "显示窗口" : "打开浏览器");
+        _openMenuItem.Click += (_, _) => ShowOrOpenUI();
 
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) =>
@@ -115,13 +209,29 @@ public sealed class SystemTrayService(
             lifetime.StopApplication();
         };
 
-        menu.Items.Add(openItem);
+        menu.Items.Add(_openMenuItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
         return menu;
     }
 
-    private void OpenBrowser()
+    private void ShowOrOpenUI()
+    {
+        var window = _mainWindow;
+        if (window is not null && _webView2Available)
+        {
+            window.Show();
+            if (window.WindowState == FormWindowState.Minimized)
+                window.WindowState = FormWindowState.Normal;
+            window.Activate();
+        }
+        else
+        {
+            OpenInDefaultBrowser();
+        }
+    }
+
+    private void OpenInDefaultBrowser()
     {
         try
         {
@@ -133,5 +243,6 @@ public sealed class SystemTrayService(
     public void Dispose()
     {
         // NotifyIcon is owned and disposed by the STA thread via `using` in RunTrayLoop
+        // WebViewWindow is disposed via FormClosing when Application.Exit() is called
     }
 }

@@ -352,7 +352,7 @@ async function handleIconContextMenuSelect(key: string) {
   } else if (key === 'web-icon') {
     showIconPicker.value = true
   } else if (key === 'upload-icon') {
-    iconFileInput.value?.click()
+    handleUploadIconFromExplorer()
   } else if (key === 'delete-icon') {
     try {
       await gamesApi.deleteCustomIcon(gameId)
@@ -377,7 +377,21 @@ async function handleIconContextMenuSelect(key: string) {
   }
 }
 
-const iconFileInput = ref<HTMLInputElement | null>(null)
+async function handleUploadIconFromExplorer() {
+  const path = await selectFile({
+    title: '选择图标图片',
+    filters: [{ label: '图片文件', extensions: ['.jpg', '.jpeg', '.png', '.webp'] }],
+  })
+  if (!path) return
+  try {
+    await gamesApi.uploadIconFromPath(gameId, path)
+    await gamesStore.refreshGame(gameId)
+    if (game.value) game.value = await gamesApi.get(gameId)
+    message.success('图标已更新')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '上传图标失败')
+  }
+}
 
 async function handleIconSaved() {
   await gamesStore.refreshGame(gameId)
@@ -388,29 +402,6 @@ function handleBackgroundSaved() {
   if (game.value) game.value.hasBackground = true
   bgTimestamp.value = Date.now()
   heroBgLoaded.value = false
-}
-
-async function handleIconFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    message.error('仅支持 JPEG、PNG 或 WebP 格式')
-    return
-  }
-  if (file.size > 5 * 1024 * 1024) {
-    message.error('图片文件不能超过 5 MB')
-    return
-  }
-  try {
-    await gamesApi.uploadIcon(gameId, file)
-    await gamesStore.refreshGame(gameId)
-    if (game.value) game.value = await gamesApi.get(gameId)
-    message.success('自定义图标已上传')
-  } catch (err) {
-    message.error(err instanceof Error ? err.message : '上传图标失败')
-  }
 }
 
 async function handleInstallAiEndpoint() {
@@ -1168,15 +1159,6 @@ onBeforeUnmount(() => stopWatch())
       placement="bottom-start"
       @clickoutside="showIconContextMenu = false"
       @select="handleIconContextMenuSelect"
-    />
-
-    <!-- Hidden file input for icon upload -->
-    <input
-      ref="iconFileInput"
-      type="file"
-      accept="image/jpeg,image/png,image/webp"
-      style="display: none"
-      @change="handleIconFileSelect"
     />
 
     <!-- Cover Picker Modal -->
