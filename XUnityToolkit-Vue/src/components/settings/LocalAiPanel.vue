@@ -310,6 +310,55 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- LLAMA Download Banner -->
+    <div v-if="!llamaInstalled && !store.llamaDownload" class="llama-download-banner">
+      <div class="llama-download-info">
+        <NIcon :size="20"><DownloadOutlined /></NIcon>
+        <div>
+          <div class="llama-download-title">llama.cpp 引擎未安装</div>
+          <div class="llama-download-desc">本地 AI 翻译需要 llama.cpp 推理引擎。可从 GitHub 发行版在线下载。</div>
+        </div>
+      </div>
+      <NButton type="primary" @click="store.downloadLlama()">
+        <template #icon><NIcon><DownloadOutlined /></NIcon></template>
+        下载 llama.cpp
+      </NButton>
+    </div>
+
+    <div v-if="store.llamaDownload && !store.llamaDownload.done && !store.llamaDownload.error" class="llama-download-banner downloading">
+      <div class="llama-download-progress-info">
+        <span>正在下载 llama.cpp 引擎...</span>
+        <span class="llama-download-stats">
+          {{ formatBytes(store.llamaDownload.bytesDownloaded) }}
+          <template v-if="store.llamaDownload.totalBytes > 0">
+            / {{ formatBytes(store.llamaDownload.totalBytes) }}
+          </template>
+          <template v-if="store.llamaDownload.speedBytesPerSec > 0">
+            &middot; {{ formatSpeed(store.llamaDownload.speedBytesPerSec) }}
+          </template>
+        </span>
+      </div>
+      <NProgress
+        type="line"
+        :percentage="store.llamaDownload.totalBytes > 0
+          ? Math.round(store.llamaDownload.bytesDownloaded / store.llamaDownload.totalBytes * 100)
+          : 0"
+        :show-indicator="false"
+        style="margin: 8px 0"
+      />
+      <NButton size="small" quaternary @click="store.cancelLlamaDownload()">
+        <template #icon><NIcon><CloseOutlined /></NIcon></template>
+        取消
+      </NButton>
+    </div>
+
+    <div v-if="store.llamaDownload?.error" class="llama-download-banner error">
+      <span>{{ store.llamaDownload.error }}</span>
+      <NButton size="small" type="primary" @click="store.retryLlamaDownload()">
+        重试
+      </NButton>
+    </div>
+
     <!-- Error Display (skip LLAMA_NOT_INSTALLED sentinel) -->
     <div v-if="showErrorBanner" class="error-banner">
       {{ store.status!.error }}
@@ -719,6 +768,54 @@ onBeforeUnmount(() => {
   color: var(--danger);
   font-size: 13px;
   word-break: break-word;
+}
+
+.llama-download-banner {
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, transparent);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.llama-download-banner .llama-download-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--accent);
+}
+.llama-download-banner .llama-download-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+}
+.llama-download-banner .llama-download-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+.llama-download-banner .llama-download-progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.llama-download-banner .llama-download-stats {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.llama-download-banner.downloading {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+.llama-download-banner.error {
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
 }
 
 /* Info Sections */

@@ -254,6 +254,8 @@ export const localLlmApi = {
     api.put<void>('/api/local-llm/settings', req),
   getCatalog: () => api.get<BuiltInModelInfo[]>('/api/local-llm/catalog'),
   getLlamaStatus: () => api.get<LlamaStatus>('/api/local-llm/llama-status'),
+  downloadLlama: () => api.post<void>('/api/local-llm/llama-download'),
+  cancelLlamaDownload: () => api.post<void>('/api/local-llm/llama-download/cancel'),
   start: (modelPath: string, gpuLayers?: number, contextLength?: number) =>
     api.post<LocalLlmStatus>('/api/local-llm/start', { modelPath, gpuLayers, contextLength }),
   stop: () => api.post<LocalLlmStatus>('/api/local-llm/stop'),

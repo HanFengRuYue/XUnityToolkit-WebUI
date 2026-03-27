@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as signalR from '@microsoft/signalr'
 import { localLlmApi } from '@/api/games'
-import type { LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalLlmDownloadProgress, LlamaStatus } from '@/api/types'
+import type { LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalLlmDownloadProgress, LlamaStatus, LlamaDownloadProgress } from '@/api/types'
 
 export const useLocalLlmStore = defineStore('localLlm', () => {
   const status = ref<LocalLlmStatus | null>(null)
@@ -11,6 +11,7 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
   const catalog = ref<BuiltInModelInfo[]>([])
   const downloads = ref<Map<string, LocalLlmDownloadProgress>>(new Map())
   const llamaStatus = ref<LlamaStatus | null>(null)
+  const llamaDownload = ref<LlamaDownloadProgress | null>(null)
 
   const isRunning = computed(() => status.value?.state === 'Running')
   const isStarting = computed(() => status.value?.state === 'Starting')
@@ -45,6 +46,17 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
       } else {
         downloads.value.set(progress.catalogId, progress)
         downloads.value = new Map(downloads.value)
+      }
+    })
+
+    connection.on('llamaDownloadProgress', (progress: LlamaDownloadProgress) => {
+      if (progress.done && !progress.error) {
+        llamaDownload.value = null
+        fetchLlamaStatus()
+      } else if (progress.error) {
+        llamaDownload.value = progress
+      } else {
+        llamaDownload.value = progress
       }
     })
 
@@ -118,11 +130,26 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
     await fetchSettings()
   }
 
+  async function downloadLlama() {
+    await localLlmApi.downloadLlama()
+  }
+
+  async function cancelLlamaDownload() {
+    await localLlmApi.cancelLlamaDownload()
+    llamaDownload.value = null
+  }
+
+  async function retryLlamaDownload() {
+    llamaDownload.value = null
+    await localLlmApi.downloadLlama()
+  }
+
   return {
-    status, settings, gpus, catalog, downloads, llamaStatus,
+    status, settings, gpus, catalog, downloads, llamaStatus, llamaDownload,
     isRunning, isStarting, isBusy,
     connect, disconnect,
     fetchStatus, fetchSettings, fetchGpus, refreshGpus, fetchCatalog, fetchLlamaStatus, fetchModels,
     startServer, stopServer, downloadModel, pauseDownload, cancelDownload,
+    downloadLlama, cancelLlamaDownload, retryLlamaDownload,
   }
 })

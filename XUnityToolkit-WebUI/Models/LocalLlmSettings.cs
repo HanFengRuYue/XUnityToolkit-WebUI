@@ -74,7 +74,15 @@ public sealed record LlamaBackendInfo(
 public sealed record LlamaStatus(
     string BundledVersion,
     IReadOnlyList<LlamaBackendInfo> Backends,
-    GpuBackend RecommendedBackend);
+    GpuBackend RecommendedBackend,
+    bool IsDownloading = false);
+
+public sealed record LlamaDownloadProgress(
+    long BytesDownloaded,
+    long TotalBytes,
+    long SpeedBytesPerSec,
+    bool Done,
+    string? Error);
 
 public sealed record BuiltInModelInfo(
     string Id,

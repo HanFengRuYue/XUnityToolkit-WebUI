@@ -1,8 +1,10 @@
 # build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload]
+# 用法: .\build.ps1 [-SkipDownload] [-Edition full|no-llama|lite]
 
 param(
-    [switch]$SkipDownload
+    [switch]$SkipDownload,
+    [ValidateSet('full', 'no-llama', 'lite')]
+    [string]$Edition = 'full'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -80,6 +82,7 @@ Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
 Write-Host "    Version: $BuildVersion" -ForegroundColor DarkGray
 Write-Host "    Target: $rid" -ForegroundColor DarkGray
+Write-Host "    Edition: $Edition" -ForegroundColor DarkGray
 Write-Host ""
 
 $currentStep = 0
@@ -279,6 +282,9 @@ if (-not $SkipDownload) {
     }
 
     # ── llama.cpp binaries from GitHub Releases (pinned version) ──
+    if ($Edition -ne 'full') {
+        Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
+    } else {
     $llamaTag = "b8416"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
@@ -306,6 +312,7 @@ if (-not $SkipDownload) {
         }
     }
     Remove-OldVersions -Dir $llamaDir -ExpectedFiles $expectedLlama
+    } # end if ($Edition -eq 'full')
 
     # ── Update classdata.tpk from AssetRipper/Tpk CI ──
     if (Get-Command gh -ErrorAction SilentlyContinue) {
@@ -414,17 +421,20 @@ New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 
 # ── Step: Publish win-x64 ──
 $currentStep++
-$OutputDir = Join-Path $ReleaseRoot $rid
+$editionSuffix = if ($Edition -eq 'full') { '' } else { "-$Edition" }
+$OutputDir = Join-Path $ReleaseRoot "$rid$editionSuffix"
+$selfContained = if ($Edition -eq 'lite') { 'false' } else { 'true' }
 Write-Host ""
-Write-Host "[$currentStep/$stepCount] Publishing $rid..." -ForegroundColor Yellow
+Write-Host "[$currentStep/$stepCount] Publishing $rid ($Edition)..." -ForegroundColor Yellow
 
 & dotnet publish $ProjectFile `
     -c Release `
     -r $rid `
-    --self-contained true `
+    --self-contained $selfContained `
     -p:DebugType=none `
     -p:SkipFrontendBuild=true `
     -p:InformationalVersion=$BuildVersion `
+    -p:Edition=$Edition `
     -o $OutputDir
 
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
@@ -452,6 +462,14 @@ if (Test-Path $bundledSrc) {
     $bundledDest = Join-Path $OutputDir 'bundled'
     if (Test-Path $bundledDest) { Remove-Item $bundledDest -Recurse -Force }
     Copy-Item -Path $bundledSrc -Destination $bundledDest -Recurse -Force
+    # Remove llama for non-full editions
+    if ($Edition -ne 'full') {
+        $llamaDest = Join-Path $bundledDest 'llama'
+        if (Test-Path $llamaDest) {
+            Remove-Item $llamaDest -Recurse -Force
+            Write-Host "  Removed bundled/llama/ (edition: $Edition)" -ForegroundColor DarkGray
+        }
+    }
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
 

@@ -92,7 +92,13 @@ public static class SettingsEndpoints
                 ?.InformationalVersion
                 ?? asm.GetName().Version?.ToString()
                 ?? "1.0.0";
-            return Results.Ok(ApiResult<VersionInfo>.Ok(new VersionInfo(version)));
+            var edition = EditionInfo.Current switch
+            {
+                AppEdition.NoLlama => "no-llama",
+                AppEdition.Lite => "lite",
+                _ => "full"
+            };
+            return Results.Ok(ApiResult<VersionInfo>.Ok(new VersionInfo(version, edition)));
         });
 
         group.MapGet("/data-path", (AppDataPaths paths) =>
@@ -367,6 +373,6 @@ public static class SettingsEndpoints
     }
 }
 
-public record VersionInfo(string Version);
+public record VersionInfo(string Version, string Edition);
 
 public record DataPathInfo(string Path);
