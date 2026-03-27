@@ -207,6 +207,7 @@ export interface AppSettings {
   libraryCardSize: string
   libraryGap: string
   libraryShowLabels: boolean
+  pageZoom: number
   receivePreReleaseUpdates: boolean
   installOptions: InstallOptions
 }

@@ -34,7 +34,7 @@ internal sealed class WebViewWindow : Form
 
         Text = "XUnity Toolkit WebUI";
         Size = new Size(1200, 800);
-        MinimumSize = new Size(800, 600);
+        MinimumSize = new Size(500, 400);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.None;
         Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;

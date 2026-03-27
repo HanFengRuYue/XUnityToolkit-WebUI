@@ -32,6 +32,7 @@ import {
   FileUploadOutlined,
   StorageOutlined,
   ExpandMoreOutlined,
+  ZoomInOutlined,
 } from '@vicons/material'
 import { LogoGithub } from '@vicons/ionicons5'
 import { settingsApi } from '@/api/games'
@@ -99,6 +100,7 @@ const settings = ref<AppSettings>({
   libraryCardSize: 'medium',
   libraryGap: 'normal',
   libraryShowLabels: true,
+  pageZoom: 0,
   receivePreReleaseUpdates: false,
   installOptions: {
     autoInstallTmpFont: true,
@@ -137,6 +139,20 @@ watch(() => settings.value.theme, (newTheme) => {
 watch(() => settings.value.accentColor, (newColor) => {
   if (newColor) themeStore.setAccentColor(newColor)
 })
+
+// Sync page zoom changes immediately
+watch(() => settings.value.pageZoom, (newZoom) => {
+  if (typeof newZoom === 'number') themeStore.setPageZoom(newZoom)
+})
+
+function handleZoomChange(value: number | null) {
+  if (value === null) return
+  settings.value.pageZoom = value
+}
+
+function handleZoomReset() {
+  settings.value.pageZoom = 0
+}
 
 async function loadSettings() {
   disableAutoSave()
@@ -410,6 +426,31 @@ onActivated(() => loadSettings())
             </NColorPicker>
           </div>
           <span class="form-hint">选择应用的主题色，将影响所有页面的高亮和按钮颜色</span>
+        </div>
+        <div class="form-row">
+          <label class="form-label">
+            <NIcon :size="14" color="var(--text-3)"><ZoomInOutlined /></NIcon>
+            页面缩放（{{ themeStore.effectiveZoom }}%）
+          </label>
+          <div class="zoom-slider-row">
+            <NSlider
+              :value="themeStore.effectiveZoom"
+              @update:value="handleZoomChange"
+              :min="50"
+              :max="200"
+              :step="5"
+              :format-tooltip="(v: number) => `${v}%`"
+            />
+            <NButton
+              size="tiny"
+              quaternary
+              :disabled="settings.pageZoom === 0"
+              @click="handleZoomReset"
+            >
+              重置
+            </NButton>
+          </div>
+          <span class="form-hint">调整界面整体缩放比例，重置将恢复为系统默认缩放</span>
         </div>
         <div class="form-row">
           <label class="form-label">
@@ -865,6 +906,16 @@ onActivated(() => loadSettings())
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.zoom-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zoom-slider-row :deep(.n-slider) {
+  flex: 1;
 }
 
 .accent-swatch {

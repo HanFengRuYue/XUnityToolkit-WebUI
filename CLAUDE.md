@@ -39,15 +39,17 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 用于系统托盘 NotifyIcon 和 WebView2 窗口)
 - **前端：** Vue 3 + TypeScript + Naive UI + Pinia（位于 `XUnityToolkit-Vue/`）
-- **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
+- **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；`isNarrowDesktop`（768-900px 视口）自动折叠侧边栏到 64px（不修改 store 持久化状态）；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
 - **AI 翻译页面布局：** 单列布局 — 统计条 → 管线状态 → 设置（可折叠区块卡片，`collapsed.settings`）→ 最近翻译 → 错误；无两列网格
 - **实时通信：** 通过单个 `InstallProgressHub` 使用 SignalR（分组：`game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`）；`preCacheStatsUpdate` 广播到 `ai-translation` 分组用于预翻译缓存命中/未命中统计；`healthReportReady` 在安装验证步骤完成后广播到 `game-{id}` 分组
 - **关闭超时：** `HostOptions.ShutdownTimeout = 3s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
 - **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许为开发/测试覆盖路径；API 密钥使用 DPAPI 加密
 - **系统托盘：** NotifyIcon 在专用 STA 线程上运行；`ShowNotification` 通过 `SynchronizationContext.Post` 调度到 STA；`_trayIcon`/`_syncContext` 为 `volatile`
-- **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`）内嵌 WebView2 控件显示前端 UI；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag` 实现原生窗口拖拽；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 实现无边框窗口边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；WebView2 运行时不可用时自动回退到系统浏览器；用户数据目录：`{AppData}/webview2-cache/`
+- **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`，`MinimumSize` 500×400）内嵌 WebView2 控件显示前端 UI；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag` 实现原生窗口拖拽；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 实现无边框窗口边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；WebView2 运行时不可用时自动回退到系统浏览器；用户数据目录：`{AppData}/webview2-cache/`
+- **WebView2 DPI 缩放陷阱：** `MinimumSize` 是物理像素，CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著（800px 物理 at 150% DPI = 533 CSS px）；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问（桌面端用浮动标题栏，移动端用顶栏集成按钮）
 - **WebView2 WndProc 陷阱：** `Message.LParam` 在 64 位系统上必须用 `nint` 解包坐标（`(nint)m.LParam`），不要用 `m.LParam.ToInt32()`——后者在多显示器/负坐标场景会抛 `OverflowException`
-- **自定义标题栏：** 前端 `useWindowControls` composable（模块级单例）通过 `window.chrome?.webview` 检测 WebView2 环境；`AppShell.vue` 中的 `.window-titlebar` 仅在 WebView2 模式渲染（透明覆盖层 + 窗口控制按钮）；浏览器模式下无标题栏、无额外 padding；移动端媒体查询中必须隐藏标题栏并重置 padding
+- **页面缩放：** `useThemeStore` 管理页面缩放；`baseDpr`（模块级常量）捕获 `window.devicePixelRatio`；`pageZoom` ref（0=自动检测，50-200=用户设定）；CSS `document.documentElement.style.zoom = effectiveZoom / (baseDpr * 100)` 补偿系统 DPI 使滑块值直接表示有效缩放百分比；localStorage 缓存防闪烁 + 后端持久化；`AppSettings.PageZoom`（int，默认 0）
+- **自定义标题栏：** 前端 `useWindowControls` composable（模块级单例）通过 `window.chrome?.webview` 检测 WebView2 环境；`AppShell.vue` 中的 `.window-titlebar` 仅在 WebView2 模式渲染（透明覆盖层 + 窗口控制按钮）；浏览器模式下无标题栏、无额外 padding；移动端媒体查询中隐藏浮动标题栏并将窗口控制按钮集成到移动端顶栏（`.topbar-window-controls`），顶栏通过 `app-region: drag` 支持拖拽
 - **无控制台：** `OutputType=WinExe` — 无控制台窗口；不要改回 `Exe`
 - **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置；在 `Initialize()` 时通过 `WebClient.DownloadStringAsync` 发送连通性 ping（`GET /api/translate/ping?gameId=`）（即发即忘）
 - **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；批量模式由 `SemaphoreSlim` 限制；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
