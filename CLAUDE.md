@@ -133,11 +133,6 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **`TermCategoryMapping.FromString`：** `Models/TermEntry.cs` 中的共享 `Dictionary<string, TermCategory>`；被 `GlossaryExtractionService` 和 `TermExtractionService` 用于 LLM 响应解析
 - **`GameProcessHelper.KillGameProcessAsync`：** `Infrastructure/GameProcessHelper.cs`；静态方法，处理通过 shell 启动（如 Steam）的游戏进程关闭——`UseShellExecute=true` 返回的 shell 启动器会立即退出而实际游戏作为独立进程运行；按可执行文件名 + 游戏目录匹配真实进程；kill 后延迟 1 秒确保文件句柄释放
 
-## 前端共享工具
-
-- **`src/utils/format.ts`：** `formatBytes(bytes)` 和 `formatSpeed(bytesPerSec)` — 共享格式化；不要在组件中声明局部的 `formatBytes`/`formatSize`
-- **`src/constants/prompts.ts`：** `DEFAULT_SYSTEM_PROMPT` — 共享默认系统提示词常量；不要在组件中重复
-
 ## 代码约定
 
 - **Git commit 消息：** 标题和正文必须用中文书写（conventional commit 前缀如 `feat:`/`fix:`/`ci:`/`docs:` 可保持英文）

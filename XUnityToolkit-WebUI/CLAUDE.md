@@ -2,6 +2,14 @@
 
 ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录 `CLAUDE.md`。
 
+## 命令
+
+```bash
+dotnet build XUnityToolkit-WebUI.csproj                       # 构建（自动触发前端构建）
+dotnet build XUnityToolkit-WebUI.csproj -p:SkipFrontendBuild=true  # 仅构建后端
+dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http://127.0.0.1:51821）
+```
+
 ## 核心
 
 - **无迁移代码：** 项目处于预稳定阶段——不做向后兼容的迁移或旧格式转换
