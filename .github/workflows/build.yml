@@ -425,44 +425,66 @@ jobs:
 
       # ── Publish backend ──
 
-      - name: Publish win-x64
+      - name: Publish all editions
         shell: pwsh
         run: |
           $v = '${{ steps.ver.outputs.build_version }}'
-          dotnet publish XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -p:DebugType=none `
-            -p:SkipFrontendBuild=true `
-            -p:InformationalVersion=$v `
-            --no-restore `
-            -o "Release\win-x64"
+          $editions = @(
+            @{ Name='full';     SC='true';  Suffix='';          Edition='full' },
+            @{ Name='no-llama'; SC='true';  Suffix='-no-llama'; Edition='no-llama' },
+            @{ Name='lite';     SC='false'; Suffix='-lite';     Edition='lite' }
+          )
 
-          if ($LASTEXITCODE -ne 0) { throw "Publish failed for win-x64" }
+          foreach ($ed in $editions) {
+            $outDir = "Release\win-x64$($ed.Suffix)"
+            Write-Host "`n--- Publishing edition: $($ed.Name) ---"
 
-          # Cleanup unnecessary files
-          Get-ChildItem "Release\win-x64" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
-            Remove-Item -Force -ErrorAction SilentlyContinue
+            # Lite (framework-dependent) needs its own restore since --no-restore
+            # was used with the self-contained restore earlier
+            $restoreFlag = if ($ed.Name -eq 'lite') { '' } else { '--no-restore' }
 
-          # Copy bundled/ tree post-publish
-          if (Test-Path "bundled") {
-            $dest = "Release\win-x64\bundled"
-            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-            Copy-Item -Path "bundled" -Destination $dest -Recurse -Force
-            Write-Host "Copied bundled assets to output."
+            $publishArgs = @(
+              'publish', 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj',
+              '-c', 'Release',
+              '-r', 'win-x64',
+              "--self-contained", $ed.SC,
+              '-p:DebugType=none',
+              '-p:SkipFrontendBuild=true',
+              "-p:InformationalVersion=$v",
+              "-p:Edition=$($ed.Edition)",
+              '-o', $outDir
+            )
+            if ($restoreFlag) { $publishArgs += $restoreFlag }
+
+            & dotnet @publishArgs
+            if ($LASTEXITCODE -ne 0) { throw "Publish failed for $($ed.Name)" }
+
+            # Cleanup unnecessary files
+            Get-ChildItem $outDir -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
+              Remove-Item -Force -ErrorAction SilentlyContinue
+
+            # Copy bundled/ tree post-publish
+            if (Test-Path "bundled") {
+              $dest = Join-Path $outDir "bundled"
+              if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+              Copy-Item -Path "bundled" -Destination $dest -Recurse -Force
+              # Remove llama for non-full editions
+              if ($ed.Name -ne 'full') {
+                $llamaDest = Join-Path $dest "llama"
+                if (Test-Path $llamaDest) { Remove-Item $llamaDest -Recurse -Force }
+              }
+            }
+
+            # Copy Updater.exe
+            $updaterExe = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
+            if (Test-Path $updaterExe) {
+              Copy-Item $updaterExe "$outDir/" -Force
+            }
+
+            $exeFile = Get-Item (Join-Path $outDir "XUnityToolkit-WebUI.exe")
+            $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
+            Write-Host "$($ed.Name) done (exe: $sizeMB MB)"
           }
-
-          # Copy Updater.exe
-          $updaterExe = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
-          if (Test-Path $updaterExe) {
-            Copy-Item $updaterExe "Release/win-x64/" -Force
-            Write-Host "Copied Updater.exe"
-          }
-
-          $exeFile = Get-Item "Release\win-x64\XUnityToolkit-WebUI.exe"
-          $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
-          Write-Host "win-x64 done (exe: $sizeMB MB)"
 
       # ── Generate manifest & create all packages ──
       # Main release ZIP runs in a background job while component ZIPs are
@@ -473,29 +495,37 @@ jobs:
         shell: pwsh
         run: |
           $rid = "win-x64"
-          $releaseDir = "Release/$rid"
-          $releaseDirAbs = (Resolve-Path $releaseDir).Path
+          $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
+          $version = "${{ steps.ver.outputs.build_version }}"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-          # Start main release ZIP in background
-          $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
-          $mainZipDst = Join-Path $PWD.Path "XUnityToolkit-WebUI-v$vPrefix-win-x64.zip"
-          $mainZipJob = Start-Job -ScriptBlock {
+          $editions = @(
+            @{ Name='full';     Suffix='';          ManifestRid='win-x64' },
+            @{ Name='no-llama'; Suffix='-no-llama'; ManifestRid='win-x64-no-llama' },
+            @{ Name='lite';     Suffix='-lite';     ManifestRid='win-x64-lite' }
+          )
+
+          # Start main ZIP jobs in background for all editions
+          $mainZipJobs = @{}
+          foreach ($ed in $editions) {
+            $releaseDir = "Release/$rid$($ed.Suffix)"
+            $releaseDirAbs = (Resolve-Path $releaseDir).Path
+            $mainZipDst = Join-Path $PWD.Path "XUnityToolkit-WebUI-v$vPrefix-$rid$($ed.Suffix).zip"
+            $mainZipJobs[$ed.Name] = Start-Job -ScriptBlock {
               param($src, $dst)
               Add-Type -AssemblyName System.IO.Compression.FileSystem
               if (Test-Path $dst) { Remove-Item $dst }
               [System.IO.Compression.ZipFile]::CreateFromDirectory($src, $dst)
-          } -ArgumentList $releaseDirAbs, $mainZipDst
-
-          # ── Generate update manifest ──
-          $version = "${{ steps.ver.outputs.build_version }}"
-          $manifest = @{
-              version = $version
-              rid = $rid
-              files = @{}
+            } -ArgumentList $releaseDirAbs, $mainZipDst
           }
 
-          Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
+          # ── Generate per-edition manifests and app ZIPs ──
+          foreach ($ed in $editions) {
+            $releaseDir = "Release/$rid$($ed.Suffix)"
+            $releaseDirAbs = (Resolve-Path $releaseDir).Path
+
+            $manifest = @{ version = $version; rid = $ed.ManifestRid; files = @{} }
+            Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
               $relativePath = $_.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
               $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
@@ -505,49 +535,31 @@ jobs:
                          elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity)/') { "bundled-plugins" }
                          elseif ($relativePath -match '^bundled/') { "bundled-misc" }
                          else { "app" }
-              $manifest.files[$relativePath] = @{
-                  hash = "sha256:$hash"
-                  size = $_.Length
-                  package = $package
-              }
-          }
-          $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$rid.json" -Encoding utf8
-          Write-Host "Generated manifest."
+              $manifest.files[$relativePath] = @{ hash = "sha256:$hash"; size = $_.Length; package = $package }
+            }
+            $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$($ed.ManifestRid).json" -Encoding utf8
+            Write-Host "Generated manifest-$($ed.ManifestRid).json"
 
-          # Generate update-check.json for CDN-based update checks
-          $ucAssets = [ordered]@{}
-          @("manifest-$rid.json", "app-$rid.zip", "wwwroot.zip", "bundled-llama.zip", "bundled-fonts.zip", "bundled-plugins.zip", "bundled-misc.zip") | ForEach-Object {
-            $p = "Release/$_"
-            if (Test-Path $p) { $ucAssets[$_] = (Get-Item $p).Length }
-          }
-          $updateCheck = [ordered]@{
-            tag = ""
-            version = "${{ steps.ver.outputs.build_version }}"
-            changelog = ""
-            prerelease = $false
-            assets = $ucAssets
-          }
-          $updateCheck | ConvertTo-Json -Depth 3 | Set-Content -Path "Release/update-check.json" -Encoding utf8
-          Write-Host "Generated update-check.json"
-
-          # ── Create component ZIPs ──
-
-          # app ZIP — root-level files (exclude appsettings*)
-          $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
-          if ($appFiles) {
-            $appZip = "Release/app-$rid.zip"
-            if (Test-Path $appZip) { Remove-Item $appZip }
-            $zip = [System.IO.Compression.ZipFile]::Open($appZip, 'Create')
-            try {
-              foreach ($f in $appFiles) {
-                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
-              }
-            } finally { $zip.Dispose() }
-            Write-Host "Created app-$rid.zip"
+            # Per-edition app ZIP (root-level files, exclude appsettings*)
+            $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
+            if ($appFiles) {
+              $appZip = "Release/app-$($ed.ManifestRid).zip"
+              if (Test-Path $appZip) { Remove-Item $appZip }
+              $zip = [System.IO.Compression.ZipFile]::Open($appZip, 'Create')
+              try {
+                foreach ($f in $appFiles) {
+                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
+                }
+              } finally { $zip.Dispose() }
+              Write-Host "Created app-$($ed.ManifestRid).zip"
+            }
           }
 
-          # wwwroot ZIP — direct entry creation with prefix (no temp directory copy)
-          $wwwrootDir = Join-Path $releaseDir "wwwroot"
+          # ── Create shared component ZIPs (from full edition) ──
+          $fullReleaseDir = "Release/$rid"
+
+          # wwwroot ZIP
+          $wwwrootDir = Join-Path $fullReleaseDir "wwwroot"
           if (Test-Path $wwwrootDir) {
             $wwwrootZip = "Release/wwwroot.zip"
             if (Test-Path $wwwrootZip) { Remove-Item $wwwrootZip }
@@ -562,8 +574,8 @@ jobs:
             Write-Host "Created wwwroot.zip"
           }
 
-          # bundled sub-component ZIPs (split to minimize update download size)
-          $bundledDir = Join-Path $releaseDir "bundled"
+          # bundled sub-component ZIPs
+          $bundledDir = Join-Path $fullReleaseDir "bundled"
           if (Test-Path $bundledDir) {
             $bundledSubs = @(
               @{ Name = "bundled-llama";   Dirs = @("llama") },
@@ -588,7 +600,6 @@ jobs:
               Write-Host "Created $($sub.Name).zip"
             }
 
-            # bundled-misc.zip — root-level files in bundled/ (e.g., script-tag-presets.json)
             $miscFiles = Get-ChildItem -Path $bundledDir -File
             if ($miscFiles) {
               $miscZip = "Release/bundled-misc.zip"
@@ -603,35 +614,45 @@ jobs:
             }
           }
 
-          # Wait for main ZIP background job
-          $mainZipJob | Wait-Job | Out-Null
-          $mainZipOutput = Receive-Job $mainZipJob 2>&1
-          if ($mainZipOutput) { $mainZipOutput | ForEach-Object { Write-Host $_ } }
-          if ($mainZipJob.State -eq 'Failed') {
-              $err = $mainZipJob.ChildJobs[0].JobStateInfo.Reason.Message
-              Remove-Job $mainZipJob -Force
-              throw "Main ZIP creation failed: $err"
+          # Generate update-check.json
+          $ucAssets = [ordered]@{}
+          Get-ChildItem -Path "Release" -File -Filter "*.json" | ForEach-Object { $ucAssets[$_.Name] = $_.Length }
+          Get-ChildItem -Path "Release" -File -Filter "*.zip" | ForEach-Object { $ucAssets[$_.Name] = $_.Length }
+          $updateCheck = [ordered]@{
+            tag = ""; version = $version; changelog = ""; prerelease = $false; assets = $ucAssets
           }
-          Remove-Job $mainZipJob -Force
+          $updateCheck | ConvertTo-Json -Depth 3 | Set-Content -Path "Release/update-check.json" -Encoding utf8
+          Write-Host "Generated update-check.json"
 
-          $zipSize = [math]::Round((Get-Item "XUnityToolkit-WebUI-v$vPrefix-win-x64.zip").Length / 1MB, 1)
-          Write-Host "Created XUnityToolkit-WebUI-v$vPrefix-win-x64.zip ($zipSize MB)"
+          # Wait for all main ZIP background jobs
+          foreach ($ed in $editions) {
+            $job = $mainZipJobs[$ed.Name]
+            $job | Wait-Job | Out-Null
+            $jobOutput = Receive-Job $job 2>&1
+            if ($jobOutput) { $jobOutput | ForEach-Object { Write-Host $_ } }
+            if ($job.State -eq 'Failed') {
+              $err = $job.ChildJobs[0].JobStateInfo.Reason.Message
+              Remove-Job $job -Force
+              throw "Main ZIP creation failed for $($ed.Name): $err"
+            }
+            Remove-Job $job -Force
+            $zipFile = "XUnityToolkit-WebUI-v$vPrefix-$rid$($ed.Suffix).zip"
+            $zipSize = [math]::Round((Get-Item $zipFile).Length / 1MB, 1)
+            Write-Host "Created $zipFile ($zipSize MB)"
+          }
 
       # ── Build MSI installer ──
 
-      - name: Build MSI
+      - name: Build MSI (all editions)
         if: inputs.release_tag != ''
         shell: pwsh
         run: |
           $rid = "win-x64"
-          $outputDir = "Release/$rid"
           $installerProject = "Installer/Installer.wixproj"
+          $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
 
-          # Generate MSI version from build version
-          # Build version format: 3.x.YYYYMMDDHHmm
-          # MSI constraints: major < 256, minor < 256, build < 65536
           $parts = "${{ steps.ver.outputs.build_version }}".Split('.')
-          $timestamp = $parts[2]  # YYYYMMDDHHmm
+          $timestamp = $parts[2]
           $year = [int]$timestamp.Substring(0, 4)
           $month = [int]$timestamp.Substring(4, 2)
           $day = [int]$timestamp.Substring(6, 2)
@@ -642,40 +663,52 @@ jobs:
           $msiBuild = $hour * 60 + $minute
           $msiVersion = "$msiMajor.$msiMinor.$msiBuild"
 
-          # Source the shared harvesting function and generate file listing
           . ./Installer/Generate-InstallerWxs.ps1
-          $generatedDir = "Installer/Generated"
-          New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
-          Generate-InstallerWxs -ReleaseDir $outputDir -OutputFile "$generatedDir/HarvestedFiles.wxs"
 
-          $wixPlatform = 'x64'
+          $editions = @(
+            @{ Suffix='';          OutputDir="Release/$rid" },
+            @{ Suffix='-no-llama'; OutputDir="Release/$rid-no-llama" },
+            @{ Suffix='-lite';     OutputDir="Release/$rid-lite" }
+          )
 
-          # Do NOT set OutputPath — it interferes with WiX file resolution
-          dotnet build $installerProject `
-            -c Release `
-            -p:Platform=$wixPlatform `
-            -p:InstallerPlatform=$wixPlatform `
-            -p:AppPublishDir="$outputDir/" `
-            -p:MsiVersion="$msiVersion"
+          foreach ($ed in $editions) {
+            $edLabel = if ($ed.Suffix) { $ed.Suffix } else { 'full' }
+            Write-Host "`n--- Building MSI for $edLabel ---"
+            $generatedDir = "Installer/Generated"
+            New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
+            Generate-InstallerWxs -ReleaseDir $ed.OutputDir -OutputFile "$generatedDir/HarvestedFiles.wxs"
 
-          if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $rid" }
+            $wixPlatform = 'x64'
+            dotnet build $installerProject `
+              -c Release `
+              -p:Platform=$wixPlatform `
+              -p:InstallerPlatform=$wixPlatform `
+              -p:AppPublishDir="$($ed.OutputDir)/" `
+              -p:MsiVersion="$msiVersion"
 
-          # Find MSI in WiX default output location
-          $wixOutputDir = "Installer/bin/$wixPlatform/Release"
-          $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($msiFile) {
-            $vPrefix = "${{ steps.ver.outputs.version_prefix }}"
-            Move-Item $msiFile.FullName "Release/XUnityToolkit-WebUI-v$vPrefix-$rid.msi" -Force
-            Write-Host "MSI built: Release/XUnityToolkit-WebUI-v$vPrefix-$rid.msi"
+            if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $edLabel" }
+
+            $wixOutputDir = "Installer/bin/$wixPlatform/Release"
+            $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($msiFile) {
+              $msiName = "XUnityToolkit-WebUI-v$vPrefix-$rid$($ed.Suffix).msi"
+              Move-Item $msiFile.FullName "Release/$msiName" -Force
+              Write-Host "MSI built: Release/$msiName"
+            }
+            # Clean WiX output to avoid conflicts between editions
+            if (Test-Path $wixOutputDir) { Remove-Item $wixOutputDir -Recurse -Force }
           }
 
       # ── Upload artifacts ──
 
-      - name: Upload artifact
+      - name: Upload release ZIPs
         uses: actions/upload-artifact@v7
         with:
           name: release-win-x64
-          path: XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.zip
+          path: |
+            XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.zip
+            XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64-no-llama.zip
+            XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64-lite.zip
           retention-days: 3
 
       - name: Upload component packages artifact
@@ -685,7 +718,11 @@ jobs:
           name: release-components
           path: |
             Release/manifest-win-x64.json
+            Release/manifest-win-x64-no-llama.json
+            Release/manifest-win-x64-lite.json
             Release/app-win-x64.zip
+            Release/app-win-x64-no-llama.zip
+            Release/app-win-x64-lite.zip
             Release/wwwroot.zip
             Release/bundled-llama.zip
             Release/bundled-fonts.zip
@@ -693,6 +730,8 @@ jobs:
             Release/bundled-misc.zip
             Release/update-check.json
             Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.msi
+            Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64-no-llama.msi
+            Release/XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64-lite.msi
           retention-days: 3
 
   # ── Create GitHub Release ──
@@ -757,6 +796,8 @@ jobs:
           VER_PREFIX="${{ needs.build.outputs.version_prefix }}"
           gh release create "${{ inputs.release_tag }}" \
             "XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.zip" \
+            "XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.zip" \
+            "XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.zip" \
             --title "${{ inputs.release_name }}" \
             --notes-file release_notes.md \
             $PRERELEASE_FLAG \
@@ -768,12 +809,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # upload-artifact@v5 strips common path prefix (Release/)
-          # so files are at components/xxx, not components/Release/xxx
           ls -la components/
           gh release upload "${{ inputs.release_tag }}" \
             components/manifest-win-x64.json \
+            components/manifest-win-x64-no-llama.json \
+            components/manifest-win-x64-lite.json \
             components/app-win-x64.zip \
+            components/app-win-x64-no-llama.zip \
+            components/app-win-x64-lite.zip \
             components/wwwroot.zip \
             components/bundled-llama.zip \
             components/bundled-fonts.zip \
@@ -791,48 +834,32 @@ jobs:
           TAG="${{ inputs.release_tag }}"
           PRERELEASE="${{ inputs.prerelease }}"
 
-          # Extract ### Changelog section from release notes
           CHANGELOG=""
           if [ -f release_notes.md ]; then
             CHANGELOG=$(awk '/^### Changelog/{found=1; next} /^## |^### /{if(found) exit} found{print}' release_notes.md | sed 's/^ *//' | sed '/^$/d')
           fi
 
-          # Get component file sizes
-          MANIFEST_SIZE=$(stat -c%s components/manifest-win-x64.json 2>/dev/null || echo 0)
-          APP_SIZE=$(stat -c%s components/app-win-x64.zip 2>/dev/null || echo 0)
-          WWWROOT_SIZE=$(stat -c%s components/wwwroot.zip 2>/dev/null || echo 0)
-          LLAMA_SIZE=$(stat -c%s components/bundled-llama.zip 2>/dev/null || echo 0)
-          FONTS_SIZE=$(stat -c%s components/bundled-fonts.zip 2>/dev/null || echo 0)
-          PLUGINS_SIZE=$(stat -c%s components/bundled-plugins.zip 2>/dev/null || echo 0)
-          MISC_SIZE=$(stat -c%s components/bundled-misc.zip 2>/dev/null || echo 0)
+          # Build assets JSON dynamically from all component files
+          ASSETS_JSON="{}"
+          for f in components/*.json components/*.zip; do
+            [ -f "$f" ] || continue
+            NAME=$(basename "$f")
+            SIZE=$(stat -c%s "$f" 2>/dev/null || echo 0)
+            ASSETS_JSON=$(echo "$ASSETS_JSON" | jq --arg k "$NAME" --argjson v "$SIZE" '. + {($k): $v}')
+          done
 
-          # Build JSON (jq for proper escaping)
           jq -n \
             --arg tag "$TAG" \
             --arg version "$VER" \
             --arg changelog "$CHANGELOG" \
             --argjson prerelease "${PRERELEASE:-false}" \
-            --argjson manifest_size "$MANIFEST_SIZE" \
-            --argjson app_size "$APP_SIZE" \
-            --argjson wwwroot_size "$WWWROOT_SIZE" \
-            --argjson llama_size "$LLAMA_SIZE" \
-            --argjson fonts_size "$FONTS_SIZE" \
-            --argjson plugins_size "$PLUGINS_SIZE" \
-            --argjson misc_size "$MISC_SIZE" \
+            --argjson assets "$ASSETS_JSON" \
             '{
               tag: $tag,
               version: $version,
               changelog: $changelog,
               prerelease: $prerelease,
-              assets: {
-                "manifest-win-x64.json": $manifest_size,
-                "app-win-x64.zip": $app_size,
-                "wwwroot.zip": $wwwroot_size,
-                "bundled-llama.zip": $llama_size,
-                "bundled-fonts.zip": $fonts_size,
-                "bundled-plugins.zip": $plugins_size,
-                "bundled-misc.zip": $misc_size
-              }
+              assets: $assets
             }' > update-check.json
 
           gh release upload "${{ inputs.release_tag }}" update-check.json \
@@ -844,7 +871,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VER_PREFIX="${{ needs.build.outputs.version_prefix }}"
-          MSI_FILE="components/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.msi"
-          if [ -f "$MSI_FILE" ]; then
-            gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber --repo "${{ github.repository }}"
-          fi
+          for SUFFIX in "" "-no-llama" "-lite"; do
+            MSI_FILE="components/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64${SUFFIX}.msi"
+            if [ -f "$MSI_FILE" ]; then
+              gh release upload "${{ inputs.release_tag }}" "$MSI_FILE" --clobber --repo "${{ github.repository }}"
+              echo "Uploaded $(basename "$MSI_FILE")"
+            fi
+          done
