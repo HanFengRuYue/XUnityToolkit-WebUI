@@ -37,7 +37,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 ## 架构
 
-- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 仅用于系统托盘 NotifyIcon)
+- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 用于系统托盘 NotifyIcon 和 WebView2 窗口)
 - **前端：** Vue 3 + TypeScript + Naive UI + Pinia（位于 `XUnityToolkit-Vue/`）
 - **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
 - **AI 翻译页面布局：** 单列布局 — 统计条 → 管线状态 → 设置（可折叠区块卡片，`collapsed.settings`）→ 最近翻译 → 错误；无两列网格
@@ -45,6 +45,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **关闭超时：** `HostOptions.ShutdownTimeout = 3s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
 - **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许为开发/测试覆盖路径；API 密钥使用 DPAPI 加密
 - **系统托盘：** NotifyIcon 在专用 STA 线程上运行；`ShowNotification` 通过 `SynchronizationContext.Post` 调度到 STA；`_trayIcon`/`_syncContext` 为 `volatile`
+- **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`）内嵌 WebView2 控件显示前端 UI；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag` 实现原生窗口拖拽；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 实现无边框窗口边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；WebView2 运行时不可用时自动回退到系统浏览器；用户数据目录：`{AppData}/webview2-cache/`
+- **WebView2 WndProc 陷阱：** `Message.LParam` 在 64 位系统上必须用 `nint` 解包坐标（`(nint)m.LParam`），不要用 `m.LParam.ToInt32()`——后者在多显示器/负坐标场景会抛 `OverflowException`
+- **自定义标题栏：** 前端 `useWindowControls` composable（模块级单例）通过 `window.chrome?.webview` 检测 WebView2 环境；`AppShell.vue` 中的 `.window-titlebar` 仅在 WebView2 模式渲染（透明覆盖层 + 窗口控制按钮）；浏览器模式下无标题栏、无额外 padding；移动端媒体查询中必须隐藏标题栏并重置 padding
 - **无控制台：** `OutputType=WinExe` — 无控制台窗口；不要改回 `Exe`
 - **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置；在 `Initialize()` 时通过 `WebClient.DownloadStringAsync` 发送连通性 ping（`GET /api/translate/ping?gameId=`）（即发即忘）
 - **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；批量模式由 `SemaphoreSlim` 限制；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
@@ -64,7 +67,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **健康检查错误分析：** `CheckLogErrors` 双遍扫描：Pass 1 扫描 `[Error:]` 行匹配通用错误模式（IL2CPP、Harmony、程序集版本、类型加载、插件加载、字体缺失、文件未找到、权限、空引用、网络、XUnity 钩子）；Pass 2 扫描所有行匹配 LLMTranslate 端点专属模式（工具箱连接、空响应、数量不匹配、本地模型、端点禁用、API 失败）——DLL 通过 `Console.WriteLine` 输出，在 BepInEx 中显示为 `[Info/Message:]` 级别而非 `[Error:]`，因此必须独立扫描；`HealthCheckDetail(Category, Excerpt, Suggestion?)` 携带分类诊断；`SafeExcerpt` 剥离日志前缀并用 `Path.GetFileName` 替换绝对路径；每类最多 2 条、总计最多 10 条；添加新错误模式：在 `GeneralErrorPatterns` 或 `EndpointErrorPatterns` 列表中添加 `ErrorPattern` + 对应 `[GeneratedRegex]`
 - **插件健康验证前置条件：** `POST .../health-check/verify` 需要 `FullyInstalled` 或 `PartiallyInstalled` 状态；`BepInExOnly` 时 LLMTranslate.dll 未安装，ping 永远不会到达，验证必定超时
 - **健康检查 ↔ DLL 日志依赖：** `CheckEndpointRegistered` 扫描 BepInEx 日志中的 `"LLMTranslate"` 子串 — 需要 DLL 的 `Log()`（无条件）输出初始化 banner；不要将初始化消息限制在 `DebugLog()` 后面，否则健康检查将无法检测到端点
-- **文件浏览器：** `FileExplorerModal.vue`（`defineAsyncComponent` 懒加载）在 `App.vue` 全局挂载一次；`useFileExplorer()` composable 使用模块级 reactive 单例提供 `selectFile()`/`selectFolder()` → `Promise<string | null>`；返回服务端文件路径，兼容现有所有路径 API
+- **文件浏览器：** `FileExplorerModal.vue`（`defineAsyncComponent` 懒加载）在 `App.vue` 全局挂载一次；`useFileExplorer()` composable 使用模块级 reactive 单例提供 `selectFile()`/`selectFolder()` → `Promise<string | null>`；返回服务端文件路径，兼容现有所有路径 API；左侧栏包含快速访问（标准文件夹 + 用户固定文件夹）和磁盘列表；`QuickAccessHelper`（静态类，`Services/`）通过 Shell COM（STA 线程）枚举 `shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}`，结果缓存在 `volatile` 静态字段；COM 对象必须逐级 `Marshal.ReleaseComObject`（shell → folder → items → 每个 item）；`POST /api/filesystem/read-text` 读取文本文件内容（最大 10MB），供前端导入功能使用（翻译编辑器、术语编辑器）；所有文件上传场景均提供 `*-from-path` 端点变体（接受 `UploadFromPathRequest { FilePath }`），与 multipart 上传端点并存——前者用于内置文件浏览器点击选择，后者用于拖拽上传
 - **在线更新：** `UpdateService` 检查 GitHub Releases 的新版本；基于清单的差异下载（app/wwwroot/bundled-llama/bundled-fonts/bundled-plugins/bundled-misc 组件 ZIP）；`Updater.exe`（AOT，无运行时依赖）处理文件替换和重启；暂存在 `data/update-staging/`；两阶段备份-替换保证原子性；失败时回滚；通过 `AppSettings.ReceivePreReleaseUpdates` 选择预发布版本
 
 ## 翻译管线
@@ -151,7 +154,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **背景：** `GET .../background`, `POST .../background/upload`（10MB）, `POST .../background/{search,heroes,select,steam-search,steam-select,web-search,web-select}`, `DELETE .../background`
 - **配置：** `GET/PUT /api/games/{id}/config`（PUT 时 PatchAsync 读-修改-写）, `GET/PUT .../config/raw`
 - **设置：** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`（删除整个 `paths.Root` 目录，使所有服务缓存失效，重建目录）, `GET .../data-path`, `POST .../export`（ZIP，**非 ApiResult**）, `POST .../import`（multipart ZIP）, `POST .../open-data-folder`
-- **文件浏览器：** `GET /api/filesystem/drives`, `POST /api/filesystem/list`（前端文件浏览器弹窗用于替代 Windows 原生对话框）
+- **文件浏览器：** `GET /api/filesystem/drives`, `GET /api/filesystem/quick-access`, `POST /api/filesystem/list`, `POST /api/filesystem/read-text`（前端文件浏览器弹窗用于替代 Windows 原生对话框）
+- **Path-based 上传：** 所有文件上传端点均有 `*-from-path` 变体，接受 `UploadFromPathRequest { FilePath }` JSON 请求体，用于内置文件浏览器场景；multipart 端点保留用于拖拽上传；涉及：`font-generation/upload-from-path`、`font-replacement/upload-from-path`、`cover/upload-from-path`、`background/upload-from-path`、`icon/upload-from-path`、`settings/import-from-path`、`charset/upload-custom-from-path`、`charset/upload-translation-from-path`
 - **AI 翻译：** `POST /api/translate`（**非 ApiResult** — DLL 直接调用；前端必须使用原始 `fetch`）, `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=`（来自 LLMTranslate.dll 的连通性 ping）
 - **AI 控制：** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`
@@ -214,7 +218,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **添加 BuiltInModelInfo 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **DataPathInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`
-- **FileExplorer 模型：** 在 2 处同步：`Models/FileExplorer.cs`, `src/api/types.ts`
+- **FileExplorer 模型：** 在 2 处同步：`Models/FileExplorer.cs`, `src/api/types.ts`；包含 `QuickAccessEntry`、`ReadTextResponse`；`UploadFromPathRequest` 为所有 path-based 上传端点共享的请求记录
 - **添加 UnityGameInfo 字段：** 在 2 处同步：`Models/UnityGameInfo.cs`, `src/api/types.ts`；安装编排器 Step 1 始终重新检测（`DetectAsync`），新字段自动生效无需额外处理
 - **添加 AppDataPaths 目录：** 还要更新 `SettingsEndpoints.cs` `/export` 端点中的导出排除列表，如果新目录包含大型/可重新生成/机器特定的数据；`translation-memory/`、`dynamic-patterns/`、`term-candidates/` 被排除在导出之外（可重新生成）
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
@@ -250,7 +254,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **更新器测试方法：** 创建模拟目录（app dir + staging dir + delete list），不指定 `--pid` 运行 Updater，验证文件被正确替换/删除；注意 `--app-dir` 须测试带和不带尾部 `\` 两种情况
 - **MSI 安装程序：** `Installer/Installer.wixproj` (WixToolset.Sdk)；每用户安装到 `%LocalAppData%\Programs\`；`build.ps1` 从发布输出自动生成 `Installer/Generated/HarvestedFiles.wxs`；MSI 版本：`{(YYYY-2024)*12+MM}.{DD}.{HH*60+mm}`（所有段在 MSI 限制内：major<256, minor<256, build<65536）
 - **MSI + 更新器共存：** Updater.exe 在增量更新后通过 P/Invoke（AOT 安全）同步 HKCU Uninstall 键中的 `DisplayVersion`/`InstallDate`
-- **MSI 注册表键：** 由 MSI 写入（`Components.wxs`），由 `Updater/Program.cs` 读取（MsiProductCode, InstallDir）；`DataPath` 键由 MSI 写入仅用于 `RemoveFolderEx` 清理 — 应用不再读取它；键路径：`HKCU\Software\XUnityToolkit`
+- **MSI MajorUpgrade 调度：** `Schedule="afterInstallExecute"` — 新版先安装再卸载旧版；`CleanupAppData` 组件（GUID `D4E5F6A7-...`）保留为空壳（仅 CleanupMarker 注册表值），用于 MSI 组件引用计数防止旧版 `RemoveFolderEx` 在升级时删除数据目录；不要移除该组件或更改其 GUID
+- **MSI 注册表键：** 由 MSI 写入（`Components.wxs`），由 `Updater/Program.cs` 读取（MsiProductCode, InstallDir）；`DataPath` 键由 MSI 写入，`CleanupMarker` 键为 `CleanupAppData` 组件 KeyPath；键路径：`HKCU\Software\XUnityToolkit`
+- **MSI 卸载不删除数据：** `%AppData%\XUnityToolkit\` 在卸载时保留（行业标准）；用户可通过应用内"设置重置"或手动删除清理
 - **安装程序许可证：** `Installer/License.rtf` 必须与项目根目录 `LICENSE` 匹配（版权持有人、许可类型）
 
 ### WiX 注意事项

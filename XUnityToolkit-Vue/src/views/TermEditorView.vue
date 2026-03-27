@@ -33,6 +33,8 @@ import {
   ContentCopyOutlined,
 } from '@vicons/material'
 import { gamesApi } from '@/api/games'
+import { filesystemApi } from '@/api/filesystem'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { Game, TermEntry, TermType, TermCategory } from '@/api/types'
 import { useAutoSave } from '@/composables/useAutoSave'
 
@@ -55,7 +57,7 @@ const entries = ref<TermRow[]>([])
 let nextId = 1
 
 // Import
-const importFileInput = ref<HTMLInputElement | null>(null)
+const { selectFile } = useFileExplorer()
 
 // Add entry form
 const newType = ref<TermType>('translate')
@@ -500,17 +502,16 @@ function handleClearAll() {
 
 // ── Import / Export ──
 
-function handleImportClick() {
-  importFileInput.value?.click()
-}
-
-async function handleImportFile(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
+async function handleImportClick() {
+  const path = await selectFile({
+    title: '导入术语文件',
+    filters: [{ label: '术语文件', extensions: ['.json', '.csv', '.tsv'] }],
+  })
+  if (!path) return
 
   try {
-    const text = await file.text()
-    const ext = file.name.toLowerCase().split('.').pop() ?? ''
+    const { content: text, fileName } = await filesystemApi.readText(path)
+    const ext = fileName.toLowerCase().split('.').pop() ?? ''
 
     let imported: TermEntry[]
 
@@ -540,8 +541,6 @@ async function handleImportFile(e: Event) {
     message.success(`导入完成: 新增 ${added} 条，跳过 ${imported.length - added} 条重复`)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '导入失败')
-  } finally {
-    if (importFileInput.value) importFileInput.value.value = ''
   }
 }
 
@@ -932,9 +931,6 @@ function toggleCategoryFilter(cat: TermCategory) {
       <NEmpty v-else-if="entries.length > 0" description="没有匹配的术语" style="padding: 40px 0" />
       <NEmpty v-else description="暂无术语条目，点击添加或导入" style="padding: 40px 0" />
     </div>
-
-    <!-- Hidden file input for import -->
-    <input ref="importFileInput" type="file" accept=".json,.csv,.tsv" style="display: none" @change="handleImportFile" />
 
     <!-- Import from Game modal -->
     <NModal v-model:show="showImportGameModal" preset="card" title="从其他游戏导入术语" style="max-width: 480px">

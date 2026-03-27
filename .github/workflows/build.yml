@@ -1,12 +1,14 @@
 # Reusable build workflow — called by release.yml and dep-check.yml
 # Can also be triggered manually via workflow_dispatch for testing.
 #
-# Optimizations over naive sequential build:
-#   - NuGet package cache (actions/cache)
-#   - npm ci runs in parallel with bundled asset downloads + dotnet restore
-#   - Frontend build and TranslatorEndpoint build run in parallel; Updater AOT runs as a separate step
-#   - Main release ZIP created in parallel with component ZIPs
-#   - Component ZIPs use direct entry creation (no temp directory copies)
+# Build orchestration is handled by MSBuild targets in the .csproj files:
+#   - DownloadBundledAssets: downloads external dependencies (build/DownloadBundledAssets.targets)
+#   - BuildFrontend: builds Vue frontend (XUnityToolkit-WebUI.csproj)
+#   - TranslatorEndpoint: built via ProjectReference
+#   - PublishUpdater: builds Updater AOT before publish
+#   - PostPublishCleanup: copies bundled/, Updater.exe, removes junk
+#
+# CI-specific steps (manifest generation, component ZIPs, MSI, release) remain here.
 name: Build
 
 on:
@@ -89,13 +91,14 @@ jobs:
           restore-keys: nuget-
 
       # ── Parallel: npm ci + dotnet restore + download bundled assets ──
-      # npm ci (longest, ~54s) runs in background while dotnet restore and
+      # npm ci (~54s) runs in background while dotnet restore and
       # asset downloads proceed in the foreground (~32s combined).
 
-      - name: Download bundled assets & install dependencies
+      - name: Restore dependencies & download bundled assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Start npm ci in background (independent of everything else)
           $npmCiJob = Start-Job -ScriptBlock {
@@ -105,241 +108,19 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
           } -ArgumentList (Resolve-Path "XUnityToolkit-Vue").Path
 
-          # ── Restore .NET projects (populates NuGet cache) ──
+          # Restore .NET projects
           Write-Host "Restoring .NET projects..."
           dotnet restore XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj -r win-x64 -v quiet
           dotnet restore Updater/Updater.csproj -r win-x64 -v quiet
           dotnet restore TranslatorEndpoint/TranslatorEndpoint.csproj -v quiet
           Write-Host ".NET restore complete."
 
-          # ── Download bundled assets ──
-          $headers = @{
-            'Authorization' = "Bearer $env:GH_TOKEN"
-            'User-Agent'    = 'XUnityToolkit-CI/1.0'
-          }
-
-          function Invoke-WithRetry {
-            param(
-              [scriptblock]$ScriptBlock,
-              [int]$MaxRetries = 3,
-              [string]$Operation = "Operation"
-            )
-            $attempt = 0
-            while ($true) {
-              try {
-                $attempt++
-                return (& $ScriptBlock)
-              } catch {
-                if ($attempt -ge $MaxRetries) {
-                  throw "${Operation}: failed after $MaxRetries attempts. Last error: $($_.Exception.Message)"
-                }
-                $waitSec = [math]::Pow(2, $attempt)
-                Write-Host "  [retry] $Operation failed (attempt $attempt/$MaxRetries), retrying in ${waitSec}s..."
-                Write-Host "          $($_.Exception.Message)"
-                Start-Sleep -Seconds $waitSec
-              }
-            }
-          }
-
-          function Download-Asset {
-            param([string]$Url, [string]$DestDir, [string]$FileName = $null)
-            if (-not $FileName) {
-              $FileName = [System.Uri]::UnescapeDataString(($Url -split '/')[-1])
-            }
-            $destPath = Join-Path $DestDir $FileName
-            if (Test-Path $destPath) {
-              Write-Host "  [cached] $FileName"
-              return
-            }
-            $tmpPath = "$destPath.downloading"
-            if (Test-Path $tmpPath) { Remove-Item $tmpPath -Force }
-            Write-Host "  Downloading $FileName..."
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WithRetry -Operation "Download $FileName" -ScriptBlock {
-              Invoke-WebRequest -Uri $Url -OutFile $tmpPath -UseBasicParsing -TimeoutSec 600
-            }.GetNewClosure()
-            Move-Item $tmpPath $destPath -Force
-          }
-
-          $BundledRoot = "bundled"
-          foreach ($d in @(
-            "$BundledRoot\bepinex5",
-            "$BundledRoot\bepinex6",
-            "$BundledRoot\xunity",
-            "$BundledRoot\llama"
-          )) {
-            New-Item -ItemType Directory -Path $d -Force | Out-Null
-          }
-
-          # ── BepInEx 5 (Mono) ──
-          Write-Host "Fetching BepInEx 5..."
-          $b5releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" -Headers $headers -TimeoutSec 30
-          }.GetNewClosure()
-          $b5rel = $b5releases |
-            Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } |
-            Select-Object -First 1
-          if (-not $b5rel) { throw "BepInEx 5 release not found" }
-          Write-Host "  BepInEx 5: $($b5rel.tag_name)"
-          foreach ($arch in @('x64', 'x86')) {
-            $asset = $b5rel.assets |
-              Where-Object { $_.name -like "BepInEx_win_${arch}_*" } |
-              Select-Object -First 1
-            if ($asset) {
-              Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\bepinex5"
-            }
-          }
-
-          # ── BepInEx 6 BE (IL2CPP) ──
-          Write-Host "Fetching BepInEx 6 BE..."
-          $buildsHtml = (Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
-            Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
-          }).Content
-          if ($buildsHtml -match 'href="[^"]*?/(\d+)/BepInEx-Unity\.IL2CPP-win-x64-6\.0\.0-be\.\d+%2B([a-f0-9]+)\.zip"') {
-            $buildNo = $Matches[1]
-            $commit  = $Matches[2]
-            Write-Host "  BepInEx 6 BE: build $buildNo ($commit)"
-            foreach ($arch in @('x64', 'x86')) {
-              $url  = "https://builds.bepinex.dev/projects/bepinex_be/$buildNo/BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo%2B$commit.zip"
-              $name = "BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo+$commit.zip"
-              Download-Asset -Url $url -DestDir "$BundledRoot\bepinex6" -FileName $name
-            }
-          } else {
-            throw "Failed to parse BepInEx 6 BE build info"
-          }
-
-          # ── XUnity.AutoTranslator ──
-          Write-Host "Fetching XUnity.AutoTranslator..."
-          $xureleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" -Headers $headers -TimeoutSec 30
-          }.GetNewClosure()
-          $xurel = $xureleases | Select-Object -First 1
-          if (-not $xurel) { throw "XUnity release not found" }
-          Write-Host "  XUnity: $($xurel.tag_name)"
-          foreach ($asset in ($xurel.assets | Where-Object { $_.name -like 'XUnity.AutoTranslator-BepInEx*' })) {
-            Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\xunity"
-          }
-
-          # ── llama.cpp (pinned version) ──
-          $llamaTag = "b8416"
-          Write-Host "Fetching llama.cpp $llamaTag..."
-          $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30
-          }.GetNewClosure()
-          Write-Host "  llama.cpp: $($llamarel.tag_name)"
-          $llamaPatterns = @(
-            "llama-*-bin-win-cuda-12.4-x64.zip",
-            "cudart-llama-bin-win-cuda-12.4-x64.zip",
-            "llama-*-bin-win-vulkan-x64.zip",
-            "llama-*-bin-win-cpu-x64.zip"
-          )
-          foreach ($pattern in $llamaPatterns) {
-            $asset = $llamarel.assets |
-              Where-Object { $_.name -like $pattern } |
-              Select-Object -First 1
-            if ($asset) {
-              Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\llama"
-            } else {
-              Write-Host "  [skip] $pattern not found"
-            }
-          }
-
-          # ── Extract XUnity reference DLLs for TranslatorEndpoint ──
-          $xunityZip = Get-ChildItem -Path "$BundledRoot\xunity" -Filter '*.zip' |
-              Where-Object { $_.Name -notlike '*IL2CPP*' } |
-              Select-Object -First 1
-          if ($xunityZip) {
-              Write-Host "Extracting XUnity reference DLLs..."
-              $libsDir = "TranslatorEndpoint\libs"
-              if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-              try {
-                  Add-Type -AssemblyName System.IO.Compression.FileSystem
-                  $zip = [System.IO.Compression.ZipFile]::OpenRead($xunityZip.FullName)
-                  try {
-                      $dllMappings = @(
-                          @{ Entry = 'BepInEx/plugins/XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll'; Target = 'XUnity.AutoTranslator.Plugin.Core.dll' },
-                          @{ Entry = 'BepInEx/core/XUnity.Common.dll'; Target = 'XUnity.Common.dll' }
-                      )
-                      foreach ($mapping in $dllMappings) {
-                          $entry = $zip.GetEntry($mapping.Entry)
-                          if (-not $entry) {
-                              Write-Host "  [warn] Entry '$($mapping.Entry)' not found in ZIP"
-                              continue
-                          }
-                          $targetPath = Join-Path $libsDir $mapping.Target
-                          $entryStream = $entry.Open()
-                          $memStream = New-Object System.IO.MemoryStream
-                          try {
-                              $entryStream.CopyTo($memStream)
-                              $newBytes = $memStream.ToArray()
-                              $sha256 = [System.Security.Cryptography.SHA256]::Create()
-                              try {
-                                  $newHash = [BitConverter]::ToString($sha256.ComputeHash($newBytes)).Replace('-','')
-                              } finally {
-                                  $sha256.Dispose()
-                              }
-                          } finally {
-                              $entryStream.Dispose()
-                              $memStream.Dispose()
-                          }
-                          $changed = $true
-                          if (Test-Path $targetPath) {
-                              $oldHash = (Get-FileHash -Path $targetPath -Algorithm SHA256).Hash
-                              if ($oldHash -eq $newHash) { $changed = $false }
-                          }
-                          if ($changed) {
-                              [System.IO.File]::WriteAllBytes($targetPath, $newBytes)
-                              Write-Host "  [updated] $($mapping.Target)"
-                          } else {
-                              Write-Host "  [unchanged] $($mapping.Target)"
-                          }
-                      }
-                  } finally {
-                      $zip.Dispose()
-                  }
-              } catch {
-                  Write-Host "::warning::Failed to extract XUnity DLLs: $($_.Exception.Message)"
-                  Write-Host "  Using committed DLLs as fallback."
-              }
-          } else {
-              Write-Host "  [skip] XUnity ZIP not found, using committed DLLs"
-          }
-
-          # ── Update classdata.tpk from AssetRipper/Tpk CI ──
-          if (Get-Command gh -ErrorAction SilentlyContinue) {
-              Write-Host "Fetching latest classdata.tpk from AssetRipper/Tpk..."
-              $tpkTempDir = Join-Path $env:RUNNER_TEMP "tpk_$(Get-Random)"
-              try {
-                  $ghOutput = & gh run download -R AssetRipper/Tpk -n lz4_file -D $tpkTempDir 2>&1
-                  if ($LASTEXITCODE -ne 0) { throw "gh run download failed: $ghOutput" }
-                  $downloadedTpk = Join-Path $tpkTempDir 'lz4.tpk'
-                  if (-not (Test-Path $downloadedTpk)) { throw "lz4.tpk not found in downloaded artifact" }
-                  $targetTpk = "XUnityToolkit-WebUI\Resources\classdata.tpk"
-                  $newHash = (Get-FileHash -Path $downloadedTpk -Algorithm SHA256).Hash
-                  $changed = $true
-                  if (Test-Path $targetTpk) {
-                      $oldHash = (Get-FileHash -Path $targetTpk -Algorithm SHA256).Hash
-                      if ($oldHash -eq $newHash) { $changed = $false }
-                  }
-                  if ($changed) {
-                      Copy-Item -Path $downloadedTpk -Destination $targetTpk -Force
-                      Write-Host "  [updated] classdata.tpk"
-                  } else {
-                      Write-Host "  [unchanged] classdata.tpk is up to date"
-                  }
-              } catch {
-                  Write-Host "::warning::Failed to update classdata.tpk: $($_.Exception.Message)"
-                  Write-Host "  Artifacts may have expired (90-day retention). Using committed version."
-              } finally {
-                  if (Test-Path $tpkTempDir) { Remove-Item $tpkTempDir -Recurse -Force -ErrorAction SilentlyContinue }
-              }
-          } else {
-              Write-Host "  [skip] gh CLI not found, using committed classdata.tpk"
-          }
-
+          # Download bundled assets via MSBuild target
+          Write-Host "Downloading bundled assets..."
+          dotnet msbuild XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj -t:DownloadBundledAssets -p:SkipBundledDownload=false -v:minimal
           Write-Host "Bundled assets ready."
 
-          # ── Wait for npm ci ──
+          # Wait for npm ci
           Write-Host "`n--- Waiting for npm ci ---"
           $npmCiJob | Wait-Job | Out-Null
           $npmCiOutput = Receive-Job $npmCiJob 2>&1
@@ -352,115 +133,40 @@ jobs:
           Remove-Job $npmCiJob
           Write-Host "npm ci complete."
 
-      # ── Build frontend & TranslatorEndpoint (parallel) ──
-      # Frontend runs in foreground (longest, shows progress live).
-      # TranslatorEndpoint runs in background via Start-Job.
-      # Updater AOT is a separate step — AOT needs native toolchain
-      # which is unreliable inside Start-Job child processes.
+      # ── Build frontend ──
+      # npm ci already ran in background; now build the Vue frontend.
 
-      - name: Build frontend & TranslatorEndpoint
+      - name: Build frontend
         shell: pwsh
         run: |
-          $workDir = $PWD.Path
-
-          # Start TranslatorEndpoint build in background (conditional on XUnity DLLs)
-          $endpointJob = $null
-          $hasLibs = (Test-Path "TranslatorEndpoint/libs/XUnity.AutoTranslator.Plugin.Core.dll") -and
-                     (Test-Path "TranslatorEndpoint/libs/XUnity.Common.dll")
-          if ($hasLibs) {
-              $endpointJob = Start-Job -ScriptBlock {
-                  param($dir)
-                  Set-Location $dir
-                  & dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release --nologo -v quiet --no-restore 2>&1
-                  if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed (exit code $LASTEXITCODE)" }
-              } -ArgumentList $workDir
-          } else {
-              Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
-          }
-
-          # Build frontend in foreground (longest task, ~34s)
-          Write-Host "::group::Frontend Build"
           Push-Location XUnityToolkit-Vue
-          & npm run build
-          $frontendExit = $LASTEXITCODE
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
           Pop-Location
-          Write-Host "::endgroup::"
-
-          if ($frontendExit -ne 0) {
-              if ($endpointJob) { $endpointJob | Stop-Job -PassThru | Remove-Job -Force }
-              throw "Frontend build failed"
-          }
           Write-Host "Frontend build complete."
 
-          # Collect TranslatorEndpoint results
-          if ($endpointJob) {
-              Write-Host "::group::TranslatorEndpoint Build"
-              $endpointJob | Wait-Job | Out-Null
-              try {
-                  $endpointOutput = Receive-Job $endpointJob -ErrorAction Stop 2>&1
-                  if ($endpointOutput) { $endpointOutput | ForEach-Object { Write-Host $_ } }
-              } catch {
-                  $endpointOutput = Receive-Job $endpointJob -ErrorAction SilentlyContinue 2>&1
-                  if ($endpointOutput) { $endpointOutput | ForEach-Object { Write-Host $_ } }
-              }
-              if ($endpointJob.State -eq 'Failed') {
-                  $err = $endpointJob.ChildJobs[0].JobStateInfo.Reason.Message
-                  Remove-Job $endpointJob -Force
-                  throw "TranslatorEndpoint build failed: $err"
-              }
-              Remove-Job $endpointJob -Force
-              Write-Host "TranslatorEndpoint build complete."
-              Write-Host "::endgroup::"
-          }
-
-      # ── Build Updater (AOT) ──
-      # AOT publish requires its own restore phase to populate PrivateSdkAssemblies;
-      # --no-restore breaks AOT. Runs as a dedicated step for clear error reporting.
-
-      - name: Build Updater (AOT)
-        shell: pwsh
-        run: |
-          dotnet publish Updater/Updater.csproj -c Release -r win-x64
-          if ($LASTEXITCODE -ne 0) { throw "Updater AOT build failed" }
-
-      # ── Publish backend ──
+      # ── Publish (single command handles everything) ──
+      # MSBuild targets handle: TranslatorEndpoint (ProjectReference), Updater AOT,
+      # post-publish cleanup (copy bundled/, Updater.exe, delete junk).
+      # Frontend + bundled downloads are skipped here (already done in prior steps).
 
       - name: Publish win-x64
         shell: pwsh
         run: |
           $v = '${{ steps.ver.outputs.build_version }}'
-          dotnet publish XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj `
+          dotnet publish XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
             -p:DebugType=none `
+            -p:SkipBundledDownload=true `
             -p:SkipFrontendBuild=true `
             -p:InformationalVersion=$v `
-            --no-restore `
-            -o "Release\win-x64"
+            -o "Release/win-x64"
 
           if ($LASTEXITCODE -ne 0) { throw "Publish failed for win-x64" }
 
-          # Cleanup unnecessary files
-          Get-ChildItem "Release\win-x64" -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-
-          # Copy bundled/ tree post-publish
-          if (Test-Path "bundled") {
-            $dest = "Release\win-x64\bundled"
-            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-            Copy-Item -Path "bundled" -Destination $dest -Recurse -Force
-            Write-Host "Copied bundled assets to output."
-          }
-
-          # Copy Updater.exe
-          $updaterExe = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
-          if (Test-Path $updaterExe) {
-            Copy-Item $updaterExe "Release/win-x64/" -Force
-            Write-Host "Copied Updater.exe"
-          }
-
-          $exeFile = Get-Item "Release\win-x64\XUnityToolkit-WebUI.exe"
+          $exeFile = Get-Item "Release/win-x64/XUnityToolkit-WebUI.exe"
           $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
           Write-Host "win-x64 done (exe: $sizeMB MB)"
 
@@ -628,7 +334,7 @@ jobs:
           $installerProject = "Installer/Installer.wixproj"
 
           # Generate MSI version from build version
-          # Build version format: 2.4.YYYYMMDDHHmm
+          # Build version format: 3.7.YYYYMMDDHHmm
           # MSI constraints: major < 256, minor < 256, build < 65536
           $parts = "${{ steps.ver.outputs.build_version }}".Split('.')
           $timestamp = $parts[2]  # YYYYMMDDHHmm

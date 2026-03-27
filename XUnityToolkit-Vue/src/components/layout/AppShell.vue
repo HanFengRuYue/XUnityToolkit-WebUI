@@ -7,6 +7,9 @@ import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.v
 import { settingsApi } from '@/api/games'
 import { useUpdateStore } from '@/stores/update'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useWindowControls } from '@/composables/useWindowControls'
+
+const { isWebView2, isMaximized, minimize, toggleMaximize, close: closeWindow } = useWindowControls()
 
 const router = useRouter()
 const route = useRoute()
@@ -130,7 +133,30 @@ function onResizeDoubleClick() {
 </script>
 
 <template>
-  <div class="app-layout">
+  <div class="app-layout" :class="{ 'has-titlebar': isWebView2 }">
+    <!-- Custom Window Title Bar (WebView2 only) -->
+    <div v-if="isWebView2" class="window-titlebar">
+      <div class="window-controls">
+        <button class="win-btn win-minimize" @click="minimize" title="最小化">
+          <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
+        </button>
+        <button class="win-btn win-maximize" @click="toggleMaximize" :title="isMaximized ? '向下还原' : '最大化'">
+          <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
+            <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1" />
+          </svg>
+          <svg v-else width="10" height="10" viewBox="0 0 10 10">
+            <rect x="2.5" y="0.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1" />
+            <rect x="0.5" y="2.5" width="7" height="7" rx="1" fill="var(--bg-surface)" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button class="win-btn win-close" @click="closeWindow" title="关闭">
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Mobile Top Bar -->
     <header class="mobile-topbar">
       <button class="hamburger" @click="sidebarOpen = !sidebarOpen" :class="{ active: sidebarOpen }">
@@ -252,6 +278,60 @@ function onResizeDoubleClick() {
   height: 100vh;
   position: relative;
   z-index: 1;
+}
+
+/* ===== Custom Window Title Bar (WebView2 only) ===== */
+.window-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  z-index: 9000;
+  app-region: drag;
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.window-controls {
+  display: flex;
+  height: 32px;
+  pointer-events: auto;
+  app-region: no-drag;
+}
+
+.win-btn {
+  width: 46px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  appearance: none;
+  padding: 0;
+}
+
+.win-btn:hover {
+  background: var(--bg-muted-hover);
+  color: var(--text-1);
+}
+
+.win-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.app-layout.has-titlebar .sidebar-header {
+  padding-top: 40px;
+}
+
+.app-layout.has-titlebar .main-content {
+  padding-top: 40px;
 }
 
 /* ===== Sidebar ===== */
@@ -713,6 +793,17 @@ function onResizeDoubleClick() {
   /* Main Content padding */
   .main-content {
     padding: 20px 20px;
+  }
+
+  /* Hide custom title bar on mobile */
+  .window-titlebar {
+    display: none;
+  }
+  .app-layout.has-titlebar .sidebar-header {
+    padding-top: 24px;
+  }
+  .app-layout.has-titlebar .main-content {
+    padding-top: 20px;
   }
 }
 

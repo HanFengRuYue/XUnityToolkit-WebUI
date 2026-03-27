@@ -212,6 +212,7 @@ ASP.NET Core 后端。项目概览、API 端点和构建命令请参阅根目录
 - 预构造的 `ILoggerProvider`：使用 `AddSingleton<T>(_ => instance)` 避免双重释放
 - `IHubContext<T>.SendAsync` 是扩展方法——需要 `using Microsoft.AspNetCore.SignalR;`
 - **`SystemTrayService` DI：** `AddSingleton` + `AddHostedService(sp => sp.GetRequired...)` 用于注入 + 托管
+- **`WebViewWindow` 生命周期：** 由 `SystemTrayService` 在 STA 线程上创建；`_mainWindow` 仅在 `InitializeAsync()` + `Show()` 成功后赋值（防止暴露未就绪窗口）；`Kestrel ready` 通过 `TaskCompletionSource` + `lifetime.ApplicationStarted` 协调；`Application.Run()` 保持无参调用（不传 Form）以支持 WebView2 不可用的回退路径
 
 ## Web 图片搜索
 

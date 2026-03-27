@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onActivated, onBeforeUnmount, onDeactivated } from 'vue'
 import {
-  NButton, NIcon, NUpload, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
+  NButton, NIcon, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
   NDescriptions, NDescriptionsItem, NInputNumber,
 } from 'naive-ui'
@@ -12,6 +12,7 @@ import {
 } from '@vicons/material'
 import { HubConnectionBuilder, HubConnectionState, type HubConnection } from '@microsoft/signalr'
 import { api } from '@/api/client'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import { formatBytes } from '@/utils/format'
 import type {
   FontUploadInfo, FontGenerationStatus, GeneratedFontInfo, FontGenerationProgress,
@@ -31,6 +32,7 @@ const collapsed = reactive({
 })
 
 const message = useMessage()
+const { selectFile } = useFileExplorer()
 
 // Upload state
 const uploadedFont = ref<FontUploadInfo | null>(null)
@@ -113,7 +115,7 @@ const renderModeOptions = [
   { label: 'SDF32 (32x 上采样，最高质量)', value: 'SDF32' },
 ]
 
-// Upload handler
+// Upload handler (drag-and-drop fallback)
 async function handleUpload({ file }: { file: { file: File } }) {
   uploading.value = true
   const formData = new FormData()
@@ -133,6 +135,24 @@ async function handleUpload({ file }: { file: { file: File } }) {
     uploading.value = false
   }
   return false
+}
+
+async function handleSelectFontFile() {
+  const path = await selectFile({
+    title: '选择字体文件',
+    filters: [{ label: '字体文件', extensions: ['.ttf', '.otf'] }],
+  })
+  if (!path) return
+  uploading.value = true
+  try {
+    const result = await api.post<FontUploadInfo>('/api/font-generation/upload-from-path', { filePath: path })
+    uploadedFont.value = result
+    message.success(`已上传: ${result.fontName}`)
+  } catch (e: any) {
+    message.error(e.message || '上传失败')
+  } finally {
+    uploading.value = false
+  }
 }
 
 // Character set helpers
@@ -172,16 +192,17 @@ async function loadPreview() {
   }
 }
 
-async function handleCharsetUpload(options: { file: { file: File } }) {
+async function handleSelectCharsetFile() {
+  const path = await selectFile({
+    title: '选择字符集文件',
+    filters: [{ label: '文本文件', extensions: ['.txt'] }],
+  })
+  if (!path) return
   uploadingCharset.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', options.file.file)
-    const resp = await fetch('/api/font-generation/charset/upload-custom', { method: 'POST', body: formData })
-    const result = await resp.json()
-    if (!result.success) throw new Error(result.error)
-    customCharsetFile.value = result.data
-    message.success(`已上传自定义字符集（${result.data.characterCount} 字符）`)
+    const result = await api.post<{ fileName: string; characterCount: number }>('/api/font-generation/charset/upload-custom-from-path', { filePath: path })
+    customCharsetFile.value = result
+    message.success(`已上传自定义字符集（${result.characterCount} 字符）`)
   } catch (e: any) {
     message.error(e.message || '上传失败')
   } finally {
@@ -189,16 +210,17 @@ async function handleCharsetUpload(options: { file: { file: File } }) {
   }
 }
 
-async function handleTranslationUpload(options: { file: { file: File } }) {
+async function handleSelectTranslationFile() {
+  const path = await selectFile({
+    title: '选择翻译文件',
+    filters: [{ label: '文本文件', extensions: ['.txt'] }],
+  })
+  if (!path) return
   uploadingTranslation.value = true
   try {
-    const formData = new FormData()
-    formData.append('file', options.file.file)
-    const resp = await fetch('/api/font-generation/charset/upload-translation', { method: 'POST', body: formData })
-    const result = await resp.json()
-    if (!result.success) throw new Error(result.error)
-    translationFile.value = result.data
-    message.success(`已提取翻译文件字符（${result.data.characterCount} 字符）`)
+    const result = await api.post<{ fileName: string; characterCount: number }>('/api/font-generation/charset/upload-translation-from-path', { filePath: path })
+    translationFile.value = result
+    message.success(`已提取翻译文件字符（${result.characterCount} 字符）`)
   } catch (e: any) {
     message.error(e.message || '上传失败')
   } finally {
@@ -457,21 +479,16 @@ onBeforeUnmount(async () => {
           字体与设置
         </h2>
       </div>
-      <NUpload
+      <div
         v-if="!uploadedFont"
-        accept=".ttf,.otf"
-        :max="1"
-        :custom-request="({ file }) => handleUpload({ file: file as any })"
-        :show-file-list="false"
-        :disabled="isGenerating"
-        directory-dnd
+        class="upload-area"
+        :class="{ disabled: isGenerating }"
+        @click="!isGenerating && handleSelectFontFile()"
       >
-        <div class="upload-area">
-          <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
-          <p class="upload-text">拖拽或点击上传</p>
-          <p class="upload-hint">TTF / OTF · 最大 50MB</p>
-        </div>
-      </NUpload>
+        <NIcon :size="36" color="var(--text-3)"><UploadFileOutlined /></NIcon>
+        <p class="upload-text">点击选择字体文件</p>
+        <p class="upload-hint">TTF / OTF · 最大 50MB</p>
+      </div>
       <div v-else class="upload-settings-grid">
         <div class="upload-column">
           <div class="upload-result">
@@ -573,17 +590,9 @@ onBeforeUnmount(async () => {
 
       <!-- Custom charset upload -->
       <div class="charset-section-label">自定义字符集</div>
-      <NUpload
-        accept=".txt"
-        :max="1"
-        :custom-request="({ file }) => handleCharsetUpload({ file: file as any })"
-        :show-file-list="false"
-        :disabled="isGenerating"
-      >
-        <NButton :disabled="isGenerating" :loading="uploadingCharset" size="small">
-          上传 TXT 文件
-        </NButton>
-      </NUpload>
+      <NButton :disabled="isGenerating" :loading="uploadingCharset" size="small" @click="handleSelectCharsetFile">
+        选择 TXT 文件
+      </NButton>
       <div v-if="customCharsetFile" class="upload-info">
         <NTag size="small" type="success">{{ customCharsetFile.fileName }}</NTag>
         <span>{{ customCharsetFile.characterCount.toLocaleString() }} 字符</span>
@@ -613,17 +622,9 @@ onBeforeUnmount(async () => {
         <p class="hint-text">将从游戏的翻译缓存中提取已翻译文本的字符</p>
       </div>
       <div v-if="translationMode === 'upload'" style="margin-top: 8px">
-        <NUpload
-          accept=".txt"
-          :max="1"
-          :custom-request="({ file }) => handleTranslationUpload({ file: file as any })"
-          :show-file-list="false"
-          :disabled="isGenerating"
-        >
-          <NButton :disabled="isGenerating" :loading="uploadingTranslation" size="small">
-            上传翻译文件
-          </NButton>
-        </NUpload>
+        <NButton :disabled="isGenerating" :loading="uploadingTranslation" size="small" @click="handleSelectTranslationFile">
+          选择翻译文件
+        </NButton>
         <div v-if="translationFile" class="upload-info">
           <NTag size="small" type="success">{{ translationFile.fileName }}</NTag>
           <span>{{ translationFile.characterCount.toLocaleString() }} 字符</span>

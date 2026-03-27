@@ -800,3 +800,15 @@ export interface ListDirectoryResponse {
   parentPath: string | null
   entries: FileSystemEntry[]
 }
+
+export interface QuickAccessEntry {
+  name: string
+  fullPath: string
+  type: 'standard' | 'pinned'
+}
+
+export interface ReadTextResponse {
+  content: string
+  fileName: string
+  fileSize: number
+}

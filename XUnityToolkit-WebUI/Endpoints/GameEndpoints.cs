@@ -310,6 +310,38 @@ public static class GameEndpoints
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
 
+        // Upload icon from local path
+        group.MapPost("/{id}/icon/upload-from-path", async (
+            UploadFromPathRequest request,
+            string id,
+            GameLibraryService library,
+            GameImageService imageService,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 5 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("图片文件不能超过 5 MB。"));
+
+            var ext = Path.GetExtension(request.FilePath).ToLowerInvariant();
+            if (ext is not ".jpg" and not ".jpeg" and not ".png" and not ".webp")
+                return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
+
+            await using var stream = File.OpenRead(request.FilePath);
+            await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+
+            await library.UpdateAsync(game);
+            return Results.Ok(ApiResult.Ok());
+        });
+
         // Delete custom icon
         group.MapDelete("/{id}/icon/custom", async (
             string id,

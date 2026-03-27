@@ -295,6 +295,69 @@ public static class SettingsEndpoints
                 return Results.BadRequest(ApiResult.Fail("无效的 ZIP 文件"));
             }
         }).DisableAntiforgery();
+
+        group.MapPost("/import-from-path", async (UploadFromPathRequest request, AppDataPaths paths,
+            AppSettingsService settingsService,
+            TermService termService,
+            ScriptTagService scriptTagService,
+            TranslationMemoryService tmService,
+            DynamicPatternService dynamicPatternService,
+            TermExtractionService extractionService,
+            PreTranslationCacheMonitor cacheMonitor,
+            ILogger<AppSettingsService> logger) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+            if (!File.Exists(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+
+            var info = new FileInfo(request.FilePath);
+            if (info.Length > 100 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("文件大小不能超过 100MB"));
+
+            var ext = Path.GetExtension(request.FilePath).ToLowerInvariant();
+            if (ext != ".zip")
+                return Results.BadRequest(ApiResult.Fail("仅支持 .zip 格式"));
+
+            var rootPath = Path.GetFullPath(paths.Root);
+            try
+            {
+                await using var stream = File.OpenRead(request.FilePath);
+                using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name))
+                        continue;
+
+                    var destPath = PathSecurity.SafeJoin(rootPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
+                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+
+                    await using var entryStream = entry.Open();
+                    await using var destStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                    await entryStream.CopyToAsync(destStream);
+                }
+
+                // Invalidate all in-memory caches
+                settingsService.InvalidateCache();
+                termService.ClearAllCache();
+                scriptTagService.ClearAllCache();
+                tmService.ClearAllCache();
+                dynamicPatternService.ClearAllCache();
+                extractionService.ClearAllCache();
+                cacheMonitor.UnloadCache();
+
+                logger.LogInformation("已从路径导入配置数据");
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidOperationException)
+            {
+                return Results.BadRequest(ApiResult.Fail("文件路径不安全，导入已中止"));
+            }
+            catch (InvalidDataException)
+            {
+                return Results.BadRequest(ApiResult.Fail("无效的 ZIP 文件"));
+            }
+        });
     }
     private static void TryDelete(Action action, string name, List<string> errors)
     {

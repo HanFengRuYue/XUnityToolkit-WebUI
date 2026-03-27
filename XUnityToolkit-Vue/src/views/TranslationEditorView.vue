@@ -39,6 +39,8 @@ import {
   SwapVertOutlined,
 } from '@vicons/material'
 import { gamesApi, translationEditorApi } from '@/api/games'
+import { filesystemApi } from '@/api/filesystem'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { Game, TranslationEntry, TermEntry } from '@/api/types'
 
 interface TranslationRow extends TranslationEntry {
@@ -63,7 +65,7 @@ const savedSnapshot = ref('')
 let nextId = 1
 
 // Import
-const importFileInput = ref<HTMLInputElement | null>(null)
+const { selectFile } = useFileExplorer()
 const importing = ref(false)
 
 // Add entry form
@@ -578,17 +580,16 @@ function handleAddEntry() {
   }
 }
 
-function handleImportClick() {
-  importFileInput.value?.click()
-}
-
-async function handleImportFile(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
-  if (!file) return
+async function handleImportClick() {
+  const path = await selectFile({
+    title: '导入翻译文件',
+    filters: [{ label: '文本文件', extensions: ['.txt'] }],
+  })
+  if (!path) return
 
   importing.value = true
   try {
-    const content = await file.text()
+    const { content } = await filesystemApi.readText(path)
     const importedEntries = await translationEditorApi.parseImport(gameId, content)
 
     // Merge: add only entries whose original text doesn't already exist
@@ -607,8 +608,6 @@ async function handleImportFile(e: Event) {
     message.error(e instanceof Error ? e.message : '导入失败')
   } finally {
     importing.value = false
-    // Reset file input so same file can be imported again
-    if (importFileInput.value) importFileInput.value.value = ''
   }
 }
 
@@ -934,14 +933,6 @@ function handleExport() {
       <NEmpty v-else description="暂无翻译条目" style="padding: 40px 0" />
     </div>
 
-    <!-- Hidden file input for import -->
-    <input
-      ref="importFileInput"
-      type="file"
-      accept=".txt"
-      style="display: none"
-      @change="handleImportFile"
-    />
   </div>
 </template>
 

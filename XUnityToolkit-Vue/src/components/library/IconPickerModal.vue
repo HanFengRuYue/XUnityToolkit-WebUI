@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { NModal, NTabs, NTabPane, NIcon, NButton, NInput, NSpin, useMessage } from 'naive-ui'
 import { SearchRound, CloudUploadOutlined } from '@vicons/material'
 import { gamesApi } from '@/api/games'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type { Game, SteamGridDbSearchResult, SteamGridDbImage } from '@/api/types'
 import WebImageSearchTab from './WebImageSearchTab.vue'
 
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const message = useMessage()
+const { selectFile } = useFileExplorer()
 
 // SteamGridDB search state
 const searchQuery = ref(props.game.name)
@@ -95,6 +97,25 @@ async function selectIconImage(image: SteamGridDbImage) {
 }
 
 // Upload functions
+async function handleSelectIconFile() {
+  const path = await selectFile({
+    title: '选择图标图片',
+    filters: [{ label: '图片文件', extensions: ['.jpg', '.jpeg', '.png', '.webp'] }],
+  })
+  if (!path) return
+  uploading.value = true
+  try {
+    await gamesApi.uploadIconFromPath(props.game.id, path)
+    message.success('图标已更新')
+    emit('saved')
+    emit('update:show', false)
+  } catch (e: any) {
+    message.error(e instanceof Error ? e.message : '上传失败')
+  } finally {
+    uploading.value = false
+  }
+}
+
 function handleFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -239,20 +260,13 @@ async function deleteIcon() {
             @dragover.prevent="dragOver = true"
             @dragleave="dragOver = false"
             @drop.prevent="handleDrop"
-            @click="($refs.fileInput as HTMLInputElement)?.click()"
+            @click="handleSelectIconFile"
           >
             <NIcon :size="36" color="var(--text-3)">
               <CloudUploadOutlined />
             </NIcon>
             <p class="upload-hint">拖拽图片到此处，或点击选择文件</p>
             <p class="upload-formats">支持 JPEG、PNG、WebP，最大 5 MB</p>
-            <input
-              ref="fileInput"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              style="display: none"
-              @change="handleFileSelect"
-            />
           </div>
 
           <div v-else class="upload-preview">

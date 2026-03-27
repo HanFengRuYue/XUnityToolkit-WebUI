@@ -3,10 +3,11 @@ import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   NButton, NDataTable, NIcon, NProgress, NTag,
-  NUpload, useMessage, useDialog, type DataTableColumns, type UploadFileInfo
+  useMessage, useDialog, type DataTableColumns,
 } from 'naive-ui'
 import { ArrowBackOutlined, SearchOutlined, RestoreOutlined, FontDownloadOutlined, CloudUploadOutlined, DeleteOutlineOutlined } from '@vicons/material'
 import { api } from '@/api/client'
+import { useFileExplorer } from '@/composables/useFileExplorer'
 import type {
   Game, FontInfo, FontReplacementRequest, FontReplacementStatus,
   FontReplacementProgress, FontReplacementResult
@@ -18,6 +19,7 @@ const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const { selectFile } = useFileExplorer()
 
 const gameId = computed(() => route.params.id as string)
 const game = ref<Game | null>(null)
@@ -183,7 +185,19 @@ async function restoreFonts() {
   })
 }
 
-function handleUploadFinish({ event }: { file: UploadFileInfo, event?: ProgressEvent }) {
+async function handleSelectCustomFont() {
+  const path = await selectFile({ title: '选择自定义字体文件' })
+  if (!path) return
+  try {
+    await api.post(`/api/games/${gameId}/font-replacement/upload-from-path`, { filePath: path })
+    message.success('自定义字体上传成功')
+    loadStatus()
+  } catch (e: any) {
+    message.error(e.message || '字体上传失败')
+  }
+}
+
+function handleUploadFinish({ event }: { file: never, event?: ProgressEvent }) {
   const response = (event?.target as XMLHttpRequest)?.response
   try {
     const result = JSON.parse(response)
@@ -327,18 +341,10 @@ onBeforeUnmount(async () => {
           扫描与替换
         </h2>
         <div class="header-actions">
-          <NUpload
-            :action="`/api/games/${gameId}/font-replacement/upload`"
-            :show-file-list="false"
-            @finish="handleUploadFinish"
-            @error="handleUploadError"
-            accept="*"
-          >
-            <NButton size="small" :disabled="replacing">
-              <template #icon><NIcon :size="16"><CloudUploadOutlined /></NIcon></template>
-              上传自定义字体
-            </NButton>
-          </NUpload>
+          <NButton size="small" :disabled="replacing" @click="handleSelectCustomFont">
+            <template #icon><NIcon :size="16"><CloudUploadOutlined /></NIcon></template>
+            上传自定义字体
+          </NButton>
           <NButton size="small" type="primary" :loading="scanning" :disabled="replacing" @click="scanFonts">
             <template #icon><NIcon :size="16"><SearchOutlined /></NIcon></template>
             扫描字体
