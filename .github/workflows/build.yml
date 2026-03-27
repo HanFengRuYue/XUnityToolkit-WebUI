@@ -82,7 +82,7 @@ jobs:
       # ── Caching ──
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -672,7 +672,7 @@ jobs:
       # ── Upload artifacts ──
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: release-win-x64
           path: XUnityToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64.zip
@@ -680,7 +680,7 @@ jobs:
 
       - name: Upload component packages artifact
         if: inputs.release_tag != ''
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: release-components
           path: |
@@ -707,12 +707,12 @@ jobs:
           fetch-depth: 0
 
       - name: Download artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-win-x64
 
       - name: Download component packages
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: release-components
           path: components
