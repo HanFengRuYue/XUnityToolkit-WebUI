@@ -14,6 +14,9 @@ public sealed class LocalLlmSettings
     /// <summary>Context window size for llama-server.</summary>
     public int ContextLength { get; set; } = 4096;
 
+    /// <summary>KV cache quantization type: "f16", "q8_0", "q4_0". Reduces VRAM at minimal quality cost.</summary>
+    public string KvCacheType { get; set; } = "q8_0";
+
     /// <summary>Absolute path of the currently loaded/selected model GGUF file.</summary>
     public string? LoadedModelPath { get; set; }
 

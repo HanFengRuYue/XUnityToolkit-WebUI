@@ -27,6 +27,8 @@ public static class SettingsEndpoints
             settings.AiTranslation.ContextSize = Math.Clamp(settings.AiTranslation.ContextSize, 0, 100);
             settings.AiTranslation.LocalContextSize = Math.Clamp(settings.AiTranslation.LocalContextSize, 0, 10);
             settings.AiTranslation.Temperature = Math.Clamp(settings.AiTranslation.Temperature, 0.0, 2.0);
+            settings.AiTranslation.LocalMinP = Math.Clamp(settings.AiTranslation.LocalMinP, 0.0, 1.0);
+            settings.AiTranslation.LocalRepeatPenalty = Math.Clamp(settings.AiTranslation.LocalRepeatPenalty, 0.5, 2.0);
             settings.AiTranslation.FuzzyMatchThreshold = Math.Clamp(settings.AiTranslation.FuzzyMatchThreshold, 0, 100);
             settings.PageZoom = settings.PageZoom == 0 ? 0 : Math.Clamp(settings.PageZoom, 50, 200);
 

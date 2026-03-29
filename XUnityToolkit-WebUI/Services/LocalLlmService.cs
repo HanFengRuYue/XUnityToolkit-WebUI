@@ -93,6 +93,8 @@ public sealed class LocalLlmService(
         var settings = await LoadSettingsAsync(ct);
         settings.GpuLayers = req.GpuLayers;
         settings.ContextLength = req.ContextLength;
+        if (req.KvCacheType is "f16" or "q8_0" or "q4_0")
+            settings.KvCacheType = req.KvCacheType;
         await SaveSettingsAsync(settings, ct);
     }
 
@@ -327,7 +329,20 @@ public sealed class LocalLlmService(
             // Build arguments (--reasoning-budget 0 disables thinking in reasoning models)
             // Sanitize modelPath to prevent argument injection via embedded quotes
             var safeModelPath = modelPath.Replace("\"", "");
-            var args = $"-m \"{safeModelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} --log-disable --no-webui --reasoning-budget 0";
+
+            // Performance flags: flash attention + continuous batching + larger micro-batch
+            // CPU mode: explicit thread counts for optimal utilization
+            var perfArgs = _activeBackend == GpuBackend.CPU
+                ? $"--flash-attn --cont-batching -ub 1024 -t {Environment.ProcessorCount} -tb {Environment.ProcessorCount}"
+                : "--flash-attn --cont-batching -ub 1024";
+
+            // KV cache quantization: reduces VRAM usage (q8_0 ~50% savings, near-lossless)
+            var currentSettings = await LoadSettingsAsync(ct);
+            var kvType = currentSettings.KvCacheType is "f16" or "q8_0" or "q4_0"
+                ? currentSettings.KvCacheType : "q8_0";
+            var kvArgs = kvType != "f16" ? $"--cache-type-k {kvType} --cache-type-v {kvType}" : "";
+
+            var args = $"-m \"{safeModelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} {perfArgs} {kvArgs} --log-disable --no-webui --reasoning-budget 0";
 
             logger.LogInformation("启动 llama-server: {Path} {Args}", serverPath, args);
 
