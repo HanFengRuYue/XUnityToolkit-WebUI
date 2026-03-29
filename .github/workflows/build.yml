@@ -886,3 +886,40 @@ jobs:
               echo "Uploaded $(basename "$MSI_FILE")"
             fi
           done
+
+      - name: Update README download links
+        if: ${{ inputs.prerelease != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag }}"
+          VER_PREFIX="${{ needs.build.outputs.version_prefix }}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          # Generate new download links table
+          NEW_CONTENT="| 版本 | ZIP 便携版 | MSI 安装包 |
+          |------|-----------|-----------|
+          | **Full（完整版）** | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.zip) | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64.msi) |
+          | **No-LLAMA** | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.zip) | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.msi) |
+          | **Lite（精简版）** | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.zip) | [下载](${BASE}/XUnityToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.msi) |"
+
+          # Remove leading whitespace from heredoc indentation
+          NEW_CONTENT=$(echo "$NEW_CONTENT" | sed 's/^          //')
+
+          # Replace content between markers using awk
+          awk -v new="$NEW_CONTENT" '
+            /<!-- DOWNLOAD_LINKS_START -->/ { print; printf "%s\n", new; skip=1; next }
+            /<!-- DOWNLOAD_LINKS_END -->/ { skip=0 }
+            !skip { print }
+          ' README.md > README.tmp && mv README.tmp README.md
+
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: 更新 README 下载链接至 ${TAG}"
+            git pull --rebase origin main
+            git push
+          fi
