@@ -4,6 +4,7 @@ import { NIcon, NSwitch, NPopover, NColorPicker } from 'naive-ui'
 import { TuneRound } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useThemeStore, accentPresets } from '@/stores/theme'
+import { settingsApi } from '@/api/games'
 
 const gamesStore = useGamesStore()
 const themeStore = useThemeStore()
@@ -19,11 +20,9 @@ function setAccentFromPicker(hex: string) {
   themeStore.setAccentColor(hex)
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    import('@/api/games').then(({ settingsApi }) => {
-      settingsApi.get().then(s => {
-        s.accentColor = hex
-        settingsApi.save(s)
-      })
+    settingsApi.get().then(s => {
+      s.accentColor = hex
+      settingsApi.save(s)
     })
   }, 500)
 }
@@ -63,11 +62,9 @@ function toggleLabels(val: boolean) {
 function setAccent(hex: string) {
   themeStore.setAccentColor(hex)
   // Also persist to backend
-  import('@/api/games').then(({ settingsApi }) => {
-    settingsApi.get().then(settings => {
-      settings.accentColor = hex
-      settingsApi.save(settings)
-    })
+  settingsApi.get().then(settings => {
+    settings.accentColor = hex
+    settingsApi.save(settings)
   })
 }
 </script>

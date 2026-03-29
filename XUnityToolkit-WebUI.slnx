@@ -2,5 +2,4 @@
   <Project Path="XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj" />
   <Project Path="TranslatorEndpoint/TranslatorEndpoint.csproj" />
   <Project Path="Updater/Updater.csproj" />
-  <Project Path="Installer/Installer.wixproj" />
 </Solution>

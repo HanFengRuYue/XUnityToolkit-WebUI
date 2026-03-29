@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as signalR from '@microsoft/signalr'
-import { gamesApi } from '@/api/games'
+import { gamesApi, settingsApi } from '@/api/games'
 import type { InstallationStatus, XUnityConfig, InstallOptions, PluginHealthReport } from '@/api/types'
 
 export type OperationType = 'install' | 'uninstall'
@@ -80,7 +80,6 @@ export const useInstallStore = defineStore('install', () => {
     status.value = backendStatus
     // Restore skipped steps from persisted settings
     try {
-      const { settingsApi } = await import('@/api/games')
       const appSettings = await settingsApi.get()
       skippedSteps.value = computeSkippedSteps(appSettings.installOptions)
     } catch { /* best effort */ }

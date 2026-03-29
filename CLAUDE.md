@@ -46,7 +46,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许为开发/测试覆盖路径；API 密钥使用 DPAPI 加密
 - **系统托盘：** NotifyIcon 在专用 STA 线程上运行；`ShowNotification` 通过 `SynchronizationContext.Post` 调度到 STA；`_trayIcon`/`_syncContext` 为 `volatile`
 - **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`，`MinimumSize` 500×400）内嵌 WebView2 控件显示前端 UI；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag` 实现原生窗口拖拽；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 实现无边框窗口边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；WebView2 运行时不可用时自动回退到系统浏览器；用户数据目录：`{AppData}/webview2-cache/`
-- **WebView2 DPI 缩放陷阱：** `MinimumSize` 是物理像素，CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著（800px 物理 at 150% DPI = 533 CSS px）；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问（桌面端用浮动标题栏，移动端用顶栏集成按钮）
+- **WebView2 DPI 感知：** `Application.SetHighDpiMode(HighDpiMode.PerMonitorV2)` 在 `SystemTrayService.RunTrayLoop()` 中 `EnableVisualStyles()` 之前调用——这是 WebView2 高 DPI 清晰渲染的关键；`<ApplicationHighDpiMode>` MSBuild 属性不被 `Microsoft.NET.Sdk.Web` 识别，必须使用编程方式
+- **WebView2 DPI 缩放陷阱：** `MinimumSize` 在 PerMonitorV2 下是逻辑像素（150% DPI 时物理最小 750×600），CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问（桌面端用浮动标题栏，移动端用顶栏集成按钮）
 - **WebView2 WndProc 陷阱：** `Message.LParam` 在 64 位系统上必须用 `nint` 解包坐标（`(nint)m.LParam`），不要用 `m.LParam.ToInt32()`——后者在多显示器/负坐标场景会抛 `OverflowException`
 - **页面缩放：** `useThemeStore` 管理页面缩放；`baseDpr`（模块级常量）捕获 `window.devicePixelRatio`；`pageZoom` ref（0=自动检测，50-200=用户设定）；CSS `document.documentElement.style.zoom = effectiveZoom / (baseDpr * 100)` 补偿系统 DPI 使滑块值直接表示有效缩放百分比；localStorage 缓存防闪烁 + 后端持久化；`AppSettings.PageZoom`（int，默认 0）
 - **自定义标题栏：** 前端 `useWindowControls` composable（模块级单例）通过 `window.chrome?.webview` 检测 WebView2 环境；`AppShell.vue` 中的 `.window-titlebar` 仅在 WebView2 模式渲染（透明覆盖层 + 窗口控制按钮）；浏览器模式下无标题栏、无额外 padding；移动端媒体查询中隐藏浮动标题栏并将窗口控制按钮集成到移动端顶栏（`.topbar-window-controls`），顶栏通过 `app-region: drag` 支持拖拽
@@ -157,7 +158,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Path-based 上传：** 所有文件上传端点均有 `*-from-path` 变体，接受 `UploadFromPathRequest { FilePath }` JSON 请求体，用于内置文件浏览器场景；multipart 端点保留用于拖拽上传；涉及：`font-generation/upload-from-path`、`font-replacement/upload-from-path`、`cover/upload-from-path`、`background/upload-from-path`、`icon/upload-from-path`、`settings/import-from-path`、`charset/upload-custom-from-path`、`charset/upload-translation-from-path`
 - **AI 翻译：** `POST /api/translate`（**非 ApiResult** — DLL 直接调用；前端必须使用原始 `fetch`）, `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=`（来自 LLMTranslate.dll 的连通性 ping）
 - **AI 控制：** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
-- **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`, `POST .../llama-download`（下载 llama 二进制）, `POST .../llama-download/cancel`
+- **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength/kvCacheType）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`, `POST .../llama-download`（下载 llama 二进制）, `POST .../llama-download/cancel`
 - **AI 端点：** `GET/POST/DELETE /api/games/{id}/ai-endpoint` — 管理 `LLMTranslate.dll`；POST 还会修补 INI 中的 `[LLMTranslate] ToolkitUrl` + `GameId`
 - **术语：** `GET/PUT /api/games/{id}/terms` — 统一术语 CRUD（替代独立的 glossary/DNT）；`POST /api/games/{id}/terms/import-from-game` — 跨游戏导入 | **描述：** `GET/PUT .../description`
 - **术语表（兼容）：** `GET/PUT /api/games/{id}/glossary` — 旧版兼容层，通过 TermService 读写
@@ -238,6 +239,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.6.{YYYYMMDDHHmm}`（CI 使用 `3.6.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
 - **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框已移除）
+- **MSB3277 屏蔽：** `<NoWarn>MSB3277</NoWarn>` — WebView2.Wpf.dll 引用 WindowsBase 5.0.0.0 与 .NET 10 的 4.0.0.0 冲突；.NET Core 运行时自动统一，警告无害
+- **Vite vendor 分包：** `vite.config.ts` 中 `rolldownOptions.output.codeSplitting.groups` 将 vue/naive-ui/signalr 拆分为独立 chunk（使用 `test` 正则匹配 `node_modules` 路径）；`chunkSizeWarningLimit: 750`；`onwarn` 过滤 SignalR ESM `/*#__PURE__*/` 注释警告；Vite 8 使用 Rolldown 引擎（替代 Rollup + esbuild），不要使用 `rollupOptions` 或 `manualChunks` 对象形式（已移除）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
 - **AppDataPaths 配置回写：** 在 `Program.cs` 中修改 `appDataRoot` 来源后，**必须**执行 `builder.Configuration["AppData:Root"] = appDataRoot` — 否则 `AppDataPaths`（通过 DI 读取 `IConfiguration`）不会获取新值
 - **内置资源：** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity 通过 API 自动检测最新版本；llama.cpp 固定在 b8416（更改 build.ps1/build.yml 中的 `$llamaTag`）；CUDA 12.4；发布后复制
@@ -270,9 +273,9 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **保留属性：** `PublishDir` 和 `SourceDir` 是 MSBuild/WiX SDK 的保留属性，会被静默覆盖；使用自定义名称（例如 `AppPublishDir`）并通过 `-p:AppPublishDir=...` 传递
 - **路径解析：** WiX 相对于 `.wixproj` 目录解析 `Source` 路径，不是相对于 CWD；在 `.wixproj` 中使用 `IsPathRooted` 处理绝对和相对路径输入；不要在 WiX 构建中设置 `-p:OutputPath`（会干扰文件解析）
 - **每用户 ICE 错误：** 每用户安装（`Scope="perUser"`）触发 ICE 误报；`SuppressValidation=true` 跳过所有 ICE 检查（也加快构建）
-- **WixUI 变量覆盖：** `WixUILicenseRtf` 等必须是 `.wxs` 中的 `<WixVariable>`，不是 `.wxl` 中的 `<String>` — 本地化字符串在 WiX v5 中不适用于 WixUI 变量覆盖
+- **WixUI 变量覆盖：** `WixUILicenseRtf` 等必须是 `.wxs` 中的 `<WixVariable>`，不是 `.wxl` 中的 `<String>` — 本地化字符串在 WiX 中不适用于 WixUI 变量覆盖
 - **MSI 代码页：** MSI 数据库代码页默认为 1252（西方）；MSI 内部字符串（例如 `DowngradeErrorMessage`）中的中文字符会导致 WIX0311 错误；对 MSI 级别的字符串使用英文
-- **v5 元素语法：** `<String>` 使用 `Value` 属性（非内部文本）；`<Publish>` 使用 `Condition` 属性（非内部文本）；内部文本在 WiX v5 中已过时
+- **元素语法：** `<String>` 使用 `Value` 属性（非内部文本）；`<Publish>` 使用 `Condition` 属性（非内部文本）；内部文本已过时
 - **DefaultLanguage 输出路径：** 设置 `<DefaultLanguage>zh-CN</DefaultLanguage>` 导致 MSI 输出到文化子文件夹（例如 `bin/x64/Release/zh-CN/`）；`build.ps1` 使用 `-Recurse` 查找 MSI
 - **WiX UI 扩展：** `WixToolset.UI.wixext` 附带内置 `zh-CN` 本地化；只需自定义 `.wxl` 用于应用特定字符串（启动复选框文本、许可证路径）；`.wxs` 中的中文文本必须使用 `!(loc.StringId)` 以避免代码页错误
 - **构建产物清理：** WiX 在 `OutputPath` 中生成 `.wixpdb` 文件；移动 MSI 后必须清理，否则它们会污染发布 ZIP

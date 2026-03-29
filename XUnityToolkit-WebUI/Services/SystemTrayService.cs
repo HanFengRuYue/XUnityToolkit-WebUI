@@ -49,6 +49,7 @@ public sealed class SystemTrayService(
 
     private void RunTrayLoop()
     {
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 

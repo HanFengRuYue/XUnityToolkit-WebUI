@@ -27,7 +27,7 @@ jobs:
       new_deps_json: ${{ steps.compare.outputs.new_deps_json }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Fetch upstream versions
         id: fetch
@@ -156,7 +156,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Update deps.json
         run: |
