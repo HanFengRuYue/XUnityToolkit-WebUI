@@ -242,7 +242,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 
 ## WebView2 详情
 
-- **启动优化：** `SystemTrayService.StartAsync` 在 `DetectWebView2Runtime()` 后立即启动 `CoreWebView2Environment.CreateAsync`（存为 `_preCreatedEnvTask`），与 Kestrel 启动并行运行（节省 300-2000ms）；`WebViewWindow` 构造函数接收 `Task<CoreWebView2Environment>?`；`InitializeAsync` 中 `await _envTask` 使用预创建的环境；`Icon` 在 `BuildTrayIcon` 中缓存一次
+- **启动优化：** `RunTrayLoop()` 在 STA 线程上启动 `CoreWebView2Environment.CreateAsync`（存为 `_preCreatedEnvTask`），与 Kestrel 启动并行运行（节省 300-2000ms）；**必须在 STA 线程上调用**——从 MTA（`StartAsync`）调用会导致 `RPC_E_CHANGED_MODE`；`WebViewWindow` 构造函数接收 `Task<CoreWebView2Environment>?`；`InitializeAsync` 中 `await _envTask` 使用预创建的环境；`Icon` 在 `BuildTrayIcon` 中缓存一次
 - **快速关闭：** `OnFormClosing` 在 `ApplicationExitCall` 路径上通过 `Controls.Remove(_webView)` 分离控件，跳过慢速 `_webView.Dispose()`（~500-1000ms Chromium 子进程关闭）；浏览器子进程在宿主进程退出时通过 IPC 通道断开自动终止
 - **DPI 缩放陷阱：** `MinimumSize` 在 PerMonitorV2 下是逻辑像素（150% DPI 时物理最小 750×600），CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问
 - **关闭超时：** `HostOptions.ShutdownTimeout = 1s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
