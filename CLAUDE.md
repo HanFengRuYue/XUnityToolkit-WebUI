@@ -160,7 +160,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - `dotnet build` 自动运行前端；跳过使用 `-p:SkipFrontendBuild=true`
 - `build.ps1`：本地构建 — 下载内置资源 → 提取 XUnity 引用 DLL → 更新 classdata.tpk → 前端 → TranslatorEndpoint → Updater (AOT) → 发布到 `Release/win-x64/`；`-SkipDownload` 跳过资源下载；无清单/组件 ZIP、无 MSI（CI `build.yml` 独立处理完整发布构建）；清理：删除 `web.config`、`*.pdb`、`*.staticwebassets.endpoints.json`
-- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `3.9.{YYYYMMDDHHmm}`（CI 使用 `3.9.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
+- **版本号：** `build.ps1` 通过 `-p:InformationalVersion` 自动生成 `4.0.{YYYYMMDDHHmm}`（CI 使用 `4.0.` 前缀）；**必须使用 `InformationalVersion` 而非 `Version`** — `Version` 设置 `AssemblyVersion`（UInt16 最大 65535），时间戳会溢出
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
 - **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框已移除）
 - **MSB3277 屏蔽：** `<NoWarn>MSB3277</NoWarn>` — WebView2.Wpf.dll 引用 WindowsBase 5.0.0.0 与 .NET 10 的 4.0.0.0 冲突；.NET Core 运行时自动统一，警告无害
