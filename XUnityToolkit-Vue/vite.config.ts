@@ -28,6 +28,23 @@ export default defineConfig({
   build: {
     outDir: '../XUnityToolkit-WebUI/wwwroot',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 750,
+    rolldownOptions: {
+      onwarn(warning, defaultHandler) {
+        // Suppress @microsoft/signalr ESM /*#__PURE__*/ annotation warnings
+        if (warning.code === 'SOURCEMAP_ERROR' || warning.message?.includes('#__PURE__')) return
+        defaultHandler(warning)
+      },
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-vue', test: /node_modules[\\/](vue|vue-router|pinia|@vue[\\/]devtools-api)/ },
+            { name: 'vendor-naive-ui', test: /node_modules[\\/]naive-ui/ },
+            { name: 'vendor-signalr', test: /node_modules[\\/]@microsoft[\\/]signalr/ },
+          ],
+        },
+      },
+    },
   },
   server: {
     proxy: {
