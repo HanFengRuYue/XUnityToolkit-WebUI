@@ -35,7 +35,13 @@ public sealed class AiTranslationSettings
     /// <summary>
     /// Number of recent translation pairs for local mode (0 = disabled, max 10). Separate from cloud ContextSize.
     /// </summary>
-    public int LocalContextSize { get; set; }
+    public int LocalContextSize { get; set; } = 3;
+
+    /// <summary>min_p sampling parameter for local LLM (0-1, default 0.05). Dynamically prunes low-probability tokens.</summary>
+    public double LocalMinP { get; set; } = 0.05;
+
+    /// <summary>repeat_penalty for local LLM (0.5-2.0, default 1.0). 1.0 = no penalty (correct for translation).</summary>
+    public double LocalRepeatPenalty { get; set; } = 1.0;
 
     /// <summary>
     /// Enable pre-translation cache optimization (normalization, regex generation, monitoring).

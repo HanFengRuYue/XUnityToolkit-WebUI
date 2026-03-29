@@ -49,6 +49,7 @@ const message = useMessage()
 
 const gpuLayers = ref(-1)
 const contextLength = ref(4096)
+const kvCacheType = ref('q8_0')
 const catalogExpanded = ref(false)
 const testing = ref(false)
 
@@ -214,6 +215,7 @@ async function handleSaveSettings() {
     await localLlmApi.saveSettings({
       gpuLayers: gpuLayers.value,
       contextLength: contextLength.value,
+      kvCacheType: kvCacheType.value,
     })
   } catch { /* ignore */ }
 }
@@ -234,6 +236,7 @@ onMounted(async () => {
   if (store.settings) {
     gpuLayers.value = store.settings.gpuLayers
     contextLength.value = store.settings.contextLength
+    kvCacheType.value = store.settings.kvCacheType ?? 'q8_0'
   }
 })
 
@@ -394,6 +397,20 @@ onBeforeUnmount(() => {
           />
           <span class="form-hint">较大的上下文需要更多显存</span>
         </div>
+        <div class="form-row">
+          <label class="form-label">KV Cache 量化</label>
+          <NSelect
+            v-model:value="kvCacheType"
+            :options="[
+              { label: 'f16（最高精度）', value: 'f16' },
+              { label: 'q8_0（推荐，省约 50% 显存）', value: 'q8_0' },
+              { label: 'q4_0（省约 75% 显存）', value: 'q4_0' },
+            ]"
+            style="width: 260px"
+            @update:value="handleSaveSettings"
+          />
+          <span class="form-hint">量化 KV Cache 可减少显存占用，q8_0 几乎无质量损失</span>
+        </div>
       </div>
     </div>
 
@@ -435,7 +452,33 @@ onBeforeUnmount(() => {
             :step="1"
             :tooltip="true"
           />
-          <span class="form-hint">附带的近期翻译对数量，0 为关闭（本地模式最多 10，默认关闭）</span>
+          <span class="form-hint">附带的近期翻译对数量，0 为关闭（本地模式最多 10）</span>
+        </div>
+        <div class="form-row">
+          <label class="form-label">min_p（{{ modelValue.localMinP?.toFixed(2) ?? '0.05' }}）</label>
+          <NSlider
+            :value="modelValue.localMinP ?? 0.05"
+            @update:value="(v: number) => updateAiSettings({ localMinP: v })"
+            :min="0"
+            :max="1"
+            :step="0.01"
+            :tooltip="true"
+            :format-tooltip="(v: number) => v.toFixed(2)"
+          />
+          <span class="form-hint">动态裁剪低概率 token，较高值加速生成但可能降低多样性</span>
+        </div>
+        <div class="form-row">
+          <label class="form-label">重复惩罚（{{ modelValue.localRepeatPenalty?.toFixed(1) ?? '1.0' }}）</label>
+          <NSlider
+            :value="modelValue.localRepeatPenalty ?? 1.0"
+            @update:value="(v: number) => updateAiSettings({ localRepeatPenalty: v })"
+            :min="0.5"
+            :max="2"
+            :step="0.1"
+            :tooltip="true"
+            :format-tooltip="(v: number) => v.toFixed(1)"
+          />
+          <span class="form-hint">1.0 = 无惩罚（翻译场景推荐），大于 1 会惩罚重复用词</span>
         </div>
       </div>
 

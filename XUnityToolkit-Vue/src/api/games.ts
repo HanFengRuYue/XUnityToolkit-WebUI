@@ -250,7 +250,7 @@ export const localLlmApi = {
   getGpus: () => api.get<GpuInfo[]>('/api/local-llm/gpus'),
   refreshGpus: () => api.post<GpuInfo[]>('/api/local-llm/gpus/refresh'),
   getSettings: () => api.get<LocalLlmSettings>('/api/local-llm/settings'),
-  saveSettings: (req: { gpuLayers: number; contextLength: number }) =>
+  saveSettings: (req: { gpuLayers: number; contextLength: number; kvCacheType?: string }) =>
     api.put<void>('/api/local-llm/settings', req),
   getCatalog: () => api.get<BuiltInModelInfo[]>('/api/local-llm/catalog'),
   getLlamaStatus: () => api.get<LlamaStatus>('/api/local-llm/llama-status'),

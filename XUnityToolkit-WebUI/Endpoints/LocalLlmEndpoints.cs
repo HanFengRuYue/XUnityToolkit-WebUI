@@ -169,7 +169,7 @@ public static class LocalLlmEndpoints
     }
 }
 
-public record UpdateLocalLlmSettingsRequest(int GpuLayers, int ContextLength);
+public record UpdateLocalLlmSettingsRequest(int GpuLayers, int ContextLength, string? KvCacheType = null);
 public record StartLocalLlmRequest(string ModelPath, int GpuLayers = -1, int ContextLength = 4096);
 public record DownloadModelRequest(string CatalogId);
 public record PauseDownloadRequest(string CatalogId);

@@ -180,6 +180,8 @@ export interface AiTranslationSettings {
   temperature: number
   contextSize: number
   localContextSize: number
+  localMinP: number
+  localRepeatPenalty: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
   enablePreTranslationCache: boolean
@@ -497,6 +499,7 @@ export type LocalLlmServerState = 'Idle' | 'Starting' | 'Running' | 'Stopping' |
 export interface LocalLlmSettings {
   gpuLayers: number
   contextLength: number
+  kvCacheType: string
   loadedModelPath?: string
   endpointId: string
   models: LocalModelEntry[]

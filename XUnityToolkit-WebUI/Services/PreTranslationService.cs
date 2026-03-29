@@ -153,7 +153,7 @@ public sealed partial class PreTranslationService(
         var aiSettings = settings.AiTranslation;
         var isLocalMode = string.Equals(aiSettings.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
         var maxConc = isLocalMode ? 1 : Math.Clamp(aiSettings.MaxConcurrency, 1, 100);
-        var batchSize = isLocalMode ? 1 : 10;
+        var batchSize = isLocalMode ? 5 : 10;
 
         // ── Pre-Round 1: Template variable detection (regex-based, zero LLM cost) ──
         var templateVars = dynamicPatternService.DetectTemplateVariables(textList);

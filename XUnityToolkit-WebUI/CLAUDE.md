@@ -76,7 +76,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 ## 并发与性能
 
 - **热路径：** `POST /api/translate` 接收 100+ 请求/秒；所有 I/O 必须使用内存缓存，绝不每请求访问磁盘
-- `SemaphoreSlim`：每批一个槽位；`EnsureSemaphore` 延迟 Dispose 3 分钟；60s 超时 → 503；**关键：** 信号量等待和 LLM 调用放在不同的 `try` 块中；**本地模式批处理拆分：** `TranslateAsync` 循环单文本的 `TranslateBatchAsync` 调用，使 `_translating` 显示 1（而非批大小）
+- `SemaphoreSlim`：每批一个槽位；`EnsureSemaphore` 延迟 Dispose 3 分钟；60s 超时 → 503；**关键：** 信号量等待和 LLM 调用放在不同的 `try` 块中；**本地模式批处理拆分：** `TranslateLocalSequentialAsync` 单次获取信号量后循环逐条调用 `CallOpenAiCompatRawAsync`，使 `_translating` 显示 1（而非批大小）；系统提示词缓存 + 节流广播
 - **信号量释放守卫：** 释放信号量的 `finally` 块必须检查 `if (semaphoreAcquired)`——超时/取消后无条件 `Release()` 会损坏信号量计数；统计计数器如 `_translating` 同理
 - **热路径缓存：** 绝不在热路径上调用 `GameLibraryService.GetByIdAsync`；使用 `ConcurrentDictionary` + 显式失效
 - `BroadcastStats`：CAS 节流 200ms；完成/错误时使用 `force: true`，以及所有 `TranslateBatchAsync` 状态转换（`_queued++/--`、`_translating++/--`）——非强制广播会被静默丢弃，因为它们触发时正处于调用方广播的节流窗口内，导致中间管线状态对前端不可见
@@ -93,7 +93,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **`await using` 提前关闭：** 当流必须在后续代码读取文件之前关闭时，使用块作用域 `{ await using var s = ...; }` 而非调用 `s.Close()`（与 `await using` 隐式 dispose 冗余）
 - **插件并发：** DLL 10×10 = 100 条文本；Mono >15 连接会死锁——改用批处理
 - **XUnity HTTP：** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`；无 `Connection: close`（CLOSE_WAIT bug）
-- **预翻译：** 对每批 10 条使用 `Parallel.ForEachAsync`（本地模式：批=1，并行度=1）；CAS 节流 200ms 进度；`catch (OperationCanceledException) when (ct.IsCancellationRequested)` 守卫防止 HTTP `TaskCanceledException` 中止整个操作——在 `Parallel.ForEachAsync` 主体中**始终使用 `when` 守卫**
+- **预翻译：** 对每批 10 条使用 `Parallel.ForEachAsync`（本地模式：批=5，并行度=1）；CAS 节流 200ms 进度；`catch (OperationCanceledException) when (ct.IsCancellationRequested)` 守卫防止 HTTP `TaskCanceledException` 中止整个操作——在 `Parallel.ForEachAsync` 主体中**始终使用 `when` 守卫**
 - **顺序 LLM 循环中的 `when` 守卫：** `DynamicPatternService`/`TermExtractionService` 批处理循环也需要 `catch (OperationCanceledException) when (ct.IsCancellationRequested)`——裸 `catch (OperationCanceledException) { throw; }` 会捕获 HTTP 超时的 `TaskCanceledException` 并在单次超时时中止所有剩余批次
 - **LLM 重试：** `TranslateBatchAsync` 对瞬态错误（`TaskCanceledException`、`HttpRequestException`、`TimeoutException`）最多重试 2 次，指数退避（2s、4s）；重试循环在信号量获取块内；`IsTransientError` 辅助方法判断可重试性
 - **TM 去抖动持久化：** `TranslationMemoryService.Add()` 是同步的（仅内存）；持久化通过 `ScheduleDebouncedPersist` 去抖动 5s；`FlushAsync` 在批处理完成后立即持久化；每游戏 `SemaphoreSlim` 锁（非全局）
@@ -101,18 +101,19 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 ## AI 翻译上下文
 
 - **批处理模式：** 整批作为一次 LLM 调用；JSON 数组 I/O
-- **翻译记忆：** 每游戏易失；云端 `ContextSize`（10，最大 100），本地 `LocalContextSize`（0，最大 10）
+- **翻译记忆：** 每游戏易失；云端 `ContextSize`（10，最大 100），本地 `LocalContextSize`（3，最大 10）
 - **游戏描述：** `Game.AiDescription`；`_descriptionCache` 在 `PUT /description` 时失效；截断到 500 字符
 - **多阶段管线：** Phase 0（TM 查找）→ Phase 1（自然模式，仅云端）→ Phase 2（占位符替换）→ Phase 3（强制纠正）；`TermAuditService` 在阶段间验证合规性；`NaturalTranslationMode` 和 `TermAuditEnabled` 控制阶段
 - **翻译记忆 Phase 0：** 在 `TranslateAsync` 中插入于 Phase 1 之前；`phase0Resolved` HashSet 追踪 TM 已解决的索引；Phase 1/2/3 过滤循环必须跳过这些索引；`perTextTranslationSource` 数组追踪每条文本的 `"tmExact"`/`"tmFuzzy"`/`"tmPattern"`；TM 命中在接受前经过 `TermAuditService` 验证
 - **SystemPrompt 顺序：** 模板 → 描述 → 术语 → 记忆 → [文本]
-- **添加 SystemPrompt 段落：** 新参数必须贯穿：`TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → 全部 8 个提供商分支 → `Call*Async` → `BuildSystemPrompt`；同时更新 `TestTranslateAsync`（传 `null`）
+- **添加 SystemPrompt 段落：** 新参数必须贯穿：`TranslateAsync` → `TranslateBatchAsync` → `CallProviderAsync` → 全部 8 个提供商分支 → `Call*Async` → `BuildSystemPrompt`；同时更新 `TranslateLocalSequentialAsync`（直接调用 `CallOpenAiCompatRawAsync`，绕过标准链）和 `TestTranslateAsync`（传 `null`）
 - **ParseTranslationArray：** 先去除 `<think>...</think>` 再提取 JSON 数组（处理无围栏情况）
+- **`CallOpenAiCompatRawAsync` 可选采样参数：** 接受 `double? minP, double? repeatPenalty, int? maxTokens` 可选参数；`CallOpenAiCompatAsync` 在 `ep.ApiKey == "local"` 时自动传递 `AiTranslationSettings.LocalMinP/LocalRepeatPenalty` 和基于输入长度估算的 max_tokens；`CallLlmRawAsync` 不传递这些参数（保持通用）
 - **`CallLlmRawAsync`：** `Task<(string content, long tokens)> CallLlmRawAsync(ApiEndpointConfig endpoint, string systemPrompt, string userContent, double temperature, CancellationToken ct)`——返回元组，必须解构 `var (content, _) = await ...`；无信号量的公共任意 LLM 调用方法；被 `GlossaryExtractionService`、`BepInExLogService`、`DynamicPatternService`、`TermExtractionService` 使用；端点选择：`OrderByDescending(e => e.Priority)`（值越高越优先，与 `CalculateScore` 一致）
 - **测试与翻译端点的差异：** `TestTranslateAsync` 直接使用请求体中的端点；`TranslateAsync` 通过 `settingsService.GetAsync()` 读取已存储的设置。设置未持久化时测试可能通过但翻译失败——调试"没有可用的AI提供商"错误时始终检查两条路径
 - **Gemini 认证：** 使用 `x-goog-api-key` HTTP 头，不要用 URL 查询参数 `?key=`——URL 参数会在异常消息、日志和 HTTP 跟踪中泄露
 - **占位符旁路：** 当整个输入文本是单个占位符（`{{G_x}}`/`{{DNT_x}}`）时，直接预计算结果并跳过 LLM 调用——LLM 对保留占位符不可靠；预计算结果跳过 `ApplyGlossaryPostProcess` 但仍经过术语审计（计入 phase2Pass 统计）；`preComputed` 字典追踪这些索引
-- **提示词中的术语：** 在云端模式下，所有翻译类型的术语条目（包括非正则）都保留在系统提示词中，即使使用了占位符——不要过滤为仅正则。在本地模式下，`promptTerms` 设为 `null` 以节省上下文 token；术语执行仅依赖占位符替换（非正则）和 `ApplyGlossaryPostProcess`（正则 + 兜底）
+- **提示词中的术语：** 在云端模式下，所有翻译类型的术语条目（包括非正则）都保留在系统提示词中，即使使用了占位符——不要过滤为仅正则。在本地模式下，当匹配的术语数 ≤20 时包含术语表（提升术语遵守率），超过 20 时 `promptGlossary` 设为 `null` 以节省上下文 token；术语执行仍依赖占位符替换（非正则）和 `ApplyGlossaryPostProcess`（正则 + 兜底）
 - **术语提示词标注：** `AppendTermAnnotation` 格式化 Category（`GetCategoryLabel` → 角色/地点/物品/技能/组织/通用）+ Description；Phase 1 使用全角 `（）`，Phase 2 使用半角 `()`；两个阶段都在发送给 LLM 的术语列表中包含类别和描述
 - **`AppendTermAnnotation` 括号格式：** 全角直接追加 `（`；半角直接追加 `(`——不要在 `(` 前插入前导空格；两种都以匹配的右括号结束
 - **术语子串保护：** `ApplyGlossaryPostProcess`、Phase 3 强制纠正和 `TermAuditService` 都使用受保护区间追踪，防止较短术语破坏较长术语翻译中的子串（如 `Settings`→`设置` 不得替换 `SaveSettings.es3`→`SaveSettings.es3` 中的 `Settings`）；`TermAuditService` 按最长优先排序术语，跳过被更长已通过术语包含的短术语审计；任何对术语原文/译文进行 `string.Replace` 的新代码必须遵循此模式
@@ -197,6 +198,9 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **ModelScope URL：** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}`——支持 Range 头用于断点续传；公开模型无需认证
 - **GPU 监控：** CUDA 运行时每 3 秒轮询 nvidia-smi
 - **推理已禁用：** `--reasoning-budget 0` 防止 `<think>` 块
+- **性能参数：** `--flash-attn --cont-batching -ub 1024` 默认启用；CPU 模式额外设置 `-t/-tb` 为 CPU 核心数；KV cache 量化通过 `LocalLlmSettings.KvCacheType`（默认 `q8_0`，可选 `f16`/`q4_0`）
+- **本地推理采样参数：** 本地端点（`ApiKey=="local"`）的请求附加 `min_p`（`AiTranslationSettings.LocalMinP`，默认 0.05）、`repeat_penalty`（`LocalRepeatPenalty`，默认 1.0）、`max_tokens`（基于输入长度估算）
+- **本地串行循环优化：** `TranslateLocalSequentialAsync` 在批量翻译时单次获取信号量 + 缓存系统提示词 + 节流 SignalR 广播（替代原先 per-text 的 `TranslateBatchAsync` 调用）
 - 端点自动注册为 `Custom` 提供商，Priority=8；稳定的 `EndpointId`
 - **端点生命周期：** `RegisterEndpointAsync` 在 `StartAsync`（健康检查后）时设置 `Enabled=true`；`UnregisterEndpointAsync` 在 `StopAsync` 时设置 `Enabled=false`；`Program.cs` 中的**启动清理**强制将 `ApiKey=="local"` 的端点设为 `Enabled=false`（本地 LLM 在全新启动时绝不运行；防范崩溃孤立状态）
 - **翻译门控：** `POST /api/translate` 注入 `LocalLlmService`，当 `ActiveMode=="local" && !IsRunning` 时阻止请求（503）；防止 XUnity 错误累积（5 次连续错误 → 翻译器关闭）

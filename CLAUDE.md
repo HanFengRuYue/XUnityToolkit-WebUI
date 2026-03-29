@@ -53,7 +53,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **无控制台：** `OutputType=WinExe` — 无控制台窗口；不要改回 `Exe`
 - **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置；在 `Initialize()` 时通过 `WebClient.DownloadStringAsync` 发送连通性 ping（`GET /api/translate/ping?gameId=`）（即发即忘）
 - **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；批量模式由 `SemaphoreSlim` 限制；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
-- **本地 LLM：** `LocalLlmService` 管理 llama-server 进程；通过 DXGI 检测 GPU，WMI 作为后备；llama 二进制文件打包为 ZIP，首次使用时延迟解压；本地模式强制 concurrency=1、batch size=1、禁用术语提取；术语占位符替换 + 后处理在本地模式下仍然有效（跳过系统提示词中的术语以节省上下文 token）
+- **本地 LLM：** `LocalLlmService` 管理 llama-server 进程；通过 DXGI 检测 GPU，WMI 作为后备；llama 二进制文件打包为 ZIP，首次使用时延迟解压；本地模式强制 concurrency=1、batch size=1、禁用术语提取；`TranslateLocalSequentialAsync` 优化本地串行循环（单次信号量获取 + 系统提示词缓存 + 节流 SignalR 广播）；术语占位符替换 + 后处理在本地模式下仍然有效；当匹配术语数 ≤20 时在系统提示词中包含术语表（超过 20 则省略以节省上下文 token）；llama-server 默认启用 `--flash-attn --cont-batching -ub 1024`，KV cache 量化通过 `LocalLlmSettings.KvCacheType`（默认 `q8_0`）配置；本地端点推理请求附加 `min_p`/`repeat_penalty`/`max_tokens` 采样参数
 - **模块化版本：** 三个版本 — Full（自包含+LLAMA）、No-LLAMA（自包含）、Lite（框架依赖）；`EditionInfo`（`Infrastructure/EditionInfo.cs`）通过 `AssemblyMetadataAttribute("Edition")` 在构建时注入，运行时静态读取；`EditionInfo.Current` 返回 `AppEdition` 枚举；`EditionInfo.HasBundledLlama` 仅 Full 为 true；通过 `-p:Edition=full|no-llama|lite` 传递；`UpdateService` 使用 `GetManifestRid()` 获取版本特定的清单 RID（`win-x64`/`win-x64-no-llama`/`win-x64-lite`）
 - **LLAMA 运行时下载：** `LocalLlmService.DownloadLlamaAsync` 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；`POST .../llama-download/cancel` 取消；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅
 - **资源提取：** `AssetExtractionService` 使用 AssetsTools.NET 从 Unity `.assets` 和 bundle 文件中提取字符串；`PreTranslationService` 批量翻译并写入 XUnity 缓存文件
@@ -193,7 +193,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 - **InstallStep 枚举：** 在 4 处同步：`Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`；还要更新 `GameDetailView.vue` 的 `installStepLabel` 映射
 - **添加 AppSettings 字段：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, store 的 `loadPreferences`/`savePreferences`, `SettingsView.vue`
-- **添加 AiTranslationSettings 字段：** 在 3 处同步：`Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue`（`DEFAULT_AI_TRANSLATION` + 管线设置 UI）；实时设置（`TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`）在 `AiTranslationView.vue` 中显示；仅预翻译设置（`EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`）在 `AssetExtractionView.vue` 中显示
+- **添加 AiTranslationSettings 字段：** 在 4 处同步：`Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue`（`DEFAULT_AI_TRANSLATION`）, `SettingsView.vue`（默认值）；实时设置（`TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`）在 `AiTranslationView.vue` 中显示；本地模式专属设置（`LocalMinP`, `LocalRepeatPenalty`, `LocalContextSize`）在 `LocalAiPanel.vue` 中显示；仅预翻译设置（`EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`）在 `AssetExtractionView.vue` 中显示；数值型字段需在 `SettingsEndpoints.cs` 中添加 `Math.Clamp`
 - **添加 TermEntry 字段：** 在 2 处同步：`Models/TermEntry.cs`, `src/api/types.ts`；包含 `Source`（`TermSource` 枚举，PascalCase JSON）
 - **ScriptTagRule/ScriptTagConfig 字段：** 在 2 处同步：`Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
 - **每游戏数据清理（脚本标签）：** `GameEndpoints.cs` 中的 `DELETE /api/games/{id}` 必须删除 `scriptTagFile` + 调用 `scriptTagService.RemoveCache`
@@ -214,6 +214,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **`[LLMTranslate]` INI 配置：** 在 3 处写入 — `POST /ai-endpoint`、`InstallOrchestrator`、DLL `Initialize`
 - **更新状态模型：** `Models/UpdateInfo.cs` → `src/api/types.ts` → `src/stores/update.ts` → `SettingsView.vue`
 - **AppSettings.ReceivePreReleaseUpdates：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue`（设置默认值 + NSwitch）
+- **添加 LocalLlmSettings 用户配置字段：** 在 3 处同步：`Models/LocalLlmSettings.cs`, `Endpoints/LocalLlmEndpoints.cs`（`UpdateLocalLlmSettingsRequest`）, `src/api/types.ts`；UI 在 `LocalAiPanel.vue`；API 在 `src/api/games.ts`（`localLlmApi.saveSettings`）；`UpdateUserSettingsAsync` 合并字段
 - **添加 BuiltInModelInfo 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **VersionInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`；包含 `Version`、`Edition`
