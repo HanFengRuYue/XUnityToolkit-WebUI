@@ -170,7 +170,7 @@ builder.Services.AddSignalR()
 // 缩短关闭超时，避免浏览器 WebSocket 连接导致退出延迟
 builder.Services.Configure<HostOptions>(options =>
 {
-    options.ShutdownTimeout = TimeSpan.FromSeconds(3);
+    options.ShutdownTimeout = TimeSpan.FromSeconds(1);
 });
 
 var app = builder.Build();
@@ -287,32 +287,36 @@ var hubContext = app.Services.GetRequiredService<IHubContext<InstallProgressHub>
 fileLoggerProvider.LogBroadcast = entry =>
     _ = hubContext.Clients.Group("logs").SendAsync("logEntry", entry);
 
-// Initialize AI translation enabled state from settings + cleanup stale local endpoint
-try
-{
-    var settingsService = app.Services.GetRequiredService<AppSettingsService>();
-    var settings = settingsService.GetAsync().GetAwaiter().GetResult();
-    app.Services.GetRequiredService<LlmTranslationService>().Enabled = settings.AiTranslation.Enabled;
-
-    // Local LLM is never running on fresh startup — disable any stale local endpoint
-    var localEndpoint = settings.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
-    if (localEndpoint is { Enabled: true })
-    {
-        settingsService.UpdateAsync(s =>
-        {
-            var ep = s.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
-            if (ep is not null) ep.Enabled = false;
-        }).GetAwaiter().GetResult();
-    }
-}
-catch
-{
-    // Ignore — defaults to enabled
-}
-
-// Auto-check for updates after startup
+// Deferred initialization after Kestrel is ready — avoids blocking startup with disk I/O + DPAPI
 app.Lifetime.ApplicationStarted.Register(() =>
 {
+    // Initialize AI translation enabled state + cleanup stale local endpoint
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var settingsService = app.Services.GetRequiredService<AppSettingsService>();
+            var settings = await settingsService.GetAsync();
+            app.Services.GetRequiredService<LlmTranslationService>().Enabled = settings.AiTranslation.Enabled;
+
+            // Local LLM is never running on fresh startup — disable any stale local endpoint
+            var localEndpoint = settings.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
+            if (localEndpoint is { Enabled: true })
+            {
+                await settingsService.UpdateAsync(s =>
+                {
+                    var ep = s.AiTranslation.Endpoints.FirstOrDefault(e => e.ApiKey == "local");
+                    if (ep is not null) ep.Enabled = false;
+                });
+            }
+        }
+        catch
+        {
+            // Ignore — defaults to enabled
+        }
+    });
+
+    // Auto-check for updates
     _ = Task.Run(async () =>
     {
         var updateService = app.Services.GetRequiredService<UpdateService>();

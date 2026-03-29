@@ -14,7 +14,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 
 - **无迁移代码：** 项目处于预稳定阶段——不做向后兼容的迁移或旧格式转换
 - **关键基础设施服务：** `GameLibraryService`（内存中的游戏库增删改查）、`AppSettingsService`（设置缓存）、`ConfigurationService`（INI 读写/补丁）、`UnityDetectionService`（游戏检测）、`GameImageService`（图标/封面/背景管理）
-- `AppSettingsService`：内存缓存；`GetAsync()` 无磁盘 I/O；不要修改返回的对象——使用 `UpdateAsync`/`SaveAsync`
+- `AppSettingsService`：内存缓存；`GetAsync()` 无磁盘 I/O；不要修改返回的对象——使用 `UpdateAsync`/`SaveAsync`；**启动延迟加载：** 设置初始化（`LlmTranslationService.Enabled` + 清理过期本地端点）在 `ApplicationStarted` 回调中异步执行（不再阻塞 `app.Run()` 之前的启动路径）
 - **数据存储：** 所有运行时数据存储在 `%AppData%\XUnityToolkit\`；`AppDataPaths` 集中管理路径；随附资源（`bundled/`、`wwwroot/`）保留在程序根目录
 - **敏感数据加密：** `DpapiProtector`（DPAPI CurrentUser）加密 `ApiEndpointConfig.ApiKey` 和 `SteamGridDbApiKey`；前缀 `ENC:DPAPI:` + Base64；在 `AppSettingsService.ReadAsync`/`WriteAsync` 边界加解密；解密失败时保留密文并创建 `.bak` 备份
 - **DI 之前的路径：** `Program.cs` 在 DI 之前读取 `builder.Configuration["AppData:Root"]` 并回退到 `%AppData%\XUnityToolkit\`——必须与 `AppDataPaths._root` 的公式保持同步
@@ -140,6 +140,11 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **`CollectStrings` 深度：** 递归限制为 20（支持 GameCreator 2 等深度嵌套框架）
 - **TextAsset JSON 检测：** 对于将结构化数据存储为 JSON TextAsset 的游戏（如 VIDE 对话），在 TextAsset 提取循环中添加检测（返回 `List<ExtractedText>?` 的 `TryExtract*`），在通用 `ExtractTextLines` 兜底之前；使用 `System.Text.Json.JsonDocument` 解析；返回 `null` 则回退到通用提取
 - **GameCreator 2 支持：** `DetectGameCreatorDialogueType` 识别 Dialogue/Quest/Actor/Stat 类型；类型特定的提取使用 `GameCreator:{Type}:{Name}` 来源标签；`DetectAndLogTemplateVariables` 扫描 `{Variable}` 模式（如 `{PC}`、`{M}`）并记录 DNT 术语建议
+- **I2 Localization 提取：** `ExtractI2LocalizationTerms` 通过 `mSource.mTerms`+`mLanguages` 字段存在性检测 I2 `LanguageSourceAsset`；使用 `I2:{langCode}:{termKey}` source tag；跳过 `IsGameText` 过滤；对非 I2 MonoBehaviour 回退到通用 `CollectStrings`
+- **VIDE Dialogues 提取：** `TryExtractVideDialogue` 通过 `dID`+`playerDiags` 键检测 TextAsset 中的 VIDE 对话 JSON；从 `pd_{N}_com_{C}text` 提取对话，从 `pd_{N}_com_{C}charName` 提取角色名；过滤控制标记；source tag 为 `VIDE:{dialogueName}` 和 `VIDE:Character:{dialogueName}`
+- **VIDE SOQuotes_UW 提取：** `IsVideQuote` 通过 `quotes`+`dialType` 检测；`ExtractVideQuotes` 从 `quotes` 数组提取；source tag 为 `Quote:{assetName}`
+- **VIDE SOTraitData_UW 提取：** `IsVideTrait` 通过 `traitName`+`traitType` 检测；提取 `traitName`、`reqsText`、`effectText`、`flavorText`；`hoverText` 仅在去除模板占位符后剩余文本 >5 字符时提取；source tag 为 `Trait:{assetName}`
+- **添加游戏专用提取器：** 模式：在 `ExtractFromAssetsInstance` 中通过字段签名检测 → 专用提取方法配合特定 source tag → 回退到通用 `CollectStrings`；对于 TextAsset JSON 格式，在 `ExtractTextLines` 回退之前的 TextAsset 循环中检测；添加 `[GeneratedRegex]` 匹配键模式；更新 CLAUDE.md 架构部分
 - XUnity 缓存格式：`encoded_original=encoded_translation`；转义 `\\`、`\n`、`\r`、`\=`；`XUnityTranslationFormat` 静态类
 - **OutputFile 中的 `{Lang}`：** 用 `config.TargetLanguage` 替换；防范路径穿越
 
@@ -182,8 +187,9 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **async/unsafe 冲突：** `GenerateCore` 是 `unsafe` 的（FreeType 指针）——通过 `CharacterSetService.ResolveCharactersAsync` 的字符解析必须在 `GenerateAsync` 中 `Task.Run` 之前完成，绝不在 `GenerateCore` 内部
 - **`HashSet<int>` 而非 `HashSet<char>`：** CJK Extension B（U+20000+）需要辅助平面支持；`char` 是 16 位的；整个管线使用 `int` 码点；`StringInfo.GetTextElementEnumerator()` 处理代理对
 - **磁盘临时 SDF 位图：** 对于大字符集（70K+ 字符），SDF 位图在渲染期间保存到 `data/font-generation/temp/{sessionId}/`，合成时逐页读回，在 `finally` 中清理
-- **CharacterSetService：** 单例；依赖 `AppDataPaths`、`GameLibraryService`；`ResolveCharactersAsync` 合并内置 + 自定义 TXT + 翻译文件来源；来自 `BuiltinCharsets.SupersetOf` 的超集警告；翻译文件路径从游戏 INI `[Files] OutputFile` + `[General] Language` 解析
-- **始终包含的字符集：** `ResolveCharactersAsync` 无条件合并 `Ascii()` + `CommonPunctuation()` 到每个生成的字体中；`CommonPunctuation()` 覆盖 CJK 符号与标点（U+3000–U+303F）、CJK 兼容形式（U+FE30–U+FE4F）、全角 ASCII（U+FF01–U+FF60）和部分通用标点（破折号、引号、省略号）；添加新的始终包含范围：在 `BuiltinCharsets.cs` 的 `CommonPunctuation()` 中添加 + 在 `TmpFontGeneratorService.GenerateAsync` 的兜底路径中镜像
+- **CharacterSetService：** 单例；依赖 `AppDataPaths`、`GameLibraryService`；`ResolveCharactersAsync` 合并内置 + 自定义 TXT + 翻译文件来源；来自 `BuiltinCharsets.SupersetOf` 的超集警告；翻译文件路径从游戏 INI `[Files] OutputFile` + `[General] Language` 解析；`UseAllFontCharacters` 模式接受 `IReadOnlySet<int>? preEnumeratedFontChars`，直接使用字体 cmap 字符（不添加额外字符集）
+- **始终包含的字符集：** `ResolveCharactersAsync` 在普通模式下无条件合并 `Ascii()` + `CommonPunctuation()` 到每个生成的字体中；`CommonPunctuation()` 覆盖 CJK 符号与标点（U+3000–U+303F）、CJK 兼容形式（U+FE30–U+FE4F）、全角 ASCII（U+FF01–U+FF60）和部分通用标点（破折号、引号、省略号）；添加新的始终包含范围：在 `BuiltinCharsets.cs` 的 `CommonPunctuation()` 中添加 + 在 `TmpFontGeneratorService.GenerateAsync` 的兜底路径中镜像
+- **`UseAllFontCharacters` 不变量：** 此模式下**不得**添加 `Ascii()`/`CommonPunctuation()` — 字体 cmap 已包含其支持的所有字符，额外添加字体不支持的字符会导致生成时出现"缺失字形"；`EnumerateFontCharacters`（`FontGenerationEndpoints.cs` 中的 unsafe 静态方法）通过 `FT_Get_First_Char`/`FT_Get_Next_Char` 枚举 cmap（循环终止条件：`glyphIndex == 0`）；cmap 扫描对大字体（60K+ 字形）可能耗时较长，端点层须用 `Task.Run` 包裹避免阻塞请求线程
 - **零大小字形 GlyphRect：** `BitmapWidth==0 || BitmapHeight==0` 的字形（空格、控制字符）必须使 GlyphRect 为 `{0,0,0,0}`——`BitmapWidth - 2*padding` 会产生负值，TMP 会拒绝；零大小字形跳过图集打包但包含在 GlyphTable/CharacterTable 中以提供有效度量
 - **FT_Load/Render 失败追踪：** `FT_Load_Glyph`/`FT_Render_Glyph` 失败必须将字符添加到 `missingChars`——裸 `continue` 会静默丢失字符，使其既不在字体中也不在报告中
 - **安装为 TMP 字体：** `POST /install-tmp-font/{gameId}` 将生成的 bundle 复制到 `{GamePath}/BepInEx/Font/{fontName}`（保留实际名称，去掉 `.bundle` 扩展名）并补丁 `[Behaviour] FallbackFontTextMeshPro`；使用 `TmpFontService.InstallCustomFont`
@@ -233,3 +239,88 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **`WebImageSearchService`：** 抓取 Bing 和 Google 的图片搜索结果；无需 API 密钥
 - **SSRF 防护：** `ValidateImageUrl` 在服务端下载前拒绝非 http(s)、环回地址、私有 IP
 - **Content-Type 验证：** 保存下载的图片前必须检查 `IsAllowedContentType`
+
+## WebView2 详情
+
+- **启动优化：** `SystemTrayService.StartAsync` 在 `DetectWebView2Runtime()` 后立即启动 `CoreWebView2Environment.CreateAsync`（存为 `_preCreatedEnvTask`），与 Kestrel 启动并行运行（节省 300-2000ms）；`WebViewWindow` 构造函数接收 `Task<CoreWebView2Environment>?`；`InitializeAsync` 中 `await _envTask` 使用预创建的环境；`Icon` 在 `BuildTrayIcon` 中缓存一次
+- **快速关闭：** `OnFormClosing` 在 `ApplicationExitCall` 路径上通过 `Controls.Remove(_webView)` 分离控件，跳过慢速 `_webView.Dispose()`（~500-1000ms Chromium 子进程关闭）；浏览器子进程在宿主进程退出时通过 IPC 通道断开自动终止
+- **DPI 缩放陷阱：** `MinimumSize` 在 PerMonitorV2 下是逻辑像素（150% DPI 时物理最小 750×600），CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问
+- **关闭超时：** `HostOptions.ShutdownTimeout = 1s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
+- **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`，`MinimumSize` 500×400）；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag`；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；回退到系统浏览器；用户数据目录 `{AppData}/webview2-cache/`；`DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE=33)` 启用 Windows 11 圆角
+
+## BepInEx 日志与健康检查
+
+- **BepInEx 日志：** `BepInExLogService` 使用 `FileShare.ReadWrite` 读取 `{GamePath}/BepInEx/LogOutput.log`；AI 分析通过 `LlmTranslationService.CallLlmRawAsync`（不占用信号量）；诊断提示词为预定义中文；日志截断到最后 4000 行供 LLM 上下文使用；`hasBepInEx` 计算包含 `PartiallyInstalled` 状态
+- **插件健康检查：** `PluginHealthCheckService` 执行被动的、基于规则的健康检查（不依赖 AI）；第 1 级：文件完整性；第 2 级：基于日志的检查（`[GeneratedRegex]`）；第 3 级：连通性检查——DLL 发送 `GET /api/translate/ping?gameId=`；`VerifyAsync` 自动启动游戏，等待日志 + ping，分析；`VerifyForInstallAsync` 绕过 `_activeVerifications` 守卫供编排器使用；`PluginHealthCard.vue` 只显示有问题的项目，接受可选 `initialReport` prop
+- **健康检查错误分析：** `CheckLogErrors` 双遍扫描：Pass 1 扫描 `[Error:]` 行匹配通用错误模式（IL2CPP、Harmony、程序集版本等）；Pass 2 扫描所有行匹配 LLMTranslate 端点专属模式——DLL 通过 `Console.WriteLine` 输出为 `[Info/Message:]` 级别；`HealthCheckDetail(Category, Excerpt, Suggestion?)` 携带分类诊断；`SafeExcerpt` 剥离日志前缀并用 `Path.GetFileName` 替换绝对路径；每类最多 2 条、总计最多 10 条；添加新错误模式：在 `GeneralErrorPatterns` 或 `EndpointErrorPatterns` 列表中添加 `ErrorPattern` + 对应 `[GeneratedRegex]`
+- **插件健康验证前置条件：** `POST .../health-check/verify` 需要 `FullyInstalled` 或 `PartiallyInstalled` 状态；`BepInExOnly` 时验证必定超时
+- **健康检查 ↔ DLL 日志依赖：** `CheckEndpointRegistered` 扫描 BepInEx 日志中的 `"LLMTranslate"` 子串——需要 DLL 的 `Log()` 输出初始化 banner；不要将初始化消息限制在 `DebugLog()` 后面
+
+## 文件浏览器
+
+- **`FileExplorerModal.vue`** 在 `App.vue` 全局挂载一次（`defineAsyncComponent`）；`useFileExplorer()` composable 使用模块级 reactive 单例提供 `selectFile()`/`selectFolder()` → `Promise<string | null>`；返回服务端文件路径
+- **`QuickAccessHelper`**（静态类，`Services/`）通过 Shell COM（STA 线程）枚举 `shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}`，结果缓存在 `volatile` 静态字段；COM 对象必须逐级 `Marshal.ReleaseComObject`
+- **`POST /api/filesystem/read-text`：** 读取文本文件内容（最大 10MB），供前端导入功能使用；所有文件上传场景均提供 `*-from-path` 端点变体（接受 `UploadFromPathRequest { FilePath }`），与 multipart 上传端点并存
+
+## 备份/恢复
+
+- **`BackupService`：** 为每个游戏创建 `BackupManifest` 用于干净卸载；清单位于 `{dataRoot}/backups/{gameId}.json`
+
+## LLAMA 运行时下载
+
+- **`LocalLlmService.DownloadLlamaAsync`：** 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅
+
+## 翻译管线详情
+
+- **多轮预翻译：** `PreTranslationService` 支持 2 轮管线；第 1 轮：标准翻译 + 自动术语提取；可选术语审核暂停（5 分钟超时，`AwaitingTermReview` 状态）；第 2 轮：使用新提取的术语重新翻译；动态模式正则追加到 `_PreTranslated_Regex.txt`；结果批量写入 TM
+- **统一术语管理：** `TermService` 在 `data/glossaries/{gameId}.json` 存储每游戏术语条目（首次加载时迁移旧版 DNT 条目）；每个 `TermEntry` 有 `Type`（Translate/DoNotTranslate）、`Category`、`Priority`、`CaseSensitive`、`ExactMatch`、`IsRegex`；`TermMatchingService` 处理基于优先级的占位符替换；`TermAuditService` 验证翻译中的术语合规性
+- **术语提取服务：** `GlossaryExtractionService`（响应式、热路径）和 `TermExtractionService`（批量、预翻译）通过 `LlmResponseParser`、`EndpointSelector`、`TermCategoryMapping` 共享逻辑，但故意是独立服务——不要合并
+- **GlossaryExtractionService 重触发守卫：** 在信号量超时时重置 `LastExtractionAt`；使用 `Math.Max(1L, total - interval + 1)` 而非 `Math.Max(0, ...)`
+- **占位符替换顺序：** 术语按优先级排序（高优先），然后按原文长度排序（长优先）；翻译类型术语产生 `{{G_x}}`，免翻译术语产生 `{{DNT_x}}`
+- **翻译后处理顺序：** 术语表恢复 → 术语表后处理 → DNT 恢复；**DNT 恢复必须在术语表后处理之后** — 否则 `ApplyGlossaryPostProcess` 会破坏免翻译意图
+- **预翻译缓存优化：** `PreTranslationCacheMonitor` 跟踪缓存命中/未命中；`PreTranslationService` 规范化缓存键并生成 `sr:` 分割器模式的 `_PreTranslated_Regex.txt`；XUnity 配置针对空白容差优化
+- **LLM 批量分析限制：** `DynamicPatternService` 和 `TermExtractionService` 最多采样 200 对以将 LLM 调用上限控制在约 10 次
+- **LLM 批量服务进度：** `AnalyzeDynamicFragmentsAsync` 和 `ExtractFromPairsAsync` 接受 `Action<int, int>? onBatchProgress`（done, total）；`PreTranslationService` 用即发即忘推送 SignalR 更新
+- **脚本标签清理：** `ScriptTagService` 从预翻译缓存键和 LLM 输入中剥离游戏特定指令码；`NormalizeForCache` 两层：`XUnityTranslationFormat` → `ScriptTagService`；每游戏规则在 `{dataRoot}/script-tags/{gameId}.json`；全局预设在 `bundled/script-tag-presets.json`
+- **脚本标签与术语：** 脚本标签预设仅在行级别操作；内联占位符保留（如 `{PC}`）需要 DoNotTranslate 术语条目
+- **XUnity 正则翻译：** 缓存文件支持 `r:"pattern"=replacement`（标准正则）和 `sr:"pattern"=$1$2`（分割器正则）；`sr:` 分组必须是可翻译文本；对数字模式使用 `TemplateAllNumberAway=True`
+
+## 实现不变量
+
+- **TranslationStats 计算字段：** `DynamicPatternCount` 和 `ExtractedTermCount` 在 `TranslateEndpoints.cs` 中填充（而非 `LlmTranslationService.GetStats()`），因为 `TermExtractionService` → `LlmTranslationService` 会产生循环 DI 依赖；任何来自依赖 `LlmTranslationService` 的服务的新计算统计必须遵循相同的端点层模式
+- **`RecentTranslation.EndpointName` 用于 TM 命中：** 当 `perTextTranslationSource[i]` 不为 null 时在 `PipelineComplete` 中设为 `"翻译记忆"`；防止最近翻译列表中出现空端点名
+- **`TranslationMemoryService.GetHitStats()` 元组顺序：** 返回 `(ExactHits, PatternHits, FuzzyHits, Misses)` — 用匹配的名称解构，不要用 `(exact, fuzzy, pattern, misses)`
+- **枚举 JSON 大小写：** `TermType` 和 `TermCategory` 使用 `CamelCaseJsonStringEnumConverter<T>`（camelCase）；所有其他枚举使用默认 PascalCase — 不要修改全局 `JsonStringEnumConverter`；**转换器优先级：** 属性级 `[JsonConverter]` > `JsonSerializerOptions.Converters` > 类型级 `[JsonConverter]` — camelCase 枚举必须在 TermEntry **属性**上有 `[JsonConverter]`
+- **TermEntry 反序列化不变量：** 所有从 JSON 反序列化 `List<TermEntry>` 的代码必须使用 `FileHelper.DataJsonOptions` — 没有枚举转换器，`DoNotTranslate` 类型会静默变为 `Translate`
+
+## 安全约定
+
+- **路径遍历：** 对所有 ZIP 解压和用户提供的相对路径使用 `PathSecurity.SafeJoin(root, relative)`；使用 `Path.GetFileName()` 从用户提供的文件名中去除目录部分
+- **gameId 验证：** 所有直接将 `id` 用于文件路径的端点必须使用 `Guid.TryParse(id, out _)` 验证以防止路径遍历
+- **SSRF 防护：** 在对任何用户提供的 URL 执行 `HttpClient.GetAsync()` 前使用 `PathSecurity.ValidateExternalUrl(url)`；阻止回环、私有 IP、链路本地、`.local`/`.internal` 主机名
+- **派生 URL 的 SSRF：** 也要验证从用户可配置基础 URL 构造的 URL；必须对最终 URL 验证
+- **外部 API 源 URL 的 SSRF：** 来自外部 API 响应的 URL 也必须通过 `ValidateExternalUrl` 验证
+- **语言代码验证：** `fromLang`/`toLang` 用于文件路径时必须验证为简单代码（`^[a-zA-Z0-9_\-]{1,20}$`）；同时验证完整路径通过 `Path.GetFullPath` + `StartsWith` 保持在预期目录内
+- **CustomFontPath 验证：** 必须验证保持在 `paths.GetCustomFontDirectory(gameId)` 内
+- **ExecutableName 验证：** 必须是不含路径分隔符的简单文件名；在 `POST /api/games/` 和 `PUT /api/games/{id}` 中均需验证
+- **游戏启动安全：** `Process.Start` 前始终通过 `Path.GetFullPath` + `StartsWith` 验证 `exePath` 在 `GamePath` 内
+- **进程参数：** 绝不在未清理引号的情况下将用户输入插入参数字符串
+- **CancellationTokenSource：** 从 `ConcurrentDictionary` 中移除时始终 `Dispose()`；覆盖前先 dispose 旧的 CTS
+- **即发即忘端点中的 CTS 所有权：** 生产者拥有 disposal；取消端点应只调用 `.Cancel()`，不要 `.Dispose()`
+- **进程 disposal：** 在将 `_process` 设为 null 前始终调用 `Process.Dispose()`
+- **返回给客户端的错误消息：** 绝不从通用 `catch (Exception)` 块返回 `ex.Message` — 使用安全的静态消息
+- **全局异常处理器：** `Program.cs` 中的中间件捕获未处理的 `/api` 异常，向客户端返回通用错误
+- **设置验证：** 在 `SettingsEndpoints` 中对数值设置进行 clamp；添加新的数值型字段需要添加对应的 `Math.Clamp`
+- **输入大小限制：** 术语 10000、翻译文本 500、原始配置 512 KB；文件上传：字体 50MB、字符集/翻译 10MB、设置导入 100MB
+- **正则验证：** 保存前使用 `new Regex(..., timeout: 1s)` 验证术语 `IsRegex` 条目
+- **原子文件写入：** 对 JSON 数据文件使用 `FileHelper.WriteJsonAtomicAsync`；对非 JSON 关键文件使用写入临时文件 + `File.Move(overwrite: true)`
+- **SignalR 错误消息：** 不要在 `_error` 字段中广播内部文件路径；使用 `Path.GetFileName()` 或通用消息
+
+## 共享基础设施 (`Infrastructure/`)
+
+- **`FileHelper.DataJsonOptions`：** 标准 `JsonSerializerOptions`（WriteIndented + CamelCase + JsonStringEnumConverter）由所有数据文件服务共享 — 不要声明每服务的 `JsonOptions`
+- **`FileHelper.WriteJsonAtomicAsync<T>`：** 原子 JSON 写入（序列化 → `.tmp` → `File.Move`）；包含 `Directory.CreateDirectory`
+- **`LlmResponseParser`：** `ExtractJsonArray(content)` 去除 `<think>` 块 + markdown 围栏 + 提取 `[...]`；`ExtractJsonContent(content)` 用于通用 JSON
+- **`EndpointSelector`：** `SelectBestEndpoint(endpoints)` 返回最高优先级的已启用端点；`SelectEndpoint(endpoints, preferredId)` 先尝试指定端点，回退到最佳
+- **`TermCategoryMapping.FromString`：** `Models/TermEntry.cs` 中的共享 `Dictionary<string, TermCategory>`
+- **`GameProcessHelper.KillGameProcessAsync`：** `Infrastructure/GameProcessHelper.cs`；处理通过 shell 启动的游戏进程关闭——按可执行文件名 + 游戏目录匹配真实进程；kill 后延迟 1 秒确保文件句柄释放

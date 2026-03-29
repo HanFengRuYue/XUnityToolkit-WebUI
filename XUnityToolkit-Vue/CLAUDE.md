@@ -96,7 +96,7 @@ npx vue-tsc --build  # 类型检查
 - **视觉验证：** 始终使用 Playwright MCP（`browser_navigate` + `browser_take_screenshot`）在报告完成前验证 UI 更改 —— 类型检查和构建成功不能保证正确的视觉输出
 - 验证图标：`node -e "const m = require('@vicons/material'); console.log(m['IconName'] ? 'YES' : 'NO')"`
 - **`embedded` 属性模式：** 根据独立使用或嵌套使用来条件渲染卡片包裹
-- **`LocalAiPanel.vue`：** 通过 `v-model` 接收设置；共享设置通过父组件的 `useAutoSave` 流转；本地专属设置通过 `PUT /api/local-llm/settings` 保存
+- **`LocalAiPanel.vue`：** 通过 `v-model` 接收设置；共享设置通过父组件的 `useAutoSave` 流转；本地专属设置通过 `PUT /api/local-llm/settings` 保存；`.settings-grid` 使用垂直单列布局（`flex-direction: column`），与 `AiTranslationCard.vue` 的 `.ai-form` 布局风格统一——不要使用横向多列 grid
 - TypeScript：对类型化对象使用 `Object.assign({}, obj, patch)` 而非展开运算符；懒加载弹窗：`defineAsyncComponent`
 - **类型化对象的动态字段访问：** `(obj as Record<string, unknown>)[field]` 在严格 TS 下失败；使用 `(obj as unknown as Record<string, unknown>)[field]`
 - **Markdown 渲染：** `marked` 包（自带类型定义，不需要 `@types/marked`）；使用 `marked.parse(md, { async: false }) as string` —— 需要 `as string` 类型断言（重载返回 `string | Promise<string>`）

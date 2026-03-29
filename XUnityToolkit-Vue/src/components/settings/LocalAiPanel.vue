@@ -928,16 +928,14 @@ onBeforeUnmount(() => {
 /* Settings Grid */
 .settings-grid {
   display: flex;
+  flex-direction: column;
   gap: 20px;
-  flex-wrap: wrap;
 }
 
 .form-row {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex: 1;
-  min-width: 200px;
 }
 
 .form-label {
@@ -1145,11 +1143,6 @@ onBeforeUnmount(() => {
 
 
 @media (max-width: 768px) {
-  .settings-grid {
-    flex-direction: column;
-    gap: 16px;
-  }
-
   .form-row :deep(.n-input-number) {
     width: 100% !important;
   }

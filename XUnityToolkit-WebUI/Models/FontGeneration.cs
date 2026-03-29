@@ -10,7 +10,8 @@ public record FontGenerationRequest(
     string RenderMode = "SDFAA",
     string SamplingSizeMode = "manual",
     string PaddingMode = "percentage",
-    int PaddingValue = 10
+    int PaddingValue = 10,
+    IReadOnlySet<int>? PreEnumeratedFontChars = null
 );
 
 public record FontGenerationResult(
@@ -70,14 +71,13 @@ public record CharacterSetConfig
     public string? CustomCharsetFileName { get; init; }
     public string? TranslationGameId { get; init; }
     public string? TranslationFileName { get; init; }
+    public bool UseAllFontCharacters { get; init; }
 }
 
 public record CharacterSetPreview
 {
     public int TotalCharacters { get; init; }
     public Dictionary<string, int> SourceBreakdown { get; init; } = new();
-    public int EstimatedAtlasCount { get; init; }
-    public bool ExceedsSingleAtlas { get; init; }
     public List<string> Warnings { get; init; } = [];
 }
 

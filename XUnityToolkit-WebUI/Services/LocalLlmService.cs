@@ -19,7 +19,7 @@ public sealed class LocalLlmService(
     BundledAssetPaths bundledPaths,
     IHubContext<InstallProgressHub> hubContext,
     SystemTrayService trayService,
-    ILogger<LocalLlmService> logger)
+    ILogger<LocalLlmService> logger) : IDisposable
 {
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private Process? _process;
@@ -1164,5 +1164,27 @@ public sealed class LocalLlmService(
         {
             logger.LogWarning(ex, "llama 下载进度推送失败");
         }
+    }
+
+    public void Dispose()
+    {
+        // Prevent OnProcessExited from entering its body and racing against _stateLock.Dispose()
+        _state = LocalLlmServerState.Stopping;
+
+        // Kill llama-server without waiting — the OS will clean up the process tree.
+        // Do NOT call StopInternalAsync (has a 5s wait timeout).
+        try
+        {
+            if (_process is { HasExited: false })
+                _process.Kill(true);
+        }
+        catch { /* best effort */ }
+
+        try { _process?.Dispose(); }
+        catch { /* best effort */ }
+        _process = null;
+
+        StopGpuPolling();
+        _stateLock.Dispose();
     }
 }

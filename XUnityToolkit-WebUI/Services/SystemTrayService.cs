@@ -13,6 +13,8 @@ public sealed class SystemTrayService(
     private volatile SynchronizationContext? _syncContext;
     private volatile WebViewWindow? _mainWindow;
     private volatile bool _webView2Available;
+    private Task<CoreWebView2Environment>? _preCreatedEnvTask;
+    private Icon? _cachedIcon;
     private ToolStripMenuItem? _openMenuItem;
     private readonly TaskCompletionSource _kestrelReady = new();
 
@@ -29,13 +31,32 @@ public sealed class SystemTrayService(
     {
         DetectWebView2Runtime();
 
+        // Start WebView2 environment creation immediately — overlaps with Kestrel startup
+        // instead of waiting until after Kestrel is ready (~300-2000ms saved)
+        if (_webView2Available)
+        {
+            try
+            {
+                var userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "XUnityToolkit", "webview2-cache");
+                Directory.CreateDirectory(userDataFolder);
+                _preCreatedEnvTask = CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: userDataFolder);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to pre-create WebView2 environment");
+                _preCreatedEnvTask = null;
+            }
+        }
+
         _staThread = new Thread(RunTrayLoop) { IsBackground = true };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
 
         lifetime.ApplicationStarted.Register(() => _kestrelReady.TrySetResult());
-
-        // No console hiding needed — WinExe subsystem doesn't create a console window
 
         return Task.CompletedTask;
     }
@@ -116,10 +137,7 @@ public sealed class SystemTrayService(
         {
             try
             {
-                var userDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "XUnityToolkit", "webview2-cache");
-                var window = new WebViewWindow(AppUrl, userDataFolder, logger);
+                var window = new WebViewWindow(AppUrl, _preCreatedEnvTask, _cachedIcon, logger);
                 _ = InitializeAndShowWindow(window);
             }
             catch (Exception ex)
@@ -185,10 +203,11 @@ public sealed class SystemTrayService(
 
     private NotifyIcon BuildTrayIcon()
     {
+        _cachedIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
         var icon = new NotifyIcon
         {
             Text = "XUnity Toolkit WebUI",
-            Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application,
+            Icon = _cachedIcon,
             ContextMenuStrip = BuildContextMenu()
         };
 

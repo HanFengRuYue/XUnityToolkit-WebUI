@@ -2068,7 +2068,7 @@ watch(() => aiStore.stats?.translating, () => {
 }
 
 .threshold-slider {
-  max-width: 320px;
+  max-width: 100%;
 }
 
 .sub-setting-hint {
