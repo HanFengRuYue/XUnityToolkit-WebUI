@@ -21,8 +21,17 @@
 
 ## 下载安装
 
-| [**前往下载页面**](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/latest) |
-|:---:|
+<!-- DOWNLOAD_LINKS_START -->
+| 版本 | ZIP 便携版 | MSI 安装包 |
+|------|-----------|-----------|
+| **Full（完整版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64.msi) |
+| **No-LLAMA** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64-no-llama.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64-no-llama.msi) |
+| **Lite（精简版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64-lite.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v3.9/XUnityToolkit-WebUI-v3.9-win-x64-lite.msi) |
+<!-- DOWNLOAD_LINKS_END -->
+
+- **Full**：自包含 + 内置本地大模型（推荐）
+- **No-LLAMA**：自包含，仅云端 API 翻译
+- **Lite**：需安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)，最小体积
 
 ---
 

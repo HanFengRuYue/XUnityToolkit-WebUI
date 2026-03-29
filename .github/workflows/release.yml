@@ -15,15 +15,31 @@ jobs:
       release_body: |
         ## XUnityToolkit-WebUI ${{ github.ref_name }}
 
-        ### Downloads
-        | File | Description |
-        |------|-------------|
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Portable (Windows x64) |
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | MSI Installer (Windows x64) |
+        ### 版本说明
+        - **Full（完整版）**：自包含 + 内置本地大模型（推荐）
+        - **No-LLAMA**：自包含，仅云端 API 翻译
+        - **Lite（精简版）**：需安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)，最小体积
 
-        ### Installation
-        - **Portable:** Download the ZIP, extract, and run `XUnityToolkit-WebUI.exe`.
-        - **Installer:** Download the MSI and double-click to install.
+        ### 下载
+
+        #### ZIP 便携版（解压即用）
+        | 文件 | 版本 |
+        |------|------|
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Full 完整版 |
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.zip` | No-LLAMA |
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.zip` | Lite 精简版 |
+
+        #### MSI 安装包（双击安装）
+        | 文件 | 版本 |
+        |------|------|
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | Full 完整版 |
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.msi` | No-LLAMA |
+        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.msi` | Lite 精简版 |
+
+        ### 安装方式
+        - **便携版：** 下载 ZIP，解压后运行 `XUnityToolkit-WebUI.exe`
+        - **安装包：** 下载 MSI，双击安装即可
+        - **Lite 版：** 需要先安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)
       prerelease: false
     permissions:
       contents: write
