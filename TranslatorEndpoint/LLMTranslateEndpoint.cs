@@ -112,7 +112,8 @@ namespace LLMTranslate
                     pingUrl += "?gameId=" + Uri.EscapeDataString(_gameId);
                 var pingClient = new WebClient();
                 pingClient.DownloadStringCompleted += (s, e) => ((WebClient)s).Dispose();
-                pingClient.DownloadStringAsync(new Uri(pingUrl));
+                try { pingClient.DownloadStringAsync(new Uri(pingUrl)); }
+                catch { pingClient.Dispose(); throw; }
                 Log("  连通性测试已发送: " + pingUrl);
             }
             catch (Exception ex)

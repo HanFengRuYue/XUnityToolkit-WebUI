@@ -147,7 +147,7 @@ public sealed class GlossaryExtractionService(
             var state = _gameStates.GetOrAdd(gameId, _ => new GameExtractionState());
             var total = _totalPerGame.GetOrAdd(gameId, 0);
             var interval = CalculateInterval(total);
-            Interlocked.Exchange(ref state.LastExtractionAt, Math.Max(0, total - interval + 1));
+            Interlocked.Exchange(ref state.LastExtractionAt, Math.Max(1L, total - interval + 1));
             logger.LogWarning("术语提取信号量超时，{Count} 条翻译已重新入队", pairs.Count);
             return;
         }

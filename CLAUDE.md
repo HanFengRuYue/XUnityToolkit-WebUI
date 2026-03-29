@@ -83,7 +83,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **多轮预翻译：** `PreTranslationService` 支持 2 轮管线；第 1 轮：标准翻译 + 自动术语提取；可选术语审核暂停（5 分钟超时，`AwaitingTermReview` 状态）；第 2 轮：使用新提取的术语重新翻译；动态模式正则追加到 `_PreTranslated_Regex.txt`；结果批量写入 TM
 - **统一术语管理：** `TermService` 在 `data/glossaries/{gameId}.json` 存储每游戏术语条目（首次加载时迁移旧版 DNT 条目）；每个 `TermEntry` 有 `Type`（Translate/DoNotTranslate）、`Category`、`Priority`、`CaseSensitive`、`ExactMatch`、`IsRegex`；`TermMatchingService` 处理基于优先级的占位符替换；`TermAuditService` 验证翻译中的术语合规性
 - **术语提取服务：** `GlossaryExtractionService`（响应式、热路径、直接写入术语表）和 `TermExtractionService`（批量、预翻译、暂存候选）通过 `LlmResponseParser`、`EndpointSelector`（`SelectBestEndpoint` — 无服务级端点覆盖）、`TermCategoryMapping` 共享 LLM 提取逻辑，但故意是独立服务 — 不同的生命周期、输出和并发模型；不要合并
-- **GlossaryExtractionService 重触发守卫：** 在信号量超时时重置 `LastExtractionAt`，绝不重置为 0（会导致每次 `POST /api/translate` 立即重触发）；重置为 `total - interval + 1` 以允许在一个间隔后重试
+- **GlossaryExtractionService 重触发守卫：** 在信号量超时时重置 `LastExtractionAt`；使用 `Math.Max(1L, total - interval + 1)` 而非 `Math.Max(0, ...)`——当 `total` 很小时后者会 clamp 到 0，导致立即重触发
 - **占位符替换顺序：** 术语按优先级排序（高优先），然后按原文长度排序（长优先）；翻译类型术语产生 `{{G_x}}` 占位符，免翻译术语产生 `{{DNT_x}}`；基于优先级的排序确保重要术语在低优先级术语之前占据其范围
 - **翻译后处理顺序：** 术语表恢复 → 术语表后处理 → DNT 恢复；**DNT 恢复必须在术语表后处理之后** — 否则 `ApplyGlossaryPostProcess`（在翻译文本中对术语原文执行 `string.Replace`）会将恢复的 DNT 词替换为术语表翻译，破坏免翻译意图
 - **术语子串不变量：** 当多个术语存在子串关系时（例如 `SaveSettings.es3` 包含 `Settings`），三层 — `ApplyGlossaryPostProcess`、`TermAuditService`、第 3 阶段强制修正 — 均使用受保护范围/包含逻辑确保较长术语优先；任何新的对术语原文/翻译的 `string.Replace` 必须使用带范围保护的位置替换
@@ -109,6 +109,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **gameId 验证：** 所有直接将 `id` 用于文件路径的端点（GET/PUT/DELETE）（无 `library.GetByIdAsync` 存在性检查）必须使用 `Guid.TryParse(id, out _)` 验证以防止路径遍历；适用于 TM 统计、dynamic-patterns、term-candidates、extracted-texts、pre-translate/regex 端点
 - **SSRF 防护：** 在对任何用户提供的 URL 执行 `HttpClient.GetAsync()` 前使用 `PathSecurity.ValidateExternalUrl(url)`；阻止回环、私有 IP（IPv4+IPv6）、链路本地、`.local`/`.internal` 主机名
 - **派生 URL 的 SSRF：** 也要验证从用户可配置基础 URL 构造的 URL（例如 `HfMirrorUrl` + repo path）；必须对最终 URL 而非仅基础 URL 通过 `ValidateExternalUrl` 验证
+- **外部 API 源 URL 的 SSRF：** 来自外部 API 响应的 URL（如 GitHub `BrowserDownloadUrl`）也必须通过 `ValidateExternalUrl` 验证——不要假设 API 响应可信
 - **语言代码验证：** `fromLang`/`toLang` 参数以及 INI 来源的语言值（例如 `[General] Language`）用于文件路径时必须验证为简单代码（`^[a-zA-Z0-9_\-]{1,20}$`）以防止路径遍历；同时验证解析后的完整路径通过 `Path.GetFullPath` + `StartsWith` 保持在预期目录内
 - **CustomFontPath 验证：** 请求体中的 `FontReplacementRequest.CustomFontPath` 必须在 `FontReplacementEndpoints` 中验证其保持在 `paths.GetCustomFontDirectory(gameId)` 内，然后再传递给服务
 - **ExecutableName 验证：** 必须是不含路径分隔符（`/`, `\`）的简单文件名；在 `POST /api/games/` 和 `PUT /api/games/{id}` 中均需验证
@@ -156,6 +157,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **设置：** `GET/PUT /api/settings`, `GET .../version`, `POST .../reset`（删除整个 `paths.Root` 目录，使所有服务缓存失效，重建目录）, `GET .../data-path`, `POST .../export`（ZIP，**非 ApiResult**）, `POST .../import`（multipart ZIP）, `POST .../open-data-folder`
 - **文件浏览器：** `GET /api/filesystem/drives`, `GET /api/filesystem/quick-access`, `POST /api/filesystem/list`, `POST /api/filesystem/read-text`（前端文件浏览器弹窗用于替代 Windows 原生对话框）
 - **Path-based 上传：** 所有文件上传端点均有 `*-from-path` 变体，接受 `UploadFromPathRequest { FilePath }` JSON 请求体，用于内置文件浏览器场景；multipart 端点保留用于拖拽上传；涉及：`font-generation/upload-from-path`、`font-replacement/upload-from-path`、`cover/upload-from-path`、`background/upload-from-path`、`icon/upload-from-path`、`settings/import-from-path`、`charset/upload-custom-from-path`、`charset/upload-translation-from-path`
+- **`*-from-path` 端点对等性：** `*-from-path` 变体必须与对应的 multipart 端点包含相同的业务逻辑（如迁移、验证）——`settings/import-from-path` 已同步 DNT 迁移逻辑
 - **AI 翻译：** `POST /api/translate`（**非 ApiResult** — DLL 直接调用；前端必须使用原始 `fetch`）, `GET /api/translate/stats`, `GET /api/translate/cache-stats`, `POST /api/translate/test`, `GET /api/translate/ping?gameId=`（来自 LLMTranslate.dll 的连通性 ping）
 - **AI 控制：** `POST /api/ai/toggle`, `GET /api/ai/models?provider=&apiBaseUrl=&apiKey=`, `GET /api/ai/extraction/stats`
 - **本地 LLM：** `GET/PUT /api/local-llm/settings`（PUT 仅合并 gpuLayers/contextLength/kvCacheType）, `GET .../status`, `GET .../gpus`, `POST .../gpus/refresh`, `GET .../catalog`, `GET .../llama-status`, `POST .../test`（需要 Running 状态）, `POST .../start`, `POST .../stop`, `.../download`（模型）+ `/pause` + `/cancel` 变体, `GET .../models`, `POST .../models/add`, `DELETE .../models/{id}`, `POST .../llama-download`（下载 llama 二进制）, `POST .../llama-download/cancel`

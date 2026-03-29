@@ -16,6 +16,9 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         "LLMTranslate",
     };
 
+    private static readonly Lazy<string[]> RuntimeDlls = new(() =>
+        Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
+
     public Task<List<BepInExPlugin>> ListPluginsAsync(Game game)
     {
         var pluginsDir = Path.Combine(game.GamePath, "BepInEx", "plugins");
@@ -297,9 +300,7 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
                 return (null, null, null);
 
             // Use MetadataLoadContext for safe read-only reflection
-            // Include all runtime DLLs so we can resolve mscorlib/netstandard references from BepInEx plugins
-            var runtimeDlls = Directory.GetFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll");
-            var resolver = new PathAssemblyResolver(runtimeDlls.Append(actualPath));
+            var resolver = new PathAssemblyResolver(RuntimeDlls.Value.Append(actualPath));
 
             using var mlc = new MetadataLoadContext(resolver);
             var assembly = mlc.LoadFromAssemblyPath(actualPath);

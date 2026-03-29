@@ -27,6 +27,7 @@ npx vue-tsc --build  # 类型检查
 - API 客户端：`api.get`、`api.post`、`api.put`、`api.del`（不要用 `.delete` —— 这是 JS 保留字）；从 `@/api/client` 导入（不要用 `@/api` —— 它是一个目录，Vite 会报 EISDIR 错误）
 - API 层：`src/api/client.ts`（axios 封装）、`src/api/types.ts`（共享类型）、`src/api/games.ts`（游戏 API 方法）
 - **`games.ts` 始终静态导入：** 该模块被 25+ 文件静态导入，已在主 chunk 中；不要使用 `import('@/api/games')` 动态导入（不会产生代码分割效果，只会触发 Vite 警告）
+- **禁止生产 `console.*`：** 不要在生产代码路径中使用 `console.error`/`console.warn`/`console.log`——WebView2 环境无 DevTools；错误应通过 `message.error()` 通知用户或静默忽略（已有 reactive 状态处理）
 
 ## 设计系统
 

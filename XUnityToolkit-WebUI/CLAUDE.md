@@ -41,14 +41,14 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - P/Invoke：使用 `[DllImport]` 而非 `[LibraryImport]`；重命名方法时 → 搜索所有调用点
 
 - **文件上传安全：** 始终对上传的文件名使用 `Path.GetFileName(file.FileName)`——`Path.Combine` 不能防止恶意文件名的路径穿越
-- **每游戏数据清理：** 添加新的每游戏数据目录时，必须在 `DELETE /api/games/{id}` 处理器（`GameEndpoints.cs`）中添加清理 + 如果服务有 `RemoveCache` 则进行缓存驱逐（如 `termService.RemoveCache`、`scriptTagService.RemoveCache`）
+- **每游戏数据清理：** 添加新的每游戏数据目录时，必须在 `DELETE /api/games/{id}` 处理器（`GameEndpoints.cs`）中添加清理 + 如果服务有 `RemoveCache` 则进行缓存驱逐（如 `termService.RemoveCache`、`scriptTagService.RemoveCache`、`cacheMonitor.UnloadCache()`）
 - **服务缓存清除：** `TermService.ClearAllCache()`、`ScriptTagService.ClearAllCache()`、`TranslationMemoryService.ClearAllCache()`、`DynamicPatternService.ClearAllCache()`、`TermExtractionService.ClearAllCache()` 清除所有内存缓存；用于设置重置（`POST /api/settings/reset`）和设置导入（`POST /api/settings/import`）；`RemoveCache(gameId)` 清除单个游戏的缓存
 - **`ClearAllCache` 释放不变量：** 有每游戏 `ConcurrentDictionary<string, SemaphoreSlim>` 锁的服务必须在 `ClearAllCache()` 中释放所有信号量（遍历 `.Values` → `.Dispose()` → `.Clear()`）；与 `RemoveCache` 模式一致
 - **设置重置/导入缓存失效：** `/reset` 和 `/import` 都必须调用全部 7 个失效操作：`settingsService.InvalidateCache()`、`termService.ClearAllCache()`、`scriptTagService.ClearAllCache()`、`tmService.ClearAllCache()`、`dynamicPatternService.ClearAllCache()`、`extractionService.ClearAllCache()`、`cacheMonitor.UnloadCache()`——遗漏任何一个都会留下过期的内存状态
 - **设置重置日志挂起：** `POST /api/settings/reset` 在删除数据目录前调用 `FileLoggerProvider.SuspendFileLog()`（释放日志文件句柄），然后在 `finally` 中调用 `ResumeFileLog()`；不要用按子目录删除替代整目录删除（此前导致清理不完整）
 - **捆绑文件构建复制：** `bundled/` 中的新文件需要在 `.csproj` 中添加 `<Content CopyToOutputDirectory="PreserveNewest" Link="bundled\...">`——`build.ps1` 仅在发布时运行，`dotnet run` 使用构建输出
 - **`ScriptTagService` DI：** `AddSingleton`；遵循 `TermService` 模式（SemaphoreSlim + ConcurrentDictionary 缓存 + 原子文件写入）；预设在 `GetAsync` 中自动更新；保存/自动更新时使编译正则缓存失效
-- **`BepInExPluginService` DI：** `AddSingleton`；扫描 `BepInEx/plugins/` 目录列出插件；使用 `MetadataLoadContext` 安全反射读取 DLL 元数据（GUID/Name/Version）——不加载到 AppDomain；toolkit-managed 插件（XUnity、LLMTranslate）通过 `IsToolkitManaged()` 保护，禁止修改/卸载；启用/禁用通过 `.disabled` 文件后缀实现；上传端点需要 `.DisableAntiforgery()`（multipart）；所有端点要求 BepInEx 已安装状态
+- **`BepInExPluginService` DI：** `AddSingleton`；扫描 `BepInEx/plugins/` 目录列出插件；使用 `MetadataLoadContext` 安全反射读取 DLL 元数据（GUID/Name/Version）——不加载到 AppDomain；`RuntimeDlls` 为 `Lazy<string[]>` 静态缓存（避免循环内重复枚举运行时目录）；toolkit-managed 插件（XUnity、LLMTranslate）通过 `IsToolkitManaged()` 保护，禁止修改/卸载；启用/禁用通过 `.disabled` 文件后缀实现；上传端点需要 `.DisableAntiforgery()`（multipart）；所有端点要求 BepInEx 已安装状态
 - **日志级别配置：** `Program.cs` 有两层过滤：`AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)`（ASP.NET 管线）+ `FileLoggerProvider(logsDirectory, LogLevel.Debug)`（提供者）；两者都必须 ≤ 期望级别，否则日志会被静默丢弃
 - **静态方法日志模式：** 静态方法无法访问 `ILogger`——要么传递 `ILogger? log = null` 参数并使用 `log?.LogDebug(...)`，要么在有 `logger` 可用的实例方法调用点添加日志；仅需聚合信息（计数、前后对比）时优先使用调用点日志
 - 读取日志文件：必须使用 `FileShare.ReadWrite` 以避免 `IOException`
@@ -90,7 +90,8 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **去抖动中的 CTS 替换：** 在 `ConcurrentDictionary` 中替换 CTS 时，先写入新 CTS，然后再取消/释放旧的——避免并发代码找不到任何条目的窗口期
 - **CTS 去抖动原子交换：** `_dict.GetValueOrDefault(key)` + `_dict[key] = newCts` 不是线程安全的——并发调用者可能孤立一个 CTS（泄漏后台任务）或双重释放旧 CTS；使用 `GetOrAdd`/`TryUpdate` CAS 循环模式
 - **CTS finally 中的原子清理：** 使用 `Interlocked.Exchange(ref _cts, null)?.Dispose()`——不要用 `var cts = _cts; _cts = null; cts?.Dispose()`（非原子的读-置空-释放允许并发 `.Cancel()` 在已释放的 CTS 上执行）
-- **`await using` 提前关闭：** 当流必须在后续代码读取文件之前关闭时，使用块作用域 `{ await using var s = ...; }` 而非调用 `s.Close()`（与 `await using` 隐式 dispose 冗余）
+- **`await using` 提前关闭：** 当流必须在后续代码读取文件之前关闭时，使用块作用域 `{ await using var s = ...; }` 而非调用 `s.Close()` 或 `s.DisposeAsync()`（与 `await using` 隐式 dispose 冗余，且造成双重释放）
+- **SignalR 下载进度节流：** 所有基于流的下载循环（`UpdateService`、`LocalLlmService`）必须使用 `Stopwatch` 节流 SignalR 广播（200ms 间隔）；循环结束后执行最终广播确保 100% 进度可见
 - **插件并发：** DLL 10×10 = 100 条文本；Mono >15 连接会死锁——改用批处理
 - **XUnity HTTP：** Mono `DefaultConnectionLimit` = 2 → `FindServicePoint(uri).ConnectionLimit`；无 `Connection: close`（CLOSE_WAIT bug）
 - **预翻译：** 对每批 10 条使用 `Parallel.ForEachAsync`（本地模式：批=5，并行度=1）；CAS 节流 200ms 进度；`catch (OperationCanceledException) when (ct.IsCancellationRequested)` 守卫防止 HTTP `TaskCanceledException` 中止整个操作——在 `Parallel.ForEachAsync` 主体中**始终使用 `when` 守卫**

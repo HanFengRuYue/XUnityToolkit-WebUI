@@ -624,8 +624,7 @@ public sealed class FontReplacementService(
             ReplacedFiles = replacedFiles,
             CatalogFiles = catalogFiles
         };
-        var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(Path.Combine(backupDir, "manifest.json"), json, ct);
+        await FileHelper.WriteJsonAtomicAsync(Path.Combine(backupDir, "manifest.json"), manifest, ct: ct);
 
         var successCount = fonts.Length - failedFonts.Count;
         logger.LogInformation("字体替换完成: 成功 {Success}/{Total} 个字体, 修改了 {Files} 个文件",

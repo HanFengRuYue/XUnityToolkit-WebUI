@@ -158,7 +158,11 @@ public sealed class TermExtractionService(
 
             var file = paths.TermCandidatesFile(gameId);
             if (!File.Exists(file))
-                return new TermCandidateStore();
+            {
+                var empty = new TermCandidateStore();
+                _cache[gameId] = empty;
+                return empty;
+            }
 
             var json = await File.ReadAllTextAsync(file, ct);
             var store = JsonSerializer.Deserialize<TermCandidateStore>(json, FileHelper.DataJsonOptions)
