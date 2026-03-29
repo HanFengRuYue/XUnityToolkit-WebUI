@@ -31,27 +31,6 @@ public sealed class SystemTrayService(
     {
         DetectWebView2Runtime();
 
-        // Start WebView2 environment creation immediately — overlaps with Kestrel startup
-        // instead of waiting until after Kestrel is ready (~300-2000ms saved)
-        if (_webView2Available)
-        {
-            try
-            {
-                var userDataFolder = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "XUnityToolkit", "webview2-cache");
-                Directory.CreateDirectory(userDataFolder);
-                _preCreatedEnvTask = CoreWebView2Environment.CreateAsync(
-                    browserExecutableFolder: null,
-                    userDataFolder: userDataFolder);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to pre-create WebView2 environment");
-                _preCreatedEnvTask = null;
-            }
-        }
-
         _staThread = new Thread(RunTrayLoop) { IsBackground = true };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
@@ -79,6 +58,28 @@ public sealed class SystemTrayService(
 
         _syncContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _trayIcon = trayIcon;
+
+        // Pre-create WebView2 environment on STA thread — overlaps with Kestrel startup
+        // instead of waiting until after Kestrel is ready (~300-2000ms saved).
+        // Must run on STA thread; calling from MTA (StartAsync) causes RPC_E_CHANGED_MODE.
+        if (_webView2Available)
+        {
+            try
+            {
+                var userDataFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "XUnityToolkit", "webview2-cache");
+                Directory.CreateDirectory(userDataFolder);
+                _preCreatedEnvTask = CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: userDataFolder);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to pre-create WebView2 environment");
+                _preCreatedEnvTask = null;
+            }
+        }
 
         WaitForKestrelThenShowUI();
 
