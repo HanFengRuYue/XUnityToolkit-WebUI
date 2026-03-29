@@ -77,8 +77,8 @@ async function loadScriptTags() {
     scriptTagRules.value = res.rules
     scriptTagPresetVersion.value = res.presetVersion
     scriptTagDirty.value = false
-  } catch (e) {
-    console.error('Failed to load script tags', e)
+  } catch {
+    // Script tag loading failed — non-critical, continue with empty rules
   }
 }
 

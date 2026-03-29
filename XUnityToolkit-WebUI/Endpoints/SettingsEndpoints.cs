@@ -346,6 +346,79 @@ public static class SettingsEndpoints
                     await entryStream.CopyToAsync(destStream);
                 }
 
+                // Migrate old do-not-translate/ entries into glossaries/ (unified term format)
+                var dntDir = Path.Combine(rootPath, "do-not-translate");
+                if (Directory.Exists(dntDir))
+                {
+                    var glossariesDir = Path.Combine(rootPath, "glossaries");
+                    Directory.CreateDirectory(glossariesDir);
+
+                    foreach (var dntFile in Directory.EnumerateFiles(dntDir, "*.json"))
+                    {
+                        try
+                        {
+                            var gameId = Path.GetFileNameWithoutExtension(dntFile);
+                            var dntJson = await File.ReadAllTextAsync(dntFile);
+                            using var dntDoc = JsonDocument.Parse(dntJson);
+
+                            var dntTerms = new List<TermEntry>();
+                            foreach (var element in dntDoc.RootElement.EnumerateArray())
+                            {
+                                var original = element.GetProperty("original").GetString();
+                                if (string.IsNullOrEmpty(original)) continue;
+
+                                var caseSensitive = element.TryGetProperty("caseSensitive", out var csProp)
+                                    && csProp.GetBoolean();
+
+                                dntTerms.Add(new TermEntry
+                                {
+                                    Type = TermType.DoNotTranslate,
+                                    Original = original,
+                                    CaseSensitive = caseSensitive,
+                                });
+                            }
+
+                            if (dntTerms.Count == 0)
+                            {
+                                File.Delete(dntFile);
+                                continue;
+                            }
+
+                            // Merge with existing glossary if present
+                            var glossaryFile = Path.Combine(glossariesDir, $"{gameId}.json");
+                            var existingTerms = new List<TermEntry>();
+                            if (File.Exists(glossaryFile))
+                            {
+                                var glossaryJson = await File.ReadAllTextAsync(glossaryFile);
+                                existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson, FileHelper.DataJsonOptions) ?? [];
+                            }
+
+                            // Dedup by Original
+                            var existingOriginals = new HashSet<string>(
+                                existingTerms.Select(t => t.Original),
+                                StringComparer.Ordinal);
+
+                            foreach (var term in dntTerms)
+                            {
+                                if (existingOriginals.Add(term.Original))
+                                    existingTerms.Add(term);
+                            }
+
+                            var mergedJson = JsonSerializer.Serialize(existingTerms, FileHelper.DataJsonOptions);
+                            await File.WriteAllTextAsync(glossaryFile, mergedJson);
+                            File.Delete(dntFile);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogWarning(ex, "迁移 do-not-translate 文件失败: {File}", Path.GetFileName(dntFile));
+                        }
+                    }
+
+                    // Remove directory if empty
+                    if (!Directory.EnumerateFileSystemEntries(dntDir).Any())
+                        Directory.Delete(dntDir);
+                }
+
                 // Invalidate all in-memory caches
                 settingsService.InvalidateCache();
                 termService.ClearAllCache();

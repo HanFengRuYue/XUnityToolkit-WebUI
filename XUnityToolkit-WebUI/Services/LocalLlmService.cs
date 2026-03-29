@@ -788,34 +788,35 @@ public sealed class LocalLlmService(
     private async Task DownloadModelStreamAsync(BuiltInModelInfo entry, HttpResponseMessage resp,
         string tempPath, string finalPath, long existingBytes, long totalBytes, bool useMirror, bool useModelScope, CancellationToken ct)
     {
-        await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-        await using var fs = new FileStream(tempPath, existingBytes > 0 ? FileMode.Append : FileMode.Create,
-            FileAccess.Write, FileShare.None, 81920);
-
-        var buffer = new byte[81920];
-        long bytesDownloaded = existingBytes;
-        var sw = Stopwatch.StartNew();
-        long lastBroadcastTicks = 0;
-
-        int bytesRead;
-        while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
+        long bytesDownloaded;
         {
-            await fs.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
-            bytesDownloaded += bytesRead;
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            await using var fs = new FileStream(tempPath, existingBytes > 0 ? FileMode.Append : FileMode.Create,
+                FileAccess.Write, FileShare.None, 81920);
 
-            var now = sw.ElapsedTicks;
-            if (now - lastBroadcastTicks >= TimeSpan.FromMilliseconds(200).Ticks)
+            var buffer = new byte[81920];
+            bytesDownloaded = existingBytes;
+            var sw = Stopwatch.StartNew();
+            long lastBroadcastTicks = 0;
+
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer, ct)) > 0)
             {
-                var elapsed = sw.Elapsed.TotalSeconds;
-                var speed = elapsed > 0 ? (long)((bytesDownloaded - existingBytes) / elapsed) : 0;
+                await fs.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                bytesDownloaded += bytesRead;
 
-                await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
-                    entry.Id, bytesDownloaded, totalBytes, speed, false, null, UseMirror: useMirror, UseModelScope: useModelScope));
-                lastBroadcastTicks = now;
+                var now = sw.ElapsedTicks;
+                if (now - lastBroadcastTicks >= TimeSpan.FromMilliseconds(200).Ticks)
+                {
+                    var elapsed = sw.Elapsed.TotalSeconds;
+                    var speed = elapsed > 0 ? (long)((bytesDownloaded - existingBytes) / elapsed) : 0;
+
+                    await BroadcastDownloadProgress(new LocalLlmDownloadProgress(
+                        entry.Id, bytesDownloaded, totalBytes, speed, false, null, UseMirror: useMirror, UseModelScope: useModelScope));
+                    lastBroadcastTicks = now;
+                }
             }
         }
-
-        await fs.DisposeAsync();
 
         if (File.Exists(finalPath)) File.Delete(finalPath);
         File.Move(tempPath, finalPath);
@@ -1036,6 +1037,7 @@ public sealed class LocalLlmService(
                 ?? throw new InvalidOperationException("最新发行版中未找到 bundled-llama.zip");
 
             var downloadUrl = asset.BrowserDownloadUrl;
+            PathSecurity.ValidateExternalUrl(downloadUrl);
             var totalBytes = asset.Size;
 
             logger.LogInformation("开始下载 llama 二进制文件: {Url} ({Size:N0} bytes)", downloadUrl, totalBytes);
@@ -1049,45 +1051,44 @@ public sealed class LocalLlmService(
             if (totalBytes == 0)
                 totalBytes = downloadResponse.Content.Headers.ContentLength ?? 0;
 
-            await using var stream = await downloadResponse.Content.ReadAsStreamAsync(token);
-            await using var fileStream = File.Create(tempFile);
-
-            var buffer = new byte[81920];
-            long downloadedBytes = 0;
-            var lastBroadcast = Stopwatch.GetTimestamp();
-            var speedWindow = new Queue<(long ticks, long bytes)>();
-            int bytesRead;
-
-            while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
+            long downloadedBytes;
             {
-                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
-                downloadedBytes += bytesRead;
+                await using var stream = await downloadResponse.Content.ReadAsStreamAsync(token);
+                await using var fileStream = File.Create(tempFile);
 
-                var now = Stopwatch.GetTimestamp();
-                speedWindow.Enqueue((now, downloadedBytes));
-                while (speedWindow.Count > 0 &&
-                       Stopwatch.GetElapsedTime(speedWindow.Peek().ticks, now).TotalSeconds > 2)
-                    speedWindow.Dequeue();
+                var buffer = new byte[81920];
+                downloadedBytes = 0;
+                var lastBroadcast = Stopwatch.GetTimestamp();
+                var speedWindow = new Queue<(long ticks, long bytes)>();
+                int bytesRead;
 
-                if (Stopwatch.GetElapsedTime(lastBroadcast, now).TotalMilliseconds >= 200)
+                while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
                 {
-                    lastBroadcast = now;
-                    long speed = 0;
-                    if (speedWindow.Count > 1)
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), token);
+                    downloadedBytes += bytesRead;
+
+                    var now = Stopwatch.GetTimestamp();
+                    speedWindow.Enqueue((now, downloadedBytes));
+                    while (speedWindow.Count > 0 &&
+                           Stopwatch.GetElapsedTime(speedWindow.Peek().ticks, now).TotalSeconds > 2)
+                        speedWindow.Dequeue();
+
+                    if (Stopwatch.GetElapsedTime(lastBroadcast, now).TotalMilliseconds >= 200)
                     {
-                        var first = speedWindow.Peek();
-                        var elapsed = Stopwatch.GetElapsedTime(first.ticks, now).TotalSeconds;
-                        if (elapsed > 0)
-                            speed = (long)((downloadedBytes - first.bytes) / elapsed);
+                        lastBroadcast = now;
+                        long speed = 0;
+                        if (speedWindow.Count > 1)
+                        {
+                            var first = speedWindow.Peek();
+                            var elapsed = Stopwatch.GetElapsedTime(first.ticks, now).TotalSeconds;
+                            if (elapsed > 0)
+                                speed = (long)((downloadedBytes - first.bytes) / elapsed);
+                        }
+                        await BroadcastLlamaDownloadProgress(
+                            new LlamaDownloadProgress(downloadedBytes, totalBytes, speed, false, null));
                     }
-                    await BroadcastLlamaDownloadProgress(
-                        new LlamaDownloadProgress(downloadedBytes, totalBytes, speed, false, null));
                 }
             }
-
-            // Close file stream before moving
-            await fileStream.FlushAsync(token);
-            fileStream.Close();
 
             logger.LogInformation("llama 二进制文件下载完成: {Size:N0} bytes", downloadedBytes);
 

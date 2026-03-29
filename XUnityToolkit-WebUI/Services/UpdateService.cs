@@ -1,5 +1,6 @@
 namespace XUnityToolkit_WebUI.Services;
 
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -431,6 +432,7 @@ public sealed class UpdateService(
                     await using var stream = await response.Content.ReadAsStreamAsync(token);
                     await using var fileStream = File.Create(zipPath);
                     var buffer = new byte[81920];
+                    var lastBroadcast = Stopwatch.GetTimestamp();
                     int bytesRead;
                     while ((bytesRead = await stream.ReadAsync(buffer, token)) > 0)
                     {
@@ -438,8 +440,14 @@ public sealed class UpdateService(
                         downloadedBytes += bytesRead;
                         _status.DownloadedBytes = downloadedBytes;
                         _status.Progress = totalBytes > 0 ? (double)downloadedBytes / totalBytes * 100 : 0;
-                        await BroadcastStatus();
+
+                        if (Stopwatch.GetElapsedTime(lastBroadcast).TotalMilliseconds >= 200)
+                        {
+                            await BroadcastStatus();
+                            lastBroadcast = Stopwatch.GetTimestamp();
+                        }
                     }
+                    await BroadcastStatus();
                 }
 
                 logger.LogInformation("已下载: {Name} ({Size:N0} bytes)", zipName, new FileInfo(zipPath).Length);

@@ -59,8 +59,8 @@ export const useUpdateStore = defineStore('update', () => {
     try {
       await connection.start()
       await connection.invoke('JoinUpdateGroup')
-    } catch (err) {
-      console.error('Failed to connect update hub:', err)
+    } catch {
+      // SignalR connection failed — state is already handled
     }
   }
 
@@ -121,7 +121,6 @@ export const useUpdateStore = defineStore('update', () => {
     } catch (err) {
       state.value = 'Error'
       error.value = err instanceof Error ? err.message : '检查更新失败'
-      console.error('Check for update failed:', err)
     }
   }
 
@@ -135,15 +134,14 @@ export const useUpdateStore = defineStore('update', () => {
         state.value = 'Error'
         error.value = err instanceof Error ? err.message : '下载更新失败'
       }
-      console.error('Download update failed:', err)
     }
   }
 
   async function cancelDownload() {
     try {
       await updateApi.cancel()
-    } catch (err) {
-      console.error('Cancel download failed:', err)
+    } catch {
+      // Cancel request failed — ignore
     }
   }
 
@@ -159,7 +157,6 @@ export const useUpdateStore = defineStore('update', () => {
       if (restartPollTimer) { clearInterval(restartPollTimer); restartPollTimer = null }
       error.value = err instanceof Error ? err.message : '应用更新失败'
       state.value = error.value ? 'Error' : prevState
-      console.error('Apply update failed:', err)
     }
   }
 
@@ -207,8 +204,8 @@ export const useUpdateStore = defineStore('update', () => {
       state.value = 'None'
       checkResult.value = undefined
       availableInfo.value = undefined
-    } catch (err) {
-      console.error('Dismiss update failed:', err)
+    } catch {
+      // Dismiss request failed — ignore
     }
   }
 

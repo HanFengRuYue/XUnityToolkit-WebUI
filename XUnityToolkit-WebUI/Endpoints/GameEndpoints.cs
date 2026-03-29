@@ -496,7 +496,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, DynamicPatternService dynamicPatternService, TermExtractionService extractionService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, DynamicPatternService dynamicPatternService, TermExtractionService extractionService, PreTranslationCacheMonitor cacheMonitor, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -537,10 +537,11 @@ public static class GameEndpoints
                 File.Delete(scriptTagFile);
             scriptTagService.RemoveCache(id);
 
-            // Clean up translation memory, dynamic patterns, and term candidates
+            // Clean up translation memory, dynamic patterns, term candidates, and pre-translation cache
             tmService.RemoveCache(id);
             dynamicPatternService.RemoveCache(id);
             extractionService.RemoveCache(id);
+            cacheMonitor.UnloadCache();
 
             var tmFile = appDataPaths.TranslationMemoryFile(id);
             if (File.Exists(tmFile)) File.Delete(tmFile);

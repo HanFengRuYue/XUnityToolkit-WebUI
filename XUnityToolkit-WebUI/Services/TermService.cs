@@ -239,11 +239,7 @@ public sealed class TermService(AppDataPaths paths, ILogger<TermService> logger)
     private async Task SaveInternalAsync(string gameId, List<TermEntry> entries, CancellationToken ct)
     {
         var file = paths.GlossaryFile(gameId);
-        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        var json = JsonSerializer.Serialize(entries, FileHelper.DataJsonOptions);
-        var tmpPath = file + ".tmp";
-        await File.WriteAllTextAsync(tmpPath, json, ct);
-        File.Move(tmpPath, file, overwrite: true);
+        await FileHelper.WriteJsonAtomicAsync(file, entries, ct: ct);
         _cache[gameId] = entries;
         logger.LogInformation("已保存游戏 {GameId} 的术语库: {Count} 条", gameId, entries.Count);
     }

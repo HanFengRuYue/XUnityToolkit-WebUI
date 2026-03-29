@@ -135,7 +135,7 @@ async function doReplace() {
         `字体替换部分完成：成功 ${result.successCount} 个，失败 ${result.failedFonts.length} 个`,
         { duration: 6000 }
       )
-      console.warn('字体替换失败详情:\n' + failedNames)
+      // Font replacement partial failure details available in failedNames
     } else {
       message.success(`字体替换完成：已替换 ${result.successCount} 个字体`)
     }
@@ -189,7 +189,7 @@ async function handleSelectCustomFont() {
   const path = await selectFile({ title: '选择自定义字体文件' })
   if (!path) return
   try {
-    await api.post(`/api/games/${gameId}/font-replacement/upload-from-path`, { filePath: path })
+    await api.post(`/api/games/${gameId.value}/font-replacement/upload-from-path`, { filePath: path })
     message.success('自定义字体上传成功')
     loadStatus()
   } catch (e: any) {
@@ -251,8 +251,8 @@ onMounted(async () => {
 
     await connection.start()
     await connection.invoke('JoinFontReplacementGroup', gameId.value)
-  } catch (e) {
-    console.error('SignalR connection failed:', e)
+  } catch {
+    // SignalR connection failed — silently ignore
   }
 })
 

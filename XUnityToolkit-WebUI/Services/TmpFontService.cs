@@ -47,6 +47,7 @@ public sealed partial class TmpFontService(BundledAssetPaths bundledPaths, ILogg
     /// </summary>
     public static string InstallCustomFont(string gamePath, string srcPath, string destFileName)
     {
+        destFileName = Path.GetFileName(destFileName);
         var destPath = Path.Combine(GetFontDirectory(gamePath), destFileName);
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
         File.Copy(srcPath, destPath, overwrite: true);

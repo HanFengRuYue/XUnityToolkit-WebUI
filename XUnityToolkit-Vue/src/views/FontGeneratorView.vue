@@ -329,7 +329,6 @@ let connection: HubConnection | null = null
 
 onMounted(async () => {
   checkMobile()
-  window.addEventListener('resize', checkMobile)
   try {
     connection = new HubConnectionBuilder()
       .withUrl('/hubs/install')
@@ -364,7 +363,7 @@ onMounted(async () => {
     await connection.start()
     await connection.invoke('JoinFontGenerationGroup')
   } catch (e) {
-    console.error('SignalR connection failed:', e)
+    // SignalR connection failed — silently ignore
   }
   await loadHistory()
   // Load games for "use as custom" dropdown
@@ -439,8 +438,8 @@ onActivated(async () => {
 
       await connection.start()
       await connection.invoke('JoinFontGenerationGroup')
-    } catch (e) {
-      console.error('SignalR reconnection failed:', e)
+    } catch {
+      // SignalR reconnection failed — silently ignore
     }
   }
 })
