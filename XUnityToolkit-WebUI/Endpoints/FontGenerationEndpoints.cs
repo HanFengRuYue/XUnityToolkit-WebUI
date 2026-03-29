@@ -81,7 +81,7 @@ public static class FontGenerationEndpoints
             }));
         });
 
-        group.MapPost("/generate", (FontGenerationStartRequest body,
+        group.MapPost("/generate", async (FontGenerationStartRequest body,
             TmpFontGeneratorService generator, AppDataPaths appDataPaths,
             IHubContext<InstallProgressHub> hubContext,
             ILogger<TmpFontGeneratorService> logger) =>
@@ -89,6 +89,10 @@ public static class FontGenerationEndpoints
             var fontPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory, Path.GetFileName(body.FileName));
             if (!File.Exists(fontPath))
                 return Results.NotFound(ApiResult.Fail("上传的字体文件不存在"));
+
+            IReadOnlySet<int>? fontChars = null;
+            if (body.CharacterSet?.UseAllFontCharacters == true)
+                fontChars = await Task.Run(() => EnumerateFontCharacters(fontPath));
 
             var request = new FontGenerationRequest(
                 fontPath,
@@ -100,7 +104,8 @@ public static class FontGenerationEndpoints
                 body.RenderMode,
                 body.SamplingSizeMode,
                 body.PaddingMode,
-                body.PaddingValue
+                body.PaddingValue,
+                fontChars
             );
 
             // Fire-and-forget
@@ -225,10 +230,19 @@ public static class FontGenerationEndpoints
             Results.Ok(ApiResult<List<CharsetInfo>>.Ok(charsetService.GetBuiltinCharsets())));
 
         // POST /charset/preview — preview merged charset stats
-        group.MapPost("/charset/preview", async (CharacterSetPreviewRequest body, CharacterSetService charsetService) =>
+        group.MapPost("/charset/preview", async (CharacterSetPreviewRequest body,
+            CharacterSetService charsetService, AppDataPaths appDataPaths) =>
         {
-            var (_, preview) = await charsetService.ResolveCharactersAsync(
-                body.CharacterSet, body.AtlasWidth, body.AtlasHeight, body.SamplingSize);
+            IReadOnlySet<int>? fontChars = null;
+            if (body.CharacterSet.UseAllFontCharacters && !string.IsNullOrEmpty(body.FontFileName))
+            {
+                var fontPath = Path.Combine(appDataPaths.FontGenerationUploadsDirectory,
+                    Path.GetFileName(body.FontFileName));
+                if (File.Exists(fontPath))
+                    fontChars = await Task.Run(() => EnumerateFontCharacters(fontPath));
+            }
+
+            var (_, preview) = await charsetService.ResolveCharactersAsync(body.CharacterSet, fontChars);
             return Results.Ok(ApiResult<CharacterSetPreview>.Ok(preview));
         });
 
@@ -446,6 +460,50 @@ public static class FontGenerationEndpoints
         CharacterSetConfig CharacterSet,
         int AtlasWidth = 4096,
         int AtlasHeight = 4096,
-        int SamplingSize = 64
+        int SamplingSize = 64,
+        string? FontFileName = null
     );
+
+    private static unsafe HashSet<int> EnumerateFontCharacters(string fontPath)
+    {
+        FT_LibraryRec_* lib;
+        FT_FaceRec_* face;
+        var result = new HashSet<int>();
+
+        if (FT_Init_FreeType(&lib) != FT_Error.FT_Err_Ok)
+            return result;
+
+        try
+        {
+            var pathBytes = Encoding.UTF8.GetBytes(fontPath + '\0');
+            FT_Error error;
+            fixed (byte* pathPtr = pathBytes)
+            {
+                error = FT_New_Face(lib, pathPtr, 0, &face);
+            }
+            if (error != FT_Error.FT_Err_Ok)
+                return result;
+
+            try
+            {
+                uint glyphIndex;
+                var charCode = FT_Get_First_Char(face, &glyphIndex);
+                while (glyphIndex != 0)
+                {
+                    result.Add((int)charCode);
+                    charCode = FT_Get_Next_Char(face, charCode, &glyphIndex);
+                }
+            }
+            finally
+            {
+                FT_Done_Face(face);
+            }
+        }
+        finally
+        {
+            FT_Done_FreeType(lib);
+        }
+
+        return result;
+    }
 }

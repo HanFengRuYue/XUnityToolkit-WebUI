@@ -253,15 +253,31 @@ public sealed class TranslationMemoryService(
 
     public void Dispose()
     {
-        // Flush all dirty stores synchronously on shutdown
-        foreach (var gameId in _dirtyTimestamps.Keys.ToList())
-        {
+        // Cancel all debounce timers first to prevent races with the flush
+        var dirtyGames = _dirtyTimestamps.Keys.ToList();
+        foreach (var gameId in dirtyGames)
             CancelDebounceTimer(gameId);
+
+        // Flush all dirty stores in parallel — each game writes to a separate file
+        // with a per-game lock, so there is no contention
+        var tasks = new List<Task>();
+        foreach (var gameId in dirtyGames)
+        {
             if (_dirtyTimestamps.TryRemove(gameId, out _) && _stores.TryGetValue(gameId, out var store))
             {
-                try { PersistAsync(gameId, store, CancellationToken.None).GetAwaiter().GetResult(); }
-                catch (Exception ex) { logger.LogError(ex, "关闭时保存翻译记忆库失败: {GameId}", gameId); }
+                var gid = gameId; // capture for closure
+                tasks.Add(Task.Run(async () =>
+                {
+                    try { await PersistAsync(gid, store, CancellationToken.None); }
+                    catch (Exception ex) { logger.LogError(ex, "关闭时保存翻译记忆库失败: {GameId}", gid); }
+                }));
             }
+        }
+
+        if (tasks.Count > 0)
+        {
+            try { Task.WhenAll(tasks).GetAwaiter().GetResult(); }
+            catch { /* individual errors already logged */ }
         }
 
         var locks = _persistLocks.Values.ToList();

@@ -3,7 +3,7 @@ import { ref, reactive, computed, watch, onMounted, onActivated, onBeforeUnmount
 import {
   NButton, NIcon, NSelect, NProgress, NSpace, NAlert, useMessage, NPopconfirm,
   NCheckboxGroup, NCheckbox, NRadioGroup, NRadio, NCollapse, NCollapseItem, NSpin, NTag,
-  NDescriptions, NDescriptionsItem, NInputNumber,
+  NDescriptions, NDescriptionsItem, NInputNumber, NSwitch,
 } from 'naive-ui'
 import {
   FontDownloadOutlined, UploadFileOutlined, SettingsOutlined, DownloadOutlined,
@@ -59,6 +59,7 @@ const generatedFonts = ref<GeneratedFontInfo[]>([])
 const games = ref<{ id: string; name: string }[]>([])
 
 // Character set configuration
+const useAllFontCharacters = ref(false)
 const builtinCharsets = ref<CharsetInfo[]>([])
 const selectedCharsets = ref<string[]>(['GB2312'])
 const customCharsetFile = ref<{ fileName: string; characterCount: number } | null>(null)
@@ -157,6 +158,12 @@ async function handleSelectFontFile() {
 
 // Character set helpers
 function buildCharsetConfig(): CharacterSetConfig {
+  if (useAllFontCharacters.value) {
+    return {
+      builtinSets: [],
+      useAllFontCharacters: true,
+    }
+  }
   return {
     builtinSets: selectedCharsets.value,
     customCharsetFileName: customCharsetFile.value?.fileName,
@@ -172,7 +179,12 @@ function triggerPreview() {
 
 async function loadPreview() {
   const config = buildCharsetConfig()
-  if (config.builtinSets.length === 0 && !config.customCharsetFileName
+  if (config.useAllFontCharacters) {
+    if (!uploadedFont.value) {
+      charsetPreview.value = null
+      return
+    }
+  } else if (config.builtinSets.length === 0 && !config.customCharsetFileName
       && !config.translationGameId && !config.translationFileName) {
     charsetPreview.value = null
     return
@@ -184,6 +196,7 @@ async function loadPreview() {
       atlasWidth: atlasSize.value,
       atlasHeight: atlasSize.value,
       samplingSize: samplingSize.value,
+      fontFileName: uploadedFont.value?.fileName,
     })
   } catch (e: any) {
     message.error(e.message || '预览失败')
@@ -319,10 +332,14 @@ function formatDuration(ms: number): string {
 
 // Watchers
 watch(
-  [selectedCharsets, customCharsetFile, translationMode, translationGameId, translationFile, atlasSize, samplingSize],
+  [selectedCharsets, customCharsetFile, translationMode, translationGameId, translationFile, atlasSize, samplingSize, useAllFontCharacters],
   triggerPreview,
   { deep: true },
 )
+
+watch(uploadedFont, () => {
+  if (useAllFontCharacters.value) triggerPreview()
+})
 
 // SignalR (created in onMounted)
 let connection: HubConnection | null = null
@@ -572,9 +589,19 @@ onBeforeUnmount(async () => {
       <div class="section-body" :class="{ collapsed: collapsed.charset }">
         <div class="section-body-inner">
 
+      <!-- Use all font characters toggle -->
+      <div class="charset-all-font-row">
+        <NSwitch v-model:value="useAllFontCharacters" :disabled="isGenerating || !uploadedFont" />
+        <div>
+          <span class="charset-section-label" style="margin: 0">使用字体支持的所有字符</span>
+          <p class="hint-text" style="margin: 0">读取字体文件内包含的全部字符用于生成，忽略下方所有字符集选项</p>
+        </div>
+      </div>
+
+      <div :class="{ 'charset-disabled': useAllFontCharacters }">
       <!-- Built-in charsets -->
       <div class="charset-section-label">内置字符集</div>
-      <NCheckboxGroup v-model:value="selectedCharsets" :disabled="isGenerating">
+      <NCheckboxGroup v-model:value="selectedCharsets" :disabled="isGenerating || useAllFontCharacters">
         <div class="charset-grid">
           <NCheckbox
             v-for="cs in builtinCharsets"
@@ -589,7 +616,7 @@ onBeforeUnmount(async () => {
 
       <!-- Custom charset upload -->
       <div class="charset-section-label">自定义字符集</div>
-      <NButton :disabled="isGenerating" :loading="uploadingCharset" size="small" @click="handleSelectCharsetFile">
+      <NButton :disabled="isGenerating || useAllFontCharacters" :loading="uploadingCharset" size="small" @click="handleSelectCharsetFile">
         选择 TXT 文件
       </NButton>
       <div v-if="customCharsetFile" class="upload-info">
@@ -601,7 +628,7 @@ onBeforeUnmount(async () => {
 
       <!-- Translation extraction -->
       <div class="charset-section-label">从翻译提取字符</div>
-      <NRadioGroup v-model:value="translationMode" :disabled="isGenerating">
+      <NRadioGroup v-model:value="translationMode" :disabled="isGenerating || useAllFontCharacters">
         <NSpace :size="16">
           <NRadio value="none">不使用</NRadio>
           <NRadio value="game">选择游戏</NRadio>
@@ -631,6 +658,7 @@ onBeforeUnmount(async () => {
         </div>
         <p class="hint-text">上传 XUnity 翻译缓存文件（格式：原文=译文），将提取译文中的字符</p>
       </div>
+      </div><!-- end .charset-disabled -->
 
       <!-- Charset preview -->
       <div v-if="charsetPreview || loadingPreview" class="charset-preview">
@@ -642,8 +670,7 @@ onBeforeUnmount(async () => {
             </NTag>
           </div>
           <div class="preview-total">
-            合计 <strong>{{ charsetPreview.totalCharacters.toLocaleString() }}</strong> 个唯一字符，
-            预计需要 <strong>{{ charsetPreview.estimatedAtlasCount }}</strong> 页 Atlas
+            合计 <strong>{{ charsetPreview.totalCharacters.toLocaleString() }}</strong> 个唯一字符
           </div>
           <NAlert
             v-for="(warning, idx) in charsetPreview.warnings"
@@ -919,6 +946,21 @@ onBeforeUnmount(async () => {
 }
 
 /* Character Set */
+.charset-all-font-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.charset-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
 .charset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

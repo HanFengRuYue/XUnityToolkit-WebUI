@@ -14,8 +14,23 @@ public class CharacterSetService(
     public List<CharsetInfo> GetBuiltinCharsets() => BuiltinCharsets.GetAllCharsetInfos();
 
     public async Task<(HashSet<int> Characters, CharacterSetPreview Preview)> ResolveCharactersAsync(
-        CharacterSetConfig config, int atlasWidth, int atlasHeight, int samplingSize)
+        CharacterSetConfig config, IReadOnlySet<int>? preEnumeratedFontChars = null)
     {
+        // UseAllFontCharacters mode: use only the characters from the font's cmap table
+        // Do NOT add ASCII/CommonPunctuation — the font's cmap already includes whatever it supports
+        if (config.UseAllFontCharacters && preEnumeratedFontChars != null)
+        {
+            var fontMerged = new HashSet<int>(preEnumeratedFontChars);
+
+            var fontPreview = new CharacterSetPreview
+            {
+                TotalCharacters = fontMerged.Count,
+                SourceBreakdown = new Dictionary<string, int> { ["FontGlyphs"] = fontMerged.Count },
+                Warnings = []
+            };
+            return (fontMerged, fontPreview);
+        }
+
         var merged = new HashSet<int>();
         var breakdown = new Dictionary<string, int>();
         var warnings = new List<string>();
@@ -96,13 +111,10 @@ public class CharacterSetService(
             }
         }
 
-        var estimatedPages = EstimateAtlasCount(merged.Count, atlasWidth, atlasHeight, samplingSize);
         var preview = new CharacterSetPreview
         {
             TotalCharacters = merged.Count,
             SourceBreakdown = breakdown,
-            EstimatedAtlasCount = estimatedPages,
-            ExceedsSingleAtlas = estimatedPages > 1,
             Warnings = warnings
         };
 
@@ -189,15 +201,6 @@ public class CharacterSetService(
                 set.Add(codepoint);
         }
         return set;
-    }
-
-    public static int EstimateAtlasCount(int charCount, int atlasWidth, int atlasHeight, int samplingSize)
-    {
-        var glyphArea = (samplingSize + 18) * (samplingSize + 18);
-        var atlasArea = atlasWidth * atlasHeight;
-        var glyphsPerPage = (int)(atlasArea * 0.85 / glyphArea);
-        if (glyphsPerPage <= 0) return charCount > 0 ? int.MaxValue : 0;
-        return (int)Math.Ceiling((double)charCount / glyphsPerPage);
     }
 
     private static HashSet<int>? EnumerateBuiltin(string setId) => setId switch

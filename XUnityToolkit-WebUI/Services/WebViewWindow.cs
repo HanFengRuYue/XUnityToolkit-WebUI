@@ -8,7 +8,7 @@ internal sealed class WebViewWindow : Form
 {
     private readonly WebView2 _webView;
     private readonly string _appUrl;
-    private readonly string _userDataFolder;
+    private readonly Task<CoreWebView2Environment>? _preCreatedEnvTask;
     private readonly ILogger _logger;
 
     // Win32 constants
@@ -26,10 +26,14 @@ internal sealed class WebViewWindow : Form
 
     private const int ResizeBorderWidth = 6;
 
-    public WebViewWindow(string appUrl, string userDataFolder, ILogger logger)
+    // DWM rounded corner support (Windows 11+)
+    private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    private const int DWMWCP_ROUND = 2;
+
+    public WebViewWindow(string appUrl, Task<CoreWebView2Environment>? preCreatedEnvTask, Icon? cachedIcon, ILogger logger)
     {
         _appUrl = appUrl;
-        _userDataFolder = userDataFolder;
+        _preCreatedEnvTask = preCreatedEnvTask;
         _logger = logger;
 
         Text = "XUnity Toolkit WebUI";
@@ -37,19 +41,36 @@ internal sealed class WebViewWindow : Form
         MinimumSize = new Size(500, 400);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.None;
-        Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!) ?? SystemIcons.Application;
+        Icon = cachedIcon ?? SystemIcons.Application;
 
         _webView = new WebView2 { Dock = DockStyle.Fill };
         Controls.Add(_webView);
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+
+        // Windows 11 (build 22000+) rounded corners
+        if (Environment.OSVersion.Version.Build >= 22000)
+        {
+            try
+            {
+                var preference = DWMWCP_ROUND;
+                DwmSetWindowAttribute(Handle, DWMWA_WINDOW_CORNER_PREFERENCE,
+                    ref preference, sizeof(int));
+            }
+            catch { /* DWM unavailable — square corners fallback */ }
+        }
+    }
+
     public async Task InitializeAsync()
     {
-        Directory.CreateDirectory(_userDataFolder);
-
-        var env = await CoreWebView2Environment.CreateAsync(
-            browserExecutableFolder: null,
-            userDataFolder: _userDataFolder);
+        // Use pre-created environment if available (started in SystemTrayService.StartAsync,
+        // overlapping with Kestrel startup for ~300-2000ms savings)
+        var env = _preCreatedEnvTask is not null
+            ? await _preCreatedEnvTask
+            : await CoreWebView2Environment.CreateAsync(browserExecutableFolder: null, userDataFolder: null);
         await _webView.EnsureCoreWebView2Async(env);
 
         _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
@@ -164,12 +185,16 @@ internal sealed class WebViewWindow : Form
             return;
         }
 
-        // Application.Exit() path -- allow close, dispose WebView2
-        try { _webView.Dispose(); }
-        catch { /* best effort */ }
+        // Application.Exit() path — detach WebView2 to skip its slow Dispose (~500-1000ms).
+        // The browser subprocess self-terminates when the host process exits (IPC channel breaks).
+        Controls.Remove(_webView);
 
         base.OnFormClosing(e);
     }
+
+    [DllImport("dwmapi.dll", ExactSpelling = true, PreserveSig = true)]
+    private static extern int DwmSetWindowAttribute(
+        IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MINMAXINFO

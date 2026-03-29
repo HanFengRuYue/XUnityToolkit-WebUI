@@ -112,7 +112,7 @@ public sealed class TmpFontGeneratorService(
             if (request.CharacterSet != null)
             {
                 var (resolved, preview) = await characterSetService.ResolveCharactersAsync(
-                    request.CharacterSet, request.AtlasWidth, request.AtlasHeight, request.SamplingSize);
+                    request.CharacterSet, request.PreEnumeratedFontChars);
                 chars = resolved.OrderBy(c => c).ToList();
                 sourceBreakdown = preview.SourceBreakdown;
             }

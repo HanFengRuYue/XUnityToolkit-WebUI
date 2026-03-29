@@ -323,6 +323,13 @@ function onResizeDoubleClick() {
   height: 32px;
   pointer-events: auto;
   app-region: no-drag;
+  background: color-mix(in srgb, var(--bg-surface) 75%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 0 0 0 var(--radius-sm);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .win-btn {

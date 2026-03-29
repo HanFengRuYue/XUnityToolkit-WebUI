@@ -37,103 +37,24 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 ## 架构
 
-- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 用于系统托盘 NotifyIcon 和 WebView2 窗口)
-- **前端：** Vue 3 + TypeScript + Naive UI + Pinia（位于 `XUnityToolkit-Vue/`）
-- **侧边栏状态：** `useSidebarStore`（Pinia + localStorage）管理折叠/宽度；`effectiveWidth` 计算属性在折叠时返回 64px，否则返回自定义宽度；移动端（≤768px）忽略折叠/调整大小；`isNarrowDesktop`（768-900px 视口）自动折叠侧边栏到 64px（不修改 store 持久化状态）；折叠后的导航项是 44×44px 的方形按钮，通过 `margin: 0 auto` 居中；折叠开关位于设置按钮上方
-- **AI 翻译页面布局：** 单列布局 — 统计条 → 管线状态 → 设置（可折叠区块卡片，`collapsed.settings`）→ 最近翻译 → 错误；无两列网格
-- **实时通信：** 通过单个 `InstallProgressHub` 使用 SignalR（分组：`game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`）；`preCacheStatsUpdate` 广播到 `ai-translation` 分组用于预翻译缓存命中/未命中统计；`healthReportReady` 在安装验证步骤完成后广播到 `game-{id}` 分组
-- **关闭超时：** `HostOptions.ShutdownTimeout = 3s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
-- **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许为开发/测试覆盖路径；API 密钥使用 DPAPI 加密
-- **系统托盘：** NotifyIcon 在专用 STA 线程上运行；`ShowNotification` 通过 `SynchronizationContext.Post` 调度到 STA；`_trayIcon`/`_syncContext` 为 `volatile`
-- **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`，`MinimumSize` 500×400）内嵌 WebView2 控件显示前端 UI；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag` 实现原生窗口拖拽；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 实现无边框窗口边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；WebView2 运行时不可用时自动回退到系统浏览器；用户数据目录：`{AppData}/webview2-cache/`
-- **WebView2 DPI 感知：** `Application.SetHighDpiMode(HighDpiMode.PerMonitorV2)` 在 `SystemTrayService.RunTrayLoop()` 中 `EnableVisualStyles()` 之前调用——这是 WebView2 高 DPI 清晰渲染的关键；`<ApplicationHighDpiMode>` MSBuild 属性不被 `Microsoft.NET.Sdk.Web` 识别，必须使用编程方式
-- **WebView2 DPI 缩放陷阱：** `MinimumSize` 在 PerMonitorV2 下是逻辑像素（150% DPI 时物理最小 750×600），CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问（桌面端用浮动标题栏，移动端用顶栏集成按钮）
-- **WebView2 WndProc 陷阱：** `Message.LParam` 在 64 位系统上必须用 `nint` 解包坐标（`(nint)m.LParam`），不要用 `m.LParam.ToInt32()`——后者在多显示器/负坐标场景会抛 `OverflowException`
-- **页面缩放：** `useThemeStore` 管理页面缩放；`baseDpr`（模块级常量）捕获 `window.devicePixelRatio`；`pageZoom` ref（0=自动检测，50-200=用户设定）；CSS `document.documentElement.style.zoom = effectiveZoom / (baseDpr * 100)` 补偿系统 DPI 使滑块值直接表示有效缩放百分比；localStorage 缓存防闪烁 + 后端持久化；`AppSettings.PageZoom`（int，默认 0）
-- **自定义标题栏：** 前端 `useWindowControls` composable（模块级单例）通过 `window.chrome?.webview` 检测 WebView2 环境；`AppShell.vue` 中的 `.window-titlebar` 仅在 WebView2 模式渲染（透明覆盖层 + 窗口控制按钮）；浏览器模式下无标题栏、无额外 padding；移动端媒体查询中隐藏浮动标题栏并将窗口控制按钮集成到移动端顶栏（`.topbar-window-controls`），顶栏通过 `app-region: drag` 支持拖拽
-- **无控制台：** `OutputType=WinExe` — 无控制台窗口；不要改回 `Exe`
-- **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置；在 `Initialize()` 时通过 `WebClient.DownloadStringAsync` 发送连通性 ping（`GET /api/translate/ping?gameId=`）（即发即忘）
-- **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；批量模式由 `SemaphoreSlim` 限制；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
-- **本地 LLM：** `LocalLlmService` 管理 llama-server 进程；通过 DXGI 检测 GPU，WMI 作为后备；llama 二进制文件打包为 ZIP，首次使用时延迟解压；本地模式强制 concurrency=1、batch size=1、禁用术语提取；`TranslateLocalSequentialAsync` 优化本地串行循环（单次信号量获取 + 系统提示词缓存 + 节流 SignalR 广播）；术语占位符替换 + 后处理在本地模式下仍然有效；当匹配术语数 ≤20 时在系统提示词中包含术语表（超过 20 则省略以节省上下文 token）；llama-server 默认启用 `--flash-attn --cont-batching -ub 1024`，KV cache 量化通过 `LocalLlmSettings.KvCacheType`（默认 `q8_0`）配置；本地端点推理请求附加 `min_p`/`repeat_penalty`/`max_tokens` 采样参数
-- **模块化版本：** 三个版本 — Full（自包含+LLAMA）、No-LLAMA（自包含）、Lite（框架依赖）；`EditionInfo`（`Infrastructure/EditionInfo.cs`）通过 `AssemblyMetadataAttribute("Edition")` 在构建时注入，运行时静态读取；`EditionInfo.Current` 返回 `AppEdition` 枚举；`EditionInfo.HasBundledLlama` 仅 Full 为 true；通过 `-p:Edition=full|no-llama|lite` 传递；`UpdateService` 使用 `GetManifestRid()` 获取版本特定的清单 RID（`win-x64`/`win-x64-no-llama`/`win-x64-lite`）
-- **LLAMA 运行时下载：** `LocalLlmService.DownloadLlamaAsync` 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；`POST .../llama-download/cancel` 取消；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅
-- **资源提取：** `AssetExtractionService` 使用 AssetsTools.NET 从 Unity `.assets` 和 bundle 文件中提取字符串；`PreTranslationService` 批量翻译并写入 XUnity 缓存文件
-- **I2 Localization 提取：** `AssetExtractionService.ExtractI2LocalizationTerms` 通过 `mSource.mTerms`+`mLanguages` 字段存在性检测 I2 `LanguageSourceAsset`；使用 `I2:{langCode}:{termKey}` source tag 提取每种语言的术语值；跳过 `IsGameText` 过滤（I2 术语是已知的游戏文本）；对非 I2 MonoBehaviour 回退到通用 `CollectStrings`
-- **GameCreator 2 提取：** `AssetExtractionService` 检测 GameCreator Dialogue (`m_Story`+`m_Nodes`)、Quest (`m_Tasks`+`m_Title`/`m_Description`)、Actor (`m_ActorName`/`m_PrimaryActorName`) 和 Stat (`m_Acronym`+`m_Title`) 类型；使用 `GameCreator:{Type}:{Name}` source tag 提取；遍历对话节点树（`m_Content`, `m_ContentChoice`, `m_Values*`）、任务层级和指令子字段；剩余字段回退到通用 `CollectStrings`；`DetectAndLogTemplateVariables` 扫描提取的文本中的 `{Variable}` 模式并记录建议配置 DoNotTranslate 术语
-- **VIDE Dialogues 提取：** `AssetExtractionService.TryExtractVideDialogue` 通过 `dID`+`playerDiags` 键检测 TextAsset 中的 VIDE 对话 JSON；解析扁平 JSON，从 `pd_{N}_com_{C}text` 键提取对话文本，从 `pd_{N}_com_{C}charName` 键提取角色名；过滤控制标记（`*` 前缀、`RAND`、`ExtraData`）；source tag 为 `VIDE:{dialogueName}` 和 `VIDE:Character:{dialogueName}`；对非 VIDE TextAsset 回退到通用 `ExtractTextLines`
-- **VIDE SOQuotes_UW 提取：** `IsVideQuote` 通过 `quotes`+`dialType` 字段存在性检测；`ExtractVideQuotes` 从 `quotes` 数组中提取所有字符串；source tag 为 `Quote:{assetName}`
-- **VIDE SOTraitData_UW 提取：** `IsVideTrait` 通过 `traitName`+`traitType` 字段存在性检测；`ExtractVideTraits` 直接提取 `traitName`、`reqsText`、`effectText`、`flavorText`；仅当 `hoverText` 包含实质性非模板文本时才提取（去除 `{NAME}`/`{REQS}`/`{EFFECT}`/`{FLAVOR}`/`{STATS}`/`{REPS}`/`{TP}`/`{ITEMS}`/`{CLOTHES}` 占位符后检查剩余文本是否 >5 字符）；source tag 为 `Trait:{assetName}` 和 `Trait:HoverText:{assetName}`
-- **添加游戏专用提取器：** 模式：在 `ExtractFromAssetsInstance` 中通过字段签名检测 → 专用提取方法配合特定 source tag → 回退到通用 `CollectStrings`；对于 TextAsset JSON 格式，在 `ExtractTextLines` 回退之前的 TextAsset 循环中检测；添加 `[GeneratedRegex]` 匹配键模式；更新 CLAUDE.md 架构部分
-- **备份/恢复：** `BackupService` 为每个游戏创建 `BackupManifest` 用于干净卸载；清单位于 `{dataRoot}/backups/{gameId}.json`
-- **字体替换：** `FontReplacementService` 使用 AssetsTools.NET 扫描和替换游戏 `.assets` 及 bundle 文件中的 TMP_FontAsset；字段级替换保留 PPtr 引用；自动清除 Addressables CRC；备份位于 `{dataRoot}/font-backups/{gameId}/`；自定义字体位于 `{dataRoot}/custom-fonts/{gameId}/`
-- **字体生成：** `TmpFontGeneratorService` 通过 FreeType (`FT_RENDER_MODE_NORMAL`) 渲染抗锯齿位图，然后通过 `DistanceFieldGenerator`（Felzenszwalb EDT）生成 SDF，复刻 Unity 的 FontEngine 方式；支持 SDFAA/SDF8/SDF16/SDF32 渲染模式和上采样（8x/16x/32x）；动态内边距（百分比/像素模式）；自动大小二分搜索；`GradientScale = padding + 1` 注入到 Material 中；RectpackSharp 用于图集打包；多图集支持；`CharacterSetService` 解析可叠加字符集（内置/自定义 TXT/XUnity 翻译文件）；`BuiltinCharsets` 枚举 GB2312/GBK/CJK Common/CJK Full/Japanese；磁盘临时 SDF 位图用于控制内存；生成报告保存为 `.report.json` 附属文件；输出位于 `{dataRoot}/generated-fonts/`
-- **BepInEx 日志：** `BepInExLogService` 使用 `FileShare.ReadWrite` 读取 `{GamePath}/BepInEx/LogOutput.log`；AI 分析通过 `LlmTranslationService.CallLlmRawAsync`（不占用信号量）；诊断提示词为预定义中文；日志截断到最后 4000 行供 LLM 上下文使用；`hasBepInEx` 计算包含 `PartiallyInstalled` 状态
-- **插件健康检查：** `PluginHealthCheckService` 执行被动的、基于规则的健康检查（不依赖 AI）；第 1 级：文件完整性（doorstop 代理、BepInEx 核心、XUnity 插件、配置、LLMTranslate DLL）；第 2 级：基于日志的检查，通过 `[GeneratedRegex]`（BepInEx 初始化、XUnity 已加载、端点已注册、错误分析）；第 3 级：连通性检查 — `LLMTranslate.dll` 在 `Initialize()` 时发送 `GET /api/translate/ping?gameId=`，`RecordPing`/`HasRecentPing` 跟踪到达情况；`VerifyAsync` 自动启动游戏，等待日志 + ping，然后分析；`VerifyForInstallAsync` 绕过 `_activeVerifications` 守卫供 `InstallOrchestrator` 使用（编排器自己管理并发）；`PluginHealthCard.vue` 只显示有问题的项目（过滤 Healthy），单个"启动验证"按钮（无被动重检按钮），接受可选 `initialReport` prop（提供时跳过被动检查）；API：`GET /api/games/{id}/health-check`, `POST .../health-check/verify`
-- **健康检查错误分析：** `CheckLogErrors` 双遍扫描：Pass 1 扫描 `[Error:]` 行匹配通用错误模式（IL2CPP、Harmony、程序集版本、类型加载、插件加载、字体缺失、文件未找到、权限、空引用、网络、XUnity 钩子）；Pass 2 扫描所有行匹配 LLMTranslate 端点专属模式（工具箱连接、空响应、数量不匹配、本地模型、端点禁用、API 失败）——DLL 通过 `Console.WriteLine` 输出，在 BepInEx 中显示为 `[Info/Message:]` 级别而非 `[Error:]`，因此必须独立扫描；`HealthCheckDetail(Category, Excerpt, Suggestion?)` 携带分类诊断；`SafeExcerpt` 剥离日志前缀并用 `Path.GetFileName` 替换绝对路径；每类最多 2 条、总计最多 10 条；添加新错误模式：在 `GeneralErrorPatterns` 或 `EndpointErrorPatterns` 列表中添加 `ErrorPattern` + 对应 `[GeneratedRegex]`
-- **插件健康验证前置条件：** `POST .../health-check/verify` 需要 `FullyInstalled` 或 `PartiallyInstalled` 状态；`BepInExOnly` 时 LLMTranslate.dll 未安装，ping 永远不会到达，验证必定超时
-- **健康检查 ↔ DLL 日志依赖：** `CheckEndpointRegistered` 扫描 BepInEx 日志中的 `"LLMTranslate"` 子串 — 需要 DLL 的 `Log()`（无条件）输出初始化 banner；不要将初始化消息限制在 `DebugLog()` 后面，否则健康检查将无法检测到端点
-- **文件浏览器：** `FileExplorerModal.vue`（`defineAsyncComponent` 懒加载）在 `App.vue` 全局挂载一次；`useFileExplorer()` composable 使用模块级 reactive 单例提供 `selectFile()`/`selectFolder()` → `Promise<string | null>`；返回服务端文件路径，兼容现有所有路径 API；左侧栏包含快速访问（标准文件夹 + 用户固定文件夹）和磁盘列表；`QuickAccessHelper`（静态类，`Services/`）通过 Shell COM（STA 线程）枚举 `shell:::{679f85cb-0220-4080-b29b-5540cc05aab6}`，结果缓存在 `volatile` 静态字段；COM 对象必须逐级 `Marshal.ReleaseComObject`（shell → folder → items → 每个 item）；`POST /api/filesystem/read-text` 读取文本文件内容（最大 10MB），供前端导入功能使用（翻译编辑器、术语编辑器）；所有文件上传场景均提供 `*-from-path` 端点变体（接受 `UploadFromPathRequest { FilePath }`），与 multipart 上传端点并存——前者用于内置文件浏览器点击选择，后者用于拖拽上传
-- **在线更新：** `UpdateService` 检查 GitHub Releases 的新版本；基于清单的差异下载（app/wwwroot/bundled-llama/bundled-fonts/bundled-plugins/bundled-misc 组件 ZIP）；`Updater.exe`（AOT，无运行时依赖）处理文件替换和重启；暂存在 `data/update-staging/`；两阶段备份-替换保证原子性；失败时回滚；通过 `AppSettings.ReceivePreReleaseUpdates` 选择预发布版本
+- **后端：** ASP.NET Core Minimal API (.NET 10.0, Windows Forms 用于系统托盘和 WebView2 窗口)；详见 `XUnityToolkit-WebUI/CLAUDE.md`
+- **前端：** Vue 3 + TypeScript + Naive UI + Pinia（位于 `XUnityToolkit-Vue/`）；详见 `XUnityToolkit-Vue/CLAUDE.md`
+- **实时通信：** 通过单个 `InstallProgressHub` 使用 SignalR（分组：`game-{id}`, `ai-translation`, `logs`, `pre-translation-{gameId}`, `local-llm`, `font-replacement-{gameId}`, `font-generation`, `update`）
+- **持久化：** JSON 文件存储在 `%AppData%\XUnityToolkit\`（`library.json`, `settings.json`）；`AppData:Root` 配置键允许覆盖路径；API 密钥使用 DPAPI 加密
+- **TranslatorEndpoint：** net35 `LLMTranslate.dll` — XUnity.AutoTranslator 自定义端点，将游戏文本转发到 `POST /api/translate`；通过 `[LLMTranslate]` INI 区段配置
+- **AI 翻译：** `LlmTranslationService` 调用 LLM API（OpenAI/Claude/Gemini/DeepSeek/Qwen/GLM/Kimi/Custom）；多提供商负载均衡；每游戏统一术语表、翻译记忆、AI 描述；通过 SignalR 实时统计
+- **本地 LLM：** `LocalLlmService` 管理 llama-server 进程；通过 DXGI/WMI 检测 GPU；本地模式强制 concurrency=1、batch size=1、禁用术语提取
+- **模块化版本：** Full（自包含+LLAMA）、No-LLAMA（自包含）、Lite（框架依赖）；通过 `-p:Edition=full|no-llama|lite` 传递；`EditionInfo`（`Infrastructure/EditionInfo.cs`）在构建时注入
+- **资源提取：** `AssetExtractionService` 使用 AssetsTools.NET 提取字符串；支持 I2 Localization、GameCreator 2、VIDE 等专用提取器
+- **字体：** `FontReplacementService` 扫描和替换 TMP_FontAsset；`TmpFontGeneratorService` 通过 FreeType + Felzenszwalb EDT 生成 SDF 字体
+- **在线更新：** `UpdateService` 检查 GitHub Releases；基于清单的差异下载；`Updater.exe`（AOT）处理文件替换和重启
 
 ## 翻译管线
 
-- **管线分叉流程设计：** 状态仪表板显示水平分叉管线："已接收" → [LLM 分支：排队→翻译中→已完成→术语提取] | [TM 分支：(精确·模糊·模式 inline node)→已命中]；水平分叉布局是设计意图 — 不要替换为平面卡片或垂直自顶向下布局；SVG 覆盖层绘制直角连接路径和动画粒子（`offset-path`）；所有节点包裹在 `NPopover` 中用于悬停提示；节点使用 `flex: 1 1 0` 填充可用宽度；术语提取内联在 LLM 分支流程中（在已完成之后，不是作为单独的 `.branch-sub`）；TM 命中显示为单个 `.tm-node` 配合 `.tm-chips-inline`（不是单独的小芯片）；LLM 完成计数计算为 `totalTranslated - (tmHits + tmFuzzyHits + tmPatternHits)`；TM 分支使用基于 accent 的 `color-mix()` 变体（不是 `--secondary`）以跟随主题强调色，实时 `TranslationStats` 字段（非单独获取的 `TranslationMemoryStats`）；**管线动画 `active` 不变量：** 连接线的 `active` 条件必须使用瞬时流量指标（如 `queued + translating > 0`），不能使用累计计数器（如 `tmTotalHits > 0`）— 累计值只增不减，会导致动画在翻译完成后永远播放
-- **多阶段翻译管线：** 第 1 阶段（自然）发送未修改的文本，术语在结构化提示词中 — 无占位符，依赖 LLM 理解；第 2 阶段（占位符）对第 1 阶段未解决的术语应用 `{{G_x}}`/`{{DNT_x}}` 替换；第 3 阶段（强制修正）重翻仍未通过术语审计的片段；各阶段逐步推进 — 每个阶段只处理前序阶段未解决的文本
-- **翻译记忆：** `TranslationMemoryService` 提供持久化的每游戏 TM，具有三级匹配（精确 → 动态模式 → Levenshtein 模糊）；在首次 `POST /api/translate` 时延迟加载；作为 `LlmTranslationService` 管线中的第 0 阶段集成（在第 1 阶段之前）；TM 命中需经过 `TermAuditService` 验证；`Add()` 是同步的（仅内存），持久化经过防抖（5 秒延迟）以避免批量翻译时的 I/O 争用；`FlushAsync()` 取消待处理的防抖并立即持久化（由 `PreTranslationService` 在最终批次后调用）；每游戏 `SemaphoreSlim` 锁用于持久化（非全局）；实现 `IDisposable` 用于关闭时刷新；`DynamicPatternService` 检测模板变量并使用 LLM 识别动态文本片段，生成 XUnity `r:` 正则表达式模式；`TermExtractionService` 在第 1 轮预翻译后通过专用 LLM 调用提取术语
-- **多轮预翻译：** `PreTranslationService` 支持 2 轮管线；第 1 轮：标准翻译 + 自动术语提取；可选术语审核暂停（5 分钟超时，`AwaitingTermReview` 状态）；第 2 轮：使用新提取的术语重新翻译；动态模式正则追加到 `_PreTranslated_Regex.txt`；结果批量写入 TM
-- **统一术语管理：** `TermService` 在 `data/glossaries/{gameId}.json` 存储每游戏术语条目（首次加载时迁移旧版 DNT 条目）；每个 `TermEntry` 有 `Type`（Translate/DoNotTranslate）、`Category`、`Priority`、`CaseSensitive`、`ExactMatch`、`IsRegex`；`TermMatchingService` 处理基于优先级的占位符替换；`TermAuditService` 验证翻译中的术语合规性
-- **术语提取服务：** `GlossaryExtractionService`（响应式、热路径、直接写入术语表）和 `TermExtractionService`（批量、预翻译、暂存候选）通过 `LlmResponseParser`、`EndpointSelector`（`SelectBestEndpoint` — 无服务级端点覆盖）、`TermCategoryMapping` 共享 LLM 提取逻辑，但故意是独立服务 — 不同的生命周期、输出和并发模型；不要合并
-- **GlossaryExtractionService 重触发守卫：** 在信号量超时时重置 `LastExtractionAt`；使用 `Math.Max(1L, total - interval + 1)` 而非 `Math.Max(0, ...)`——当 `total` 很小时后者会 clamp 到 0，导致立即重触发
-- **占位符替换顺序：** 术语按优先级排序（高优先），然后按原文长度排序（长优先）；翻译类型术语产生 `{{G_x}}` 占位符，免翻译术语产生 `{{DNT_x}}`；基于优先级的排序确保重要术语在低优先级术语之前占据其范围
-- **翻译后处理顺序：** 术语表恢复 → 术语表后处理 → DNT 恢复；**DNT 恢复必须在术语表后处理之后** — 否则 `ApplyGlossaryPostProcess`（在翻译文本中对术语原文执行 `string.Replace`）会将恢复的 DNT 词替换为术语表翻译，破坏免翻译意图
-- **术语子串不变量：** 当多个术语存在子串关系时（例如 `SaveSettings.es3` 包含 `Settings`），三层 — `ApplyGlossaryPostProcess`、`TermAuditService`、第 3 阶段强制修正 — 均使用受保护范围/包含逻辑确保较长术语优先；任何新的对术语原文/翻译的 `string.Replace` 必须使用带范围保护的位置替换
-- **预计算占位符文本：** 完全被单个占位符替换的文本在 LLM 调用前解析（预计算）；它们绕过 LLM 调用和 `ApplyGlossaryPostProcess`（结果直接来自术语映射），但仍参与术语审计并计入 phase2Pass 统计；`preComputed` 字典跟踪这些索引
-- **预翻译缓存优化：** `PreTranslationCacheMonitor` 在 `EnablePreTranslationCache` 开启时跟踪缓存命中/未命中；通过 `EnsureCacheAsync` 在每游戏首次 `POST /api/translate` 时延迟加载（`_loadAttemptedForGameId` + `SemaphoreSlim` 双重检查锁）；`PreTranslationService` 规范化缓存键（富文本标签剥离）并生成带 `sr:` 分割器模式的 `_PreTranslated_Regex.txt`；XUnity 配置针对空白容差优化（`CacheWhitespaceDifferences`, `IgnoreWhitespaceInDialogue`, `MinDialogueChars`）；自定义正则模式存储在 `{dataRoot}/cache/pre-translation-regex/{gameId}.txt`
-- **LLM 批量分析限制：** `DynamicPatternService` 和 `TermExtractionService` 最多采样 200 对（`MaxAnalysisPairs`/`MaxExtractionPairs`）以将 LLM 调用上限控制在约 10 次；否则 2500 条翻译 = 127 次顺序调用（10 分钟–2 小时）
-- **LLM 批量服务进度：** `DynamicPatternService.AnalyzeDynamicFragmentsAsync` 和 `TermExtractionService.ExtractFromPairsAsync` 接受 `Action<int, int>? onBatchProgress`（done, total）；`PreTranslationService` 在同步回调中使用即发即忘 `_ = BroadcastStatus(...)` 推送 SignalR 更新
-- **脚本标签清理：** `ScriptTagService` 从预翻译缓存键和 LLM 输入中剥离游戏特定指令码（例如 `tk,N,text`, `%%,N,text,#BTN`）；`NormalizeForCache` 现有两层：`XUnityTranslationFormat`（富文本）→ `ScriptTagService`（脚本标签）；每游戏规则在 `{dataRoot}/script-tags/{gameId}.json`；全局版本化预设在 `bundled/script-tag-presets.json`，通过 `IsBuiltin` 标志自动更新
-- **脚本标签与术语：** 脚本标签预设（`Extract`/`Exclude`）仅在行级别操作；内联占位符保留（例如 `{PC}`, `{M}` 模板变量）需要 DoNotTranslate 术语条目，而非脚本标签规则
-- **XUnity 正则翻译：** 缓存文件支持 `r:"pattern"=replacement`（标准正则，默认子串替换，除非用 `^$` 锚定）和 `sr:"pattern"=$1$2`（分割器正则，自动锚定，独立翻译每个捕获组后重新组装）；`sr:` 分组必须是可翻译文本 — 纯数字分组浪费翻译调用；对数字模式使用 `TemplateAllNumberAway=True`
-
-## 实现不变量
-
-- **TranslationStats 计算字段：** `DynamicPatternCount` 和 `ExtractedTermCount` 在 `TranslateEndpoints.cs` 中填充（而非 `LlmTranslationService.GetStats()`），因为 `TermExtractionService` → `LlmTranslationService` 会产生循环 DI 依赖；任何来自依赖 `LlmTranslationService` 的服务的新计算统计必须遵循相同的端点层模式
-- **`RecentTranslation.EndpointName` 用于 TM 命中：** 当 `perTextTranslationSource[i]` 不为 null 时在 `PipelineComplete` 中设为 `"翻译记忆"`；防止最近翻译列表中出现空端点名
-- **`TranslationMemoryService.GetHitStats()` 元组顺序：** 返回 `(ExactHits, PatternHits, FuzzyHits, Misses)` — 用匹配的名称解构，不要用 `(exact, fuzzy, pattern, misses)`
-- **枚举 JSON 大小写：** `TermType` 和 `TermCategory` 使用 `CamelCaseJsonStringEnumConverter<T>`（camelCase：`"translate"`, `"doNotTranslate"`, `"character"`）；所有其他枚举使用默认 PascalCase（`"OpenAI"`, `"NotInstalled"`）— 不要修改全局 `JsonStringEnumConverter` 或为其添加命名策略；**转换器优先级：** 属性级 `[JsonConverter]` > `JsonSerializerOptions.Converters` > 类型级 `[JsonConverter]` — camelCase 枚举必须在 TermEntry **属性**上有 `[JsonConverter]`（不仅是枚举类型上），否则 `Program.cs` 和服务 `JsonOptions` 中的全局 PascalCase `JsonStringEnumConverter` 会覆盖类型级属性
-- **TermEntry 反序列化不变量：** 所有从 JSON 反序列化 `List<TermEntry>` 的代码（包括迁移/导入路径）必须使用 `FileHelper.DataJsonOptions` — 没有枚举转换器，`DoNotTranslate` 类型会静默变为 `Translate`（默认枚举值 0）
-
-## 安全约定
-
-- **路径遍历：** 对所有 ZIP 解压和用户提供的相对路径使用 `PathSecurity.SafeJoin(root, relative)`；使用 `Path.GetFileName()` 从用户提供的文件名中去除目录部分
-- **gameId 验证：** 所有直接将 `id` 用于文件路径的端点（GET/PUT/DELETE）（无 `library.GetByIdAsync` 存在性检查）必须使用 `Guid.TryParse(id, out _)` 验证以防止路径遍历；适用于 TM 统计、dynamic-patterns、term-candidates、extracted-texts、pre-translate/regex 端点
-- **SSRF 防护：** 在对任何用户提供的 URL 执行 `HttpClient.GetAsync()` 前使用 `PathSecurity.ValidateExternalUrl(url)`；阻止回环、私有 IP（IPv4+IPv6）、链路本地、`.local`/`.internal` 主机名
-- **派生 URL 的 SSRF：** 也要验证从用户可配置基础 URL 构造的 URL（例如 `HfMirrorUrl` + repo path）；必须对最终 URL 而非仅基础 URL 通过 `ValidateExternalUrl` 验证
-- **外部 API 源 URL 的 SSRF：** 来自外部 API 响应的 URL（如 GitHub `BrowserDownloadUrl`）也必须通过 `ValidateExternalUrl` 验证——不要假设 API 响应可信
-- **语言代码验证：** `fromLang`/`toLang` 参数以及 INI 来源的语言值（例如 `[General] Language`）用于文件路径时必须验证为简单代码（`^[a-zA-Z0-9_\-]{1,20}$`）以防止路径遍历；同时验证解析后的完整路径通过 `Path.GetFullPath` + `StartsWith` 保持在预期目录内
-- **CustomFontPath 验证：** 请求体中的 `FontReplacementRequest.CustomFontPath` 必须在 `FontReplacementEndpoints` 中验证其保持在 `paths.GetCustomFontDirectory(gameId)` 内，然后再传递给服务
-- **ExecutableName 验证：** 必须是不含路径分隔符（`/`, `\`）的简单文件名；在 `POST /api/games/` 和 `PUT /api/games/{id}` 中均需验证
-- **游戏启动安全：** 在 `Process.Start` 前始终通过 `Path.GetFullPath` + `StartsWith` 验证 `exePath` 在 `GamePath` 内
-- **进程参数：** 绝不在未清理引号的情况下将用户输入插入参数字符串；从用于 `-m "..."` 风格参数的用户提供路径中去除 `"`
-- **CancellationTokenSource：** 从 `ConcurrentDictionary` 中移除时始终 `Dispose()`；覆盖前先 dispose 旧的 CTS
-- **即发即忘端点中的 CTS 所有权：** 生产者（例如 `/replace` 处理程序的 `finally` 块）拥有 disposal；取消端点应只调用 `.Cancel()`，不要调用 `.Dispose()` — 防止取消和完成之间的双重 dispose 竞争
-- **进程 disposal：** 在将 `_process` 设为 null 前始终调用 `Process.Dispose()`
-- **返回给客户端的错误消息：** 绝不从通用 `catch (Exception)` 块返回 `ex.Message` — 使用安全的静态消息；来自类型化 catch（`HttpRequestException`, `InvalidOperationException`）的 `ex.Message` 可以接受
-- **全局异常处理器：** `Program.cs` 中的中间件捕获未处理的 `/api` 异常，服务端记录完整详情，向客户端返回通用错误
-- **设置验证：** 在 `SettingsEndpoints` 中对数值设置进行 clamp（MaxConcurrency, Port, ContextSize, LocalContextSize, Temperature, FuzzyMatchThreshold）；添加新的数值型 `AiTranslationSettings` 字段需要添加对应的 `Math.Clamp` 行
-- **输入大小限制：** 对列表端点强制最大数量（术语 10000（统一）、翻译文本 500、原始配置 512 KB）；文件上传：字体 50MB、字符集/翻译 10MB、设置导入 100MB
-- **正则验证：** 保存前使用 `new Regex(..., timeout: 1s)` 验证术语 `IsRegex` 条目
-- **原子文件写入：** 对 JSON 数据文件使用 `FileHelper.WriteJsonAtomicAsync`；对非 JSON 关键文件使用写入临时文件 + `File.Move(overwrite: true)`
-- **SignalR 错误消息：** 不要在 `_error` 字段中广播内部文件路径；使用 `Path.GetFileName()` 或通用消息
-
-## 共享基础设施 (`Infrastructure/`)
-
-- **`FileHelper.DataJsonOptions`：** 标准 `JsonSerializerOptions`（WriteIndented + CamelCase + JsonStringEnumConverter）由所有数据文件服务共享 — 不要声明每服务的 `JsonOptions`；有不同配置的服务（例如 `GameImageService` 不使用 WriteIndented，`UpdateService` 不使用 JsonStringEnumConverter）保持自己的配置
-- **`FileHelper.WriteJsonAtomicAsync<T>`：** 原子 JSON 写入（序列化 → `.tmp` → `File.Move`）；包含 `Directory.CreateDirectory`；用于所有每游戏数据文件持久化
-- **`LlmResponseParser`：** `ExtractJsonArray(content)` 去除 `<think>` 块 + markdown 围栏 + 提取 `[...]`；`ExtractJsonContent(content)` 用于通用 JSON（数组或对象）；被 `GlossaryExtractionService`、`TermExtractionService`、`LlmTranslationService`、`DynamicPatternService` 使用
-- **`EndpointSelector`：** `SelectBestEndpoint(endpoints)` 返回最高优先级的已启用端点；`SelectEndpoint(endpoints, preferredId)` 先尝试指定端点，回退到最佳；被 `GlossaryExtractionService`、`TermExtractionService`、`DynamicPatternService`、`BepInExLogService` 使用
-- **`TermCategoryMapping.FromString`：** `Models/TermEntry.cs` 中的共享 `Dictionary<string, TermCategory>`；被 `GlossaryExtractionService` 和 `TermExtractionService` 用于 LLM 响应解析
-- **`GameProcessHelper.KillGameProcessAsync`：** `Infrastructure/GameProcessHelper.cs`；静态方法，处理通过 shell 启动（如 Steam）的游戏进程关闭——`UseShellExecute=true` 返回的 shell 启动器会立即退出而实际游戏作为独立进程运行；按可执行文件名 + 游戏目录匹配真实进程；kill 后延迟 1 秒确保文件句柄释放
+- **管线分叉流程设计：** 状态仪表板显示水平分叉管线："已接收" → [LLM 分支：排队→翻译中→已完成→术语提取] | [TM 分支：(精确·模糊·模式)→已命中]；水平分叉布局是设计意图 — 不要替换为平面卡片或垂直自顶向下布局；LLM 完成计数 = `totalTranslated - (tmHits + tmFuzzyHits + tmPatternHits)`；TM 分支使用基于 accent 的 `color-mix()` 变体；**管线动画 `active` 不变量：** 连接线的 `active` 条件必须使用瞬时流量指标（如 `queued + translating > 0`），不能使用累计计数器 — 累计值只增不减，会导致动画永远播放
+- **多阶段翻译管线：** Phase 0（TM 查找）→ Phase 1（自然模式）→ Phase 2（占位符 `{{G_x}}`/`{{DNT_x}}` 替换）→ Phase 3（强制修正）；各阶段逐步推进；详见 `XUnityToolkit-WebUI/CLAUDE.md` 的"AI 翻译上下文"和"翻译管线详情"
+- **翻译记忆：** `TranslationMemoryService` 提供持久化的每游戏 TM（精确 → 动态模式 → Levenshtein 模糊）；TM 命中需经过 `TermAuditService` 验证；`Add()` 同步（仅内存），持久化经过防抖（5 秒）
+- **统一术语管理：** `TermService` 在 `data/glossaries/{gameId}.json` 存储每游戏术语条目；`TermMatchingService` 处理占位符替换；`TermAuditService` 验证合规性
 
 ## 代码约定
 
@@ -218,7 +139,8 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **更新状态模型：** `Models/UpdateInfo.cs` → `src/api/types.ts` → `src/stores/update.ts` → `SettingsView.vue`
 - **AppSettings.ReceivePreReleaseUpdates：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, `SettingsView.vue`（设置默认值 + NSwitch）
 - **添加 LocalLlmSettings 用户配置字段：** 在 3 处同步：`Models/LocalLlmSettings.cs`, `Endpoints/LocalLlmEndpoints.cs`（`UpdateLocalLlmSettingsRequest`）, `src/api/types.ts`；UI 在 `LocalAiPanel.vue`；API 在 `src/api/games.ts`（`localLlmApi.saveSettings`）；`UpdateUserSettingsAsync` 合并字段
-- **添加 BuiltInModelInfo 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
+- **添加 BuiltInModelInfo 字段：** 在 2 处��步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
+- **添加 BuiltInModelCatalog 条目：** 仅需编辑 `Models/LocalLlmSettings.cs` 的 `BuiltInModelCatalog.Models` 列表——前端自动渲染新条目，无需任何前端修改；`ModelScopeRepo`/`ModelScopeFile` 可为 null（不是所有 HuggingFace 模型都有 ModelScope 镜像）
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **VersionInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`；包含 `Version`、`Edition`
 - **LlamaDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`

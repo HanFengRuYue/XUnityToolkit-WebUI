@@ -636,13 +636,12 @@ export interface CharacterSetConfig {
   customCharsetFileName?: string
   translationGameId?: string
   translationFileName?: string
+  useAllFontCharacters?: boolean
 }
 
 export interface CharacterSetPreview {
   totalCharacters: number
   sourceBreakdown: Record<string, number>
-  estimatedAtlasCount: number
-  exceedsSingleAtlas: boolean
   warnings: string[]
 }
 
