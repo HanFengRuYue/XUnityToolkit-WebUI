@@ -333,8 +333,8 @@ public sealed class LocalLlmService(
             // Performance flags: flash attention + continuous batching + larger micro-batch
             // CPU mode: explicit thread counts for optimal utilization
             var perfArgs = _activeBackend == GpuBackend.CPU
-                ? $"--flash-attn --cont-batching -ub 1024 -t {Environment.ProcessorCount} -tb {Environment.ProcessorCount}"
-                : "--flash-attn --cont-batching -ub 1024";
+                ? $"--flash-attn on --cont-batching -ub 1024 -t {Environment.ProcessorCount} -tb {Environment.ProcessorCount}"
+                : "--flash-attn on --cont-batching -ub 1024";
 
             // KV cache quantization: reduces VRAM usage (q8_0 ~50% savings, near-lossless)
             var currentSettings = await LoadSettingsAsync(ct);

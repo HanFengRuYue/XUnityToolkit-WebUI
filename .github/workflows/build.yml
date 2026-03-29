@@ -678,7 +678,15 @@ jobs:
             New-Item -ItemType Directory -Path $generatedDir -Force | Out-Null
             Generate-InstallerWxs -ReleaseDir $ed.OutputDir -OutputFile "$generatedDir/HarvestedFiles.wxs"
 
+            # Clean bin/ AND obj/ to force full WiX rebuild per edition.
+            # WiX SDK caches .wixobj, .cab, and MSI in obj/ — without cleaning,
+            # incremental build reuses stale artifacts from the previous edition.
             $wixPlatform = 'x64'
+            $wixBinDir = "Installer/bin/$wixPlatform/Release"
+            $wixObjDir = "Installer/obj/$wixPlatform/Release"
+            if (Test-Path $wixBinDir) { Remove-Item $wixBinDir -Recurse -Force }
+            if (Test-Path $wixObjDir) { Remove-Item $wixObjDir -Recurse -Force }
+
             dotnet build $installerProject `
               -c Release `
               -p:Platform=$wixPlatform `
@@ -688,15 +696,15 @@ jobs:
 
             if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $edLabel" }
 
-            $wixOutputDir = "Installer/bin/$wixPlatform/Release"
-            $msiFile = Get-ChildItem "$wixOutputDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            $msiFile = Get-ChildItem "$wixBinDir/*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($msiFile) {
               $msiName = "XUnityToolkit-WebUI-v$vPrefix-$rid$($ed.Suffix).msi"
+              $msiSize = [math]::Round($msiFile.Length / 1MB, 1)
               Move-Item $msiFile.FullName "Release/$msiName" -Force
-              Write-Host "MSI built: Release/$msiName"
+              Write-Host "MSI built: Release/$msiName ($msiSize MB)"
+            } else {
+              throw "MSI output not found for $edLabel in $wixBinDir"
             }
-            # Clean WiX output to avoid conflicts between editions
-            if (Test-Path $wixOutputDir) { Remove-Item $wixOutputDir -Recurse -Force }
           }
 
       # ── Upload artifacts ──
