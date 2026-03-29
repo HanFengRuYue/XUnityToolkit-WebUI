@@ -249,6 +249,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **TMP 字体：** `bundled/fonts/`（在 git 中跟踪）；发布构建使用 `build.ps1` 发布后 `Copy-Item`
 - **TMP 字体兼容性：** 不是所有游戏都使用 TextMeshPro；`UnityGameInfo.HasTextMeshPro`（`bool?`：`true`=有TMP DLL, `false`=Mono 无 TMP, `null`=IL2CPP 或未知）控制安装条件；Mono 游戏通过检查 `{GameName}_Data/Managed/` 中含 `TextMeshPro` 的 DLL 判断；XUnity 日志 `"Cannot use fallback font because it is not supported in this version"` 标志 TMP 不可用
 - **PowerShell ZIP：** 不要使用 `Compress-Archive`（在 PowerShell 7.5.5 上已损坏 — 模块加载错误）；使用 `[System.IO.Compression.ZipFile]` 代替
+- **WiX MSI 多版本构建陷阱：** 在循环中为多个 edition 构建 MSI 时，必须在每次迭代前清理 `Installer/obj/{Platform}/{Configuration}/`（不仅是 `bin/`）——WiX SDK 在 `obj/` 中缓存 `.wixobj`、`.cab` 和中间 MSI，增量构建会复用上一版本的产物导致所有 MSI 内容相同；只清理 `obj/{Platform}/{Configuration}/` 而非整个 `obj/`，以保留 NuGet restore 缓存
 - **更新清单：** 每次发布生成 `manifest-{rid}.json`，包含 SHA256 哈希；组件 ZIP：`app-{rid}.zip`、`wwwroot.zip`、`bundled-llama.zip`、`bundled-fonts.zip`、`bundled-plugins.zip`、`bundled-misc.zip`
 - 构建前停止后端：`taskkill //f //im XUnityToolkit-WebUI.exe`
 - 默认系统提示词：中文，7 条规则；`{from}`/`{to}` 会被替换；`{0}` 等为字面量
