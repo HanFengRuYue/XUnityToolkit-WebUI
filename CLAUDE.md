@@ -155,6 +155,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
 - **BepInExPlugin 字段：** 在 2 处同步：`Models/BepInExPlugin.cs`, `src/api/types.ts`；API 方法在 `src/api/games.ts`；在 `PluginManagerView.vue` 中显示
 - **日志级别同步点：** `Program.cs` `AddFilter` + `FileLoggerProvider` 构造函数 `minLevel` + 前端 `LogView.vue` `selectedLevels` + `levelDefs` — 修改日志级别阈值时四处必须一致
+- **更新 llama.cpp 版本：** 在 4 处同步：`build.ps1`（`$llamaTag`）、`.github/workflows/build.yml`（`$llamaTag`）、`LocalLlmService.cs`（`LlamaVersion`）、根 `CLAUDE.md`（内置资源描述）；同时更新 CUDA 资产 pattern（build.ps1 + build.yml）和用户文档（README.md）；资产命名需通过 `gh api repos/ggml-org/llama.cpp/releases/tags/{tag}` 确认实际 CUDA 版本号（如 `cuda-13.1` 而非 `cuda-13`）
 
 ### 构建
 
@@ -167,7 +168,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **Vite vendor 分包：** `vite.config.ts` 中 `rolldownOptions.output.codeSplitting.groups` 将 vue/naive-ui/signalr 拆分为独立 chunk（使用 `test` 正则匹配 `node_modules` 路径）；`chunkSizeWarningLimit: 750`；`onwarn` 过滤 SignalR ESM `/*#__PURE__*/` 注释警告；Vite 8 使用 Rolldown 引擎（替代 Rollup + esbuild），不要使用 `rollupOptions` 或 `manualChunks` 对象形式（已移除）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
 - **AppDataPaths 配置回写：** 在 `Program.cs` 中修改 `appDataRoot` 来源后，**必须**执行 `builder.Configuration["AppData:Root"] = appDataRoot` — 否则 `AppDataPaths`（通过 DI 读取 `IConfiguration`）不会获取新值
-- **内置资源：** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity 通过 API 自动检测最新版本；llama.cpp 固定在 b8416（更改 build.ps1/build.yml 中的 `$llamaTag`）；CUDA 12.4；发布后复制
+- **内置资源：** `bundled/{bepinex5,bepinex6,xunity,llama}/` — BepInEx/XUnity 通过 API 自动检测最新版本；llama.cpp 固定在 b8580（更改 build.ps1/build.yml 中的 `$llamaTag`）；CUDA 13.1；发布后复制
 - **TMP 字体：** `bundled/fonts/`（在 git 中跟踪）；发布构建使用 `build.ps1` 发布后 `Copy-Item`
 - **TMP 字体兼容性：** 不是所有游戏都使用 TextMeshPro；`UnityGameInfo.HasTextMeshPro`（`bool?`：`true`=有TMP DLL, `false`=Mono 无 TMP, `null`=IL2CPP 或未知）控制安装条件；Mono 游戏通过检查 `{GameName}_Data/Managed/` 中含 `TextMeshPro` 的 DLL 判断；XUnity 日志 `"Cannot use fallback font because it is not supported in this version"` 标志 TMP 不可用
 - **PowerShell ZIP：** 不要使用 `Compress-Archive`（在 PowerShell 7.5.5 上已损坏 — 模块加载错误）；使用 `[System.IO.Compression.ZipFile]` 代替
@@ -220,6 +221,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **CI 陷阱 — AOT 与 `--no-restore`：** `dotnet publish` 配合 AOT 需要自己的 restore 阶段来填充 `PrivateSdkAssemblies` ItemGroup；独立 `dotnet restore` + `--no-restore` publish 会失败，报 `PrivateSdkAssemblies is required`
 - **CI 陷阱 — `$GITHUB_OUTPUT`：** 多行值会破坏格式；使用 heredoc（`key<<EOF`）或 `jq -c` 处理 JSON
 - **CI 陷阱 — `gh release create --notes`：** `${{ }}` 中的反引号会变成 bash 命令替换；改用 `--notes-file`
+- **CI 陷阱 — tag push detached HEAD：** release workflow 由 tag push 触发时处于 detached HEAD；"Update README download links" 步骤必须先 `git checkout main` 再 commit/push
 
 ### 杂项
 

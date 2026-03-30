@@ -221,15 +221,15 @@ jobs:
           }
 
           # ── llama.cpp (pinned version) ──
-          $llamaTag = "b8416"
+          $llamaTag = "b8580"
           Write-Host "Fetching llama.cpp $llamaTag..."
           $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30
           }.GetNewClosure()
           Write-Host "  llama.cpp: $($llamarel.tag_name)"
           $llamaPatterns = @(
-            "llama-*-bin-win-cuda-12.4-x64.zip",
-            "cudart-llama-bin-win-cuda-12.4-x64.zip",
+            "llama-*-bin-win-cuda-13.1-x64.zip",
+            "cudart-llama-bin-win-cuda-13.1-x64.zip",
             "llama-*-bin-win-vulkan-x64.zip",
             "llama-*-bin-win-cpu-x64.zip"
           )
@@ -914,12 +914,15 @@ jobs:
             !skip { print }
           ' README.md > README.tmp && mv README.tmp README.md
 
+          # Switch to main branch (tag push leaves detached HEAD)
+          git checkout main
+          git pull --rebase origin main
+
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
           if ! git diff --cached --quiet; then
             git commit -m "ci: 更新 README 下载链接至 ${TAG}"
-            git pull --rebase origin main
             git push
           fi
