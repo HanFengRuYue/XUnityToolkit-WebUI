@@ -563,8 +563,7 @@ public static class GameEndpoints
 
             Process.Start(new ProcessStartInfo
             {
-                FileName = "explorer.exe",
-                Arguments = $"\"{game.GamePath.Replace("\"", "")}\"",
+                FileName = game.GamePath,
                 UseShellExecute = true
             });
             return Results.Ok(ApiResult.Ok());

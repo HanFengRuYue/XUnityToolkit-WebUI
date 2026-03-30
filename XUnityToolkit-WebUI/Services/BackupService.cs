@@ -18,7 +18,9 @@ public sealed class BackupService(AppDataPaths paths, ILogger<BackupService> log
 
         foreach (var relativePath in relativePathsToBackup)
         {
-            var sourcePath = Path.Combine(gamePath, relativePath);
+            string sourcePath;
+            try { sourcePath = PathSecurity.SafeJoin(gamePath, relativePath); }
+            catch (InvalidOperationException) { continue; }
             if (!File.Exists(sourcePath)) continue;
 
             var backupFileName = relativePath.Replace(Path.DirectorySeparatorChar, '_')

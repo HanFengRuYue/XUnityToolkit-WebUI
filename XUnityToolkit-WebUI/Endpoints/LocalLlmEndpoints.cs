@@ -69,8 +69,9 @@ public static class LocalLlmEndpoints
             }
             catch (HttpRequestException ex)
             {
+                logger.LogWarning(ex, "本地 LLM 连接测试失败");
                 return Results.Ok(ApiResult<LocalLlmTestResult>.Ok(
-                    new LocalLlmTestResult(false, null, ex.Message, 0)));
+                    new LocalLlmTestResult(false, null, "连接本地 AI 服务失败", 0)));
             }
             catch (Exception ex)
             {

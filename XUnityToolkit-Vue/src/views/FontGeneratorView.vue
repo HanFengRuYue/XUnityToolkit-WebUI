@@ -463,6 +463,7 @@ onActivated(async () => {
 
 onDeactivated(async () => {
   window.removeEventListener('resize', checkMobile)
+  if (previewDebounceTimer) clearTimeout(previewDebounceTimer)
   await cleanupConnection()
 })
 

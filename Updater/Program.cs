@@ -305,7 +305,7 @@ static void Rollback(
 
     // Write error JSON (manual string — AOT safe, no reflection)
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
-    string safeError = errorMessage.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    string safeError = EscapeJsonString(errorMessage);
     string errorJson =
         $"{{\n" +
         $"  \"version\": \"unknown\",\n" +
@@ -468,5 +468,30 @@ partial class Program
     {
         int dataSize = (value.Length + 1) * 2;
         RegSetValueEx(hKey, name, 0, REG_SZ, value, dataSize);
+    }
+
+    static string EscapeJsonString(string value)
+    {
+        var sb = new System.Text.StringBuilder(value.Length + 16);
+        foreach (char c in value)
+        {
+            switch (c)
+            {
+                case '"':  sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n");  break;
+                case '\r': sb.Append("\\r");  break;
+                case '\t': sb.Append("\\t");  break;
+                case '\b': sb.Append("\\b");  break;
+                case '\f': sb.Append("\\f");  break;
+                default:
+                    if (c < 0x20)
+                        sb.Append($"\\u{(int)c:x4}");
+                    else
+                        sb.Append(c);
+                    break;
+            }
+        }
+        return sb.ToString();
     }
 }

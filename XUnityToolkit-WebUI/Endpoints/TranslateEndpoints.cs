@@ -77,8 +77,8 @@ public static class TranslateEndpoints
             catch (HttpRequestException ex)
             {
                 logger.LogError(ex, "AI 翻译 API 调用失败");
-                translationService.RecordError($"LLM API 调用失败: {ex.Message}", gameId: request.GameId);
-                return Results.Json(ApiResult.Fail($"LLM API 调用失败: {ex.Message}"), statusCode: 502);
+                translationService.RecordError("LLM API 调用失败", gameId: request.GameId);
+                return Results.Json(ApiResult.Fail("LLM API 调用失败"), statusCode: 502);
             }
             catch (OperationCanceledException)
             {
