@@ -2148,7 +2148,7 @@ watch(() => aiStore.stats?.translating, () => {
   padding: 4px;
   background: var(--bg-subtle);
   border-radius: var(--radius-md);
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .mode-tab {
