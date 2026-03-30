@@ -204,15 +204,6 @@ export const settingsApi = {
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   },
-  async importData(file: File): Promise<void> {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch('/api/settings/import', { method: 'POST', body: formData })
-    if (!res.ok) {
-      const data = await res.json().catch(() => null)
-      throw new Error(data?.error ?? '导入失败')
-    }
-  },
   importFromPath: (filePath: string) =>
     api.post<void>('/api/settings/import-from-path', { filePath }),
 }

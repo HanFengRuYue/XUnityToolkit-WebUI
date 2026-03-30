@@ -41,8 +41,19 @@ import type { AppSettings } from '@/api/types'
 import { useThemeStore, accentPresets } from '@/stores/theme'
 import type { ThemeMode } from '@/stores/theme'
 import { useAutoSave } from '@/composables/useAutoSave'
-import { marked } from 'marked'
+import { Marked } from 'marked'
 import { useUpdateStore } from '@/stores/update'
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+const safeMarked = new Marked({
+  renderer: {
+    html({ text }: { text: string }) {
+      return escapeHtml(text)
+    },
+  },
+})
 
 defineOptions({ name: 'SettingsView' })
 
@@ -188,7 +199,7 @@ const buildNumber = computed(() => {
 const changelogHtml = computed(() => {
   const md = updateStore.availableInfo?.changelog
   if (!md) return ''
-  return marked.parse(md, { async: false }) as string
+  return safeMarked.parse(md, { async: false }) as string
 })
 
 interface ChangelogEntry {

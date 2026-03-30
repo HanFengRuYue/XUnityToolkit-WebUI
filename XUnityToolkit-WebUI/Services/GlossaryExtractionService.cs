@@ -166,7 +166,7 @@ public sealed class GlossaryExtractionService(
             }
 
             // Load existing terms for dedup context and DNT filtering
-            var allTerms = await termService.GetAsync(gameId);
+            var allTerms = await termService.GetAsync(gameId, ct);
             var existingGlossary = allTerms.Where(t => t.Type == TermType.Translate).ToList();
             var dntEntries = allTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
 

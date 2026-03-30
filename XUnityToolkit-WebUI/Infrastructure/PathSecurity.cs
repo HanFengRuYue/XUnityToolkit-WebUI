@@ -35,15 +35,14 @@ public static class PathSecurity
         // Block private IP ranges
         if (IPAddress.TryParse(host.Trim('[', ']'), out var ip))
         {
+            // IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1) bypass IPv4 checks — unwrap first
+            if (ip.IsIPv4MappedToIPv6)
+                ip = ip.MapToIPv4();
+
             var bytes = ip.GetAddressBytes();
             var isPrivate = ip.AddressFamily switch
             {
-                System.Net.Sockets.AddressFamily.InterNetwork =>
-                    bytes[0] == 10 ||                                   // 10.0.0.0/8
-                    (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || // 172.16.0.0/12
-                    (bytes[0] == 192 && bytes[1] == 168) ||             // 192.168.0.0/16
-                    (bytes[0] == 169 && bytes[1] == 254) ||             // 169.254.0.0/16 (link-local)
-                    bytes[0] == 127,                                     // 127.0.0.0/8
+                System.Net.Sockets.AddressFamily.InterNetwork => IsPrivateIPv4(bytes),
                 System.Net.Sockets.AddressFamily.InterNetworkV6 =>
                     IPAddress.IsLoopback(ip) ||
                     (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0x80) || // fe80::/10 (link-local)
@@ -61,4 +60,11 @@ public static class PathSecurity
                 throw new ArgumentException("不允许访问内网地址");
         }
     }
+
+    private static bool IsPrivateIPv4(byte[] bytes) =>
+        bytes[0] == 10 ||                                        // 10.0.0.0/8
+        (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) || // 172.16.0.0/12
+        (bytes[0] == 192 && bytes[1] == 168) ||                  // 192.168.0.0/16
+        (bytes[0] == 169 && bytes[1] == 254) ||                  // 169.254.0.0/16 (link-local)
+        bytes[0] == 127;                                          // 127.0.0.0/8
 }

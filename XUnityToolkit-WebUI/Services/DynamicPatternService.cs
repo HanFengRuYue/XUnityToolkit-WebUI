@@ -209,7 +209,7 @@ public sealed partial class DynamicPatternService(
         var store = new DynamicPatternStore { Patterns = allPatterns };
         await SaveStoreAsync(gameId, store, ct);
 
-        var compiled = CompilePatterns(allPatterns);
+        var compiled = CompilePatterns(allPatterns, logger);
         translationMemoryService.LoadPatterns(gameId, compiled);
 
         logger.LogInformation("动态模式分析完成: {GameId}, 发现 {Count} 个模式", gameId, allPatterns.Count);
@@ -458,7 +458,7 @@ public sealed partial class DynamicPatternService(
     /// Compile DynamicPattern entries into regex + replacement tuples for TranslationMemoryService.
     /// </summary>
     internal static List<(Regex Pattern, string TranslatedTemplate, List<VariablePosition> Variables)>
-        CompilePatterns(List<DynamicPattern> patterns)
+        CompilePatterns(List<DynamicPattern> patterns, ILogger? log = null)
     {
         var results = new List<(Regex, string, List<VariablePosition>)>();
 
@@ -475,8 +475,8 @@ public sealed partial class DynamicPatternService(
             }
             catch (RegexParseException ex)
             {
-                // Skip invalid patterns silently
-                System.Diagnostics.Debug.WriteLine($"Invalid dynamic pattern regex: {ex.Message}");
+                log?.LogWarning("跳过无效的动态模式正则: {Template}, 错误: {Error}",
+                    p.OriginalTemplate, ex.Message);
             }
         }
 

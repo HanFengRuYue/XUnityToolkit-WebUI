@@ -54,6 +54,7 @@ npx vue-tsc --build  # 类型检查
 - SignalR store：在 `connect()` 前检查 `state !== Disconnected`，在 `onreconnected` 中重新加入组
 - **KeepAlive 视图中的 SignalR：** 绝不在模块/脚本顶层创建 `HubConnection` —— 始终在 `onMounted` 中创建，并在 `onDeactivated` 和 `onBeforeUnmount` 中都进行清理（KeepAlive 视图被停用而非卸载 —— 单独使用 `onBeforeUnmount` 不会触发）；将清理逻辑提取为共享函数以避免重复；声明 `let connection: HubConnection | null = null` 并在 `onMounted` 中赋值
 - **KeepAlive 视图中的 Window 监听器：** `onMounted` 中的 `window.addEventListener` 必须在 `onDeactivated` 和 `onBeforeUnmount` 中都配对 `removeEventListener`；在 `onActivated` 中重新添加 —— 否则监听器在视图停用时仍保持活跃，或在重新激活时累积
+- **KeepAlive 视图中的定时器：** `setTimeout`/`setInterval`/debounce timer 必须在 `onDeactivated` 和 `onBeforeUnmount` 中都 `clearTimeout`/`clearInterval` —— 否则切页后定时器仍触发，发送无效 API 请求
 - **`onBeforeUnmount` 而非 `onUnmounted`：** 始终使用 `onBeforeUnmount`（不要用 `onUnmounted`）进行清理 —— `onUnmounted` 在组件已销毁后才触发，来不及安全地拆卸资源；KeepAlive 视图在正常导航期间 `onUnmounted` 也永远不会触发
 - **KeepAlive 子组件：** 在 KeepAlive 缓存视图内渲染的子组件（如 `AiTranslationView` 中的 `LocalAiPanel`）也会接收 `onActivated`/`onDeactivated` —— 如果它们管理 SignalR 或其他资源，必须使用这些钩子（而不仅是 `onMounted`/`onBeforeUnmount`）
 - **FontGeneratorView 的 KeepAlive SignalR：** `FontGeneratorView` 被 `<KeepAlive>` 缓存 —— 必须在 `onActivated`（而非仅 `onMounted`）中创建新的 `HubConnection`，并在 `onDeactivated` 中拆卸；与其他 KeepAlive 视图模式相同

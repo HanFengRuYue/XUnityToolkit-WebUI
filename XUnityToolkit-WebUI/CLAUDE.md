@@ -23,6 +23,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - 命名 `HttpClient`：`"LLM"`（120s/200conn）、`"SteamGridDB"`（30s）、`"LocalLlmDownload"`（12h）、`"WebImageSearch"`（15s，浏览器 UA）、`"GitHubUpdate"`（60s）、`"GitHubCdn"`（30s，CDN/Web 请求）
 - **Multipart 上传端点：** 必须在 `MapPost` 上链式调用 `.DisableAntiforgery()`——否则 ASP.NET 会拒绝 `multipart/form-data` 请求
 - **Updater AOT 约束：** `Updater/` 目标框架为 `net10.0`（非 `-windows`），`PublishAot=true`，`InvariantGlobalization`；不能使用 `JsonSerializer` 反射——必须使用手动字符串拼接生成 JSON；不能使用 WinForms 或 UI 框架
+- **Updater JSON 转义：** `EscapeJsonString` 必须处理所有 JSON 特殊字符（`\n`/`\r`/`\t`/`\b`/`\f` + U+0000–U+001F 控制字符）——不要用简单的 `.Replace("\\", "\\\\").Replace("\"", "\\\"")"`；异常消息可能含换行符导致 JSON 无效
 - **Updater 路径遍历验证：** Phase 1（备份）、Phase 2（替换）和 Phase 3（删除）都必须使用 `Path.GetFullPath` + `StartsWith(normalizedAppDir)` 验证目标路径在 appDir 内
 - **Updater `normalizedAppDir` 构造：** 必须 `Path.GetFullPath(appDir).TrimEnd(separators) + DirectorySeparatorChar`——`AppContext.BaseDirectory` 始终带尾部 `\`，`GetFullPath` 保留它，不做 `TrimEnd` 会产生双反斜杠导致所有 `StartsWith` 检查失败（文件替换静默跳过）；`UpdateService` 传给 Updater 的 `appDir` 也需 `TrimEnd` 以兼容旧版 Updater
 - **InformationalVersion 陷阱：** .NET SDK 会附加 `+commitHash` 后缀；版本比较前必须 `Split('+')[0]`
@@ -51,6 +52,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **`BepInExPluginService` DI：** `AddSingleton`；扫描 `BepInEx/plugins/` 目录列出插件；使用 `MetadataLoadContext` 安全反射读取 DLL 元数据（GUID/Name/Version）——不加载到 AppDomain；`RuntimeDlls` 为 `Lazy<string[]>` 静态缓存（避免循环内重复枚举运行时目录）；toolkit-managed 插件（XUnity、LLMTranslate）通过 `IsToolkitManaged()` 保护，禁止修改/卸载；启用/禁用通过 `.disabled` 文件后缀实现；上传端点需要 `.DisableAntiforgery()`（multipart）；所有端点要求 BepInEx 已安装状态
 - **日志级别配置：** `Program.cs` 有两层过滤：`AddFilter("XUnityToolkit_WebUI", LogLevel.Debug)`（ASP.NET 管线）+ `FileLoggerProvider(logsDirectory, LogLevel.Debug)`（提供者）；两者都必须 ≤ 期望级别，否则日志会被静默丢弃
 - **静态方法日志模式：** 静态方法无法访问 `ILogger`——要么传递 `ILogger? log = null` 参数并使用 `log?.LogDebug(...)`，要么在有 `logger` 可用的实例方法调用点添加日志；仅需聚合信息（计数、前后对比）时优先使用调用点日志
+- **禁止 `Debug.WriteLine`：** 绝不使用 `System.Diagnostics.Debug.WriteLine` 记录日志——Release 构建中被编译移除，生产环境无任何输出；始终使用 `ILogger`
 - 读取日志文件：必须使用 `FileShare.ReadWrite` 以避免 `IOException`
 - **C# `[GeneratedRegex]` 与引号：** 原始字符串字面量（`"""..."""`）在正则包含 `"` 时会失败——改用常规转义字符串
 - **`Lock` 类型 API（.NET 9+）：** 使用 `_lock.Enter()`/`_lock.Exit()`——不要使用 `Monitor.Enter(_lock)`/`Monitor.Exit(_lock)`（CS9216 警告；`Lock` 不是基于 `object` 的）
@@ -299,8 +301,10 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 ## 安全约定
 
 - **路径遍历：** 对所有 ZIP 解压和用户提供的相对路径使用 `PathSecurity.SafeJoin(root, relative)`；使用 `Path.GetFileName()` 从用户提供的文件名中去除目录部分
+- **路径遍历（备份）：** `BackupService.CreateBackupAsync` 也必须使用 `SafeJoin`——`Path.Combine` 不防止 `../../` 穿越；`SafeJoin` 抛出 `InvalidOperationException`，需 try/catch + continue
 - **gameId 验证：** 所有直接将 `id` 用于文件路径的端点必须使用 `Guid.TryParse(id, out _)` 验证以防止路径遍历
 - **SSRF 防护：** 在对任何用户提供的 URL 执行 `HttpClient.GetAsync()` 前使用 `PathSecurity.ValidateExternalUrl(url)`；阻止回环、私有 IP、链路本地、`.local`/`.internal` 主机名
+- **SSRF IPv4-mapped IPv6：** `ValidateExternalUrl` 在检查地址族前先解包 `ip.IsIPv4MappedToIPv6 → ip.MapToIPv4()`——否则 `::ffff:127.0.0.1` 绕过所有 IPv4 私有范围检测；`IsPrivateIPv4(bytes)` 辅助方法统一 IPv4 检测逻辑
 - **派生 URL 的 SSRF：** 也要验证从用户可配置基础 URL 构造的 URL；必须对最终 URL 验证
 - **外部 API 源 URL 的 SSRF：** 来自外部 API 响应的 URL 也必须通过 `ValidateExternalUrl` 验证
 - **语言代码验证：** `fromLang`/`toLang` 用于文件路径时必须验证为简单代码（`^[a-zA-Z0-9_\-]{1,20}$`）；同时验证完整路径通过 `Path.GetFullPath` + `StartsWith` 保持在预期目录内
