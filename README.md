@@ -24,9 +24,9 @@
 <!-- DOWNLOAD_LINKS_START -->
 | 版本 | ZIP 便携版 | MSI 安装包 |
 |------|-----------|-----------|
-| **Full（完整版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64.msi) |
-| **No-LLAMA** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64-no-llama.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64-no-llama.msi) |
-| **Lite（精简版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64-lite.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.1/XUnityToolkit-WebUI-v4.1-win-x64-lite.msi) |
+| **Full（完整版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64.msi) |
+| **No-LLAMA** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64-no-llama.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64-no-llama.msi) |
+| **Lite（精简版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64-lite.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.2/XUnityToolkit-WebUI-v4.2-win-x64-lite.msi) |
 <!-- DOWNLOAD_LINKS_END -->
 
 - **Full**：自包含 + 内置本地大模型（推荐）

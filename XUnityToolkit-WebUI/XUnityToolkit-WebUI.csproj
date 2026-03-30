@@ -11,7 +11,7 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
     <SpaRoot>..\XUnityToolkit-Vue\</SpaRoot>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+    <NoWarn>$(NoWarn);MSB3277;NU1900</NoWarn>
     <Edition Condition="'$(Edition)' == ''">full</Edition>
   </PropertyGroup>
 
