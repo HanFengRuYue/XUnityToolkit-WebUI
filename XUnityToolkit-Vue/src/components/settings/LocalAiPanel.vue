@@ -702,7 +702,7 @@ onBeforeUnmount(() => {
 .local-ai-panel {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 /* Status Bar */
