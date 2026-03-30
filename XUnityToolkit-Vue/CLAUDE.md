@@ -62,11 +62,12 @@ npx vue-tsc --build  # 类型检查
 
 - **Pinia store 状态变更：** 绝不从视图或组合式函数中直接修改 store 的 `ref` 状态（`store.x = y`、`store.arr.push()`）；始终使用 store actions —— 直接修改会绕过 devtools 追踪并产生竞态条件
 - **Games store 设置器：** `setViewMode`、`setSortBy`、`setCardSize`、`setGap`、`setShowLabels` —— 使用这些 actions 而非直接赋值；`launchGame(id)` 同时处理 API 调用和 `lastPlayedAt` 更新
-- **GameCard 启动：** 必须使用 `gamesStore.launchGame(id)` —— 绝不直接修改 `props.game`（Vue 禁止 prop 修改；会绕过 store 响应式）
+- **所有启动入口：** 必须使用 `gamesStore.launchGame(id)`——包括 `GameCard` 和 `GameDetailView`；直接调用 `gamesApi.launch()` 会绕过 `lastPlayedAt` 更新，导致 Library 排序不刷新
 - **主题默认值：** CSS `:root` = 深色主题；`loadInitialTheme()` 默认为 `'system'`；通过 `matchMedia` 检测操作系统主题；`resolveTheme('system')` 在操作系统检测不可用时回退到 `'dark'`
 - **作用域样式 → 全局 CSS：** 作用域样式（`.class[data-v-xxx]`）的优先级高于全局样式（`.class`）；将共享样式提取到 `main.css` 时，必须移除作用域中的重复定义，否则它们会覆盖全局样式；页面特有的覆盖保留在作用域中，仅包含有差异的属性
 - **折叠动画：** 使用 `display: grid; grid-template-rows: 1fr/0fr` 模式（与 `main.css` 中全局 `.section-body` 一致），不要用 `max-height` —— `max-height` 会导致缓动迟滞，因为过渡应用于完整的 0→Npx 范围，而非实际内容高度；**`-body-inner` 元素不得有 `padding`** —— padding 不会随 `0fr` grid 轨道折叠；要么使用嵌套包裹元素来设置 padding，要么在折叠时将 `padding-top/padding-bottom` 过渡为 `0`（参见 `AiTranslationView.vue` 中的 `.settings-group-body-inner` 模式）
 - **Flex `gap` 与隐藏子元素：** 通过 `max-width: 0; opacity: 0`（用于平滑折叠过渡）隐藏 flex 子元素时，flex `gap` 仍然生效 —— 会将可见项推离中心。必须在折叠状态下将父元素的 `gap` 设为 `0`。影响侧边栏 logo、导航项，以及任何包含过渡隐藏子元素的 flex 容器。
+- **Flex `gap` 与空子元素：** `v-if` 为 false 的元素不渲染不占 gap，但包含 `v-if` 子元素的空容器 div 仍占 gap 间距。响应式 `flex-direction: column` + `gap` 时尤为明显——将 `v-if` 提升到容器 div 本身以避免空元素产生多余间距（参见 `LocalAiPanel.vue` `.status-right`）
 - **Flex 列子元素拉伸：** `flex-direction: column` 容器中的子项默认拉伸至全宽。对于折叠侧边栏的方形按钮，需设置明确的 `width`/`height` + `margin: 0 auto` 以防止矩形拉伸。
 - **嵌套可折叠区域 `@click.stop`：** 当带有可折叠头部的 `.section-card` 包含内层可折叠分组时（如设置分组），内层分组头部需要 `@click.stop` 以防止事件冒泡到外层折叠切换。
 - **`defineOptions` 位置：** 必须放在 `<script setup>` 中所有 `import` 语句之后，绝不放在之前 —— 否则后续导入会报 TS1232 错误
@@ -99,7 +100,7 @@ npx vue-tsc --build  # 类型检查
 - **`LocalAiPanel.vue`：** 通过 `v-model` 接收设置；共享设置通过父组件的 `useAutoSave` 流转；本地专属设置通过 `PUT /api/local-llm/settings` 保存；`.settings-grid` 使用垂直单列布局（`flex-direction: column`），与 `AiTranslationCard.vue` 的 `.ai-form` 布局风格统一——不要使用横向多列 grid
 - TypeScript：对类型化对象使用 `Object.assign({}, obj, patch)` 而非展开运算符；懒加载弹窗：`defineAsyncComponent`
 - **类型化对象的动态字段访问：** `(obj as Record<string, unknown>)[field]` 在严格 TS 下失败；使用 `(obj as unknown as Record<string, unknown>)[field]`
-- **Markdown 渲染：** `marked` 包（自带类型定义，不需要 `@types/marked`）；使用 `marked.parse(md, { async: false }) as string` —— 需要 `as string` 类型断言（重载返回 `string | Promise<string>`）
+- **Markdown 渲染：** `marked` 包（自带类型定义，不需要 `@types/marked`）；渲染不受信任的内容（如 LLM 响应）时，使用 `new Marked({ renderer: { html({ text }) { return escapeHtml(text) } } })` 创建安全实例——`marked` 默认透传原始 HTML，在 WebView2 中可导致 XSS；`as string` 类型断言仍需要（重载返回 `string | Promise<string>`）
 - **正则匹配分组：** 在严格 TS 中 `match[1]` 为 `string | undefined` —— 始终检查 `match && match[1]`
 - **作用域 `:deep()` 嵌套：** 绝不链式使用 `:deep()` —— `.x :deep(a) :deep(b)` 会静默失败；在单个 `:deep()` 调用中使用后代选择器 `:deep(a b)`
 - **`NTabs` 等宽分段：** `:deep(.n-tabs-tab) { flex: 1; justify-content: center; }`

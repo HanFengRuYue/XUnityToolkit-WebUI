@@ -67,6 +67,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 ## 术语提取
 
 - `GlossaryExtractionService`：缓冲 → 触发 → 排空 → LLM 提取 → 过滤 DNT 术语 → 合并；依赖 `TermService` 排除 DoNotTranslate 类型的术语（通过提示词暗示和合并前的硬过滤两种方式）；chunk 处理使用 `Parallel.ForEachAsync(MaxDegreeOfParallelism: 3)` 匹配信号量容量——不要用 `Task.WhenAll` 同时启动所有 chunk（会导致大量信号量超时和无效重排队）
+- **`ExtractChunkAsync` CancellationToken 不变量：** `Parallel.ForEachAsync` 的 per-iteration `ct` 必须传递到 `ExtractChunkAsync` → `CallLlmRawAsync`——不要用 `CancellationToken.None`（否则 LLM 调用在应用关闭/游戏删除时不可取消）
 - **TermEntry 模型：** `Type`（Translate/DoNotTranslate）、`Original`、`Translation`、`Category`、`Description`、`IsRegex`、`CaseSensitive`、`ExactMatch`、`Priority`
 - **关键：** 设置检查（异步）必须在缓冲排空之前——否则禁用时翻译对会丢失
 - `TryTriggerExtraction` 是同步的（热路径）；异步工作延迟到 `DrainAndExtractAsync`
@@ -75,6 +76,8 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 
 ## 并发与性能
 
+- **`TermMatchingService` 正则缓存：** `MatchesAnyExact`/`MatchesAnyRegex` 通过静态 `ConcurrentDictionary<(string, RegexOptions), Regex>` 缓存编译后的 Regex——热路径上不要每次调用 `new Regex()`
+- **`JsonSerializerOptions` 静态化：** 不要在方法体内 `new JsonSerializerOptions { ... }`——构造开销大（初始化转换器缓存）；使用 `FileHelper.DataJsonOptions` 或声明 `static readonly` 字段
 - **热路径：** `POST /api/translate` 接收 100+ 请求/秒；所有 I/O 必须使用内存缓存，绝不每请求访问磁盘
 - `SemaphoreSlim`：每批一个槽位；`EnsureSemaphore` 延迟 Dispose 3 分钟；60s 超时 → 503；**关键：** 信号量等待和 LLM 调用放在不同的 `try` 块中；**本地模式批处理拆分：** `TranslateLocalSequentialAsync` 单次获取信号量后循环逐条调用 `CallOpenAiCompatRawAsync`，使 `_translating` 显示 1（而非批大小）；系统提示词缓存 + 节流广播
 - **信号量释放守卫：** 释放信号量的 `finally` 块必须检查 `if (semaphoreAcquired)`——超时/取消后无条件 `Release()` 会损坏信号量计数；统计计数器如 `_translating` 同理

@@ -777,6 +777,9 @@ public static class GameEndpoints
             GameLibraryService library,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
@@ -795,6 +798,9 @@ public static class GameEndpoints
             GameLibraryService library,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
@@ -829,6 +835,9 @@ public static class GameEndpoints
             GameLibraryService library,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
@@ -847,6 +856,9 @@ public static class GameEndpoints
             GameLibraryService library,
             TermService termService) =>
         {
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));

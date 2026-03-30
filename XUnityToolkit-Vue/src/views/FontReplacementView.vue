@@ -128,14 +128,10 @@ async function doReplace() {
     const result = await api.post<FontReplacementResult>(
       `/api/games/${gameId.value}/font-replacement/replace`, request)
     if (result.failedFonts.length > 0) {
-      const failedNames = result.failedFonts
-        .map(f => `PathId=${f.pathId} (${f.assetFile}): ${f.error}`)
-        .join('\n')
       message.warning(
         `字体替换部分完成：成功 ${result.successCount} 个，失败 ${result.failedFonts.length} 个`,
         { duration: 6000 }
       )
-      // Font replacement partial failure details available in failedNames
     } else {
       message.success(`字体替换完成：已替换 ${result.successCount} 个字体`)
     }

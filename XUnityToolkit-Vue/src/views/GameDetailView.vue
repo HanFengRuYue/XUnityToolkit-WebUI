@@ -290,7 +290,7 @@ async function handleOpenFolder() {
 
 async function handleLaunch() {
   try {
-    await gamesApi.launch(gameId)
+    await gamesStore.launchGame(gameId)
     message.success('游戏已启动')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '启动游戏失败')

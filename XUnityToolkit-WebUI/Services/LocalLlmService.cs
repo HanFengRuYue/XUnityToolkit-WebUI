@@ -21,6 +21,9 @@ public sealed class LocalLlmService(
     SystemTrayService trayService,
     ILogger<LocalLlmService> logger) : IDisposable
 {
+    private static readonly JsonSerializerOptions LoadJsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions SaveJsonOptions = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
     private readonly SemaphoreSlim _stateLock = new(1, 1);
     private Process? _process;
     private volatile LocalLlmServerState _state = LocalLlmServerState.Idle;
@@ -67,21 +70,14 @@ public sealed class LocalLlmService(
         }
 
         var json = await File.ReadAllTextAsync(paths.LocalLlmSettingsFile, ct);
-        _settingsCache = JsonSerializer.Deserialize<LocalLlmSettings>(json, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        }) ?? new LocalLlmSettings();
+        _settingsCache = JsonSerializer.Deserialize<LocalLlmSettings>(json, LoadJsonOptions) ?? new LocalLlmSettings();
         return _settingsCache;
     }
 
     public async Task SaveSettingsAsync(LocalLlmSettings settings, CancellationToken ct = default)
     {
         _settingsCache = settings;
-        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
+        var json = JsonSerializer.Serialize(settings, SaveJsonOptions);
         var tmpPath = paths.LocalLlmSettingsFile + ".tmp";
         await File.WriteAllTextAsync(tmpPath, json, ct);
         File.Move(tmpPath, paths.LocalLlmSettingsFile, overwrite: true);
