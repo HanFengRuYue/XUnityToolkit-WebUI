@@ -133,10 +133,10 @@ public sealed class GlossaryExtractionService(
 
         // Process chunks with bounded concurrency matching the semaphore size
         await Parallel.ForEachAsync(chunks, new ParallelOptions { MaxDegreeOfParallelism = 3 },
-            async (chunk, ct) => await ExtractChunkAsync(gameId, chunk, ai));
+            async (chunk, ct) => await ExtractChunkAsync(gameId, chunk, ai, ct));
     }
 
-    private async Task ExtractChunkAsync(string gameId, List<TranslationPair> pairs, AiTranslationSettings ai)
+    private async Task ExtractChunkAsync(string gameId, List<TranslationPair> pairs, AiTranslationSettings ai, CancellationToken ct)
     {
         var acquired = await _extractionSemaphore.WaitAsync(TimeSpan.FromSeconds(30));
         if (!acquired)
@@ -178,7 +178,7 @@ public sealed class GlossaryExtractionService(
             // Call LLM
             Interlocked.Increment(ref _totalExtractionCalls);
             var (content, _) = await translationService.CallLlmRawAsync(
-                endpoint, systemPrompt, userContent, 0.1, CancellationToken.None);
+                endpoint, systemPrompt, userContent, 0.1, ct);
 
             // Parse result and filter out do-not-translate words
             var entries = ParseExtractionResult(content, logger);

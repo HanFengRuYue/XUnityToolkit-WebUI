@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Models;
 
@@ -10,6 +11,8 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
         RegexOptions.Compiled);
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
+
+    private static readonly ConcurrentDictionary<(string Pattern, RegexOptions Options), Regex> RegexCache = new();
 
     private const string CjkBoundaryClasses =
         @"\p{IsCJKUnifiedIdeographs}\p{IsHiragana}\p{IsKatakana}";
@@ -164,7 +167,7 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
         if (!term.CaseSensitive)
             options |= RegexOptions.IgnoreCase;
 
-        var regex = new Regex(pattern, options, RegexTimeout);
+        var regex = RegexCache.GetOrAdd((pattern, options), key => new Regex(key.Pattern, key.Options, RegexTimeout));
 
         foreach (var text in sourceTexts)
         {
@@ -181,7 +184,7 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
         if (!term.CaseSensitive)
             options |= RegexOptions.IgnoreCase;
 
-        var regex = new Regex(term.Original, options, RegexTimeout);
+        var regex = RegexCache.GetOrAdd((term.Original, options), key => new Regex(key.Pattern, key.Options, RegexTimeout));
 
         foreach (var text in sourceTexts)
         {

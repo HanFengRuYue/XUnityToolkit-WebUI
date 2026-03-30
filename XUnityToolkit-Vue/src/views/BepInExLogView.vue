@@ -13,7 +13,7 @@ import {
 } from '@vicons/material'
 import { bepinexLogApi, gamesApi } from '@/api/games'
 import type { BepInExLogAnalysis, Game } from '@/api/types'
-import { marked } from 'marked'
+import { Marked } from 'marked'
 
 defineOptions({ name: 'BepInExLogView' })
 
@@ -155,8 +155,16 @@ async function handleAnalyze() {
 }
 
 // Render markdown
+const safeMarked = new Marked({
+  renderer: {
+    html({ text }: { text: string }) {
+      return escapeHtml(text)
+    }
+  }
+})
+
 function renderMarkdown(md: string): string {
-  return marked.parse(md, { async: false }) as string
+  return safeMarked.parse(md, { async: false }) as string
 }
 
 // Highlight search matches in text
