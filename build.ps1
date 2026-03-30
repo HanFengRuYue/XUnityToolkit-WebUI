@@ -285,7 +285,7 @@ if (-not $SkipDownload) {
     if ($Edition -ne 'full') {
         Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
     } else {
-    $llamaTag = "b8416"
+    $llamaTag = "b8580"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30
@@ -294,10 +294,10 @@ if (-not $SkipDownload) {
 
     $llamaDir = Join-Path $BundledRoot 'llama'
 
-    # Match assets by pattern (prefer CUDA 12.4 for broader compatibility)
+    # Match assets by pattern (prefer CUDA 13.1 for broader compatibility)
     $llamaPatterns = @(
-        @{ Pattern = "llama-*-bin-win-cuda-12.4-x64.zip"; Label = "CUDA 12.4" },
-        @{ Pattern = "cudart-llama-bin-win-cuda-12.4-x64.zip"; Label = "CUDA Runtime" },
+        @{ Pattern = "llama-*-bin-win-cuda-13.1-x64.zip"; Label = "CUDA 13.1" },
+        @{ Pattern = "cudart-llama-bin-win-cuda-13.1-x64.zip"; Label = "CUDA Runtime" },
         @{ Pattern = "llama-*-bin-win-vulkan-x64.zip"; Label = "Vulkan" },
         @{ Pattern = "llama-*-bin-win-cpu-x64.zip"; Label = "CPU" }
     )
