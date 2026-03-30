@@ -288,9 +288,8 @@ onBeforeUnmount(() => {
           </span>
         </template>
       </div>
-      <div class="status-right">
+      <div v-if="store.isRunning" class="status-right">
         <NButton
-          v-if="store.isRunning"
           size="small"
           ghost
           :loading="testing"
@@ -300,7 +299,6 @@ onBeforeUnmount(() => {
           测试
         </NButton>
         <NButton
-          v-if="store.isRunning"
           size="small"
           type="error"
           ghost
@@ -710,7 +708,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 18px;
+  padding: 10px 16px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
