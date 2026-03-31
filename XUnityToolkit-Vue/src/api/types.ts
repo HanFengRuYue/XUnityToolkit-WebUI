@@ -551,6 +551,8 @@ export interface LlamaStatus {
   backends: LlamaBackendInfo[]
   recommendedBackend: GpuBackend
   isDownloading?: boolean
+  installedVersion?: string
+  needsUpdate: boolean
 }
 
 export interface LlamaDownloadProgress {

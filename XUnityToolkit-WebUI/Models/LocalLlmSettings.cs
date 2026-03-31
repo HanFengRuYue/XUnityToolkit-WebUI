@@ -78,7 +78,9 @@ public sealed record LlamaStatus(
     string BundledVersion,
     IReadOnlyList<LlamaBackendInfo> Backends,
     GpuBackend RecommendedBackend,
-    bool IsDownloading = false);
+    bool IsDownloading = false,
+    string? InstalledVersion = null,
+    bool NeedsUpdate = false);
 
 public sealed record LlamaDownloadProgress(
     long BytesDownloaded,

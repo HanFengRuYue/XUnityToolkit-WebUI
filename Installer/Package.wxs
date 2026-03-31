@@ -51,6 +51,20 @@
     <UI>
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication"
                Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+
+      <!-- Override MaintenanceTypeDlg RemoveButton: redirect to UninstallConfirmDlg.
+           Built-in WixUI_InstallDir has NewDialog → VerifyReadyDlg without explicit Order.
+           Use Order="99" to ensure this runs last, making UninstallConfirmDlg the final target. -->
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton"
+               Event="NewDialog" Value="UninstallConfirmDlg"
+               Order="99" />
+
+      <!-- Override VerifyReadyDlg Back button: built-in has NewDialog → MaintenanceTypeDlg
+           at Order="2" with Condition="Installed AND NOT PATCH". Use Order="3" so when
+           WIXUI_REMOVING=1, this runs after and overrides the built-in target. -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back"
+               Event="NewDialog" Value="UninstallConfirmDlg"
+               Condition="WIXUI_REMOVING = 1" Order="3" />
     </UI>
 
   </Package>

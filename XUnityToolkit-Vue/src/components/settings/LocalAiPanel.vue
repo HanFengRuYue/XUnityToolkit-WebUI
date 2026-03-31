@@ -23,6 +23,7 @@ import {
   ExpandMoreOutlined,
   RestoreOutlined,
   ScienceOutlined,
+  SystemUpdateAltOutlined,
 } from '@vicons/material'
 import { useLocalLlmStore } from '@/stores/localLlm'
 import { localLlmApi } from '@/api/games'
@@ -309,6 +310,23 @@ onBeforeUnmount(() => {
           停止
         </NButton>
       </div>
+    </div>
+
+    <!-- LLAMA Update Banner -->
+    <div v-if="llamaInstalled && store.llamaStatus?.needsUpdate && !store.llamaDownload" class="llama-download-banner update">
+      <div class="llama-download-info">
+        <NIcon :size="20"><SystemUpdateAltOutlined /></NIcon>
+        <div>
+          <div class="llama-download-title">llama.cpp 引擎有更新</div>
+          <div class="llama-download-desc">
+            当前版本: {{ store.llamaStatus.installedVersion }} → 最新版本: {{ store.llamaStatus.bundledVersion }}
+          </div>
+        </div>
+      </div>
+      <NButton type="primary" :disabled="store.isRunning" @click="store.downloadLlama()">
+        <template #icon><NIcon><SystemUpdateAltOutlined /></NIcon></template>
+        {{ store.isRunning ? '请先停止服务' : '更新 llama.cpp' }}
+      </NButton>
     </div>
 
     <!-- LLAMA Download Banner -->

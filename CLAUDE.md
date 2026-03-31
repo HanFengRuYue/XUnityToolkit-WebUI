@@ -144,7 +144,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **LocalLlmDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`；在 `LocalAiPanel.vue` 中显示
 - **VersionInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`；包含 `Version`、`Edition`
 - **LlamaDownloadProgress 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`
-- **LlamaStatus.IsDownloading 字段：** 在 2 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`
+- **LlamaStatus 字段：** 在 3 处同步：`Models/LocalLlmSettings.cs`, `src/api/types.ts`, `LocalAiPanel.vue`（更新横幅）；包含 `InstalledVersion`、`NeedsUpdate`（仅 non-Full 版本为 true）
 - **Edition 构建参数：** 在 2 处同步：`build.ps1`（`-Edition` 参数）和 `build.yml`（editions 数组）——必须手动同步
 - **清单命名约定：** `manifest-{rid}.json`（full）、`manifest-{rid}-no-llama.json`、`manifest-{rid}-lite.json`
 - **`bundled/llama/` 删除列表排除：** `UpdateService` 中的关键不变量——非 full 版本不得删除用户下载的 llama 文件
@@ -155,7 +155,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
 - **BepInExPlugin 字段：** 在 2 处同步：`Models/BepInExPlugin.cs`, `src/api/types.ts`；API 方法在 `src/api/games.ts`；在 `PluginManagerView.vue` 中显示
 - **日志级别同步点：** `Program.cs` `AddFilter` + `FileLoggerProvider` 构造函数 `minLevel` + 前端 `LogView.vue` `selectedLevels` + `levelDefs` — 修改日志级别阈值时四处必须一致
-- **更新 llama.cpp 版本：** 在 4 处同步：`build.ps1`（`$llamaTag`）、`.github/workflows/build.yml`（`$llamaTag`）、`LocalLlmService.cs`（`LlamaVersion`）、根 `CLAUDE.md`（内置资源描述）；同时更新 CUDA 资产 pattern（build.ps1 + build.yml）和用户文档（README.md）；资产命名需通过 `gh api repos/ggml-org/llama.cpp/releases/tags/{tag}` 确认实际 CUDA 版本号（如 `cuda-13.1` 而非 `cuda-13`）
+- **更新 llama.cpp 版本：** 在 4 处同步：`build.ps1`（`$llamaTag`）、`.github/workflows/build.yml`（`$llamaTag`）、`LocalLlmService.cs`（`LlamaVersion`）、根 `CLAUDE.md`（内置资源描述）；`build.ps1` 和 `build.yml` 在下载后自动写入 `bundled/llama/version.txt`（无需手动同步）；同时更新 CUDA 资产 pattern（build.ps1 + build.yml）和用户文档（README.md）；资产命名需通过 `gh api repos/ggml-org/llama.cpp/releases/tags/{tag}` 确认实际 CUDA 版本号（如 `cuda-13.1` 而非 `cuda-13`）
 
 ### 构建
 
@@ -191,7 +191,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **MSI + 更新器共存：** Updater.exe 在增量更新后通过 P/Invoke（AOT 安全）同步 HKCU Uninstall 键中的 `DisplayVersion`/`InstallDate`
 - **MSI MajorUpgrade 调度：** `Schedule="afterInstallExecute"` — 新版先安装再卸载旧版；`CleanupAppData` 组件（GUID `D4E5F6A7-...`）保留为空壳（仅 CleanupMarker 注册表值），用于 MSI 组件引用计数防止旧版 `RemoveFolderEx` 在升级时删除数据目录；不要移除该组件或更改其 GUID
 - **MSI 注册表键：** 由 MSI 写入（`Components.wxs`），由 `Updater/Program.cs` 读取（MsiProductCode, InstallDir）；`DataPath` 键由 MSI 写入，`CleanupMarker` 键为 `CleanupAppData` 组件 KeyPath；键路径：`HKCU\Software\XUnityToolkit`
-- **MSI 卸载不删除数据：** `%AppData%\XUnityToolkit\` 在卸载时保留（行业标准）；用户可通过应用内"设置重置"或手动删除清理
+- **MSI 卸载可选删除数据：** 卸载时 `UninstallConfirmDlg` 提供 checkbox（默认不勾选）让用户选择是否删除 `%AppData%\XUnityToolkit\`；不勾选则保留（安全默认）；升级时不弹出（`NOT UPGRADINGPRODUCTCODE` 条件）；静默卸载时也可通过 `msiexec /x {ProductCode} DELETE_USER_DATA=1` 触发删除
 - **安装程序许可证：** `Installer/License.rtf` 必须与项目根目录 `LICENSE` 匹配（版权持有人、许可类型）
 
 ### WiX 注意事项
