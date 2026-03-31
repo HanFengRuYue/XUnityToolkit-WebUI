@@ -239,6 +239,12 @@ async function handleInstallTmpFont() {
   try {
     const result = await gamesApi.installTmpFont(props.gameId)
     tmpFontInstalled.value = result.installed
+    // Reload config to reflect FallbackFontTextMeshPro written by backend
+    disableAutoSave()
+    const updatedConfig = await gamesApi.getConfig(props.gameId)
+    form.value = { ...updatedConfig }
+    await nextTick()
+    enableAutoSave()
     message.success('TMP 字体已安装')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
@@ -252,6 +258,12 @@ async function handleUninstallTmpFont() {
   try {
     const result = await gamesApi.uninstallTmpFont(props.gameId)
     tmpFontInstalled.value = result.installed
+    // Reload config to reflect font removal
+    disableAutoSave()
+    const updatedConfig = await gamesApi.getConfig(props.gameId)
+    form.value = { ...updatedConfig }
+    await nextTick()
+    enableAutoSave()
     message.success('TMP 字体已卸载')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '卸载失败')

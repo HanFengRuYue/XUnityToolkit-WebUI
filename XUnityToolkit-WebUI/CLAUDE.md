@@ -206,6 +206,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - GPU 检测：`DxgiGpuDetector`（DXGI，64 位 VRAM，PCI VendorId）为主；WMI 兜底（uint32 上限 4GB）
 - 后端选择：NVIDIA→CUDA，AMD/Intel→Vulkan，无→CPU；二进制文件在 `{dataRoot}/llama/{cuda,vulkan,cpu}/`
 - **捆绑二进制文件：** ZIP 在 `bundled/llama/`；首次 `POST /start` 时通过 `ExtractLlamaZipAsync` 懒提取
+- **llama 版本追踪：** `bundled/llama/version.txt` 记录已下载 ZIP 的版本（由 `DownloadLlamaAsync`、`build.ps1`、CI 写入）；`{dataRoot}/llama/version.txt` 记录已解压运行时的版本（由 `EnsureLlamaExtractedAsync` 写入）；`EnsureLlamaExtractedAsync` 检测版本不匹配时清除所有 backend 子目录并重新解压；`DownloadLlamaAsync` 下载后同时清理运行时目录
 - **模型下载：** `.downloading` 临时文件 + HTTP Range；`_pauseRequests` 区分暂停和取消；双源：HuggingFace（`/resolve/main/`）或 ModelScope（`/models/{repo}/resolve/master/`——注意是 `master` 非 `main`）；`_downloadModelScopeState` 追踪活跃源；清理时检查两个源的临时文件
 - **ModelScope URL：** `https://modelscope.cn/models/{owner}/{repo}/resolve/master/{file}`——支持 Range 头用于断点续传；公开模型无需认证
 - **GPU 监控：** CUDA 运行时每 3 秒轮询 nvidia-smi
@@ -273,7 +274,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 
 ## LLAMA 运行时下载
 
-- **`LocalLlmService.DownloadLlamaAsync`：** 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅
+- **`LocalLlmService.DownloadLlamaAsync`：** 从 GitHub 最新发行版下载 `bundled-llama.zip` 到 `{BaseDir}/bundled/llama/`；通过 `llamaDownloadProgress` SignalR 事件广播到 `local-llm` 分组；`POST /api/local-llm/llama-download` 触发即发即忘下载；下载后写入 `version.txt` + 清理运行时目录；前端 `LocalAiPanel.vue` 在 llama 未安装时显示下载横幅，版本过期时显示更新横幅（复用同一下载流程）
 
 ## 翻译管线详情
 

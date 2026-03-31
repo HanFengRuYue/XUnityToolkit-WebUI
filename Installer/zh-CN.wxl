@@ -2,4 +2,13 @@
 <WixLocalization Culture="zh-CN" xmlns="http://wixtoolset.org/schemas/v4/wxl">
   <!-- Custom string for launch-after-install checkbox on ExitDialog -->
   <String Id="LaunchCheckboxText" Overridable="yes" Value="安装完成后启动 XUnityToolkit-WebUI" />
+
+  <!-- Uninstall confirm dialog -->
+  <String Id="UninstallConfirmTitle" Value="确认卸载" />
+  <String Id="UninstallConfirmSubtitle" Value="将从计算机中删除 XUnityToolkit-WebUI。" />
+  <String Id="UninstallConfirmBody" Value="此操作将卸载 XUnityToolkit-WebUI 及其所有组件。您的翻译数据和配置文件默认会保留，也可以选择一并删除。" />
+  <String Id="UninstallConfirmDeleteCheckbox" Value="同时删除用户数据和配置（包含翻译记录、术语表等）" />
+  <String Id="UninstallConfirmDataPathHint" Value="数据目录：%AppData%\XUnityToolkit\" />
+  <String Id="UninstallConfirmWarning" Value="警告：删除后数据将无法恢复，包括游戏翻译设置、术语表和本地模型文件。" />
+  <String Id="UninstallConfirmRemoveButton" Value="卸载" />
 </WixLocalization>

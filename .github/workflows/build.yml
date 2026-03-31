@@ -243,6 +243,8 @@ jobs:
               Write-Host "  [skip] $pattern not found"
             }
           }
+          # Write version marker for runtime version detection
+          Set-Content -Path "$BundledRoot\llama\version.txt" -Value $llamaTag -NoNewline
 
           # ── Extract XUnity reference DLLs for TranslatorEndpoint ──
           $xunityZip = Get-ChildItem -Path "$BundledRoot\xunity" -Filter '*.zip' |

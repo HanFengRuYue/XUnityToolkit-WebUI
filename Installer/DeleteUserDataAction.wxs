@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <!-- UI property: set by checkbox in UninstallConfirmDlg, empty = unchecked.
+         Secure="yes" required for properties without initial value in WiX v4. -->
+    <Property Id="DELETE_USER_DATA" Secure="yes" />
+
+    <!-- Navigation tracking: set in UninstallConfirmDlg to route VerifyReadyDlg Back correctly -->
+    <Property Id="WIXUI_REMOVING" Secure="yes" />
+
+    <!--
+      Setter CA (immediate): builds the command line for the deferred CA.
+      Property name must match the deferred CA Id ("DeleteUserData") so MSI
+      passes it as CustomActionData.
+    -->
+    <CustomAction Id="SetDeleteUserDataCmd"
+                  Property="DeleteUserData"
+                  Value="cmd.exe /c rmdir /s /q &quot;[AppDataFolder]XUnityToolkit&quot;" />
+
+    <!--
+      Executor CA (deferred): runs rmdir via WixQuietExec (no console window).
+      - Execute="deferred": runs inside the install transaction
+      - Return="ignore": rmdir returns error if dir doesn't exist, safe to ignore
+      - Impersonate="yes": per-user install, run as current user
+    -->
+    <CustomAction Id="DeleteUserData"
+                  BinaryRef="Wix4UtilCA_X86"
+                  DllEntry="WixQuietExec"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="yes" />
+
+    <InstallExecuteSequence>
+      <!-- Setter runs in immediate phase, before deferred actions start -->
+      <Custom Action="SetDeleteUserDataCmd"
+              Before="InstallInitialize"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND DELETE_USER_DATA=&quot;1&quot;" />
+
+      <!-- Executor runs in deferred phase, after files are removed but before finalize -->
+      <Custom Action="DeleteUserData"
+              Before="InstallFinalize"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND DELETE_USER_DATA=&quot;1&quot;" />
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

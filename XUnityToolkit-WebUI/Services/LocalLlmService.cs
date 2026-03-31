@@ -183,7 +183,47 @@ public sealed class LocalLlmService(
                 isInstalled ? LlamaVersion : ""));
         }
 
-        return new LlamaStatus(LlamaVersion, backends, recommended, _isDownloadingLlama);
+        var anyInstalled = backends.Any(b => b.IsInstalled);
+        var installedVersion = anyInstalled ? ReadBundledLlamaVersion() : null;
+        var needsUpdate = installedVersion is not null
+            && installedVersion != LlamaVersion
+            && !EditionInfo.HasBundledLlama;
+
+        return new LlamaStatus(LlamaVersion, backends, recommended, _isDownloadingLlama,
+            installedVersion, needsUpdate);
+    }
+
+    /// <summary>
+    /// Reads the installed llama version from bundled/llama/version.txt,
+    /// falling back to parsing from ZIP filenames for backward compatibility.
+    /// </summary>
+    private string? ReadBundledLlamaVersion()
+    {
+        var versionFile = Path.Combine(bundledPaths.LlamaDirectory, "version.txt");
+        if (File.Exists(versionFile))
+        {
+            try { return File.ReadAllText(versionFile).Trim(); }
+            catch { /* ignore read errors */ }
+        }
+
+        // Fallback: parse version from ZIP filename (e.g., llama-b8580-bin-win-cuda-13.1-x64.zip)
+        try
+        {
+            var llamaDir = bundledPaths.LlamaDirectory;
+            if (Directory.Exists(llamaDir))
+            {
+                foreach (var zip in Directory.GetFiles(llamaDir, "llama-*.zip"))
+                {
+                    var fileName = Path.GetFileName(zip);
+                    var match = System.Text.RegularExpressions.Regex.Match(fileName, @"llama-(b\d+)-");
+                    if (match.Success)
+                        return match.Groups[1].Value;
+                }
+            }
+        }
+        catch { /* ignore */ }
+
+        return null;
     }
 
     /// <summary>
@@ -193,7 +233,27 @@ public sealed class LocalLlmService(
     private async Task EnsureLlamaExtractedAsync(GpuBackend backend)
     {
         var serverPath = GetLlamaServerPath(backend);
-        if (File.Exists(serverPath)) return;
+        var runtimeVersionFile = Path.Combine(paths.LlamaDirectory, "version.txt");
+
+        // Check if already extracted with correct version
+        if (File.Exists(serverPath))
+        {
+            string? runtimeVersion = null;
+            try { if (File.Exists(runtimeVersionFile)) runtimeVersion = File.ReadAllText(runtimeVersionFile).Trim(); }
+            catch { /* ignore */ }
+
+            if (runtimeVersion == LlamaVersion)
+                return; // Up to date
+
+            // Version mismatch or unknown — clear all backend dirs and re-extract
+            logger.LogInformation("llama.cpp 运行时版本不匹配 ({Installed} → {Expected})，重新解压",
+                runtimeVersion ?? "unknown", LlamaVersion);
+            foreach (var dir in Directory.GetDirectories(paths.LlamaDirectory))
+            {
+                try { Directory.Delete(dir, true); }
+                catch (Exception ex) { logger.LogWarning(ex, "无法清理旧 llama 运行时目录: {Dir}", dir); }
+            }
+        }
 
         // Find and extract the main backend ZIP
         var zipPattern = backend switch
@@ -220,7 +280,11 @@ public sealed class LocalLlmService(
                 await ExtractLlamaZipAsync(cudaRtZip, destDir);
         }
 
-        logger.LogInformation("llama.cpp {Backend} 后端已从捆绑包解压", backend);
+        // Write runtime version marker
+        try { File.WriteAllText(runtimeVersionFile, LlamaVersion); }
+        catch (Exception ex) { logger.LogWarning(ex, "无法写入 llama 运行时版本标记"); }
+
+        logger.LogInformation("llama.cpp {Backend} 后端已从捆绑包解压 (版本 {Version})", backend, LlamaVersion);
     }
 
     private static Task ExtractLlamaZipAsync(string zipPath, string destDir)
@@ -1118,7 +1182,29 @@ public sealed class LocalLlmService(
             // Clean up temp file
             File.Delete(tempFile);
 
-            logger.LogInformation("llama 二进制文件已解压到 {Dir}", llamaDir);
+            // Write version marker for bundled ZIPs
+            try { File.WriteAllText(Path.Combine(llamaDir, "version.txt"), LlamaVersion); }
+            catch (Exception ex) { logger.LogWarning(ex, "无法写入 llama 版本标记"); }
+
+            // Clear extracted runtime dirs so next start re-extracts from new ZIPs
+            try
+            {
+                if (Directory.Exists(paths.LlamaDirectory))
+                {
+                    foreach (var dir in Directory.GetDirectories(paths.LlamaDirectory))
+                        Directory.Delete(dir, true);
+                    var runtimeVersionFile = Path.Combine(paths.LlamaDirectory, "version.txt");
+                    if (File.Exists(runtimeVersionFile))
+                        File.Delete(runtimeVersionFile);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Files may be locked if server is running — version check on next start will handle it
+                logger.LogDebug(ex, "无法清理 llama 运行时目录（可能正在运行中）");
+            }
+
+            logger.LogInformation("llama 二进制文件已解压到 {Dir} (版本 {Version})", llamaDir, LlamaVersion);
 
             await BroadcastLlamaDownloadProgress(
                 new LlamaDownloadProgress(downloadedBytes, totalBytes, 0, true, null));

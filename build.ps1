@@ -312,6 +312,8 @@ if (-not $SkipDownload) {
         }
     }
     Remove-OldVersions -Dir $llamaDir -ExpectedFiles $expectedLlama
+    # Write version marker for runtime version detection
+    Set-Content -Path (Join-Path $llamaDir 'version.txt') -Value $llamaTag -NoNewline
     } # end if ($Edition -eq 'full')
 
     # ── Update classdata.tpk from AssetRipper/Tpk CI ──
