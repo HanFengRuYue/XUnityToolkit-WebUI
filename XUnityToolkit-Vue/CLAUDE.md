@@ -31,6 +31,7 @@ npx vue-tsc --build  # 类型检查
 
 ## 设计系统
 
+- **自托管字体：** Lexend、DM Sans、JetBrains Mono 的 WOFF2 文件在 `public/fonts/`，`@font-face` 声明在 `src/assets/fonts.css`（由 `main.css` 导入）；**绝不使用 Google Fonts CDN**——桌面应用不应依赖外部 CDN，且 `fonts.googleapis.com` 在国内被墙会阻塞渲染 5-30 秒
 - **主题：** 通过 `data-theme` 实现深色/浅色/跟随系统切换；`useThemeStore`（localStorage + 操作系统检测）为权威数据源，不是后端的 `AppSettings.Theme`；`ThemeMode = 'dark' | 'light' | 'system'`；渲染决策使用 `resolvedTheme`（始终为 `'dark'|'light'`），不要用 `mode`（可能为 `'system'`）；默认值为 `'system'`；`matchMedia` 监听器在操作系统主题变化时自动更新；浅色模式自动将强调色加深 15%；`useThemeStore` 也管理页面缩放（`pageZoom`/`effectiveZoom`/`setPageZoom`），遵循相同的 localStorage 即时应用 + 后端持久化模式
 - **CSS 变量：** 在 `main.css` 中定义（`--bg-root`、`--accent`、`--text-1` 等）；支持主题感知：使用 `--bg-subtle`/`--bg-muted` —— 绝不硬编码 `rgba(255,255,255,...)`
 - **布局：** 侧边栏（默认 230px，可折叠至 64px，通过拖拽可调整 180-400px）+ 可滚动内容区；`useSidebarStore` 将状态持久化到 localStorage（`sidebarCollapsed`、`sidebarWidth`）；三个响应式断点：900px（`isNarrowDesktop` 自动折叠侧边栏到 64px，不修改 store 持久化状态），768px（平板使用抽屉模式，禁用折叠/调整大小，WebView2 窗口控制移入顶栏），480px（手机单列布局）
@@ -75,7 +76,8 @@ npx vue-tsc --build  # 类型检查
 - **KeepAlive：** 顶层视图（Library、AiTranslation、FontGenerator、Log、Settings）通过 AppShell 中的 `<KeepAlive :include>` 缓存；每个视图必须在导入语句之后有 `defineOptions({ name: 'XxxView' })`
 - **LogView 日志级别同步：** `selectedLevels`（默认选中项）和 `levelDefs`（筛选标签定义）都必须包含某个级别，该级别才会显示并处于激活状态；`levelClass()` 样式也必须有对应的 CSS 类（如 `.level-dbg`）
 - **安装状态恢复：** `startInstall`/`startUninstall` 必须将后端 `GET /api/games/{id}/status` 作为回退方案查询 —— 页面刷新时 Pinia store 状态会丢失，而后端安装仍在继续运行
-- 对于复杂的多步骤 UI 流程使用组合式函数（`src/composables/`）；`useAddGameFlow`（添加游戏向导）、`useAutoSave`（防抖自动保存）、`useFileExplorer`（文件/文件夹选择）、`useWindowControls`（WebView2 窗口控制）
+- 对于复杂的多步骤 UI 流程使用组合式函数（`src/composables/`）；`useAddGameFlow`（添加游戏向导，含批量添加）、`useAutoSave`（防抖自动保存）、`useFileExplorer`（文件/文件夹选择）、`useWindowControls`（WebView2 窗口控制）
+- **`useAddGameFlow` 批量添加：** `addGame()` 在 `needsExeSelection=true` 时自动尝试 `batchAdd` 批量添加子目录游戏；`adding` ref 控制按钮 loading 状态（API 调用期间为 true，用户交互弹窗期间重置为 false）
 - **`useWindowControls` 单例模式：** 模块级 `isWebView2`/`isMaximized` ref；通过 `window.chrome?.webview` 检测 WebView2 环境；`postMessage` 发送 `minimize`/`maximize`/`close` 命令；监听 host 的 `maximized`/`normal` 状态通知；仅在 WebView2 模式渲染标题栏和窗口控制按钮；`env.d.ts` 中声明 `ChromeWebView` 接口（在 `declare global` 块内，因文件含 `import` 为模块）
 - **`useFileExplorer` 单例模式：** 模块级 reactive 状态 + `resolveCallback`；`selectFile(opts)`/`selectFolder(opts)` 返回 `Promise<string | null>`；`FileExplorerModal.vue` 在 `App.vue` 中通过 `defineAsyncComponent` 全局挂载一次（在 `NDialogProvider` 内）；返回服务端文件路径
 - **自动保存：** `useAutoSave(source, saveFn, { debounceMs, deep })`；`disable()` → 加载数据 → `nextTick()` → `enable()`；`disable()` 必须清除待处理的定时器；`onBeforeUnmount` 自动刷新；手动保存必须在数据重新赋值前 `disable()`，在 `finally` 中 `enable()`

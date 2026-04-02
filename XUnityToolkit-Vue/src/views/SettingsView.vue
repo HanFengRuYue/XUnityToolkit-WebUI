@@ -75,13 +75,13 @@ const isCustomAccent = computed(() =>
 
 // Settings
 const modelDownloadSourceOptions = [
-  { label: 'HuggingFace（默认）', value: 'HuggingFace' },
-  { label: 'ModelScope（魔搭社区，国内加速）', value: 'ModelScope' },
+  { label: 'HuggingFace', value: 'HuggingFace' },
+  { label: 'ModelScope（魔搭社区，默认）', value: 'ModelScope' },
 ]
 
 const settings = ref<AppSettings>({
   hfMirrorUrl: 'https://hf-mirror.com',
-  modelDownloadSource: 'HuggingFace',
+  modelDownloadSource: 'ModelScope',
   theme: themeStore.mode,
   aiTranslation: {
     enabled: true,

@@ -34,9 +34,10 @@ internal sealed class FileLoggerProvider : ILoggerProvider
         _minLevel = minLevel;
         _sessionTimestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
         Directory.CreateDirectory(logsDirectory);
-        CleanupOldLogFiles();
         _filePath = Path.Combine(logsDirectory, $"XUnityToolkit_{_sessionTimestamp}.log");
         _writer = new StreamWriter(_filePath, append: false, Encoding.UTF8) { AutoFlush = true };
+        // Defer old log cleanup to background — avoid blocking startup with directory scan + deletes
+        Task.Run(CleanupOldLogFiles);
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(categoryName, this);

@@ -60,6 +60,16 @@ export interface AddGameResponse {
   game?: Game
 }
 
+export interface BatchSkippedItem {
+  folderName: string
+  reason: string
+}
+
+export interface BatchAddResult {
+  added: Game[]
+  skipped: BatchSkippedItem[]
+}
+
 export type InstallStep =
   | 'Idle'
   | 'DetectingGame'

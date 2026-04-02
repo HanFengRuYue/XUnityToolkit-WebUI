@@ -129,6 +129,10 @@ export const useGamesStore = defineStore('games', () => {
     games.value.push(game)
   }
 
+  function addGames(newGames: Game[]) {
+    games.value.push(...newGames)
+  }
+
   return {
     games,
     loading,
@@ -151,5 +155,6 @@ export const useGamesStore = defineStore('games', () => {
     setGap,
     setShowLabels,
     addGame,
+    addGames,
   }
 })

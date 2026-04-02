@@ -251,21 +251,22 @@ public sealed class TranslationMemoryService(
         );
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Flush all dirty TM stores with a hard timeout. Called from ApplicationStopping
+    /// to ensure data is saved before DI disposal, without blocking indefinitely.
+    /// </summary>
+    public void FlushAllDirtyWithTimeout(TimeSpan timeout)
     {
-        // Cancel all debounce timers first to prevent races with the flush
         var dirtyGames = _dirtyTimestamps.Keys.ToList();
         foreach (var gameId in dirtyGames)
             CancelDebounceTimer(gameId);
 
-        // Flush all dirty stores in parallel — each game writes to a separate file
-        // with a per-game lock, so there is no contention
         var tasks = new List<Task>();
         foreach (var gameId in dirtyGames)
         {
             if (_dirtyTimestamps.TryRemove(gameId, out _) && _stores.TryGetValue(gameId, out var store))
             {
-                var gid = gameId; // capture for closure
+                var gid = gameId;
                 tasks.Add(Task.Run(async () =>
                 {
                     try { await PersistAsync(gid, store, CancellationToken.None); }
@@ -276,9 +277,16 @@ public sealed class TranslationMemoryService(
 
         if (tasks.Count > 0)
         {
-            try { Task.WhenAll(tasks).GetAwaiter().GetResult(); }
-            catch { /* individual errors already logged */ }
+            try { Task.WhenAll(tasks).Wait(timeout); }
+            catch { /* individual errors already logged; timeout is acceptable */ }
         }
+    }
+
+    public void Dispose()
+    {
+        // If ApplicationStopping flush didn't run (edge case), do a last-resort flush
+        if (!_dirtyTimestamps.IsEmpty)
+            FlushAllDirtyWithTimeout(TimeSpan.FromSeconds(1));
 
         var locks = _persistLocks.Values.ToList();
         _persistLocks.Clear();

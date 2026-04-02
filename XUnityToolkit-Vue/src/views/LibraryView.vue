@@ -17,7 +17,7 @@ const gamesStore = useGamesStore()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
-const { addGame } = useAddGameFlow(message)
+const { addGame, adding } = useAddGameFlow(message)
 
 const showCoverPicker = ref(false)
 const coverPickerGame = ref<Game | null>(null)
@@ -223,7 +223,7 @@ const gridStyle = computed(() => {
         <LibraryCustomizer />
 
         <!-- Add game -->
-        <NButton type="primary" @click="handleAddGame" size="small">
+        <NButton type="primary" @click="handleAddGame" size="small" :loading="adding">
           <template #icon>
             <NIcon><Add /></NIcon>
           </template>
@@ -247,7 +247,7 @@ const gridStyle = computed(() => {
       </div>
       <h3 class="empty-title">还没有添加任何游戏</h3>
       <p class="empty-desc">选择 Unity 游戏的安装目录，即可一键安装翻译插件</p>
-      <NButton type="primary" size="large" @click="handleAddGame">
+      <NButton type="primary" size="large" @click="handleAddGame" :loading="adding">
         <template #icon>
           <NIcon><Add /></NIcon>
         </template>

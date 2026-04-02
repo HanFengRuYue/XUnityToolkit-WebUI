@@ -10,6 +10,7 @@ internal sealed class WebViewWindow : Form
     private readonly string _appUrl;
     private readonly Task<CoreWebView2Environment>? _preCreatedEnvTask;
     private readonly ILogger _logger;
+    private Panel? _loadingOverlay;
 
     // Win32 constants
     private const int WM_NCHITTEST = 0x0084;
@@ -41,10 +42,62 @@ internal sealed class WebViewWindow : Form
         MinimumSize = new Size(500, 400);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.None;
+        BackColor = Color.FromArgb(0x0b, 0x0b, 0x11); // Match --bg-root
         Icon = cachedIcon ?? SystemIcons.Application;
 
-        _webView = new WebView2 { Dock = DockStyle.Fill };
+        _webView = new WebView2 { Dock = DockStyle.Fill, Visible = false };
         Controls.Add(_webView);
+
+        // Native loading overlay — shown immediately while WebView2 initializes
+        _loadingOverlay = new Panel
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.FromArgb(0x0b, 0x0b, 0x11)
+        };
+        _loadingOverlay.Paint += PaintLoadingOverlay;
+        Controls.Add(_loadingOverlay);
+        _loadingOverlay.BringToFront();
+    }
+
+    private void PaintLoadingOverlay(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+
+        var panel = (Panel)sender!;
+        var cx = panel.Width / 2;
+        var cy = panel.Height / 2;
+
+        // App icon
+        if (Icon is not null)
+        {
+            var iconSize = 48;
+            g.DrawIcon(Icon, new Rectangle(cx - iconSize / 2, cy - 60, iconSize, iconSize));
+        }
+
+        // App name
+        using var titleFont = new Font("Segoe UI", 16f, FontStyle.Regular);
+        using var titleBrush = new SolidBrush(Color.FromArgb(0xe0, 0xe0, 0xe8));
+        var titleText = "XUnity Toolkit";
+        var titleSize = g.MeasureString(titleText, titleFont);
+        g.DrawString(titleText, titleFont, titleBrush, cx - titleSize.Width / 2, cy + 4);
+
+        // Loading text
+        using var loadFont = new Font("Segoe UI", 10f, FontStyle.Regular);
+        using var loadBrush = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x90));
+        var loadText = "Loading...";
+        var loadSize = g.MeasureString(loadText, loadFont);
+        g.DrawString(loadText, loadFont, loadBrush, cx - loadSize.Width / 2, cy + 32);
+    }
+
+    public void HideLoadingOverlay()
+    {
+        if (_loadingOverlay is null) return;
+        _webView.Visible = true;
+        Controls.Remove(_loadingOverlay);
+        _loadingOverlay.Dispose();
+        _loadingOverlay = null;
     }
 
     protected override void OnHandleCreated(EventArgs e)
@@ -84,6 +137,8 @@ internal sealed class WebViewWindow : Form
 
         _webView.CoreWebView2.Navigate(_appUrl);
         _logger.LogInformation("WebView2 initialized, navigating to {Url}", _appUrl);
+
+        HideLoadingOverlay();
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)

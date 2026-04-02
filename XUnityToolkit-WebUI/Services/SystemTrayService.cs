@@ -162,9 +162,12 @@ public sealed class SystemTrayService(
     {
         try
         {
-            await window.InitializeAsync();
+            // Show window immediately with native loading overlay — instant visual feedback.
+            // WebView2 initialization happens in the background.
             window.Show();
-            _mainWindow = window; // Only expose after fully initialized and shown
+            _mainWindow = window;
+
+            await window.InitializeAsync();
 
             _trayIcon?.ShowBalloonTip(
                 3000,
@@ -175,6 +178,7 @@ public sealed class SystemTrayService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "WebView2 initialization failed, falling back to default browser");
+            _mainWindow = null;
             window.Dispose();
             FallbackToBrowser();
         }
@@ -227,6 +231,8 @@ public sealed class SystemTrayService(
         exitItem.Click += (_, _) =>
         {
             logger.LogInformation("用户从托盘菜单退出应用");
+            // Hide UI immediately — user perceives "app closed" before cleanup starts
+            HideUICore();
             lifetime.StopApplication();
         };
 
@@ -257,6 +263,34 @@ public sealed class SystemTrayService(
         try
         {
             Process.Start(new ProcessStartInfo { FileName = AppUrl, UseShellExecute = true });
+        }
+        catch { /* best effort */ }
+    }
+
+    /// <summary>
+    /// Hide tray icon and window immediately. Safe to call from any thread.
+    /// Used by ApplicationStopping callback for non-tray shutdown triggers (e.g. UpdateService).
+    /// </summary>
+    public void HideUIImmediately()
+    {
+        if (Thread.CurrentThread == _staThread)
+        {
+            HideUICore();
+            return;
+        }
+
+        var ctx = _syncContext;
+        if (ctx is null) return;
+        ctx.Post(_ => HideUICore(), null);
+    }
+
+    private void HideUICore()
+    {
+        try
+        {
+            var tray = _trayIcon;
+            if (tray is not null) tray.Visible = false;
+            _mainWindow?.Hide();
         }
         catch { /* best effort */ }
     }
