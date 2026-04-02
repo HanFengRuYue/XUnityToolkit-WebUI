@@ -103,6 +103,7 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 - **顺序 LLM 循环中的 `when` 守卫：** `DynamicPatternService`/`TermExtractionService` 批处理循环也需要 `catch (OperationCanceledException) when (ct.IsCancellationRequested)`——裸 `catch (OperationCanceledException) { throw; }` 会捕获 HTTP 超时的 `TaskCanceledException` 并在单次超时时中止所有剩余批次
 - **LLM 重试：** `TranslateBatchAsync` 对瞬态错误（`TaskCanceledException`、`HttpRequestException`、`TimeoutException`）最多重试 2 次，指数退避（2s、4s）；重试循环在信号量获取块内；`IsTransientError` 辅助方法判断可重试性
 - **TM 去抖动持久化：** `TranslationMemoryService.Add()` 是同步的（仅内存）；持久化通过 `ScheduleDebouncedPersist` 去抖动 5s；`FlushAsync` 在批处理完成后立即持久化；每游戏 `SemaphoreSlim` 锁（非全局）
+- **TM 关闭刷新：** `FlushAllDirtyWithTimeout(TimeSpan)` 在 `ApplicationStopping` 回调中以 3 秒硬超时并行刷新所有脏 store；`Dispose()` 仅做 1 秒兜底刷新 + semaphore 清理——不再无限期阻塞
 
 ## AI 翻译上下文
 
@@ -249,7 +250,9 @@ dotnet run --project XUnityToolkit-WebUI.csproj                # 运行（http:/
 ## WebView2 详情
 
 - **启动优化：** `RunTrayLoop()` 在 STA 线程上启动 `CoreWebView2Environment.CreateAsync`（存为 `_preCreatedEnvTask`），与 Kestrel 启动并行运行（节省 300-2000ms）；**必须在 STA 线程上调用**——从 MTA（`StartAsync`）调用会导致 `RPC_E_CHANGED_MODE`；`WebViewWindow` 构造函数接收 `Task<CoreWebView2Environment>?`；`InitializeAsync` 中 `await _envTask` 使用预创建的环境；`Icon` 在 `BuildTrayIcon` 中缓存一次
+- **启动加载 overlay：** `WebViewWindow` 构造时创建原生 WinForms `_loadingOverlay` Panel（深色背景 + 图标 + "Loading..."），`_webView.Visible = false`；窗口先 `Show()`（立即可见），再 `InitializeAsync()`（WebView2 初始化），完成后 `HideLoadingOverlay()` 切换到 WebView2 内容；`BackColor` 为 `#0b0b11` 匹配 `--bg-root`
 - **快速关闭：** `OnFormClosing` 在 `ApplicationExitCall` 路径上通过 `Controls.Remove(_webView)` 分离控件，跳过慢速 `_webView.Dispose()`（~500-1000ms Chromium 子进程关闭）；浏览器子进程在宿主进程退出时通过 IPC 通道断开自动终止
+- **退出立即隐藏 UI：** 托盘"退出" handler 在 `StopApplication()` 前先调用 `HideUICore()`（隐藏托盘图标和窗口）；`ApplicationStopping` 回调中 `HideUIImmediately()` 作为非托盘退出路径的备用；`HideUIImmediately()` 检查当前线程是否为 STA 线程，避免跨线程 `Post` 死锁
 - **DPI 缩放陷阱：** `MinimumSize` 在 PerMonitorV2 下是逻辑像素（150% DPI 时物理最小 750×600），CSS 媒体查询使用 CSS 像素——高 DPI 下差异显著；添加/修改响应式断点时必须考虑 DPI 缩放后的 CSS 视口；WebView2 无边框窗口的窗口控制按钮必须在所有视口尺寸下可访问
 - **关闭超时：** `HostOptions.ShutdownTimeout = 1s`；浏览器的 SignalR WebSocket 连接 + `withAutomaticReconnect()` 会导致 Kestrel 排空延迟——缩短超时强制中止连接；不要移除或大幅增大此配置
 - **WebView2 窗口：** `WebViewWindow`（无边框 `FormBorderStyle.None`，`MinimumSize` 500×400）；`IsNonClientRegionSupportEnabled` 启用 CSS `app-region: drag`；`WebMessageReceived`/`PostWebMessageAsString` 通信桥处理最小化/最大化/关闭命令；`WM_NCHITTEST` 边缘调整大小；`WM_GETMINMAXINFO` 约束最大化边界到工作区域；回退到系统浏览器；用户数据目录 `{AppData}/webview2-cache/`；`DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE=33)` 启用 Windows 11 圆角

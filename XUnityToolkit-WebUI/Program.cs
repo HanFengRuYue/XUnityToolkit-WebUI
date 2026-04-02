@@ -287,6 +287,14 @@ var hubContext = app.Services.GetRequiredService<IHubContext<InstallProgressHub>
 fileLoggerProvider.LogBroadcast = entry =>
     _ = hubContext.Clients.Group("logs").SendAsync("logEntry", entry);
 
+// Shutdown: hide UI immediately + flush TM with timeout — user perceives "app closed" before cleanup.
+// The tray exit handler also calls HideUICore() directly for instant visual feedback.
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    app.Services.GetRequiredService<SystemTrayService>().HideUIImmediately();
+    app.Services.GetRequiredService<TranslationMemoryService>().FlushAllDirtyWithTimeout(TimeSpan.FromSeconds(3));
+});
+
 // Deferred initialization after Kestrel is ready — avoids blocking startup with disk I/O + DPAPI
 app.Lifetime.ApplicationStarted.Register(() =>
 {

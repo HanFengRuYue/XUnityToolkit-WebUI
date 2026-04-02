@@ -163,103 +163,112 @@ public static class GameEndpoints
                 }));
             }
 
-            // Detect Unity
-            var isUnity = detection.CheckIsUnityGame(folderPath, exePath);
-            var exeName = Path.GetFileName(exePath);
+            var (game, skipReason) = await DetectAndAddAsync(
+                folderPath, exePath, library, detection, pluginDetection,
+                imageService, xUnityInstaller, configService, appSettingsService, ct);
 
-            UnityGameInfo? unityInfo = null;
-            if (isUnity)
-            {
-                try { unityInfo = detection.BuildUnityGameInfo(folderPath, exePath); }
-                catch { /* detection partial failure — still add as Unity game */ }
-            }
+            if (game is null)
+                return Results.Conflict(ApiResult<AddGameResponse>.Fail(skipReason ?? "添加游戏失败。"));
 
-            // Detect installed plugins/frameworks
-            var frameworks = await pluginDetection.DetectAsync(folderPath);
-
-            // Determine install state from detected frameworks
-            var installState = InstallState.NotInstalled;
-            string? bepInExVersion = null;
-            string? xUnityVersion = null;
-
-            var bepInEx = frameworks.FirstOrDefault(f => f.Framework == ModFrameworkType.BepInEx);
-            if (bepInEx is not null)
-            {
-                bepInExVersion = bepInEx.Version;
-                if (bepInEx.HasXUnityPlugin)
+            return Results.Created($"/api/games/{game.Id}",
+                ApiResult<AddGameResponse>.Ok(new AddGameResponse
                 {
-                    installState = InstallState.FullyInstalled;
-                    xUnityVersion = bepInEx.XUnityVersion;
-                }
-                else
-                {
-                    installState = InstallState.BepInExOnly;
-                }
-            }
+                    NeedsExeSelection = false,
+                    Game = game.WithImageFlags(imageService)
+                }));
+        });
 
-            // Detect Steam AppID from steam_appid.txt
-            int? steamAppId = null;
-            var steamAppIdFile = Path.Combine(folderPath, "steam_appid.txt");
-            if (File.Exists(steamAppIdFile))
-            {
-                try
-                {
-                    var content = (await File.ReadAllTextAsync(steamAppIdFile, ct)).Trim();
-                    if (int.TryParse(content, out var parsedId) && parsedId > 0)
-                        steamAppId = parsedId;
-                }
-                catch { /* ignore read errors */ }
-            }
+        // Batch add games from subdirectories of a parent folder
+        group.MapPost("/batch-add", async (
+            BatchAddRequest request,
+            GameLibraryService library,
+            UnityDetectionService detection,
+            PluginDetectionService pluginDetection,
+            GameImageService imageService,
+            XUnityInstallerService xUnityInstaller,
+            ConfigurationService configService,
+            AppSettingsService appSettingsService,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ParentFolderPath))
+                return Results.BadRequest(ApiResult<BatchAddResult>.Fail("文件夹路径不能为空。"));
 
-            // Build and save game
+            var parentPath = Path.GetFullPath(request.ParentFolderPath);
+            if (!Directory.Exists(parentPath))
+                return Results.BadRequest(ApiResult<BatchAddResult>.Fail("文件夹不存在。"));
+
+            string[] subDirs;
             try
             {
-                var game = await library.AddAsync(name, folderPath, exeName);
-                game.IsUnityGame = isUnity;
-                game.DetectedInfo = unityInfo;
-                game.InstallState = installState;
-                game.InstalledBepInExVersion = bepInExVersion;
-                game.InstalledXUnityVersion = xUnityVersion;
-                game.DetectedFrameworks = frameworks.Count > 0 ? frameworks : null;
-                game.SteamAppId = steamAppId;
-                await library.UpdateAsync(game);
+                subDirs = Directory.GetDirectories(parentPath, "*", SearchOption.TopDirectoryOnly);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Results.BadRequest(ApiResult<BatchAddResult>.Fail("没有访问该文件夹的权限。"));
+            }
 
-                // Sync GameId in INI when re-adding a game with existing plugins
-                if (installState == InstallState.FullyInstalled &&
-                    xUnityInstaller.IsTranslatorEndpointInstalled(folderPath))
+            if (subDirs.Length == 0)
+                return Results.Ok(ApiResult<BatchAddResult>.Ok(new BatchAddResult()));
+
+            // Snapshot existing paths for fast duplicate check
+            var existingPaths = (await library.GetAllAsync())
+                .Select(g => g.GamePath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var added = new List<Game>();
+            var skipped = new List<BatchSkippedItem>();
+
+            foreach (var subDir in subDirs)
+            {
+                var folderPath = Path.GetFullPath(subDir);
+                var folderName = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+                // Skip duplicates
+                if (existingPaths.Contains(folderPath))
                 {
-                    var configPath = configService.GetConfigPath(folderPath);
-                    if (File.Exists(configPath))
+                    skipped.Add(new BatchSkippedItem { FolderName = folderName, Reason = "已在库中" });
+                    continue;
+                }
+
+                // Try to find exe
+                var exePath = detection.TryFindExecutable(folderPath);
+                if (exePath is null)
+                {
+                    skipped.Add(new BatchSkippedItem { FolderName = folderName, Reason = "未找到可执行文件" });
+                    continue;
+                }
+
+                try
+                {
+                    var (game, skipReason) = await DetectAndAddAsync(
+                        folderPath, exePath, library, detection, pluginDetection,
+                        imageService, xUnityInstaller, configService, appSettingsService, ct);
+
+                    if (game is not null)
                     {
-                        var settings = await appSettingsService.GetAsync(ct);
-                        var port = settings.AiTranslation.Port;
-                        await configService.PatchSectionAsync(folderPath, "LLMTranslate",
-                            new Dictionary<string, string>
-                            {
-                                ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
-                                ["GameId"] = game.Id
-                            }, ct);
+                        added.Add(game.WithImageFlags(imageService));
+                        existingPaths.Add(folderPath);
+                    }
+                    else
+                    {
+                        skipped.Add(new BatchSkippedItem { FolderName = folderName, Reason = skipReason ?? "添加失败" });
                     }
                 }
-
-                // Auto-fetch cover from Steam CDN (best effort)
-                if (steamAppId.HasValue && !imageService.HasCover(game.Id))
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    try { await imageService.SaveCoverFromSteamAsync(game.Id, steamAppId.Value, ct); }
-                    catch { /* cover can be set manually later */ }
+                    throw; // propagate cancellation
                 }
+                catch (Exception)
+                {
+                    skipped.Add(new BatchSkippedItem { FolderName = folderName, Reason = "添加时发生错误" });
+                }
+            }
 
-                return Results.Created($"/api/games/{game.Id}",
-                    ApiResult<AddGameResponse>.Ok(new AddGameResponse
-                    {
-                        NeedsExeSelection = false,
-                        Game = game.WithImageFlags(imageService)
-                    }));
-            }
-            catch (InvalidOperationException ex)
+            return Results.Ok(ApiResult<BatchAddResult>.Ok(new BatchAddResult
             {
-                return Results.Conflict(ApiResult<AddGameResponse>.Fail(ex.Message));
-            }
+                Added = added,
+                Skipped = skipped
+            }));
         });
 
         group.MapPut("/{id}", async (string id, UpdateGameRequest request, GameLibraryService library, GameImageService imageService) =>
@@ -938,6 +947,118 @@ public static class GameEndpoints
             return Results.Ok(ApiResult<Game>.Ok(game.WithImageFlags(imageService)));
         });
     }
+
+    /// <summary>
+    /// Shared detection + add logic used by both add-with-detection and batch-add endpoints.
+    /// Returns (game, null) on success, or (null, reason) on skip/failure.
+    /// </summary>
+    private static async Task<(Game? game, string? skipReason)> DetectAndAddAsync(
+        string folderPath,
+        string exePath,
+        GameLibraryService library,
+        UnityDetectionService detection,
+        PluginDetectionService pluginDetection,
+        GameImageService imageService,
+        XUnityInstallerService xUnityInstaller,
+        ConfigurationService configService,
+        AppSettingsService appSettingsService,
+        CancellationToken ct)
+    {
+        var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        var exeName = Path.GetFileName(exePath);
+
+        // Detect Unity
+        var isUnity = detection.CheckIsUnityGame(folderPath, exePath);
+
+        UnityGameInfo? unityInfo = null;
+        if (isUnity)
+        {
+            try { unityInfo = detection.BuildUnityGameInfo(folderPath, exePath); }
+            catch { /* detection partial failure — still add as Unity game */ }
+        }
+
+        // Detect installed plugins/frameworks
+        var frameworks = await pluginDetection.DetectAsync(folderPath);
+
+        // Determine install state from detected frameworks
+        var installState = InstallState.NotInstalled;
+        string? bepInExVersion = null;
+        string? xUnityVersion = null;
+
+        var bepInEx = frameworks.FirstOrDefault(f => f.Framework == ModFrameworkType.BepInEx);
+        if (bepInEx is not null)
+        {
+            bepInExVersion = bepInEx.Version;
+            if (bepInEx.HasXUnityPlugin)
+            {
+                installState = InstallState.FullyInstalled;
+                xUnityVersion = bepInEx.XUnityVersion;
+            }
+            else
+            {
+                installState = InstallState.BepInExOnly;
+            }
+        }
+
+        // Detect Steam AppID from steam_appid.txt
+        int? steamAppId = null;
+        var steamAppIdFile = Path.Combine(folderPath, "steam_appid.txt");
+        if (File.Exists(steamAppIdFile))
+        {
+            try
+            {
+                var content = (await File.ReadAllTextAsync(steamAppIdFile, ct)).Trim();
+                if (int.TryParse(content, out var parsedId) && parsedId > 0)
+                    steamAppId = parsedId;
+            }
+            catch { /* ignore read errors */ }
+        }
+
+        // Build and save game
+        try
+        {
+            var game = await library.AddAsync(name, folderPath, exeName);
+            game.IsUnityGame = isUnity;
+            game.DetectedInfo = unityInfo;
+            game.InstallState = installState;
+            game.InstalledBepInExVersion = bepInExVersion;
+            game.InstalledXUnityVersion = xUnityVersion;
+            game.DetectedFrameworks = frameworks.Count > 0 ? frameworks : null;
+            game.SteamAppId = steamAppId;
+            await library.UpdateAsync(game);
+
+            // Sync GameId in INI when re-adding a game with existing plugins
+            if (installState == InstallState.FullyInstalled &&
+                xUnityInstaller.IsTranslatorEndpointInstalled(folderPath))
+            {
+                var configPath = configService.GetConfigPath(folderPath);
+                if (File.Exists(configPath))
+                {
+                    var settings = await appSettingsService.GetAsync(ct);
+                    var port = settings.AiTranslation.Port;
+                    await configService.PatchSectionAsync(folderPath, "LLMTranslate",
+                        new Dictionary<string, string>
+                        {
+                            ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+                            ["GameId"] = game.Id
+                        }, ct);
+                }
+            }
+
+            // Auto-fetch cover from Steam CDN (best effort)
+            if (steamAppId.HasValue && !imageService.HasCover(game.Id))
+            {
+                try { await imageService.SaveCoverFromSteamAsync(game.Id, steamAppId.Value, ct); }
+                catch { /* cover can be set manually later */ }
+            }
+
+            return (game, null);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return (null, ex.Message);
+        }
+    }
 }
 
 public static class GameImageExtensions
@@ -959,6 +1080,7 @@ public static class GameImageExtensions
 
 public record AddGameRequest(string GamePath, string? Name = null, string? ExecutableName = null);
 public record AddWithDetectionRequest(string FolderPath, string? ExePath = null);
+public record BatchAddRequest(string ParentFolderPath);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
 public record AiEndpointStatus(bool Installed);
 public record TmpFontStatus(bool Installed);

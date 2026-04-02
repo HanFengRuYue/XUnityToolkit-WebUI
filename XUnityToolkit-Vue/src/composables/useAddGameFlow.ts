@@ -1,4 +1,5 @@
 import type { MessageApiInjection } from 'naive-ui/es/message/src/MessageProvider'
+import { ref } from 'vue'
 import { gamesApi } from '@/api/games'
 import type { Game } from '@/api/types'
 import { useGamesStore } from '@/stores/games'
@@ -7,12 +8,22 @@ import { useFileExplorer } from '@/composables/useFileExplorer'
 export function useAddGameFlow(message: MessageApiInjection) {
   const gamesStore = useGamesStore()
   const { selectFile, selectFolder } = useFileExplorer()
+  const adding = ref(false)
 
   async function addGame(): Promise<Game | null> {
     // Step 1: select folder
     const folderPath = await selectFolder({ title: '选择游戏文件夹' })
     if (!folderPath) return null
 
+    adding.value = true
+    try {
+      return await addGameCore(folderPath)
+    } finally {
+      adding.value = false
+    }
+  }
+
+  async function addGameCore(folderPath: string): Promise<Game | null> {
     // Step 2: add with detection
     let result
     try {
@@ -22,8 +33,29 @@ export function useAddGameFlow(message: MessageApiInjection) {
       return null
     }
 
-    // Branch A: no exe found — ask user to pick one
+    // Branch A: no exe found — try batch add subdirectories first, then fallback to manual exe pick
     if (result.needsExeSelection) {
+      try {
+        const batchResult = await gamesApi.batchAdd(folderPath)
+        if (batchResult.added.length > 0) {
+          gamesStore.addGames(batchResult.added)
+          const parts = [`批量添加了 ${batchResult.added.length} 个游戏`]
+          if (batchResult.skipped.length > 0) {
+            parts.push(`，跳过 ${batchResult.skipped.length} 个`)
+          }
+          message.success(parts.join(''))
+          return null
+        }
+        // Subdirectories exist but all were skipped — show skip reasons, don't fall through to exe picker
+        if (batchResult.skipped.length > 0) {
+          message.warning(`${batchResult.skipped.length} 个子文件夹均未能添加（${batchResult.skipped.map((s) => s.reason).filter((v, i, a) => a.indexOf(v) === i).join('、')}）`)
+          return null
+        }
+      } catch {
+        // Batch add failed or no subdirectories — fall through to manual exe selection
+      }
+
+      adding.value = false // hide loading while user picks exe
       const exePath = await selectFile({
         title: '选择游戏可执行文件',
         filters: [{ label: '可执行文件', extensions: ['.exe'] }],
@@ -31,6 +63,7 @@ export function useAddGameFlow(message: MessageApiInjection) {
       })
       if (!exePath) return null
 
+      adding.value = true
       // Re-call addWithDetection with the explicit exe path
       try {
         result = await gamesApi.addWithDetection(folderPath, exePath)
@@ -66,5 +99,5 @@ export function useAddGameFlow(message: MessageApiInjection) {
     return game
   }
 
-  return { addGame }
+  return { addGame, adding }
 }

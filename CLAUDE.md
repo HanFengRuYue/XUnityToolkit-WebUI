@@ -67,7 +67,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 
 ## API 端点
 
-- **游戏：** `GET/POST /api/games/`, `GET/DELETE /api/games/{id}`, `POST .../add-with-detection`, `PUT /api/games/{id}`（重命名）, `POST .../detect`, `POST .../open-folder`, `POST .../launch`
+- **游戏：** `GET/POST /api/games/`, `GET/DELETE /api/games/{id}`, `POST .../add-with-detection`, `POST .../batch-add`（批量添加子目录游戏）, `PUT /api/games/{id}`（重命名）, `POST .../detect`, `POST .../open-folder`, `POST .../launch`
 - **TMP 字体：** `GET/POST/DELETE /api/games/{id}/tmp-font` — 检查/安装/卸载内置 TMP 字体（与游戏 Unity 版本匹配）；由 `ConfigPanel.vue` 使用
 - **框架：** `DELETE /api/games/{id}/framework/{framework}`
 - **安装：** `POST /api/games/{id}/install`, `DELETE .../install`（卸载）, `GET .../status`, `POST .../cancel`
@@ -116,7 +116,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 ### 同步点
 
 - **InstallStep 枚举：** 在 4 处同步：`Models/InstallationStatus.cs`, `src/api/types.ts`, `InstallProgressDrawer.vue`, `InstallOrchestrator.cs`；还要更新 `GameDetailView.vue` 的 `installStepLabel` 映射
-- **添加 AppSettings 字段：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, store 的 `loadPreferences`/`savePreferences`, `SettingsView.vue`
+- **添加 AppSettings 字段：** 在 4 处同步：`Models/AppSettings.cs`, `src/api/types.ts`, store 的 `loadPreferences`/`savePreferences`, `SettingsView.vue`；`SettingsView.vue` 中 `ref<AppSettings>({...})` 的初始值必须与 `AppSettings.cs` 的默认值一致
 - **添加 AiTranslationSettings 字段：** 在 4 处同步：`Models/AiTranslationSettings.cs`, `src/api/types.ts`, `AiTranslationView.vue`（`DEFAULT_AI_TRANSLATION`）, `SettingsView.vue`（默认值）；实时设置（`TermAuditEnabled`, `NaturalTranslationMode`, `EnableTranslationMemory`, `FuzzyMatchThreshold`）在 `AiTranslationView.vue` 中显示；本地模式专属设置（`LocalMinP`, `LocalRepeatPenalty`, `LocalContextSize`）在 `LocalAiPanel.vue` 中显示；仅预翻译设置（`EnableLlmPatternAnalysis`, `EnableMultiRoundTranslation`, `EnableAutoTermExtraction`, `AutoApplyExtractedTerms`）在 `AssetExtractionView.vue` 中显示；数值型字段需在 `SettingsEndpoints.cs` 中添加 `Math.Clamp`
 - **添加 TermEntry 字段：** 在 2 处同步：`Models/TermEntry.cs`, `src/api/types.ts`；包含 `Source`（`TermSource` 枚举，PascalCase JSON）
 - **ScriptTagRule/ScriptTagConfig 字段：** 在 2 处同步：`Models/ScriptTagRule.cs` + `Models/ScriptTagConfig.cs` ↔ `src/api/types.ts`
@@ -150,11 +150,13 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **`bundled/llama/` 删除列表排除：** `UpdateService` 中的关键不变量——非 full 版本不得删除用户下载的 llama 文件
 - **DataPathInfo：** 在 2 处同步：`Endpoints/SettingsEndpoints.cs`（record）, `src/api/types.ts`
 - **FileExplorer 模型：** 在 2 处同步：`Models/FileExplorer.cs`, `src/api/types.ts`；包含 `QuickAccessEntry`、`ReadTextResponse`；`UploadFromPathRequest` 为所有 path-based 上传端点共享的请求记录
+- **BatchAddResult/BatchSkippedItem 字段：** 在 2 处同步：`Models/BatchAddModels.cs`, `src/api/types.ts`；`GameEndpoints.cs` 中 `DetectAndAddAsync` 是 `add-with-detection` 和 `batch-add` 的共享检测+添加逻辑
 - **添加 UnityGameInfo 字段：** 在 2 处同步：`Models/UnityGameInfo.cs`, `src/api/types.ts`；安装编排器 Step 1 始终重新检测（`DetectAsync`），新字段自动生效无需额外处理
 - **添加 AppDataPaths 目录：** 还要更新 `SettingsEndpoints.cs` `/export` 端点中的导出排除列表，如果新目录包含大型/可重新生成/机器特定的数据；`translation-memory/`、`dynamic-patterns/`、`term-candidates/` 被排除在导出之外（可重新生成）
 - **PluginHealthReport/HealthCheckItem/HealthCheckDetail 字段：** 在 2 处同步：`Models/PluginHealth.cs`, `src/api/types.ts`；在 `PluginHealthCard.vue` 中显示
 - **BepInExPlugin 字段：** 在 2 处同步：`Models/BepInExPlugin.cs`, `src/api/types.ts`；API 方法在 `src/api/games.ts`；在 `PluginManagerView.vue` 中显示
 - **日志级别同步点：** `Program.cs` `AddFilter` + `FileLoggerProvider` 构造函数 `minLevel` + 前端 `LogView.vue` `selectedLevels` + `levelDefs` — 修改日志级别阈值时四处必须一致
+- **`ApplicationStopping` 回调同步点：** `Program.cs` 注册两个关闭回调：`SystemTrayService.HideUIImmediately()`（立即隐藏 UI）+ `TranslationMemoryService.FlushAllDirtyWithTimeout(3s)`（刷新脏 TM）；添加新的需要关闭时清理的服务应在此处添加回调
 - **更新 llama.cpp 版本：** 在 4 处同步：`build.ps1`（`$llamaTag`）、`.github/workflows/build.yml`（`$llamaTag`）、`LocalLlmService.cs`（`LlamaVersion`）、根 `CLAUDE.md`（内置资源描述）；`build.ps1` 和 `build.yml` 在下载后自动写入 `bundled/llama/version.txt`（无需手动同步）；同时更新 CUDA 资产 pattern（build.ps1 + build.yml）和用户文档（README.md）；资产命名需通过 `gh api repos/ggml-org/llama.cpp/releases/tags/{tag}` 确认实际 CUDA 版本号（如 `cuda-13.1` 而非 `cuda-13`）
 
 ### 构建
@@ -165,6 +167,7 @@ cd XUnityToolkit-Vue && npx vue-tsc --build
 - **多文件发布：** 已移除 `PublishSingleFile`；已移除 `ExcludeFromSingleFile` target；LibCpp2IL.dll 在多文件模式下自然工作
 - **附属程序集：** `SatelliteResourceLanguages=en` 从发布输出中剥离所有语言文件夹（cs/de/fr/ja/ko 等）；WinForms 附属资源未使用（UI 是 Vue，原生对话框已移除）
 - **MSB3277 屏蔽：** `<NoWarn>MSB3277</NoWarn>` — WebView2.Wpf.dll 引用 WindowsBase 5.0.0.0 与 .NET 10 的 4.0.0.0 冲突；.NET Core 运行时自动统一，警告无害
+- **自托管字体：** `XUnityToolkit-Vue/public/fonts/` 存放 Lexend、DM Sans、JetBrains Mono 的 WOFF2 文件；`src/assets/fonts.css` 声明 `@font-face`（由 `main.css` 导入）；**绝不引入 Google Fonts CDN**——桌面应用不应依赖外部 CDN，且 `fonts.googleapis.com` 在国内被墙会阻塞渲染
 - **Vite vendor 分包：** `vite.config.ts` 中 `rolldownOptions.output.codeSplitting.groups` 将 vue/naive-ui/signalr 拆分为独立 chunk（使用 `test` 正则匹配 `node_modules` 路径）；`chunkSizeWarningLimit: 750`；`onwarn` 过滤 SignalR ESM `/*#__PURE__*/` 注释警告；Vite 8 使用 Rolldown 引擎（替代 Rollup + esbuild），不要使用 `rollupOptions` 或 `manualChunks` 对象形式（已移除）
 - **数据路径：** 始终为 `%AppData%\XUnityToolkit\`（无便携模式）；`AppData:Root` 配置键允许为开发/测试覆盖
 - **AppDataPaths 配置回写：** 在 `Program.cs` 中修改 `appDataRoot` 来源后，**必须**执行 `builder.Configuration["AppData:Root"] = appDataRoot` — 否则 `AppDataPaths`（通过 DI 读取 `IConfiguration`）不会获取新值
