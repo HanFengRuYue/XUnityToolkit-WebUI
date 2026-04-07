@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Management;
@@ -52,6 +52,7 @@ public sealed class LocalLlmService(
     private volatile int _gpuVramUsed;   // MB
     private volatile int _gpuVramTotal;  // MB — -1 means never polled yet
     private volatile CancellationTokenSource? _gpuPollCts;
+    private readonly ConcurrentQueue<string> _recentProcessOutput = new();
 
     // ── llama.cpp binary constants ──
 
@@ -383,12 +384,21 @@ public sealed class LocalLlmService(
                 return GetStatus();
             }
 
+            var launchModelPath = ResolveLaunchModelPath(serverPath, modelPath);
+            if (!launchModelPath.Success)
+            {
+                _state = LocalLlmServerState.Failed;
+                _error = launchModelPath.Error;
+                await BroadcastStatus();
+                return GetStatus();
+            }
+
             // Find available port
             _internalPort = GetAvailablePort();
 
             // Build arguments (--reasoning-budget 0 disables thinking in reasoning models)
             // Sanitize modelPath to prevent argument injection via embedded quotes
-            var safeModelPath = modelPath.Replace("\"", "");
+            var safeModelPath = launchModelPath.LaunchPath.Replace("\"", "");
 
             // Performance flags: flash attention + continuous batching + larger micro-batch
             // CPU mode: explicit thread counts for optimal utilization
@@ -402,9 +412,12 @@ public sealed class LocalLlmService(
                 ? currentSettings.KvCacheType : "q8_0";
             var kvArgs = kvType != "f16" ? $"--cache-type-k {kvType} --cache-type-v {kvType}" : "";
 
-            var args = $"-m \"{safeModelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} {perfArgs} {kvArgs} --log-disable --no-webui --reasoning-budget 0";
+            var args = $"-m \"{safeModelPath}\" --host 127.0.0.1 --port {_internalPort} -ngl {gpuLayers} -c {contextLength} {perfArgs} {kvArgs} --no-webui --reasoning-budget 0";
 
+            logger.LogInformation("llama 模型启动路径策略: {Strategy}, launch path: {LaunchPath}, resolved file: {ResolvedFilePath}",
+                launchModelPath.Strategy, launchModelPath.LaunchPath, launchModelPath.ResolvedFilePath);
             logger.LogInformation("启动 llama-server: {Path} {Args}", serverPath, args);
+            ResetRecentProcessOutput();
 
             _process = new Process
             {
@@ -423,11 +436,11 @@ public sealed class LocalLlmService(
 
             _process.OutputDataReceived += (_, e) =>
             {
-                if (e.Data is not null) logger.LogDebug("[llama-server] {Line}", e.Data);
+                if (e.Data is not null) RecordProcessOutput("stdout", e.Data);
             };
             _process.ErrorDataReceived += (_, e) =>
             {
-                if (e.Data is not null) logger.LogDebug("[llama-server] {Line}", e.Data);
+                if (e.Data is not null) RecordProcessOutput("stderr", e.Data);
             };
             _process.Exited += OnProcessExited;
 
@@ -439,10 +452,21 @@ public sealed class LocalLlmService(
             var healthy = await WaitForHealthAsync(_internalPort, ct);
             if (!healthy)
             {
+                var process = _process;
+                var exitedEarly = process is { HasExited: true };
+                var exitCode = TryGetExitCode(process);
+                LogRecentProcessFailure(
+                    exitedEarly ? "llama-server 在 health check 前退出" : "llama-server health check 超时",
+                    exitCode);
+
                 _state = LocalLlmServerState.Failed;
-                _error = "llama-server 启动超时（30秒内未就绪）";
-                try { _process.Kill(true); } catch { /* ignore */ }
-                try { _process.Dispose(); } catch { /* ignore */ }
+                _error = exitedEarly
+                    ? exitCode is int code
+                        ? $"llama-server 在 health check 前退出（退出码 {code}）"
+                        : "llama-server 在 health check 前退出"
+                    : "llama-server 启动超时，/health 在 30 秒内未就绪";
+                try { process?.Kill(true); } catch { /* ignore */ }
+                try { process?.Dispose(); } catch { /* ignore */ }
                 _process = null;
                 await BroadcastStatus();
                 return GetStatus();
@@ -529,19 +553,31 @@ public sealed class LocalLlmService(
         logger.LogInformation("llama-server 已停止");
     }
 
+    internal LocalLlmLaunchPathResolution ResolveLaunchModelPath(string serverPath, string modelPath) =>
+        LocalLlmLaunchPathResolver.Resolve(serverPath, modelPath, paths.LlamaLaunchCacheDirectory);
+
     private async void OnProcessExited(object? sender, EventArgs e)
     {
         try
         {
-            if (_state == LocalLlmServerState.Stopping || _state == LocalLlmServerState.Idle)
+            if (_state == LocalLlmServerState.Stopping
+                || _state == LocalLlmServerState.Idle
+                || (_state == LocalLlmServerState.Failed && _process is null))
+            {
                 return;
+            }
+
+            var process = sender as Process ?? _process;
+            var exitCode = TryGetExitCode(process);
 
             StopGpuPolling();
             _state = LocalLlmServerState.Failed;
-            _error = "llama-server 进程意外退出";
-            try { _process?.Dispose(); } catch { /* ignore */ }
+            _error = exitCode is int code
+                ? $"llama-server 进程意外退出（退出码 {code}）"
+                : "llama-server 进程意外退出";
+            try { process?.Dispose(); } catch { /* ignore */ }
             _process = null;
-            logger.LogWarning("llama-server 进程意外退出");
+            LogRecentProcessFailure("llama-server 进程意外退出", exitCode);
             await UnregisterEndpointAsync(default);
             await BroadcastStatus();
         }
@@ -574,6 +610,53 @@ public sealed class LocalLlmService(
             await Task.Delay(500, ct);
         }
         return false;
+    }
+
+    private void ResetRecentProcessOutput()
+    {
+        while (_recentProcessOutput.TryDequeue(out _))
+        {
+        }
+    }
+
+    private void RecordProcessOutput(string stream, string line)
+    {
+        var entry = $"[{stream}] {line}";
+        _recentProcessOutput.Enqueue(entry);
+
+        while (_recentProcessOutput.Count > 60 && _recentProcessOutput.TryDequeue(out _))
+        {
+        }
+
+        logger.LogDebug("[llama-server/{Stream}] {Line}", stream, line);
+    }
+
+    private int? TryGetExitCode(Process? process)
+    {
+        try
+        {
+            return process is { HasExited: true } ? process.ExitCode : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void LogRecentProcessFailure(string reason, int? exitCode)
+    {
+        var output = _recentProcessOutput.ToArray();
+        var outputText = output.Length == 0 ? "<no output captured>" : string.Join(Environment.NewLine, output);
+
+        if (exitCode is int code)
+        {
+            logger.LogWarning("{Reason}，退出码 {ExitCode}。最近的 llama-server 输出:{NewLine}{Output}",
+                reason, code, Environment.NewLine, outputText);
+            return;
+        }
+
+        logger.LogWarning("{Reason}。最近的 llama-server 输出:{NewLine}{Output}",
+            reason, Environment.NewLine, outputText);
     }
 
     // ── GPU Monitoring (nvidia-smi) ──
