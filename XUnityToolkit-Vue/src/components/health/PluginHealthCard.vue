@@ -23,9 +23,27 @@ const verifying = ref(false)
 const error = ref<string | null>(null)
 const message = useMessage()
 
+function problemItemOrder(item: HealthCheckItem) {
+  switch (item.id) {
+    case 'toolboxAiState':
+      return 0
+    case 'logErrors':
+      return 1
+    default:
+      return 2
+  }
+}
+
 // Only show problematic items (non-Healthy)
 const problemItems = computed<HealthCheckItem[]>(() =>
-  report.value?.checks.filter(c => c.status !== 'Healthy') ?? []
+  (report.value?.checks ?? [])
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.status !== 'Healthy')
+    .sort((a, b) => {
+      const orderDiff = problemItemOrder(a.item) - problemItemOrder(b.item)
+      return orderDiff !== 0 ? orderDiff : a.index - b.index
+    })
+    .map(({ item }) => item)
 )
 
 const allHealthy = computed(() =>

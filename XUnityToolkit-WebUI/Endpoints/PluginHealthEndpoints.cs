@@ -20,7 +20,7 @@ public static class PluginHealthEndpoints
             if (game.InstallState == InstallState.NotInstalled)
                 return Results.BadRequest(ApiResult.Fail("游戏未安装插件"));
 
-            var report = healthService.Check(game);
+            var report = await healthService.CheckAsync(game);
             return Results.Ok(ApiResult<PluginHealthReport>.Ok(report));
         });
 

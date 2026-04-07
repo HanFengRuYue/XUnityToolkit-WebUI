@@ -1,22 +1,25 @@
 # AGENTS.md
 
-本文件用于给后续代理提供可直接复用的仓库上下文。它不是对 `README.md` 和各级 `CLAUDE.md` 的逐字复制，而是面向“接手开发/排障/重构”的工作手册。
+本文件用于给后续代理提供可直接复用的仓库上下文。当前仓库已经统一改为由根目录 `AGENTS.md` 维护全部项目级、后端级、前端级说明；历史 `CLAUDE.md` 已全部删除，不再作为维护入口。
 
 ## 1. 权威文档入口
 
 开始动手前，优先参考这些文件：
 
+- `AGENTS.md`
 - `README.md`
-- `CLAUDE.md`
-- `XUnityToolkit-WebUI/CLAUDE.md`
-- `XUnityToolkit-Vue/CLAUDE.md`
 
-若 AGENTS 与上述文件冲突，以源码和这些维护文档为准，并在改动后同步更新 AGENTS。
+规则：
+
+- `AGENTS.md` 是当前唯一维护中的仓库工作手册，所有原 `CLAUDE.md` 内容已并入本文件。
+- `README.md` 主要面向产品说明、构建入口和用户侧信息。
+- 仓库内不再保留任何 `CLAUDE.md`；如发现重新出现，应视为需要回收进 `AGENTS.md` 的重复文档。
+- 若文档与源码冲突，以源码为准，并在改动后同步更新 `AGENTS.md`。
 
 补充说明：
 
 - 仓库内 `.claude/` 目录只有 `scheduled_tasks.lock`，没有额外项目记忆文件。
-- 本仓库的维护说明主要沉淀在上述三个 `CLAUDE.md` 中。
+- 后端与前端原先分散在 `CLAUDE.md`、`XUnityToolkit-WebUI/CLAUDE.md`、`XUnityToolkit-Vue/CLAUDE.md` 的内容，现已统一整理到本文件后半部分的专项章节中。
 
 ## 2. 项目概览
 
@@ -357,7 +360,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 
 - `FontReplacementService`
 - 支持扫描并替换 TMP_FontAsset
-- 也支持 TTF 资源替换
+- 也支持扫描 Unity Legacy `Font` 资源，但当前只允许替换 `dynamicEmbedded` 类型的 TTF/OTF
+- 带 `CharacterRects` 的静态图集字体、依赖 `FontNames` 的系统回退字体、以及模式不明的 Legacy `Font` 会明确标记为不支持，避免误报替换成功
 - 替换前会建立备份，恢复依赖备份清单和哈希
 
 字体生成：
@@ -514,7 +518,7 @@ CI：
 截至本次整理时，已确认：
 
 - 仓库当前存在完整的项目级说明文档，且与源码主干大体一致
-- 根目录尚无 `AGENTS.md`，本文件为首次补充
+- 根目录 `AGENTS.md` 已成为统一维护入口，原三份 `CLAUDE.md` 的内容已完成合并并删除旧文件
 - `.claude/` 中没有额外项目说明
 - 构建链路、前后端入口、运行时数据目录、更新器、翻译端点均已做过静态核对
 
@@ -528,3 +532,179 @@ CI：
 - 大幅重构翻译链路、本地 LLM、字体链路、更新链路
 - 引入新的高频同步点或新的全局不变量
 
+## 19. 接口矩阵补充
+
+以下接口族原先分散记录在历史 `CLAUDE.md` 中，现统一收敛到此：
+
+- 游戏管理：`GET/POST /api/games`、`GET/DELETE /api/games/{id}`、`POST /api/games/add-with-detection`、`POST /api/games/batch-add`、`PUT /api/games/{id}`、`POST /api/games/{id}/detect`、`POST /api/games/{id}/open-folder`、`POST /api/games/{id}/launch`
+- TMP 字体：`GET/POST/DELETE /api/games/{id}/tmp-font`
+- 安装与状态：`POST /api/games/{id}/install`、`DELETE /api/games/{id}/install`、`GET /api/games/{id}/status`、`POST /api/games/{id}/cancel`
+- 图标、封面、背景：均提供 `upload`、`*-from-path`、SteamGridDB、网页搜索、选择、删除等配套端点
+- 配置：`GET/PUT /api/games/{id}/config`、`GET/PUT /api/games/{id}/config/raw`
+- 应用设置：`GET/PUT /api/settings`、`GET /api/settings/version`、`POST /api/settings/reset`、`POST /api/settings/export`、`POST /api/settings/import`、`POST /api/settings/import-from-path`、`POST /api/settings/open-data-folder`
+- 文件浏览器：`GET /api/filesystem/drives`、`GET /api/filesystem/quick-access`、`POST /api/filesystem/list`、`POST /api/filesystem/read-text`
+- AI 翻译：`POST /api/translate`、`GET /api/translate/stats`、`GET /api/translate/cache-stats`、`POST /api/translate/test`、`GET /api/translate/ping`
+- AI 控制与模型：`POST /api/ai/toggle`、`GET /api/ai/models`、`GET /api/ai/extraction/stats`
+- 本地 LLM：`GET/PUT /api/local-llm/settings`、`GET /api/local-llm/status`、`GET /api/local-llm/gpus`、`POST /api/local-llm/gpus/refresh`、`GET /api/local-llm/catalog`、`GET /api/local-llm/llama-status`、`POST /api/local-llm/test`、`POST /api/local-llm/start`、`POST /api/local-llm/stop`、下载/暂停/取消模型、下载/取消 llama 运行时
+- AI 端点、术语、描述：`/api/games/{id}/ai-endpoint`、`/api/games/{id}/terms`、`/api/games/{id}/description`
+- 兼容层：`/api/games/{id}/glossary`、`/api/games/{id}/do-not-translate` 保留兼容旧调用，但底层统一走 `TermService`
+- 翻译记忆与动态模式：`/api/games/{id}/translation-memory`、`/api/games/{id}/dynamic-patterns`、`/api/games/{id}/term-candidates`
+- 脚本标签：`GET /api/script-tag-presets`、`GET/PUT /api/games/{id}/script-tags`
+- 资源提取与预翻译：`POST /api/games/{id}/extract-assets`、`GET/DELETE /api/games/{id}/extracted-texts`、`POST /api/games/{id}/pre-translate`、`GET /api/games/{id}/pre-translate/status`、`POST /api/games/{id}/pre-translate/cancel`、`GET/PUT /api/games/{id}/pre-translate/regex`
+- 翻译编辑器：`GET/PUT /api/games/{id}/translation-editor`、`POST /api/games/{id}/translation-editor/import`、`GET /api/games/{id}/translation-editor/export`
+- 字体替换：`POST /api/games/{id}/font-replacement/scan`、`POST /api/games/{id}/font-replacement/replace`、`POST /api/games/{id}/font-replacement/restore`、`GET /api/games/{id}/font-replacement/status`、`POST /api/games/{id}/font-replacement/upload`、`POST /api/games/{id}/font-replacement/upload-from-path`、`POST /api/games/{id}/font-replacement/cancel`、`DELETE /api/games/{id}/font-replacement/custom-font?type={ttf|tmp}`
+- 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
+- BepInEx 日志与健康：`/api/games/{id}/bepinex-log`、`/api/games/{id}/health-check`
+- 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
+- 日志与更新：`/api/logs*`、`/api/update/*`
+- 所有 `multipart/form-data` 上传端点都必须显式 `.DisableAntiforgery()`
+- 所有 `*-from-path` 端点都必须与对应 multipart 端点保持相同业务校验与副作用，不允许只做“简化版实现”
+- `POST /api/translate` 直接服务于 `LLMTranslate.dll`，不是 `ApiResult<T>`，前端若直接调用必须使用原始 `fetch` 处理响应
+- 常规 JSON 端点统一使用 `Results.Ok(ApiResult<T>.Ok(...))` 或 `Results.BadRequest(ApiResult.Fail(...))`，不要直接返回裸对象
+
+## 20. 同步点与模型补充
+
+- `InstallStep`、`UpdateInfo`、`VersionInfo`、`DataPathInfo`、`BatchAddResult`、`UnityGameInfo`、`FileExplorer`、`FontReplacement`、`FontGeneration`、`PluginHealth`、`BepInExPlugin`、`LocalLlmSettings`、`BuiltInModelInfo`、`LlamaStatus` 等模型，新增字段时都必须同时同步 C# 模型、TS 类型、相关 API、对应前端页面
+- `SettingsView.vue` 的默认 `AppSettings`、`AiTranslationView.vue` 的 `DEFAULT_AI_TRANSLATION`、后端 `AppSettings`/`AiTranslationSettings` 默认值必须保持一致
+- 数值型设置新增字段时，要同步后端的 `Math.Clamp` 逻辑，否则前端与后端会出现边界不一致
+- `TermEntry` 的 `Type`/`Category`/`Source`、`ScriptTagRule`/`ScriptTagConfig`、`TranslationStats`/`RecentTranslation`/`TranslationError`、`PreTranslationStatus`/`PreTranslationCacheStats` 都属于容易漏同步的高频模型
+- 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
+- `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
+- `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
+- `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
+
+## 21. 后端专项补充
+
+### 21.1 运行与架构细节
+
+- 项目当前不做向后兼容迁移或旧格式自动转换；默认按“预稳定阶段、可以清晰断代”的思路维护
+- `Program.cs` 必须在 DI 之前读取 `AppData:Root` 并回写到 `builder.Configuration["AppData:Root"]`，否则 `AppDataPaths` 看到的是旧值
+- 静态资源缓存策略必须区分 `/assets/*` 与 `index.html`/`favicon.ico`；SPA fallback 也必须显式设置 `no-cache`
+- 命名 `HttpClient` 已经承载超时、连接数、UA 和用途假设；新增外部网络调用优先复用命名客户端，不要随处 `new HttpClient()`
+- `Updater/` 是 AOT 工程，不允许依赖 WinForms、反射式 JSON 序列化或 `Microsoft.Win32.Registry` 的常规托管封装；涉及注册表时应使用 P/Invoke
+
+### 21.2 TranslatorEndpoint 与配置链路
+
+- `TranslatorEndpoint` 目标为 `net35`，并依赖 `build.ps1` 从 XUnity 包里提取 `libs/` 引用 DLL
+- `[LLMTranslate]` INI 区段的 `ToolkitUrl`、`GameId` 等值由 `POST /api/games/{id}/ai-endpoint`、`InstallOrchestrator` 和 DLL 初始化共同维护，修改其约定必须三处同改
+- 不要从零重写 `AutoTranslatorConfig.ini`；统一通过 `ConfigurationService.PatchAsync` 做补丁式修改
+- `PatchAsync` 中 `null` 表示跳过字段，空字符串表示清空字段，这个语义不能改
+- 默认最优配置会写入 `Language=zh`、`OverrideFont=Microsoft YaHei`、`Endpoint=LLMTranslate` 等值；若调整默认配置，必须同时核对安装链路和文档说明
+- `LLMTranslate.dll` 的日志分为始终输出的 `Log()` 和仅在 `DebugMode` 下输出的 `DebugLog()`，不要把关键初始化和错误信息放进 `DebugLog()`
+
+### 21.3 AI 翻译、术语与缓存
+
+- 在线翻译主链路仍然是 Phase 0 TM 查找、Phase 1 自然翻译、Phase 2 术语/DNT 占位符替换、Phase 3 强制修正
+- `TranslationMemoryService` 的写入先落内存，持久化走防抖；热路径上不要引入额外磁盘 I/O
+- `GlossaryExtractionService` 与 `TermExtractionService` 共享解析与分类逻辑，但故意保持两个独立服务；不要因为“看起来重复”而强行合并
+- 所有翻译路径都必须在满足条件时调用 `BufferTranslation` + `TryTriggerExtraction`，否则术语提取统计会失真
+- `ScriptTagService.NormalizeForCache` 是缓存归一化的唯一入口；涉及预翻译缓存、动态模式或脚本标签的变更都要核对调用点
+- `TranslationStats.Queued` 是推导值，不等于内部 `_queued`；TM 命中和失败文本统计也有各自独立含义，不能混用
+- `RecentTranslation.EndpointName` 在 TM 命中场景下需要显式写成“翻译记忆”，否则前端最近翻译列表会出现空白端点名
+
+### 21.4 性能、并发与 SignalR
+
+- 热路径避免 `GameLibraryService.GetByIdAsync` 等磁盘或大对象访问，优先使用缓存
+- `SemaphoreSlim` 相关逻辑要区分“是否成功获取信号量”再释放，避免超时后误 `Release()`
+- `BroadcastStats` 的节流与 `force: true` 语义是前端实时流水线显示的前提，不能随意删减
+- KeepAlive 或触发即忘的后台任务，如果依赖 SignalR 结束事件来复位前端状态，那么失败、取消路径也必须广播完成/错误事件
+- 向前端返回的错误消息要避免泄露内部绝对路径、异常堆栈或敏感配置；详细信息只写服务器日志
+
+### 21.5 资源、字体、WebView2 与周边服务
+
+- `AssetExtractionService` 使用 AssetsTools.NET，数组字段访问统一遵循 `field -> "Array" -> elements` 模式
+- TTF 字体替换当前只支持 `dynamicEmbedded` 的 Unity Legacy `Font`；`staticAtlas`、`osFallback`、`unknown` 统一扫描但拒绝替换
+- `TmpFontGeneratorService` 基于 FreeTypeSharp 与 Felzenszwalb EDT 生成 SDF；生成出的 atlas、padding、gradient scale、render mode 之间有强耦合，不要局部改一个字段
+- `WebImageSearchService` 通过网页抓取提供图片搜索；所有 URL 在真正请求之前必须先走 SSRF 校验，保存前还要校验内容类型
+- `WebViewWindow`、`SystemTrayService`、WebView2 预热、加载 overlay、快速隐藏 UI、关闭超时等机制都属于桌面宿主层不变量，改动前要完整回看历史实现
+- `QuickAccessHelper` 使用 Shell COM 且要求 STA 线程；相关 COM 对象必须逐级 `Marshal.ReleaseComObject`
+- `BepInExLogService`、`PluginHealthCheckService`、`BepInExPluginService` 都依赖文件共享读或被动分析模式，不要在这些路径里引入“加载用户 DLL 到当前进程”这类高风险操作
+
+### 21.6 安全约定补充
+
+- `gameId`、语言代码、用户上传文件名、可执行文件名、导入 ZIP 内部路径都必须做路径穿越和格式校验
+- `PathSecurity.SafeJoin` 与 `PathSecurity.ValidateExternalUrl` 是路径安全和 SSRF 防护的统一入口；不要自行复制一套近似实现
+- `POST /api/settings/reset`、`POST /api/settings/import` 会引发跨服务缓存失效，相关服务新增缓存后必须并入这两条路径
+- JSON 数据文件统一走 `FileHelper.WriteJsonAtomicAsync`；非 JSON 关键文件也应采用 `.tmp + move` 的原子落盘模式
+
+## 22. 前端专项补充
+
+### 22.1 基础约定
+
+- 使用 Vue 3 Composition API 和 `<script setup lang="ts">`
+- API 调用统一从 `@/api/client` 或 `@/api/games` 进入，不要直接散落 axios 实现
+- 生产路径不要留下 `console.*`
+- 共享工具优先放在 `src/composables/`、`src/utils/`、`src/constants/`，不要在页面内重复定义一份几乎相同的 helper
+- `gamesStore.launchGame(id)` 是所有启动游戏入口的唯一调用点，不要绕开它直调 API
+
+### 22.2 设计系统与样式
+
+- 项目使用自托管字体，禁止引入 Google Fonts CDN
+- 主题模式由 `useThemeStore` 控制，`resolvedTheme` 才是渲染依据；`mode` 可能是 `system`
+- 共享布局和卡片类名以 `main.css` 为准，例如 `.page-title`、`.section-card`、`.section-header`、`.header-actions`、`.table-container`
+- 顶层页面和游戏子页面的标题、回退按钮、section card 样式有明确约定，不要在每个页面重新发明一套
+- 避免无必要的内联样式；除一次性的 `animation-delay` 等极少数情况外，统一落到作用域 CSS
+- 颜色和边框一律使用设计系统变量，不要发明不存在的 CSS 变量名
+
+### 22.3 KeepAlive、SignalR 与资源生命周期
+
+- 顶层页面通过 `KeepAlive` 缓存，因此涉及 SignalR、window 监听器、定时器的页面与子组件都要同时处理 `onActivated`、`onDeactivated`、`onBeforeUnmount`
+- `HubConnection` 不要在模块顶层创建，统一在生命周期钩子内创建和销毁
+- `onBeforeUnmount` 是默认清理钩子，不要改成 `onUnmounted`
+- 自动保存页面在加载外部数据时统一采用 `disable -> load/assign -> nextTick -> enable`
+- `AiTranslationView`、`SettingsView` 这类共享 `AppSettings` 的 KeepAlive 页面，重新激活时必须重新从后端加载，避免旧副本覆盖新改动
+
+### 22.4 Naive UI 与常见实现陷阱
+
+- `NInputNumber` 的 `@update:value` 会发出 `number | null`，保存时要显式处理 `null`
+- `NDialogOptions.onPositiveClick` 返回 Promise 会阻塞对话框关闭；耗时操作通常用 fire-and-forget 更合适
+- `NDataTable` 的排序、虚拟滚动、`row-key` 唯一性、弹性列 `minWidth` 都有历史坑，表格变更前要核对现有模式
+- `NColorPicker` 使用自定义触发器时应走 `#trigger` 槽，并锁定 `hex` 模式
+- `NUpload`、`NEllipsis` 在 flex 容器里有额外包裹层时，需要用 `:deep()` 或外层容器修正布局
+- `NTabs type="segment"`、折叠面板、按钮渐变边框等视觉模式已有历史实现，改动前先复用现有样式结构
+
+### 22.5 页面组织与交互模式
+
+- 顶层页面加路由、导航、缓存名；游戏子页面加 `/games/:id/...` 路由和 `GameDetailView` 入口按钮，不要塞进主导航
+- `TermEditorView` 是统一术语编辑页，替代早期独立 glossary/do-not-translate 页面；相关新能力优先接到这里
+- 文件浏览器由 `FileExplorerModal.vue` 全局挂载一次，`useFileExplorer()` 通过 Promise 返回选中的服务器路径
+- 背景图、封面图、图标、网页图片搜索、游戏详情 hero 视觉、视差滚动、缓存失效时间戳，都有现成模式，不要局部重写
+- 涉及复杂多步骤交互时，优先抽成 composable，例如 `useAddGameFlow`、`useAutoSave`、`useWindowControls`
+
+## 23. 构建、发布、CI/CD 补充
+
+- `dotnet build` 会自动触发前端构建；仅构建后端时用 `-p:SkipFrontendBuild=true`
+- `build.ps1` 负责本地完整构建，但不负责生成所有 CI 产物；CI 逻辑在 workflow 内独立实现
+- 版本号应通过 `InformationalVersion` 传递，不要滥用 `Version` 导致 `AssemblyVersion` 溢出问题
+- 当前发布是多文件模式，不再使用单文件发布；相关 `ExcludeFromSingleFile` 历史逻辑已失效
+- `SatelliteResourceLanguages=en`、WiX 的 `obj` 清理、PowerShell ZIP、组件 ZIP、manifest 命名、edition 构建参数等都已成为既定约束
+- WiX/MSI 细节包括：每用户安装、`MajorUpgrade` 调度、可选删除 `%AppData%\XUnityToolkit`、注册表同步、许可证文本一致性、中文字符串本地化方式、`SuppressValidation=true`
+- CI 包含可复用的 `build.yml`、发布 `release.yml`、依赖巡检 `dep-check.yml`
+- GitHub Actions 中的 AOT 发布、`$GITHUB_OUTPUT` 多行写法、`gh release create --notes-file`、detached HEAD 场景下回写 `main` 等问题都属于既有坑位
+- `dep-check.yml` 只跟踪 BepInEx 与 XUnity；`llama.cpp` 版本目前仍然固定人工维护
+
+## 24. 旧文档状态
+
+- 历史 `CLAUDE.md` 已全部删除
+- 原先三份 `CLAUDE.md` 的有效内容已并入本 `AGENTS.md`
+- 后续若有人重新添加 `CLAUDE.md`，应默认视为重复文档并回收至 `AGENTS.md`
+
+## 25. 插件健康状态补充
+
+- `PluginHealthCheckService` 现已改为 settings-aware 的异步检查流程：被动检查 `GET /api/games/{id}/health-check` 与主动验证 `POST /api/games/{id}/health-check/verify` 都统一走 `CheckAsync(...)`
+- 插件健康状态不再只靠 BepInEx 日志猜测原因；检查顺序调整为：文件完整性 -> 工具箱 AI 状态 -> 日志归类 -> 验证后的工具箱连通性
+- 当工具箱侧存在可明确识别的问题时，后端会新增 `toolboxAiState` 健康项，前端展示名称为“工具箱 AI 翻译”，状态固定为 `Warning`
+- `toolboxAiState` 当前覆盖三类场景：
+  - `AiTranslation.Enabled == false`
+  - 当前没有任何可用端点，判定规则与 `LlmTranslationService` 保持一致：`Enabled && ApiKey 非空`
+  - 当前 `ActiveMode == "local"` 且 `LocalLlmService.IsRunning == false`
+- 对于 `toolboxAiState`，详情文案必须直接指出工具箱侧问题，不允许再使用“可能不完全兼容 XUnity”这类兼容性描述
+- 日志错误归类已拆分为两层：
+  - 真正的 XUnity 兼容性/Hook 异常：只在没有明确工具箱 AI 阻塞证据时才给出“当前游戏版本可能不完全兼容 XUnity”
+  - 泛化的翻译失败：如 `Failed: 'Continue'`、`Failed: 'Credits'`、`Cannot translate`、`AutoTranslator failed`，在存在工具箱 AI 问题时必须归因到工具箱侧，不得误标为 XUnity 兼容性问题
+- `PluginHealthReport`、`HealthCheckItem`、`HealthCheckDetail` 的 JSON 结构本次未扩展；兼容性要求是只新增 `checks[].id = toolboxAiState`，不要再额外添加新字段
+- `PluginHealthCard.vue` 目前对异常项使用固定排序：
+  - `toolboxAiState` 最先显示
+  - `logErrors` 次之
+  - 其他异常项保持原始顺序
+- 插件健康状态属于文件共享读 + 被动分析路径；允许读取 `settings.json`、本地 LLM 运行状态和 `BepInEx/LogOutput.log`，但不要引入任何会加载用户插件 DLL、修改游戏文件、或为分析而重写配置文件的实现
