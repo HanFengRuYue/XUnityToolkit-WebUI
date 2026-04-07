@@ -76,7 +76,7 @@ XUnityToolkit-WebUI 是一个面向 Unity 游戏汉化/翻译工作流的 Window
 
 - `TranslatorEndpoint`: `net35`, C# 7.3
 - `Updater`: `net10.0`, `PublishAot=true`
-- `Installer`: WixToolset v4
+- `Installer`: WixToolset v6（当前工程为 `WixToolset.Sdk/6.0.2`）
 
 ## 5. 常用命令
 
@@ -165,12 +165,14 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 
 - 默认：`%AppData%\XUnityToolkit`
 - 可通过配置键 `AppData:Root` 覆盖
-- 路径集中定义在 `XUnityToolkit-WebUI/Infrastructure/AppDataPaths.cs`
+- 主要路径集中定义在 `XUnityToolkit-WebUI/Infrastructure/AppDataPaths.cs`
+- 更新暂存目录 `update-staging/` 当前由 `XUnityToolkit-WebUI/Services/UpdateService.cs` 直接管理
 
 关键文件/目录：
 
 - `library.json`
 - `settings.json`
+- `local-llm-settings.json`
 - `glossaries/`
 - `script-tags/`
 - `translation-memory/`
@@ -186,8 +188,10 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `generated-fonts/`
 - `font-backups/`
 - `custom-fonts/`
+  当前字体替换自定义源按 `custom-fonts/<gameId>/ttf/` 与 `custom-fonts/<gameId>/tmp/` 分目录管理
 - `backups/`
 - `logs/`
+- `update-staging/`
 
 安全相关：
 
@@ -362,6 +366,9 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - 支持扫描并替换 TMP_FontAsset
 - 也支持扫描 Unity Legacy `Font` 资源，但当前只允许替换 `dynamicEmbedded` 类型的 TTF/OTF
 - 带 `CharacterRects` 的静态图集字体、依赖 `FontNames` 的系统回退字体、以及模式不明的 Legacy `Font` 会明确标记为不支持，避免误报替换成功
+- 自定义替换源按游戏隔离，目录为 `custom-fonts/<gameId>/ttf/` 与 `custom-fonts/<gameId>/tmp/`，支持累计上传多个源，不再按类型整类覆盖
+- 替换请求按逐字体 `sourceId` 传递，允许同一次操作里为不同 TMP / TTF 字体选择不同默认源或自定义源
+- 状态接口会返回 `availableSources` 与 `usedSources`；备份清单中的 `ReplacedFontEntry` 会记录 `SourceId` 与 `SourceDisplayName`
 - 替换前会建立备份，恢复依赖备份清单和哈希
 
 字体生成：
@@ -552,7 +559,8 @@ CI：
 - 脚本标签：`GET /api/script-tag-presets`、`GET/PUT /api/games/{id}/script-tags`
 - 资源提取与预翻译：`POST /api/games/{id}/extract-assets`、`GET/DELETE /api/games/{id}/extracted-texts`、`POST /api/games/{id}/pre-translate`、`GET /api/games/{id}/pre-translate/status`、`POST /api/games/{id}/pre-translate/cancel`、`GET/PUT /api/games/{id}/pre-translate/regex`
 - 翻译编辑器：`GET/PUT /api/games/{id}/translation-editor`、`POST /api/games/{id}/translation-editor/import`、`GET /api/games/{id}/translation-editor/export`
-- 字体替换：`POST /api/games/{id}/font-replacement/scan`、`POST /api/games/{id}/font-replacement/replace`、`POST /api/games/{id}/font-replacement/restore`、`GET /api/games/{id}/font-replacement/status`、`POST /api/games/{id}/font-replacement/upload`、`POST /api/games/{id}/font-replacement/upload-from-path`、`POST /api/games/{id}/font-replacement/cancel`、`DELETE /api/games/{id}/font-replacement/custom-font?type={ttf|tmp}`
+- 字体替换：`POST /api/games/{id}/font-replacement/scan`、`POST /api/games/{id}/font-replacement/replace`、`POST /api/games/{id}/font-replacement/restore`、`GET /api/games/{id}/font-replacement/status`、`POST /api/games/{id}/font-replacement/upload`、`POST /api/games/{id}/font-replacement/upload-from-path`、`POST /api/games/{id}/font-replacement/cancel`、`DELETE /api/games/{id}/font-replacement/custom-fonts/{sourceId}`
+- 字体替换上传端点现在要求显式区分 `kind={ttf|tmp}`；状态端点会返回默认源/自定义源列表与已使用源摘要；替换请求中的 `fonts[]` 需要携带逐字体 `sourceId`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
 - BepInEx 日志与健康：`/api/games/{id}/bepinex-log`、`/api/games/{id}/health-check`
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
@@ -565,6 +573,7 @@ CI：
 ## 20. 同步点与模型补充
 
 - `InstallStep`、`UpdateInfo`、`VersionInfo`、`DataPathInfo`、`BatchAddResult`、`UnityGameInfo`、`FileExplorer`、`FontReplacement`、`FontGeneration`、`PluginHealth`、`BepInExPlugin`、`LocalLlmSettings`、`BuiltInModelInfo`、`LlamaStatus` 等模型，新增字段时都必须同时同步 C# 模型、TS 类型、相关 API、对应前端页面
+- 字体替换链路改动时，要一起核对 `FontReplacementRequest.Fonts[].SourceId`、`ReplacementSource` / `ReplacementSourceSet`、`FontReplacementStatus.AvailableSources` / `UsedSources`、`ReplacedFontEntry.SourceId` / `SourceDisplayName`，并同步 `FontReplacement.cs`、`src/api/types.ts`、`FontReplacementView.vue`、`FontReplacementEndpoints.cs`、`FontReplacementService.cs`
 - `SettingsView.vue` 的默认 `AppSettings`、`AiTranslationView.vue` 的 `DEFAULT_AI_TRANSLATION`、后端 `AppSettings`/`AiTranslationSettings` 默认值必须保持一致
 - 数值型设置新增字段时，要同步后端的 `Math.Clamp` 逻辑，否则前端与后端会出现边界不一致
 - `TermEntry` 的 `Type`/`Category`/`Source`、`ScriptTagRule`/`ScriptTagConfig`、`TranslationStats`/`RecentTranslation`/`TranslationError`、`PreTranslationStatus`/`PreTranslationCacheStats` 都属于容易漏同步的高频模型

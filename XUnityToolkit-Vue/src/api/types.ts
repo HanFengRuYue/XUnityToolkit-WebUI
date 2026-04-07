@@ -292,6 +292,8 @@ export interface TmpFontStatus {
 
 // ── Font Replacement ──
 
+export type TtfMode = 'dynamicEmbedded' | 'staticAtlas' | 'osFallback' | 'unknown'
+
 export interface FontInfo {
   name: string
   pathId: number
@@ -299,6 +301,8 @@ export interface FontInfo {
   isInBundle: boolean
   fontType: 'TMP' | 'TTF'
   isSupported: boolean
+  replacementSupported: boolean
+  unsupportedReason?: string | null
   // TMP-specific
   atlasCount: number
   glyphCount: number
@@ -306,17 +310,37 @@ export interface FontInfo {
   atlasWidth: number
   atlasHeight: number
   // TTF-specific
+  ttfMode?: TtfMode | null
   fontDataSize: number
+  characterRectCount: number
+  fontNamesCount: number
+  hasTextureRef: boolean
 }
 
-export interface FontTarget {
+export interface FontReplacementTarget {
   pathId: number
   assetFile: string
+  sourceId: string
+}
+
+export interface ReplacementSource {
+  id: string
+  kind: 'TMP' | 'TTF'
+  displayName: string
+  fileName: string
+  origin: 'default' | 'custom'
+  isDefault: boolean
+  fileSize: number
+  uploadedAt?: string | null
+}
+
+export interface ReplacementSourceSet {
+  tmp: ReplacementSource[]
+  ttf: ReplacementSource[]
 }
 
 export interface FontReplacementRequest {
-  fonts: FontTarget[]
-  customFontPath?: string
+  fonts: FontReplacementTarget[]
 }
 
 export interface FontReplacementStatus {
@@ -326,8 +350,8 @@ export interface FontReplacementStatus {
   isExternallyRestored: boolean
   replacedAt?: string
   fontSource?: string
-  customTtfFileName?: string
-  customTmpFileName?: string
+  availableSources: ReplacementSourceSet
+  usedSources: string[]
 }
 
 export interface FontReplacementResult {

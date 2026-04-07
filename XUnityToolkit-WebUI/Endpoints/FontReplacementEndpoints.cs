@@ -10,25 +10,35 @@ namespace XUnityToolkit_WebUI.Endpoints;
 public static class FontReplacementEndpoints
 {
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellationTokens = new();
+    private sealed record FontUploadFromPathRequest(string FilePath, string Kind);
+
+    private static string? NormalizeUploadKind(string? kind) => kind?.Trim().ToLowerInvariant() switch
+    {
+        "ttf" => "TTF",
+        "tmp" => "TMP",
+        _ => null
+    };
+
+    private static bool IsTtfOrOtf(byte[] magic) =>
+        (magic[0] == 0x00 && magic[1] == 0x01 && magic[2] == 0x00 && magic[3] == 0x00)
+        || (magic[0] == 0x4F && magic[1] == 0x54 && magic[2] == 0x54 && magic[3] == 0x4F);
 
     public static void MapFontReplacementEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/games/{id}/font-replacement");
 
-        // POST .../scan
         group.MapPost("/scan", async (string id, GameLibraryService library,
             FontReplacementService fontReplacementService, CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
             if (game.DetectedInfo is null)
-                return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
+                return Results.BadRequest(ApiResult.Fail("Unity version information was not detected."));
 
             var fonts = await fontReplacementService.ScanFontsAsync(game.GamePath, game.DetectedInfo, ct);
             return Results.Ok(ApiResult<List<FontInfo>>.Ok(fonts));
         });
 
-        // POST .../replace
         group.MapPost("/replace", async (string id, FontReplacementRequest request,
             GameLibraryService library, FontReplacementService fontReplacementService,
             AppDataPaths paths, IHubContext<InstallProgressHub> hubContext, CancellationToken ct) =>
@@ -36,15 +46,15 @@ public static class FontReplacementEndpoints
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
             if (game.DetectedInfo is null)
-                return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
+                return Results.BadRequest(ApiResult.Fail("Unity version information was not detected."));
 
-            // Prevent concurrent replacements for the same game (atomic guard)
             var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             if (!_cancellationTokens.TryAdd(id, cts))
             {
                 cts.Dispose();
-                return Results.Conflict(ApiResult.Fail("字体替换正在进行中，请等待完成或先取消。"));
+                return Results.Conflict(ApiResult.Fail("A font replacement task is already running for this game."));
             }
+
             try
             {
                 var progress = new Progress<FontReplacementProgress>(async p =>
@@ -52,20 +62,25 @@ public static class FontReplacementEndpoints
                     await hubContext.Clients.Group($"font-replacement-{id}")
                         .SendAsync("fontReplacementProgress", p, CancellationToken.None);
                 });
-                // Validate CustomFontPath: must be within the game's custom font directory
-                string? validatedFontPath = null;
+
                 if (request.CustomFontPath is not null)
                 {
                     var customDir = Path.GetFullPath(paths.GetCustomFontDirectory(id));
                     var resolved = Path.GetFullPath(request.CustomFontPath);
                     if (!resolved.StartsWith(customDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
                         && !resolved.Equals(customDir, StringComparison.OrdinalIgnoreCase))
-                        return Results.BadRequest(ApiResult.Fail("自定义字体路径不安全"));
-                    validatedFontPath = resolved;
+                    {
+                        return Results.BadRequest(ApiResult.Fail("The custom font path is not allowed."));
+                    }
                 }
+
                 var result = await fontReplacementService.ReplaceFontsAsync(
-                    game.GamePath, id, game.DetectedInfo,
-                    request.Fonts, validatedFontPath, progress, cts.Token);
+                    game.GamePath,
+                    id,
+                    game.DetectedInfo,
+                    request.Fonts,
+                    progress,
+                    cts.Token);
                 return Results.Ok(ApiResult<FontReplacementResult>.Ok(result));
             }
             finally
@@ -75,7 +90,6 @@ public static class FontReplacementEndpoints
             }
         });
 
-        // POST .../restore
         group.MapPost("/restore", async (string id, GameLibraryService library,
             FontReplacementService fontReplacementService) =>
         {
@@ -85,171 +99,123 @@ public static class FontReplacementEndpoints
             return Results.Ok(ApiResult.Ok());
         });
 
-        // GET .../status
         group.MapGet("/status", async (string id, GameLibraryService library,
             FontReplacementService fontReplacementService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
-            var status = await fontReplacementService.GetStatusAsync(game.GamePath, id);
+            var status = await fontReplacementService.GetStatusAsync(
+                game.GamePath,
+                id,
+                game.DetectedInfo?.UnityVersion);
             return Results.Ok(ApiResult<FontReplacementStatus>.Ok(status));
         });
 
-        // POST .../upload
         group.MapPost("/upload", async (string id, HttpRequest request,
-            GameLibraryService library, FontReplacementService fontReplacementService,
-            AppDataPaths appDataPaths) =>
+            GameLibraryService library, FontReplacementService fontReplacementService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
             if (!request.HasFormContentType)
-                return Results.BadRequest(ApiResult.Fail("请使用 multipart/form-data 上传。"));
+                return Results.BadRequest(ApiResult.Fail("Please upload the file with multipart/form-data."));
+
             var form = await request.ReadFormAsync();
             var file = form.Files.FirstOrDefault();
             if (file is null || file.Length == 0)
-                return Results.BadRequest(ApiResult.Fail("未选择文件。"));
+                return Results.BadRequest(ApiResult.Fail("No file was selected."));
             if (file.Length > 50 * 1024 * 1024)
-                return Results.BadRequest(ApiResult.Fail("文件大小超过 50MB 限制。"));
+                return Results.BadRequest(ApiResult.Fail("File size exceeds the 50 MB limit."));
 
-            var customDir = appDataPaths.GetCustomFontDirectory(id);
-            Directory.CreateDirectory(customDir);
+            var requestedKind = NormalizeUploadKind(form["kind"].FirstOrDefault());
+            if (requestedKind is null)
+                return Results.BadRequest(ApiResult.Fail("Specify the upload kind with kind=ttf or kind=tmp."));
 
-            var safeFileName = Path.GetFileName(file.FileName);
-            var destPath = Path.Combine(customDir, safeFileName);
-
-            // Read first 4 bytes for magic detection
             byte[] magic = new byte[4];
             using (var peekStream = file.OpenReadStream())
                 await peekStream.ReadExactlyAsync(magic);
 
-            bool isTtfOrOtf = (magic[0] == 0x00 && magic[1] == 0x01 && magic[2] == 0x00 && magic[3] == 0x00) // TTF
-                            || (magic[0] == 0x4F && magic[1] == 0x54 && magic[2] == 0x54 && magic[3] == 0x4F); // OTF "OTTO"
+            var detectedKind = IsTtfOrOtf(magic) ? "TTF" : "TMP";
+            if (!string.Equals(requestedKind, detectedKind, StringComparison.Ordinal))
+                return Results.BadRequest(ApiResult.Fail("The uploaded file type does not match the selected kind."));
 
-            if (isTtfOrOtf)
-            {
-                // Delete existing TTF/OTF custom fonts only (preserve AssetBundle custom fonts)
-                foreach (var existing in Directory.GetFiles(customDir))
-                {
-                    var ext = Path.GetExtension(existing).ToLowerInvariant();
-                    if (ext is ".ttf" or ".otf")
-                        File.Delete(existing);
-                }
+            var destinationPath = fontReplacementService.GetUniqueCustomSourcePath(
+                id,
+                requestedKind,
+                Path.GetFileName(file.FileName));
 
-                await using var stream = File.Create(destPath);
+            await using (var stream = File.Create(destinationPath))
                 await file.CopyToAsync(stream);
-            }
-            else
+
+            if (detectedKind == "TMP" && !fontReplacementService.ValidateCustomFont(destinationPath))
             {
-                // AssetBundle: delete existing AssetBundle custom fonts only
-                foreach (var existing in Directory.GetFiles(customDir))
-                {
-                    var ext = Path.GetExtension(existing).ToLowerInvariant();
-                    if (ext is not ".ttf" and not ".otf")
-                        File.Delete(existing);
-                }
-
-                {
-                    await using var stream = File.Create(destPath);
-                    await file.CopyToAsync(stream);
-                }
-
-                if (!fontReplacementService.ValidateCustomFont(destPath))
-                {
-                    File.Delete(destPath);
-                    return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
-                }
+                File.Delete(destinationPath);
+                return Results.BadRequest(ApiResult.Fail("Invalid TMP font bundle: TMP_FontAsset was not found."));
             }
 
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
 
-        // POST .../upload-from-path
-        group.MapPost("/upload-from-path", async (string id, UploadFromPathRequest request,
-            GameLibraryService library, FontReplacementService fontReplacementService,
-            AppDataPaths appDataPaths) =>
+        group.MapPost("/upload-from-path", async (string id, FontUploadFromPathRequest request,
+            GameLibraryService library, FontReplacementService fontReplacementService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
 
             if (string.IsNullOrWhiteSpace(request.FilePath))
-                return Results.BadRequest(ApiResult.Fail("请选择文件"));
+                return Results.BadRequest(ApiResult.Fail("Please choose a file."));
             if (!File.Exists(request.FilePath))
-                return Results.BadRequest(ApiResult.Fail("文件不存在"));
+                return Results.BadRequest(ApiResult.Fail("The selected file does not exist."));
+
+            var requestedKind = NormalizeUploadKind(request.Kind);
+            if (requestedKind is null)
+                return Results.BadRequest(ApiResult.Fail("Specify the upload kind with kind=ttf or kind=tmp."));
 
             var info = new FileInfo(request.FilePath);
             if (info.Length > 50 * 1024 * 1024)
-                return Results.BadRequest(ApiResult.Fail("文件大小超过 50MB 限制。"));
+                return Results.BadRequest(ApiResult.Fail("File size exceeds the 50 MB limit."));
 
-            var customDir = appDataPaths.GetCustomFontDirectory(id);
-            Directory.CreateDirectory(customDir);
-
-            var safeFileName = Path.GetFileName(request.FilePath);
-            var destPath = Path.Combine(customDir, safeFileName);
-
-            // Read first 4 bytes for magic detection
             byte[] magic = new byte[4];
             await using (var peekStream = File.OpenRead(request.FilePath))
                 await peekStream.ReadExactlyAsync(magic);
 
-            bool isTtfOrOtf = (magic[0] == 0x00 && magic[1] == 0x01 && magic[2] == 0x00 && magic[3] == 0x00)
-                            || (magic[0] == 0x4F && magic[1] == 0x54 && magic[2] == 0x54 && magic[3] == 0x4F);
+            var detectedKind = IsTtfOrOtf(magic) ? "TTF" : "TMP";
+            if (!string.Equals(requestedKind, detectedKind, StringComparison.Ordinal))
+                return Results.BadRequest(ApiResult.Fail("The uploaded file type does not match the selected kind."));
 
-            if (isTtfOrOtf)
-            {
-                foreach (var existing in Directory.GetFiles(customDir))
-                {
-                    var ext = Path.GetExtension(existing).ToLowerInvariant();
-                    if (ext is ".ttf" or ".otf")
-                        File.Delete(existing);
-                }
-                File.Copy(request.FilePath, destPath, overwrite: true);
-            }
-            else
-            {
-                foreach (var existing in Directory.GetFiles(customDir))
-                {
-                    var ext = Path.GetExtension(existing).ToLowerInvariant();
-                    if (ext is not ".ttf" and not ".otf")
-                        File.Delete(existing);
-                }
-                File.Copy(request.FilePath, destPath, overwrite: true);
+            var destinationPath = fontReplacementService.GetUniqueCustomSourcePath(
+                id,
+                requestedKind,
+                Path.GetFileName(request.FilePath));
+            File.Copy(request.FilePath, destinationPath, overwrite: false);
 
-                if (!fontReplacementService.ValidateCustomFont(destPath))
-                {
-                    File.Delete(destPath);
-                    return Results.BadRequest(ApiResult.Fail("无效的字体文件：未找到 TMP_FontAsset。"));
-                }
+            if (detectedKind == "TMP" && !fontReplacementService.ValidateCustomFont(destinationPath))
+            {
+                File.Delete(destinationPath);
+                return Results.BadRequest(ApiResult.Fail("Invalid TMP font bundle: TMP_FontAsset was not found."));
             }
 
             return Results.Ok(ApiResult.Ok());
         });
 
-        // DELETE .../custom-font?type={ttf|tmp}
-        group.MapDelete("/custom-font", (string id, string? type, AppDataPaths appDataPaths) =>
+        group.MapDelete("/custom-fonts/{sourceId}", (string id, string sourceId,
+            FontReplacementService fontReplacementService) =>
         {
             if (!Guid.TryParse(id, out _))
                 return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
 
-            var customDir = appDataPaths.GetCustomFontDirectory(id);
-            if (Directory.Exists(customDir))
+            if (sourceId.Equals("tmp-default", StringComparison.OrdinalIgnoreCase)
+                || sourceId.Equals("ttf-default", StringComparison.OrdinalIgnoreCase))
             {
-                foreach (var file in Directory.GetFiles(customDir))
-                {
-                    var ext = Path.GetExtension(file).ToLowerInvariant();
-                    var isTtfOrOtf = ext is ".ttf" or ".otf";
-
-                    if (type == "ttf" && isTtfOrOtf)
-                        File.Delete(file);
-                    else if (type == "tmp" && !isTtfOrOtf)
-                        File.Delete(file);
-                    else if (type is null)
-                        File.Delete(file);
-                }
+                return Results.BadRequest(ApiResult.Fail("Default font sources cannot be deleted."));
             }
+
+            if (!fontReplacementService.TryResolveCustomSourcePath(id, sourceId, out var path, out var error))
+                return Results.BadRequest(ApiResult.Fail(error ?? "Custom font source was not found."));
+
+            File.Delete(path!);
             return Results.Ok(ApiResult.Ok());
         });
 
-        // POST .../cancel — only cancel, /replace's finally block owns disposal
         group.MapPost("/cancel", (string id) =>
         {
             if (_cancellationTokens.TryGetValue(id, out var cts))

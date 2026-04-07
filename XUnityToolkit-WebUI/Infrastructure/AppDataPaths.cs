@@ -53,6 +53,12 @@ public sealed class AppDataPaths(IConfiguration config)
     public string GetCustomFontDirectory(string gameId) =>
         Path.Combine(CustomFontsDirectory, gameId);
 
+    public string GetCustomTtfFontDirectory(string gameId) =>
+        Path.Combine(GetCustomFontDirectory(gameId), "ttf");
+
+    public string GetCustomTmpFontDirectory(string gameId) =>
+        Path.Combine(GetCustomFontDirectory(gameId), "tmp");
+
     public string GlossaryFile(string gameId) =>
         Path.Combine(GlossariesDirectory, $"{gameId}.json");
 
