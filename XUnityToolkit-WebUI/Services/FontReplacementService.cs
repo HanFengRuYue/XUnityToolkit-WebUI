@@ -55,6 +55,62 @@ public sealed class FontReplacementService(
         ReplacementSource Source,
         byte[] FontBytes);
 
+    private sealed class AssetLookupCache
+    {
+        public Dictionary<long, AssetFileInfo> AssetsByPathId { get; } = new();
+        public Dictionary<long, AssetFileInfo> MonoBehavioursByPathId { get; } = new();
+        public Dictionary<long, AssetFileInfo> FontsByPathId { get; } = new();
+        public Dictionary<long, AssetFileInfo> Texture2DsByPathId { get; } = new();
+
+        public static AssetLookupCache Create(AssetsFile afile)
+        {
+            var cache = new AssetLookupCache();
+            foreach (var assetInfo in afile.Metadata.AssetInfos)
+            {
+                cache.AssetsByPathId[assetInfo.PathId] = assetInfo;
+                switch ((AssetClassID)assetInfo.TypeId)
+                {
+                    case AssetClassID.MonoBehaviour:
+                        cache.MonoBehavioursByPathId[assetInfo.PathId] = assetInfo;
+                        break;
+                    case AssetClassID.Font:
+                        cache.FontsByPathId[assetInfo.PathId] = assetInfo;
+                        break;
+                    case AssetClassID.Texture2D:
+                        cache.Texture2DsByPathId[assetInfo.PathId] = assetInfo;
+                        break;
+                }
+            }
+
+            return cache;
+        }
+
+        public void Track(AssetFileInfo assetInfo)
+        {
+            AssetsByPathId[assetInfo.PathId] = assetInfo;
+            if (assetInfo.TypeId == (int)AssetClassID.Texture2D)
+                Texture2DsByPathId[assetInfo.PathId] = assetInfo;
+        }
+    }
+
+    private static void ReportProgress(
+        IProgress<FontReplacementProgress>? progress,
+        string phase,
+        int current,
+        int total,
+        string? currentFile = null,
+        string? message = null)
+    {
+        progress?.Report(new FontReplacementProgress
+        {
+            Phase = phase,
+            Current = current,
+            Total = total,
+            CurrentFile = currentFile,
+            Message = message
+        });
+    }
+
     public async Task<List<FontInfo>> ScanFontsAsync(
         string gamePath, UnityGameInfo gameInfo, CancellationToken ct = default)
     {
@@ -92,7 +148,7 @@ public sealed class FontReplacementService(
         if (assetFiles.Count == 0 && bundleFiles.Count == 0)
             throw new FileNotFoundException("No asset files found in game data directory.");
 
-        logger.LogInformation("字体扫描: 找到 {AssetCount} 个资产文�? {BundleCount} �?Bundle 文件: {Path}",
+        logger.LogInformation("字体扫描: 找到 {AssetCount} 个资产文�? {BundleCount} �?Bundle 文件: {Path}",
             assetFiles.Count, bundleFiles.Count, dataPath);
 
         return await Task.Run(() =>
@@ -220,8 +276,8 @@ public sealed class FontReplacementService(
                 // If type tree is embedded, we can still read without class database
                 if (!afile.Metadata.TypeTreeEnabled)
                 {
-                    logger.LogDebug("无法加载类数据库且无内嵌类型�? 跳过 MonoBehaviour 扫描: {File}", fileName);
-                    // Don't return �?still try to scan Font assets below
+                    logger.LogDebug("无法加载类数据库且无内嵌类型�? 跳过 MonoBehaviour 扫描: {File}", fileName);
+                    // Don't return �?still try to scan Font assets below
                 }
             }
         }
@@ -262,7 +318,7 @@ public sealed class FontReplacementService(
                             ReplacementSupported = version == "1.1.0",
                             UnsupportedReason = version == "1.1.0"
                                 ? null
-                                : $"TMP FontAsset version {version} is not supported for replacement."
+                                : $"TMP FontAsset \u7248\u672C {version} \u6682\u4E0D\u652F\u6301\u66FF\u6362\u3002"
                         });
                         continue;
                     }
@@ -283,13 +339,13 @@ public sealed class FontReplacementService(
                             GlyphCount = glyphInfoList["Array"].Children.Count,
                             IsSupported = false, // v1.0.0 not supported
                             ReplacementSupported = false,
-                            UnsupportedReason = "TMP FontAsset v1.0.0 is not supported for replacement."
+                            UnsupportedReason = "TMP FontAsset v1.0.0 \u6682\u4E0D\u652F\u6301\u66FF\u6362\u3002"
                         });
                     }
                 }
                 catch
                 {
-                    // MonoBehaviour deserialization can fail �?skip silently
+                    // MonoBehaviour deserialization can fail �?skip silently
                 }
             }
         }
@@ -345,7 +401,7 @@ public sealed class FontReplacementService(
             return new TtfFontAnalysis(
                 TtfModeStaticAtlas,
                 false,
-                "Static Legacy Font relies on pre-baked glyph atlases and is not supported for replacement.",
+                "\u8BE5\u5B57\u4F53\u4F7F\u7528\u9759\u6001\u56FE\u96C6\u5B57\u5F62\uFF0C\u4F9D\u8D56\u9884\u70D8\u7119\u56FE\u96C6\uFF0C\u6682\u4E0D\u652F\u6301\u66FF\u6362\u3002",
                 fontDataSize,
                 characterRectCount,
                 fontNamesCount,
@@ -369,7 +425,7 @@ public sealed class FontReplacementService(
             return new TtfFontAnalysis(
                 TtfModeOsFallback,
                 false,
-                "This Font relies on Font Names or OS fallback fonts and is not supported for replacement.",
+                "\u8BE5\u5B57\u4F53\u4F9D\u8D56\u5B57\u4F53\u540D\u79F0\u6620\u5C04\u6216\u64CD\u4F5C\u7CFB\u7EDF\u56DE\u9000\u5B57\u4F53\uFF0C\u6682\u4E0D\u652F\u6301\u66FF\u6362\u3002",
                 fontDataSize,
                 characterRectCount,
                 fontNamesCount,
@@ -379,7 +435,7 @@ public sealed class FontReplacementService(
         return new TtfFontAnalysis(
             TtfModeUnknown,
             false,
-            "Unable to determine how this Font is used at runtime. Replacement is disabled.",
+            "\u6682\u65F6\u65E0\u6CD5\u5224\u65AD\u8BE5\u5B57\u4F53\u5728\u8FD0\u884C\u65F6\u7684\u4F7F\u7528\u65B9\u5F0F\uFF0C\u5DF2\u7981\u7528\u66FF\u6362\u3002",
             fontDataSize,
             characterRectCount,
             fontNamesCount,
@@ -463,7 +519,7 @@ public sealed class FontReplacementService(
                 try
                 {
                     manager.MonoTempGenerator = new MonoCecilTempGenerator(managedPath);
-                    logger.LogInformation("已设�?Mono 模板生成�? {Path}", managedPath);
+                    logger.LogInformation("已设�?Mono 模板生成�? {Path}", managedPath);
                     return;
                 }
                 catch (Exception ex)
@@ -838,7 +894,7 @@ public sealed class FontReplacementService(
             }
         }
         fontFile ??= tmpFontService.ResolveFontFile(gameInfo.UnityVersion);
-        // fontFile may be null if no TMP bundles available �?OK if only TTF fonts selected
+        // fontFile may be null if no TMP bundles available �?OK if only TTF fonts selected
 
         // === Resolve TTF source (raw bytes) ===
         byte[]? ttfSourceBytes = null;
@@ -887,7 +943,7 @@ public sealed class FontReplacementService(
             fontSourceDisplay = string.IsNullOrEmpty(fontSourceDisplay)
                 ? ttfSourceName
                 : $"{fontSourceDisplay} + {ttfSourceName}";
-        logger.LogInformation("字体替换开�? {Count} 个字�? 源字�? {Font}", fonts.Length, fontSourceDisplay);
+        logger.LogInformation("字体替换开�? {Count} 个字�? 源字�? {Font}", fonts.Length, fontSourceDisplay);
 
         await Task.Run(() =>
         {
@@ -979,7 +1035,7 @@ public sealed class FontReplacementService(
                         srcAtlasPages.Add(new SourceAtlasPage(srcEncodedData, srcTexFile.m_Width, srcTexFile.m_Height, srcTexFile.m_TextureFormat));
                     }
 
-                    logger.LogInformation("TMP 源字体已加载: {Glyphs} 个字�? {Pages} 页图�? 图集 {W}x{H}",
+                    logger.LogInformation("TMP 源字体已加载: {Glyphs} 个字�? {Pages} 页图�? 图集 {W}x{H}",
                         srcFontBase["m_GlyphTable"]["Array"].Children.Count, srcAtlasPages.Count,
                         srcAtlasPages[0].Width, srcAtlasPages[0].Height);
                 }
@@ -1009,7 +1065,7 @@ public sealed class FontReplacementService(
                     dstManager.UseTemplateFieldCache = true;
                     dstManager.UseMonoTemplateFieldCache = true;
 
-                    // Process bundles �?all entries within one bundle in a single load/compress cycle
+                    // Process bundles �?all entries within one bundle in a single load/compress cycle
                     foreach (var bundleGroup in bundleFileGroups)
                     {
                         ct.ThrowIfCancellationRequested();
@@ -1161,7 +1217,7 @@ public sealed class FontReplacementService(
         var failedFonts = new List<FailedFontEntry>();
 
         logger.LogInformation(
-            "瀛椾綋鏇挎崲寮€�? {Count} 涓瓧浣? 婧愬瓧浣? {Sources}",
+            "瀛椾綋鏇挎崲寮€�? {Count} 涓瓧浣? 婧愬瓧浣? {Sources}",
             fonts.Length,
             string.Join(", ", requestedSourceNames));
 
@@ -1209,12 +1265,12 @@ public sealed class FontReplacementService(
                         else
                         {
                             ttfSources[sourceId] = new TtfSourcePayload(source, File.ReadAllBytes(sourcePath));
-                            logger.LogInformation("TTF 婧愬瓧浣撳凡鍔犺�? {SourceName}", source.DisplayName);
+                            logger.LogInformation("TTF 婧愬瓧浣撳凡鍔犺�? {SourceName}", source.DisplayName);
                         }
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "鍔犺浇瀛椾綋婧愬け�? {SourceName}", source.DisplayName);
+                        logger.LogWarning(ex, "鍔犺浇瀛椾綋婧愬け�? {SourceName}", source.DisplayName);
                     }
                 }
 
@@ -1337,7 +1393,10 @@ public sealed class FontReplacementService(
                 gameName,
                 modifiedBundles,
                 gameId,
-                ct);
+                ct: ct,
+                progress: progress,
+                current: fonts.Length,
+                total: fonts.Length);
             catalogFiles.AddRange(clearedCatalogs);
         }
 
@@ -1378,12 +1437,7 @@ public sealed class FontReplacementService(
 
         if (failedFonts.Count > 0)
             logger.LogWarning("Font replacement partially failed for {Count} fonts.", failedFonts.Count);
-        progress?.Report(new FontReplacementProgress
-        {
-            Phase = "completed",
-            Current = fonts.Length,
-            Total = fonts.Length
-        });
+        ReportProgress(progress, "completed", fonts.Length, fonts.Length);
         return new FontReplacementResult
         {
             SuccessCount = successCount,
@@ -1419,6 +1473,7 @@ public sealed class FontReplacementService(
         {
             afileInst = manager.LoadAssetsFile(originalPath, loadDeps: false);
             var afile = afileInst.file;
+            var assetLookup = AssetLookupCache.Create(afile);
 
             LoadClassDatabase(manager, afile, unityVersion);
 
@@ -1428,8 +1483,7 @@ public sealed class FontReplacementService(
 
                 try
                 {
-                    var assetInfo = afile.GetAssetInfo(font.PathId);
-                    if (assetInfo is null)
+                    if (!assetLookup.AssetsByPathId.TryGetValue(font.PathId, out var assetInfo))
                     {
                         failedFonts.Add(new FailedFontEntry
                         {
@@ -1449,7 +1503,7 @@ public sealed class FontReplacementService(
                     if (assetInfo.TypeId == (int)AssetClassID.Font)
                     {
                         var source = GetTtfSourceOrThrow(font, availableSources, ttfSources);
-                        ReplaceSingleTtfFont(manager, afileInst, source.FontBytes, font.PathId, out fontName);
+                        ReplaceSingleTtfFont(manager, afileInst, source.FontBytes, font.PathId, out fontName, assetLookup);
                         fontType = SourceKindTtf;
                         sourceId = source.Source.Id;
                         sourceDisplayName = source.Source.DisplayName;
@@ -1457,7 +1511,7 @@ public sealed class FontReplacementService(
                     else
                     {
                         var source = GetTmpSourceOrThrow(font, availableSources, tmpSources);
-                        ReplaceSingleFont(manager, afileInst, source.FontBase, source.AtlasPages, font.PathId, out fontName);
+                        ReplaceSingleFont(manager, afileInst, source.FontBase, source.AtlasPages, font.PathId, out fontName, assetLookup);
                         fontType = SourceKindTmp;
                         sourceId = source.Source.Id;
                         sourceDisplayName = source.Source.DisplayName;
@@ -1473,13 +1527,7 @@ public sealed class FontReplacementService(
                     });
 
                     processedFonts++;
-                    progress?.Report(new FontReplacementProgress
-                    {
-                        Phase = "replacing",
-                        Current = processedFonts,
-                        Total = totalFonts,
-                        CurrentFile = $"{assetFileName} - {fontName}"
-                    });
+                    ReportProgress(progress, "replacing", processedFonts, totalFonts, $"{assetFileName} - {fontName}");
                 }
                 catch (Exception ex)
                 {
@@ -1491,25 +1539,20 @@ public sealed class FontReplacementService(
                         Error = ex.Message
                     });
                     processedFonts++;
-                    progress?.Report(new FontReplacementProgress
-                    {
-                        Phase = "replacing",
-                        Current = processedFonts,
-                        Total = totalFonts,
-                        CurrentFile = assetFileName
-                    });
+                    ReportProgress(progress, "replacing", processedFonts, totalFonts, assetFileName);
                 }
             }
 
             if (replacedFonts.Count > 0)
             {
-                progress?.Report(new FontReplacementProgress
-                {
-                    Phase = "saving",
-                    Current = processedFonts,
-                    Total = totalFonts,
-                    CurrentFile = assetFileName
-                });
+                logger.LogInformation("Writing modified asset file: {File}", assetFileName);
+                ReportProgress(
+                    progress,
+                    "saving",
+                    processedFonts,
+                    totalFonts,
+                    assetFileName,
+                    "正在写入资源文件，取消会在当前阶段结束后生效。");
 
                 var tmpPath = originalPath + ".tmp";
                 try
@@ -1569,7 +1612,7 @@ public sealed class FontReplacementService(
 
             if (!File.Exists(originalPath))
             {
-                logger.LogWarning("Bundle 鏂囦欢涓嶅瓨�? {File}", originalPath);
+                logger.LogWarning("Bundle 鏂囦欢涓嶅瓨�? {File}", originalPath);
                 return;
             }
         }
@@ -1631,6 +1674,7 @@ public sealed class FontReplacementService(
                 {
                     afileInst = manager.LoadAssetsFileFromBundle(bunInst, entryIndex, false);
                     var afile = afileInst.file;
+                    var assetLookup = AssetLookupCache.Create(afile);
 
                     LoadClassDatabase(manager, afile, unityVersion);
 
@@ -1642,8 +1686,7 @@ public sealed class FontReplacementService(
 
                         try
                         {
-                            var assetInfo = afile.GetAssetInfo(font.PathId);
-                            if (assetInfo is null)
+                            if (!assetLookup.AssetsByPathId.TryGetValue(font.PathId, out var assetInfo))
                             {
                                 failedFonts.Add(new FailedFontEntry
                                 {
@@ -1663,7 +1706,7 @@ public sealed class FontReplacementService(
                             if (assetInfo.TypeId == (int)AssetClassID.Font)
                             {
                                 var source = GetTtfSourceOrThrow(font, availableSources, ttfSources);
-                                ReplaceSingleTtfFont(manager, afileInst, source.FontBytes, font.PathId, out fontName);
+                                ReplaceSingleTtfFont(manager, afileInst, source.FontBytes, font.PathId, out fontName, assetLookup);
                                 fontType = SourceKindTtf;
                                 sourceId = source.Source.Id;
                                 sourceDisplayName = source.Source.DisplayName;
@@ -1671,7 +1714,7 @@ public sealed class FontReplacementService(
                             else
                             {
                                 var source = GetTmpSourceOrThrow(font, availableSources, tmpSources);
-                                ReplaceSingleFont(manager, afileInst, source.FontBase, source.AtlasPages, font.PathId, out fontName);
+                                ReplaceSingleFont(manager, afileInst, source.FontBase, source.AtlasPages, font.PathId, out fontName, assetLookup);
                                 fontType = SourceKindTmp;
                                 sourceId = source.Source.Id;
                                 sourceDisplayName = source.Source.DisplayName;
@@ -1687,13 +1730,7 @@ public sealed class FontReplacementService(
                             });
 
                             processedFonts++;
-                            progress?.Report(new FontReplacementProgress
-                            {
-                                Phase = "replacing",
-                                Current = processedFonts,
-                                Total = totalFonts,
-                                CurrentFile = $"{fullAssetFileName} - {fontName}"
-                            });
+                            ReportProgress(progress, "replacing", processedFonts, totalFonts, $"{fullAssetFileName} - {fontName}");
                         }
                         catch (Exception ex)
                         {
@@ -1705,13 +1742,7 @@ public sealed class FontReplacementService(
                                 Error = ex.Message
                             });
                             processedFonts++;
-                            progress?.Report(new FontReplacementProgress
-                            {
-                                Phase = "replacing",
-                                Current = processedFonts,
-                                Total = totalFonts,
-                                CurrentFile = fullAssetFileName
-                            });
+                            ReportProgress(progress, "replacing", processedFonts, totalFonts, fullAssetFileName);
                         }
                     }
 
@@ -1731,13 +1762,14 @@ public sealed class FontReplacementService(
 
             if (anyModified)
             {
-                progress?.Report(new FontReplacementProgress
-                {
-                    Phase = "saving",
-                    Current = processedFonts,
-                    Total = totalFonts,
-                    CurrentFile = bundleFileName
-                });
+                logger.LogInformation("Writing modified bundle: {Bundle}", bundleFileName);
+                ReportProgress(
+                    progress,
+                    "saving",
+                    processedFonts,
+                    totalFonts,
+                    bundleFileName,
+                    "正在写入 Bundle，取消会在当前阶段结束后生效。");
 
                 var tmpPath = originalPath + ".tmp";
                 var compressedPath = originalPath + ".lz4.tmp";
@@ -1750,6 +1782,15 @@ public sealed class FontReplacementService(
                     bunInst = null;
 
                     EnsureBackup(gameId, originalPath, backupFileName);
+
+                    logger.LogInformation("Recompressing modified bundle with LZ4: {Bundle}", bundleFileName);
+                    ReportProgress(
+                        progress,
+                        "saving",
+                        processedFonts,
+                        totalFonts,
+                        bundleFileName,
+                        "正在进行 LZ4 重压缩，取消会在当前阶段结束后生效。");
 
                     using var reReader = new AssetsFileReader(File.OpenRead(tmpPath));
                     var newBun = new AssetBundleFile();
@@ -1781,7 +1822,7 @@ public sealed class FontReplacementService(
                         try { File.Move(backupPath, originalPath); }
                         catch (Exception restoreEx)
                         {
-                            logger.LogError(restoreEx, "澶囦唤鎭㈠澶辫�? {Backup} �?{Original}", backupPath, originalPath);
+                            logger.LogError(restoreEx, "澶囦唤鎭㈠澶辫�? {Backup} �?{Original}", backupPath, originalPath);
                         }
                     }
                     throw;
@@ -1807,7 +1848,7 @@ public sealed class FontReplacementService(
         var originalPath = Path.Combine(dataPath, assetFileName);
         if (!File.Exists(originalPath))
         {
-            logger.LogWarning("资产文件不存�? {File}", originalPath);
+            logger.LogWarning("资产文件不存�? {File}", originalPath);
             return;
         }
 
@@ -1923,7 +1964,7 @@ public sealed class FontReplacementService(
                         ReplacedFonts = replacedFonts
                     });
 
-                    logger.LogInformation("已替�?{Count} 个字�? {File}", replacedFonts.Count, assetFileName);
+                    logger.LogInformation("已替�?{Count} 个字�? {File}", replacedFonts.Count, assetFileName);
                 }
                 catch
                 {
@@ -1963,7 +2004,7 @@ public sealed class FontReplacementService(
 
             if (!File.Exists(originalPath))
             {
-                logger.LogWarning("Bundle 文件不存�? {File}", originalPath);
+                logger.LogWarning("Bundle 文件不存�? {File}", originalPath);
                 return;
             }
         }
@@ -2008,7 +2049,7 @@ public sealed class FontReplacementService(
 
                 if (entryIndex < 0)
                 {
-                    logger.LogWarning("Bundle entry 不存�? {Entry} in {Bundle}", entryName, bundleFileName);
+                    logger.LogWarning("Bundle entry 不存�? {Entry} in {Bundle}", entryName, bundleFileName);
                     foreach (var font in fontsInEntry)
                     {
                         failedFonts.Add(new FailedFontEntry
@@ -2130,17 +2171,17 @@ public sealed class FontReplacementService(
                 var compressedPath = originalPath + ".lz4.tmp";
                 try
                 {
-                    // Write uncompressed bundle to temp file �?ONCE for all entries
+                    // Write uncompressed bundle to temp file �?ONCE for all entries
                     using (var writer = new AssetsFileWriter(tmpPath))
                         bunInst.file.Write(writer);
 
                     manager.UnloadBundleFile(bunInst);
                     bunInst = null;
 
-                    // Move original to backup (instant on same volume) �?after file handle released
+                    // Move original to backup (instant on same volume) �?after file handle released
                     EnsureBackup(gameId, originalPath, backupFileName);
 
-                    // Recompress with LZ4 �?ONCE
+                    // Recompress with LZ4 �?ONCE
                     using var reReader = new AssetsFileReader(File.OpenRead(tmpPath));
                     var newBun = new AssetBundleFile();
                     newBun.Read(reReader);
@@ -2159,7 +2200,7 @@ public sealed class FontReplacementService(
                         ReplacedFonts = allReplacedFonts
                     });
 
-                    logger.LogInformation("已替�?{Count} 个字�?(Bundle): {File}", allReplacedFonts.Count, bundleFileName);
+                    logger.LogInformation("已替�?{Count} 个字�?(Bundle): {File}", allReplacedFonts.Count, bundleFileName);
                 }
                 catch
                 {
@@ -2173,7 +2214,7 @@ public sealed class FontReplacementService(
                         try { File.Move(backupPath, originalPath); }
                         catch (Exception restoreEx)
                         {
-                            logger.LogError(restoreEx, "备份恢复失败: {Backup} �?{Original}", backupPath, originalPath);
+                            logger.LogError(restoreEx, "备份恢复失败: {Backup} �?{Original}", backupPath, originalPath);
                         }
                     }
                     throw;
@@ -2187,24 +2228,18 @@ public sealed class FontReplacementService(
         }
     }
 
-    private static void ReplaceSingleFont(
+    private void ReplaceSingleFont(
         AssetsManager manager, AssetsFileInstance afileInst,
         AssetTypeValueField srcFontBase,
         List<SourceAtlasPage> srcAtlasPages,
-        long targetPathId, out string fontName)
+        long targetPathId, out string fontName,
+        AssetLookupCache? lookup = null)
     {
         var afile = afileInst.file;
 
-        // Find the target MonoBehaviour by PathId
-        AssetFileInfo? targetMbInfo = null;
-        foreach (var mbInfo in afile.GetAssetsOfType(AssetClassID.MonoBehaviour))
-        {
-            if (mbInfo.PathId == targetPathId)
-            {
-                targetMbInfo = mbInfo;
-                break;
-            }
-        }
+        var targetMbInfo = lookup != null && lookup.MonoBehavioursByPathId.TryGetValue(targetPathId, out var cachedMonoBehaviour)
+            ? cachedMonoBehaviour
+            : afile.GetAssetsOfType(AssetClassID.MonoBehaviour).FirstOrDefault(mbInfo => mbInfo.PathId == targetPathId);
 
         if (targetMbInfo is null)
             throw new InvalidOperationException($"Target MonoBehaviour not found (PathId={targetPathId}).");
@@ -2215,31 +2250,27 @@ public sealed class FontReplacementService(
 
         fontName = dstFontBase["m_Name"].IsDummy ? "(unnamed)" : dstFontBase["m_Name"].AsString;
 
-        // Copy font data fields from source to destination
+        logger.LogDebug("Replacing TMP font {FontName} PathId={PathId}: copying font fields.", fontName, targetPathId);
         CopyFontFields(srcFontBase, dstFontBase);
 
-        // === Multi-atlas texture replacement ===
         var dstAtlasTextures = dstFontBase["m_AtlasTextures"];
         if (dstAtlasTextures.IsDummy || dstAtlasTextures["Array"].Children.Count == 0)
             throw new InvalidOperationException($"Target font '{fontName}' has no atlas textures.");
 
         var existingDstTexCount = dstAtlasTextures["Array"].Children.Count;
+        logger.LogDebug(
+            "Replacing TMP font {FontName} PathId={PathId}: updating {ReplaceCount} existing atlas textures.",
+            fontName,
+            targetPathId,
+            Math.Min(srcAtlasPages.Count, existingDstTexCount));
 
-        // Replace existing texture slots (min of source and destination count)
         var replaceCount = Math.Min(srcAtlasPages.Count, existingDstTexCount);
         for (int pageIdx = 0; pageIdx < replaceCount; pageIdx++)
         {
             var dstAtlasPathId = dstAtlasTextures["Array"][pageIdx]["m_PathID"].AsLong;
-
-            AssetFileInfo? dstTexInfo = null;
-            foreach (var texInfo in afile.GetAssetsOfType(AssetClassID.Texture2D))
-            {
-                if (texInfo.PathId == dstAtlasPathId)
-                {
-                    dstTexInfo = texInfo;
-                    break;
-                }
-            }
+            var dstTexInfo = lookup != null && lookup.Texture2DsByPathId.TryGetValue(dstAtlasPathId, out var cachedTexture)
+                ? cachedTexture
+                : afile.GetAssetsOfType(AssetClassID.Texture2D).FirstOrDefault(texInfo => texInfo.PathId == dstAtlasPathId);
 
             if (dstTexInfo is null) continue;
 
@@ -2257,20 +2288,21 @@ public sealed class FontReplacementService(
             dstTexInfo.SetNewData(dstTexBase);
         }
 
-        // Create new Texture2D assets for extra source pages
         if (srcAtlasPages.Count > existingDstTexCount)
         {
-            // Use existing texture as structural template
+            logger.LogDebug(
+                "Replacing TMP font {FontName} PathId={PathId}: creating {ExtraCount} extra atlas textures.",
+                fontName,
+                targetPathId,
+                srcAtlasPages.Count - existingDstTexCount);
+
             var templatePathId = dstAtlasTextures["Array"][0]["m_PathID"].AsLong;
-            AssetTypeValueField? texTemplate = null;
-            foreach (var texInfo in afile.GetAssetsOfType(AssetClassID.Texture2D))
-            {
-                if (texInfo.PathId == templatePathId)
-                {
-                    texTemplate = manager.GetBaseField(afileInst, texInfo);
-                    break;
-                }
-            }
+            var templateInfo = lookup != null && lookup.Texture2DsByPathId.TryGetValue(templatePathId, out var cachedTemplate)
+                ? cachedTemplate
+                : afile.GetAssetsOfType(AssetClassID.Texture2D).FirstOrDefault(texInfo => texInfo.PathId == templatePathId);
+            var texTemplate = templateInfo is not null
+                ? manager.GetBaseField(afileInst, templateInfo)
+                : null;
 
             if (texTemplate != null)
             {
@@ -2283,7 +2315,7 @@ public sealed class FontReplacementService(
 
                     var newTexBase = ValueBuilder.DefaultValueFieldFromTemplate(texTemplate.TemplateField);
                     // Read metadata from existing texture (m_MipCount, m_TextureSettings, etc.)
-                    // NOT from newTexBase which has all zeros �?Unity won't render mip=0 textures
+                    // NOT from newTexBase which has all zeros �?Unity won't render mip=0 textures
                     var texFile = TextureFile.ReadTextureFile(texTemplate);
                     texFile.m_TextureFormat = page.TextureFormat;
                     texFile.SetPictureData(page.EncodedData, page.Width, page.Height);
@@ -2294,13 +2326,12 @@ public sealed class FontReplacementService(
                     newTexBase["m_StreamData"]["size"].AsULong = 0;
                     newTexBase["m_Name"].AsString = $"{fontName} Atlas {pageIdx}";
 
-                    // Generate globally unique PathId
                     var newPathId = afile.Metadata.AssetInfos.Max(a => a.PathId) + 1;
                     var newInfo = AssetFileInfo.Create(afile, newPathId, (int)AssetClassID.Texture2D, null);
                     newInfo.SetNewData(newTexBase);
                     afile.Metadata.AssetInfos.Add(newInfo);
+                    lookup?.Track(newInfo);
 
-                    // Add PPtr to atlas textures array
                     var newPtr = ValueBuilder.DefaultValueFieldFromTemplate(ptrProto.TemplateField);
                     newPtr["m_FileID"].AsInt = 0;
                     newPtr["m_PathID"].AsLong = newInfo.PathId;
@@ -2311,7 +2342,6 @@ public sealed class FontReplacementService(
             }
         }
 
-        // Commit modified data
         targetMbInfo.SetNewData(dstFontBase);
     }
 
@@ -2319,20 +2349,14 @@ public sealed class FontReplacementService(
 
     private void ReplaceSingleTtfFont(
         AssetsManager manager, AssetsFileInstance afileInst,
-        byte[] ttfSourceBytes, long targetPathId, out string fontName)
+        byte[] ttfSourceBytes, long targetPathId, out string fontName,
+        AssetLookupCache? lookup = null)
     {
         var afile = afileInst.file;
 
-        // Find the target Font asset by PathId
-        AssetFileInfo? targetFontInfo = null;
-        foreach (var fontInfo in afile.GetAssetsOfType(AssetClassID.Font))
-        {
-            if (fontInfo.PathId == targetPathId)
-            {
-                targetFontInfo = fontInfo;
-                break;
-            }
-        }
+        var targetFontInfo = lookup != null && lookup.FontsByPathId.TryGetValue(targetPathId, out var cachedFont)
+            ? cachedFont
+            : afile.GetAssetsOfType(AssetClassID.Font).FirstOrDefault(fontInfo => fontInfo.PathId == targetPathId);
 
         if (targetFontInfo is null)
             throw new InvalidOperationException($"Target Font asset not found (PathId={targetPathId}).");
@@ -2349,14 +2373,14 @@ public sealed class FontReplacementService(
                 ?? $"Font '{fontName}' is not eligible for TTF replacement.");
         }
 
-        // Replace m_FontData with new TTF bytes �?preserve all other fields
+        // Replace m_FontData with new TTF bytes �?preserve all other fields
         var fontData = fontBase["m_FontData"];
         if (fontData.IsDummy)
             throw new InvalidOperationException($"Font '{fontName}' has no m_FontData field.");
         if (ttfAnalysis.FontDataSize <= 0)
             throw new InvalidOperationException($"Font '{fontName}' has empty embedded font data and cannot be replaced.");
 
-        // Value may be null for fonts with empty embedded data �?create new AssetTypeValue
+        // Value may be null for fonts with empty embedded data �?create new AssetTypeValue
         logger.LogInformation(
             "Replacing embedded TTF font {FontName} PathId={PathId} Mode={Mode} OldSize={OldSize} NewSize={NewSize}",
             fontName,
@@ -2453,7 +2477,7 @@ public sealed class FontReplacementService(
 
         if (elementTemplate is null)
         {
-            // No dst template available �?use source entries directly as last resort.
+            // No dst template available �?use source entries directly as last resort.
             // This preserves the old behavior and may cause issues if TMP versions differ,
             // but is better than an empty array (which would mean no glyphs at all).
             dstArrayNode.Children = new List<AssetTypeValueField>(srcArrayNode.Children);
@@ -2529,7 +2553,7 @@ public sealed class FontReplacementService(
     }
 
     /// <summary>
-    /// Backup via copy �?used when file handle is still open.
+    /// Backup via copy �?used when file handle is still open.
     /// </summary>
     private void EnsureBackupCopy(string gameId, string filePath, string backupFileName)
     {
@@ -2549,7 +2573,11 @@ public sealed class FontReplacementService(
 
     private async Task<List<CatalogFileEntry>> ClearAddressablesCrcAsync(
         string gamePath, string gameName, List<string> modifiedBundles,
-        string gameId, CancellationToken ct = default)
+        string gameId,
+        CancellationToken ct = default,
+        IProgress<FontReplacementProgress>? progress = null,
+        int current = 0,
+        int total = 0)
     {
         var catalogFiles = new List<CatalogFileEntry>();
         var aaPath = Path.Combine(gamePath, $"{gameName}_Data", "StreamingAssets", "aa");
@@ -2560,6 +2588,15 @@ public sealed class FontReplacementService(
             return catalogFiles;
         }
 
+        logger.LogInformation("Clearing Addressables CRC metadata under: {Path}", aaPath);
+        ReportProgress(
+            progress,
+            "clearing-crc",
+            current,
+            total,
+            "Addressables catalog",
+            "正在清理 Addressables CRC。");
+
         // Handle catalog.json
         var catalogJson = Path.Combine(aaPath, "catalog.json");
         if (File.Exists(catalogJson))
@@ -2569,7 +2606,7 @@ public sealed class FontReplacementService(
                 var backupFileName = BackupFile(gamePath, gameId, catalogJson);
                 var content = await File.ReadAllTextAsync(catalogJson, ct);
 
-                // Zero out all CRC entries �?safer approach since we're modifying bundles
+                // Zero out all CRC entries �?safer approach since we're modifying bundles
                 var modified = Regex.Replace(content, "\"Crc\"\\s*:\\s*\\d+", "\"Crc\":0");
 
                 await File.WriteAllTextAsync(catalogJson, modified, ct);
@@ -2716,7 +2753,7 @@ public sealed class FontReplacementService(
         }
 
         if (catalogFiles.Count == 0)
-            logger.LogDebug("未找�?Addressables catalog 文件: {Path}", aaPath);
+            logger.LogDebug("未找�?Addressables catalog 文件: {Path}", aaPath);
 
         return catalogFiles;
     }
@@ -2762,7 +2799,7 @@ public sealed class FontReplacementService(
                             }
                             catch
                             {
-                                // MonoBehaviour deserialization can fail �?skip
+                                // MonoBehaviour deserialization can fail �?skip
                             }
                         }
                     }
@@ -2793,7 +2830,7 @@ public sealed class FontReplacementService(
 
         if (!File.Exists(manifestPath))
         {
-            logger.LogWarning("字体备份清单不存�? {Path}", manifestPath);
+            logger.LogWarning("字体备份清单不存�? {Path}", manifestPath);
             return;
         }
 
@@ -2816,7 +2853,7 @@ public sealed class FontReplacementService(
                 try
                 {
                     File.Copy(backupPath, entry.OriginalPath, overwrite: true);
-                    logger.LogInformation("已还�? {Path}", entry.OriginalPath);
+                    logger.LogInformation("已还�? {Path}", entry.OriginalPath);
                 }
                 catch (Exception ex)
                 {
@@ -2825,7 +2862,7 @@ public sealed class FontReplacementService(
             }
             else
             {
-                logger.LogWarning("备份文件不存�? {Path}", backupPath);
+                logger.LogWarning("备份文件不存�? {Path}", backupPath);
             }
         }
 
@@ -2838,7 +2875,7 @@ public sealed class FontReplacementService(
                 try
                 {
                     File.Copy(backupPath, entry.OriginalPath, overwrite: true);
-                    logger.LogInformation("已还�? {Path}", entry.OriginalPath);
+                    logger.LogInformation("已还�? {Path}", entry.OriginalPath);
                 }
                 catch (Exception ex)
                 {
@@ -2847,7 +2884,7 @@ public sealed class FontReplacementService(
             }
             else
             {
-                logger.LogWarning("catalog 备份文件不存�? {Path}", backupPath);
+                logger.LogWarning("catalog 备份文件不存�? {Path}", backupPath);
             }
         }
 
@@ -2855,7 +2892,7 @@ public sealed class FontReplacementService(
         try
         {
             Directory.Delete(backupDir, recursive: true);
-            logger.LogInformation("已删除备份目�? {Path}", backupDir);
+            logger.LogInformation("已删除备份目�? {Path}", backupDir);
         }
         catch (Exception ex)
         {
@@ -2927,7 +2964,7 @@ public sealed class FontReplacementService(
                     }
                     catch
                     {
-                        // File access error �?treat as potentially restored
+                        // File access error �?treat as potentially restored
                         externallyRestored = true;
                         break;
                     }
@@ -2971,7 +3008,7 @@ public sealed class FontReplacementService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "读取字体替换状态失�? {GameId}", gameId);
+            logger.LogWarning(ex, "读取字体替换状态失�? {GameId}", gameId);
             return new FontReplacementStatus
             {
                 AvailableSources = availableSources

@@ -67,6 +67,47 @@ public sealed class TmpFontGeneratorService(
         return Math.Max(1, padding);
     }
 
+    private static string? TryReadAssetString(AssetTypeValueField field)
+    {
+        if (field.IsDummy || field.Value is null)
+            return null;
+
+        try
+        {
+            return field.AsString;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryCreateMaterialFloatEntry(
+        AssetTypeValueField prototype,
+        string propertyName,
+        float value,
+        out AssetTypeValueField? entry)
+    {
+        entry = null;
+        try
+        {
+            var created = ValueBuilder.DefaultValueFieldFromTemplate(prototype.TemplateField);
+            var nameField = created["first"]["name"];
+            var valueField = created["second"];
+            if (nameField.IsDummy || valueField.IsDummy)
+                return false;
+
+            nameField.AsString = propertyName;
+            valueField.AsFloat = value;
+            entry = created;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private readonly SemaphoreSlim _generationSemaphore = new(1, 1);
     private CancellationTokenSource? _cts;
     private long _lastBroadcastTicks;
@@ -775,7 +816,10 @@ public sealed class TmpFontGeneratorService(
                     bool foundGS = false, foundTW = false, foundTH = false;
                     foreach (var pair in floats.Children)
                     {
-                        var key = pair["first"]["name"].AsString;
+                        var key = TryReadAssetString(pair["first"]["name"]);
+                        if (string.IsNullOrWhiteSpace(key) || pair["second"].IsDummy)
+                            continue;
+
                         if (key == "_GradientScale")
                             { pair["second"].AsFloat = gradientScale; foundGS = true; }
                         else if (key == "_TextureWidth")
@@ -784,30 +828,44 @@ public sealed class TmpFontGeneratorService(
                             { pair["second"].AsFloat = atlasHeight; foundTH = true; }
                     }
 
-                    // Add missing properties
-                    if (floats.Children.Count > 0)
+                    var missingProperties = new List<(string Name, float Value)>();
+                    if (!foundGS) missingProperties.Add(("_GradientScale", gradientScale));
+                    if (!foundTW) missingProperties.Add(("_TextureWidth", atlasWidth));
+                    if (!foundTH) missingProperties.Add(("_TextureHeight", atlasHeight));
+
+                    if (missingProperties.Count > 0)
                     {
-                        var proto = floats.Children[0];
-                        if (!foundGS)
+                        if (floats.Children.Count == 0)
                         {
-                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
-                            e["first"]["name"].AsString = "_GradientScale";
-                            e["second"].AsFloat = gradientScale;
-                            floats.Children.Add(e);
+                            logger.LogWarning(
+                                "Material float array is empty; skipped injecting {Properties} for generated TMP font {FontName}.",
+                                string.Join(", ", missingProperties.Select(p => p.Name)),
+                                fontName);
                         }
-                        if (!foundTW)
+                        else
                         {
-                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
-                            e["first"]["name"].AsString = "_TextureWidth";
-                            e["second"].AsFloat = atlasWidth;
-                            floats.Children.Add(e);
-                        }
-                        if (!foundTH)
-                        {
-                            var e = ValueBuilder.DefaultValueFieldFromTemplate(proto.TemplateField);
-                            e["first"]["name"].AsString = "_TextureHeight";
-                            e["second"].AsFloat = atlasHeight;
-                            floats.Children.Add(e);
+                            var proto = floats.Children[0];
+                            var failedAdds = new List<string>();
+                            foreach (var (propertyName, propertyValue) in missingProperties)
+                            {
+                                if (TryCreateMaterialFloatEntry(proto, propertyName, propertyValue, out var createdEntry)
+                                    && createdEntry is not null)
+                                {
+                                    floats.Children.Add(createdEntry);
+                                }
+                                else
+                                {
+                                    failedAdds.Add(propertyName);
+                                }
+                            }
+
+                            if (failedAdds.Count > 0)
+                            {
+                                logger.LogWarning(
+                                    "Material float template mismatch; skipped injecting {Properties} for generated TMP font {FontName}.",
+                                    string.Join(", ", failedAdds),
+                                    fontName);
+                            }
                         }
                     }
 

@@ -12,6 +12,43 @@ public static class FontReplacementEndpoints
     private static readonly ConcurrentDictionary<string, CancellationTokenSource> _cancellationTokens = new();
     private sealed record FontUploadFromPathRequest(string FilePath, string Kind);
 
+    private static Task BroadcastFontReplacementProgressAsync(
+        IHubContext<InstallProgressHub> hubContext,
+        string gameId,
+        FontReplacementProgress progress) =>
+        hubContext.Clients.Group($"font-replacement-{gameId}")
+            .SendAsync("fontReplacementProgress", progress, CancellationToken.None);
+
+    private static bool IsTerminalPhase(string? phase) =>
+        string.Equals(phase, "completed", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(phase, "failed", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(phase, "cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static FontReplacementProgress BuildTerminalProgress(
+        FontReplacementProgress? lastProgress,
+        string phase,
+        int fallbackTotal,
+        string? message = null) =>
+        new()
+        {
+            Phase = phase,
+            Current = string.Equals(phase, "completed", StringComparison.OrdinalIgnoreCase)
+                ? fallbackTotal
+                : lastProgress?.Current ?? 0,
+            Total = lastProgress?.Total is > 0 ? lastProgress.Total : fallbackTotal,
+            CurrentFile = lastProgress?.CurrentFile,
+            Message = message
+        };
+
+    private static string GetUserFacingErrorMessage(Exception ex) => ex switch
+    {
+        OperationCanceledException => "字体替换已取消",
+        InvalidOperationException => ex.Message,
+        FileNotFoundException => "字体替换失败，所需资源文件不存在。",
+        DirectoryNotFoundException => "字体替换失败，游戏数据目录不存在。",
+        _ => "字体替换失败，请查看日志。"
+    };
+
     private static string? NormalizeUploadKind(string? kind) => kind?.Trim().ToLowerInvariant() switch
     {
         "ttf" => "TTF",
@@ -41,8 +78,10 @@ public static class FontReplacementEndpoints
 
         group.MapPost("/replace", async (string id, FontReplacementRequest request,
             GameLibraryService library, FontReplacementService fontReplacementService,
-            AppDataPaths paths, IHubContext<InstallProgressHub> hubContext, CancellationToken ct) =>
+            AppDataPaths paths, IHubContext<InstallProgressHub> hubContext,
+            ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
+            var logger = loggerFactory.CreateLogger("FontReplacementEndpoints");
             var game = await library.GetByIdAsync(id);
             if (game is null) return Results.NotFound(ApiResult.Fail("Game not found."));
             if (game.DetectedInfo is null)
@@ -55,12 +94,13 @@ public static class FontReplacementEndpoints
                 return Results.Conflict(ApiResult.Fail("A font replacement task is already running for this game."));
             }
 
+            FontReplacementProgress? lastProgress = null;
             try
             {
-                var progress = new Progress<FontReplacementProgress>(async p =>
+                var progress = new Progress<FontReplacementProgress>(p =>
                 {
-                    await hubContext.Clients.Group($"font-replacement-{id}")
-                        .SendAsync("fontReplacementProgress", p, CancellationToken.None);
+                    lastProgress = p;
+                    _ = BroadcastFontReplacementProgressAsync(hubContext, id, p);
                 });
 
                 if (request.CustomFontPath is not null)
@@ -81,7 +121,36 @@ public static class FontReplacementEndpoints
                     request.Fonts,
                     progress,
                     cts.Token);
+
+                if (!IsTerminalPhase(lastProgress?.Phase))
+                {
+                    await BroadcastFontReplacementProgressAsync(
+                        hubContext,
+                        id,
+                        BuildTerminalProgress(lastProgress, "completed", request.Fonts.Length));
+                }
+
                 return Results.Ok(ApiResult<FontReplacementResult>.Ok(result));
+            }
+            catch (OperationCanceledException)
+            {
+                await BroadcastFontReplacementProgressAsync(
+                    hubContext,
+                    id,
+                    BuildTerminalProgress(lastProgress, phase: "cancelled", fallbackTotal: request.Fonts.Length,
+                        message: "字体替换已取消"));
+                return Results.BadRequest(ApiResult.Fail("字体替换已取消"));
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "字体替换失败: GameId={GameId}", id);
+                var message = GetUserFacingErrorMessage(ex);
+                await BroadcastFontReplacementProgressAsync(
+                    hubContext,
+                    id,
+                    BuildTerminalProgress(lastProgress, phase: "failed", fallbackTotal: request.Fonts.Length,
+                        message: message));
+                return Results.BadRequest(ApiResult.Fail(message));
             }
             finally
             {

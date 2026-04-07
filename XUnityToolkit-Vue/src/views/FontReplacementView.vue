@@ -52,6 +52,7 @@ const checkedTtfRowKeys = ref<string[]>([])
 const selectedSourceIds = ref<Record<string, string>>({})
 const scanning = ref(false)
 const replacing = ref(false)
+const cancelling = ref(false)
 const restoring = ref(false)
 const progress = ref<FontReplacementProgress | null>(null)
 const tmpBatchSourceId = ref<string | null>(null)
@@ -64,9 +65,19 @@ const phaseLabels: Record<string, string> = {
   saving: '写入文件',
   'clearing-crc': '更新 CRC',
   completed: '已完成',
+  failed: '替换失败',
+  cancelled: '已取消',
 }
 
 let connection: HubConnection | null = null
+
+function isTerminalProgressPhase(phase?: string | null): boolean {
+  return phase === 'completed' || phase === 'failed' || phase === 'cancelled'
+}
+
+function getCurrentProgress(): FontReplacementProgress | null {
+  return progress.value
+}
 
 function fontKey(font: FontInfo): string {
   return `${font.assetFile}:${font.pathId}`
@@ -144,9 +155,9 @@ function getTtfModeLabel(mode: FontInfo['ttfMode']): string {
 
 function getTtfDetails(font: FontInfo): string {
   const parts: string[] = []
-  if (font.characterRectCount > 0) parts.push(`Rects ${font.characterRectCount}`)
-  if (font.fontNamesCount > 0) parts.push(`Names ${font.fontNamesCount}`)
-  if (font.hasTextureRef) parts.push('Texture')
+  if (font.characterRectCount > 0) parts.push(`字符矩形 ${font.characterRectCount} 项`)
+  if (font.fontNamesCount > 0) parts.push(`字体名 ${font.fontNamesCount} 项`)
+  if (font.hasTextureRef) parts.push('纹理引用')
   return parts.length > 0 ? parts.join(' / ') : '无额外结构'
 }
 
@@ -209,12 +220,17 @@ const tmpFonts = computed(() => fonts.value.filter(font => font.fontType === 'TM
 const ttfFonts = computed(() => fonts.value.filter(font => font.fontType === 'TTF'))
 const tmpSourceOptions = computed(() => buildSourceOptions('TMP'))
 const ttfSourceOptions = computed(() => buildSourceOptions('TTF'))
-const tmpCustomSources = computed(() => getSourcesByKind('TMP').filter(source => !source.isDefault))
-const ttfCustomSources = computed(() => getSourcesByKind('TTF').filter(source => !source.isDefault))
 
 const tmpSelectedCount = computed(() => checkedTmpRowKeys.value.length)
 const ttfSelectedCount = computed(() => checkedTtfRowKeys.value.length)
 const totalSelectedCount = computed(() => tmpSelectedCount.value + ttfSelectedCount.value)
+const selectionSummaryText = computed(() => {
+  if (totalSelectedCount.value === 0) {
+    return '尚未选择需要替换的字体'
+  }
+
+  return `已选 TMP ${tmpSelectedCount.value} 个，TTF ${ttfSelectedCount.value} 个`
+})
 const usedSourceSummary = computed(() => {
   if (!status.value) return '尚未执行替换'
   if (status.value.usedSources.length > 0) return status.value.usedSources.join('、')
@@ -268,7 +284,7 @@ function applyBatchSource(kind: 'TMP' | 'TTF') {
     nextMap[fontKey(font)] = sourceId
   }
   selectedSourceIds.value = nextMap
-  message.success(`已为 ${targets.length} 个${kind === 'TMP' ? ' TMP ' : ' TTF '}字体应用新的替换源`)
+  message.success(`已为 ${targets.length} 个${kind === 'TMP' ? 'TMP' : 'TTF'}字体应用新的替换源`)
 }
 
 async function loadGame() {
@@ -314,14 +330,15 @@ async function scanFonts() {
   }
 }
 
-async function doReplace(kind?: 'TMP' | 'TTF') {
-  const request = buildReplaceRequest(kind)
+async function doReplace() {
+  const request = buildReplaceRequest()
   if (request.fonts.length === 0) {
     message.warning('没有可执行替换的字体')
     return
   }
 
   replacing.value = true
+  cancelling.value = false
   progress.value = null
 
   try {
@@ -339,32 +356,84 @@ async function doReplace(kind?: 'TMP' | 'TTF') {
       message.success(`替换完成，共处理 ${result.successCount} 个字体`)
     }
 
+    const currentProgress = getCurrentProgress()
+    if (!isTerminalProgressPhase(currentProgress?.phase)) {
+      progress.value = {
+        phase: 'completed',
+        current: request.fonts.length,
+        total: request.fonts.length,
+      }
+    }
+
+    replacing.value = false
+    cancelling.value = false
     await loadStatus()
   } catch (error: any) {
-    message.error(`替换失败: ${error.message}`)
-  } finally {
+    const isCancelled = error.message === '字体替换已取消'
+    const currentProgress = getCurrentProgress()
+    if (!isTerminalProgressPhase(currentProgress?.phase)) {
+      progress.value = {
+        phase: isCancelled ? 'cancelled' : 'failed',
+        current: currentProgress?.current ?? 0,
+        total: currentProgress?.total || request.fonts.length,
+        currentFile: currentProgress?.currentFile,
+        message: error.message,
+      }
+    }
+
     replacing.value = false
-    progress.value = null
+    cancelling.value = false
+    await loadStatus()
+
+    if (isCancelled) {
+      message.info('字体替换已取消')
+    } else {
+      message.error(`替换失败: ${error.message}`)
+    }
   }
 }
 
-function replaceFonts(kind?: 'TMP' | 'TTF') {
-  const targets = getSelectedFonts(kind)
+function replaceFonts() {
+  const targets = getSelectedFonts()
   if (targets.length === 0) {
     message.warning('请先选择要替换的字体')
     return
   }
 
-  const scopeLabel = kind === 'TMP' ? 'TMP 字体' : kind === 'TTF' ? 'TTF 字体' : '已选字体'
   dialog.warning({
     title: '确认替换',
-    content: `将使用当前设置的替换源处理 ${targets.length} 个${scopeLabel}，是否继续？`,
+    content: `将使用当前设置的替换源处理 ${targets.length} 个已选字体，是否继续？`,
     positiveText: '开始替换',
     negativeText: '取消',
     onPositiveClick: () => {
-      void doReplace(kind)
+      void doReplace()
     },
   })
+}
+
+async function cancelReplacement() {
+  if (!replacing.value || cancelling.value) return
+
+  cancelling.value = true
+  progress.value = progress.value
+    ? { ...progress.value, message: '正在请求取消，当前阶段结束后生效。' }
+    : {
+        phase: 'replacing',
+        current: 0,
+        total: 0,
+        message: '正在请求取消，等待后端响应。',
+      }
+
+  try {
+    await api.post(`/api/games/${gameId.value}/font-replacement/cancel`)
+    message.info('已发送取消请求，当前阶段结束后会停止。', { duration: 4000 })
+  } catch (error: any) {
+    cancelling.value = false
+    progress.value = progress.value
+      ? { ...progress.value, message: undefined }
+      : null
+    message.error(`取消失败: ${error.message}`)
+  }
 }
 
 function restoreFonts() {
@@ -588,6 +657,10 @@ onMounted(async () => {
 
     connection.on('fontReplacementProgress', (payload: FontReplacementProgress) => {
       progress.value = payload
+      if (isTerminalProgressPhase(payload.phase)) {
+        replacing.value = false
+        cancelling.value = false
+      }
     })
 
     connection.onreconnected(async () => {
@@ -811,6 +884,26 @@ onBeforeUnmount(async () => {
           扫描结果
         </h2>
         <div class="header-actions">
+          <span class="selection-hint">{{ selectionSummaryText }}</span>
+          <NButton
+            size="small"
+            type="primary"
+            :loading="replacing"
+            :disabled="totalSelectedCount === 0 || scanning || replacing"
+            @click="replaceFonts"
+          >
+            替换已选 ({{ totalSelectedCount }})
+          </NButton>
+          <NButton
+            v-if="replacing"
+            size="small"
+            type="warning"
+            :loading="cancelling"
+            :disabled="cancelling"
+            @click="cancelReplacement"
+          >
+            {{ cancelling ? '正在取消…' : '取消替换' }}
+          </NButton>
           <NButton
             size="small"
             type="primary"
@@ -834,10 +927,11 @@ onBeforeUnmount(async () => {
           {{ progress.currentFile ? ` · ${progress.currentFile}` : '' }}
           ({{ progress.current }}/{{ progress.total }})
         </span>
+        <span v-if="progress.message" class="progress-message">{{ progress.message }}</span>
       </div>
 
       <div v-if="fonts.length === 0 && !progress" class="empty-state">
-        点击“扫描字体”后，这里会按 TMP 和 TTF / Legacy Font 分开展示扫描结果。
+        点击“扫描字体”后，这里会按 TMP 和 TTF / 旧版字体资源分开展示扫描结果。
       </div>
     </div>
 
@@ -860,14 +954,6 @@ onBeforeUnmount(async () => {
           />
           <NButton size="small" :disabled="tmpSelectedCount === 0" @click="applyBatchSource('TMP')">
             应用到已选
-          </NButton>
-          <NButton
-            size="small"
-            type="primary"
-            :disabled="tmpSelectedCount === 0 || replacing || scanning"
-            @click="replaceFonts('TMP')"
-          >
-            替换已选 ({{ tmpSelectedCount }})
           </NButton>
         </div>
       </div>
@@ -895,7 +981,7 @@ onBeforeUnmount(async () => {
           <span class="section-icon">
             <NIcon :size="16"><FontDownloadOutlined /></NIcon>
           </span>
-          TTF / Legacy Font
+          TTF / 旧版字体资源
           <NTag size="small" :bordered="false">{{ ttfFonts.length }}</NTag>
         </h2>
         <div class="header-actions group-actions">
@@ -908,14 +994,6 @@ onBeforeUnmount(async () => {
           />
           <NButton size="small" :disabled="ttfSelectedCount === 0" @click="applyBatchSource('TTF')">
             应用到已选
-          </NButton>
-          <NButton
-            size="small"
-            type="primary"
-            :disabled="ttfSelectedCount === 0 || replacing || scanning"
-            @click="replaceFonts('TTF')"
-          >
-            替换已选 ({{ ttfSelectedCount }})
           </NButton>
         </div>
       </div>
@@ -937,50 +1015,10 @@ onBeforeUnmount(async () => {
         />
       </div>
       <div v-else class="empty-state compact">
-        没有扫描到 TTF / Legacy Font 资源。
+        没有扫描到 TTF / 旧版字体资源。
       </div>
     </div>
 
-    <div v-if="fonts.length > 0" class="section-card" style="animation-delay: 0.3s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><FontDownloadOutlined /></NIcon>
-          </span>
-          执行替换
-        </h2>
-        <div class="header-actions">
-          <NButton
-            size="small"
-            type="primary"
-            :loading="replacing"
-            :disabled="totalSelectedCount === 0 || scanning"
-            @click="replaceFonts()"
-          >
-            替换全部已选 ({{ totalSelectedCount }})
-          </NButton>
-        </div>
-      </div>
-
-      <div class="selection-summary">
-        <div class="summary-item">
-          <span class="summary-label">TMP 已选</span>
-          <span class="summary-value">{{ tmpSelectedCount }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">TTF 已选</span>
-          <span class="summary-value">{{ ttfSelectedCount }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">自定义 TMP 源</span>
-          <span class="summary-value">{{ tmpCustomSources.length }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="summary-label">自定义 TTF 源</span>
-          <span class="summary-value">{{ ttfCustomSources.length }}</span>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -1057,6 +1095,12 @@ onBeforeUnmount(async () => {
   font-size: 13px;
   color: var(--text-2);
   line-height: 1.5;
+}
+
+.selection-hint {
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 
 .source-library {
@@ -1149,39 +1193,17 @@ onBeforeUnmount(async () => {
   color: var(--text-3);
 }
 
+.progress-message {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 .mode-note {
   margin-bottom: 14px;
 }
 
 .group-actions {
   flex-wrap: wrap;
-}
-
-.selection-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.summary-item {
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.summary-label {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
-.summary-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text-1);
 }
 
 .empty-state {
@@ -1200,17 +1222,19 @@ onBeforeUnmount(async () => {
 
 @media (max-width: 1100px) {
   .status-grid,
-  .source-library,
-  .selection-summary {
+  .source-library {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 768px) {
   .status-grid,
-  .source-library,
-  .selection-summary {
+  .source-library {
     grid-template-columns: 1fr;
+  }
+
+  .selection-hint {
+    display: none;
   }
 
   .source-item {

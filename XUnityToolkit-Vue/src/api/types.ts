@@ -366,10 +366,11 @@ export interface FailedFontEntry {
 }
 
 export interface FontReplacementProgress {
-  phase: 'loading' | 'scanning' | 'replacing' | 'saving' | 'clearing-crc' | 'completed'
+  phase: 'loading' | 'scanning' | 'replacing' | 'saving' | 'clearing-crc' | 'completed' | 'failed' | 'cancelled'
   current: number
   total: number
   currentFile?: string
+  message?: string
 }
 
 export interface EndpointTestResult {

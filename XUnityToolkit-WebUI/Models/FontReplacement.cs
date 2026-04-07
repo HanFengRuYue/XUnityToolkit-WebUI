@@ -119,4 +119,5 @@ public record FontReplacementProgress
     public int Current { get; init; }
     public int Total { get; init; }
     public string? CurrentFile { get; init; }
+    public string? Message { get; init; }
 }
