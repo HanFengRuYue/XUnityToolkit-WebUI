@@ -36,7 +36,9 @@ bundled/*
 .playwright-mcp/
 
 # Superpowers docs
-docs/
+docs/*
+!docs/readme/
+!docs/readme/*.png
 
 # Claude Code
 .claude/
