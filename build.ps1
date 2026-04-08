@@ -96,10 +96,10 @@ function Test-FrontendSmoke {
         if ($rootStatus -ne 200 -or $apiStatus -ne 200) {
             $rootText = if ($null -eq $rootStatus) { 'n/a' } else { [string]$rootStatus }
             $apiText = if ($null -eq $apiStatus) { 'n/a' } else { [string]$apiStatus }
-            throw "Smoke check failed for $Label: root=$rootText api=$apiText"
+            throw ("Smoke check failed for {0}: root={1} api={2}" -f $Label, $rootText, $apiText)
         }
 
-        Write-Host "  [smoke] $Label passed (root=$rootStatus, api=$apiStatus)" -ForegroundColor Green
+        Write-Host ("  [smoke] {0} passed (root={1}, api={2})" -f $Label, $rootStatus, $apiStatus) -ForegroundColor Green
     } finally {
         if ($proc -and -not $proc.HasExited) {
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
