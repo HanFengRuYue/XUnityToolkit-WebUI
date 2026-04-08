@@ -36,6 +36,8 @@ public sealed class UpdateService(
         ".png", ".woff", ".woff2", ".ttf", ".zip"
     };
 
+    private readonly record struct LocalManagedFile(string RelativePath, string FullPath, long Size);
+
     private readonly SemaphoreSlim _lock = new(1, 1);
     private UpdateStatusInfo _status = new() { State = UpdateState.None };
     private UpdateCheckResult? _lastCheckResult;
@@ -118,6 +120,43 @@ public sealed class UpdateService(
         using var stream = File.OpenRead(filePath);
         var hash = SHA256.HashData(stream);
         return "sha256:" + Convert.ToHexStringLower(hash);
+    }
+
+    private static Dictionary<string, LocalManagedFile> EnumerateManagedLocalFiles(
+        string appDir,
+        bool preserveCustomLlamaFiles)
+    {
+        var files = new Dictionary<string, LocalManagedFile>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var filePath in Directory.EnumerateFiles(appDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(appDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
+            if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) continue;
+            if (relative.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!ManagedExtensions.Contains(Path.GetExtension(filePath))) continue;
+            if (preserveCustomLlamaFiles
+                && relative.StartsWith("bundled/llama/", StringComparison.OrdinalIgnoreCase)
+                && !EditionInfo.HasBundledLlama)
+            {
+                continue;
+            }
+
+            var info = new FileInfo(filePath);
+            files[relative] = new LocalManagedFile(relative, filePath, info.Length);
+        }
+
+        return files;
+    }
+
+    private static bool IsManifestFileChanged(LocalManagedFile? localFile, ManifestFileEntry entry)
+    {
+        if (localFile is null)
+            return true;
+
+        if (localFile.Value.Size != entry.Size)
+            return true;
+
+        return ComputeFileHash(localFile.Value.FullPath) != entry.Hash;
     }
 
     public UpdateStatusInfo GetUpdateStatus()
@@ -260,26 +299,19 @@ public sealed class UpdateService(
             var changedPackages = new HashSet<string>();
             var changedCount = 0;
             var deletedCount = 0;
+            var localFiles = EnumerateManagedLocalFiles(appDir, preserveCustomLlamaFiles: false);
 
             foreach (var (relativePath, entry) in _remoteManifest.Files)
             {
-                var localPath = Path.Combine(appDir, relativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (!File.Exists(localPath) || ComputeFileHash(localPath) != entry.Hash)
+                localFiles.TryGetValue(relativePath, out var localFile);
+                if (IsManifestFileChanged(localFile, entry))
                 {
                     changedPackages.Add(entry.Package);
                     changedCount++;
                 }
             }
 
-            foreach (var filePath in Directory.EnumerateFiles(appDir, "*", SearchOption.AllDirectories))
-            {
-                var relative = Path.GetRelativePath(appDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
-                if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) continue;
-                if (relative.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!ManagedExtensions.Contains(Path.GetExtension(filePath))) continue;
-                if (!_remoteManifest.Files.ContainsKey(relative))
-                    deletedCount++;
-            }
+            deletedCount = localFiles.Keys.Count(relative => !_remoteManifest.Files.ContainsKey(relative));
 
             // Calculate download size
             long downloadSize = 0;
@@ -385,6 +417,7 @@ public sealed class UpdateService(
             var client = httpClientFactory.CreateClient("GitHubUpdate");
             var rid = GetCurrentRid();
             var appDir = AppContext.BaseDirectory;
+            var localFiles = EnumerateManagedLocalFiles(appDir, preserveCustomLlamaFiles: true);
             var totalBytes = _lastCheckResult.DownloadSize;
             long downloadedBytes = 0;
 
@@ -466,8 +499,8 @@ public sealed class UpdateService(
                             continue;
 
                         // Check if this file actually changed
-                        var localPath = Path.Combine(appDir, entryRelativePath.Replace('/', Path.DirectorySeparatorChar));
-                        if (File.Exists(localPath) && ComputeFileHash(localPath) == manifestEntry.Hash)
+                        localFiles.TryGetValue(entryRelativePath, out var localFile);
+                        if (!IsManifestFileChanged(localFile, manifestEntry))
                             continue;
 
                         // Extract to staging (with path traversal protection)
@@ -484,16 +517,8 @@ public sealed class UpdateService(
             // Build delete list
             var deleteList = new List<string>();
 
-            foreach (var filePath in Directory.EnumerateFiles(appDir, "*", SearchOption.AllDirectories))
+            foreach (var relative in localFiles.Keys)
             {
-                var relative = Path.GetRelativePath(appDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
-                if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) continue;
-                if (relative.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!ManagedExtensions.Contains(Path.GetExtension(filePath))) continue;
-                // Non-full editions: don't delete user-downloaded llama binaries
-                if (relative.StartsWith("bundled/llama/", StringComparison.OrdinalIgnoreCase)
-                    && !EditionInfo.HasBundledLlama)
-                    continue;
                 if (!_remoteManifest.Files.ContainsKey(relative))
                     deleteList.Add(relative);
             }

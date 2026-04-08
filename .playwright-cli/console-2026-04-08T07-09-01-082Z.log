@@ -1,0 +1,4 @@
+[      41ms] [INFO] [2026-04-08T07:09:01.123Z] Information: Normalizing '/hubs/install' to 'http://127.0.0.1:51821/hubs/install'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      45ms] [INFO] [2026-04-08T07:09:01.127Z] Information: WebSocket connected to ws://127.0.0.1:51821/hubs/install?id=Jy1cL06b4HLFBcG2hbXiaw. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      72ms] [INFO] [2026-04-08T07:09:01.154Z] Information: Normalizing '/hubs/install' to 'http://127.0.0.1:51821/hubs/install'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      79ms] [INFO] [2026-04-08T07:09:01.160Z] Information: WebSocket connected to ws://127.0.0.1:51821/hubs/install?id=qj5M0XKMaWzkFESuNckbJA. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0

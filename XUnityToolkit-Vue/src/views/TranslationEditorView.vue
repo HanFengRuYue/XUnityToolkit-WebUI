@@ -45,6 +45,8 @@ import type { Game, TranslationEntry, TermEntry } from '@/api/types'
 
 interface TranslationRow extends TranslationEntry {
   _id: number
+  _originalLower: string
+  _translationLower: string
 }
 
 const route = useRoute()
@@ -61,7 +63,9 @@ const fileExists = ref(false)
 
 // Editor state
 const entries = ref<TranslationRow[]>([])
-const savedSnapshot = ref('')
+const dirtyRowIds = ref<Set<number>>(new Set())
+const removedSnapshotIds = ref<Set<number>>(new Set())
+let savedSnapshotById = new Map<number, { original: string; translation: string }>()
 let nextId = 1
 
 // Import
@@ -98,17 +102,93 @@ const replaceIsRegex = ref(false)
 const debouncedReplaceFindText = ref('')
 let replaceFindDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-const isDirty = computed(() => {
-  const current = JSON.stringify(entries.value.map(e => ({ o: e.original, t: e.translation })))
-  return current !== savedSnapshot.value
-})
+const isDirty = computed(() =>
+  dirtyRowIds.value.size > 0 || removedSnapshotIds.value.size > 0
+)
 
 function takeSnapshot() {
-  savedSnapshot.value = JSON.stringify(entries.value.map(e => ({ o: e.original, t: e.translation })))
+  savedSnapshotById = new Map(
+    entries.value.map(row => [row._id, { original: row.original, translation: row.translation }]),
+  )
+  dirtyRowIds.value = new Set()
+  removedSnapshotIds.value = new Set()
 }
 
 function toRows(items: TranslationEntry[]): TranslationRow[] {
-  return items.map(e => ({ ...e, _id: nextId++ }))
+  return items.map(createRow)
+}
+
+function createRow(entry: TranslationEntry): TranslationRow {
+  return {
+    ...entry,
+    _id: nextId++,
+    _originalLower: entry.original.toLowerCase(),
+    _translationLower: entry.translation.toLowerCase(),
+  }
+}
+
+function addDirtyRowId(id: number) {
+  if (dirtyRowIds.value.has(id)) return
+  const next = new Set(dirtyRowIds.value)
+  next.add(id)
+  dirtyRowIds.value = next
+}
+
+function removeDirtyRowId(id: number) {
+  if (!dirtyRowIds.value.has(id)) return
+  const next = new Set(dirtyRowIds.value)
+  next.delete(id)
+  dirtyRowIds.value = next
+}
+
+function addRemovedSnapshotId(id: number) {
+  if (removedSnapshotIds.value.has(id)) return
+  const next = new Set(removedSnapshotIds.value)
+  next.add(id)
+  removedSnapshotIds.value = next
+}
+
+function removeRemovedSnapshotId(id: number) {
+  if (!removedSnapshotIds.value.has(id)) return
+  const next = new Set(removedSnapshotIds.value)
+  next.delete(id)
+  removedSnapshotIds.value = next
+}
+
+function syncDirtyState(row: TranslationRow) {
+  const snapshot = savedSnapshotById.get(row._id)
+  if (!snapshot) {
+    addDirtyRowId(row._id)
+    return
+  }
+
+  const isChanged =
+    snapshot.original !== row.original ||
+    snapshot.translation !== row.translation
+
+  if (isChanged) addDirtyRowId(row._id)
+  else removeDirtyRowId(row._id)
+
+  removeRemovedSnapshotId(row._id)
+}
+
+function updateRowOriginal(row: TranslationRow, value: string) {
+  row.original = value
+  row._originalLower = value.toLowerCase()
+  syncDirtyState(row)
+  bumpEntriesVersion()
+}
+
+function updateRowTranslation(row: TranslationRow, value: string) {
+  row.translation = value
+  row._translationLower = value.toLowerCase()
+  syncDirtyState(row)
+  bumpEntriesVersion()
+}
+
+function handleRowRemoved(row: TranslationRow) {
+  if (savedSnapshotById.has(row._id)) addRemovedSnapshotId(row._id)
+  else removeDirtyRowId(row._id)
 }
 
 const FEATURE_PATTERNS: Record<string, RegExp> = {
@@ -132,15 +212,33 @@ const FEATURE_OPTIONS = [
   { label: '包含特殊字符', value: 'special' },
 ]
 
+const compiledFilterRegex = computed<RegExp | null>(() => {
+  if (!debouncedRegexPattern.value) return null
+  try {
+    return new RegExp(debouncedRegexPattern.value)
+  } catch {
+    return null
+  }
+})
+
+const compiledReplaceRegex = computed<RegExp | null>(() => {
+  if (!replaceIsRegex.value || !debouncedReplaceFindText.value) return null
+  try {
+    return new RegExp(debouncedReplaceFindText.value, 'g')
+  } catch {
+    return null
+  }
+})
+
 const filteredAndSortedEntries = ref<TranslationRow[]>([])
 
 function recomputeFilteredEntries() {
   let result: TranslationRow[] = entries.value
 
-  const kw = filterKeyword.value.toLowerCase()
+  const kw = filterKeyword.value.trim().toLowerCase()
   if (kw) {
     result = result.filter(
-      e => e.original.toLowerCase().includes(kw) || e.translation.toLowerCase().includes(kw)
+      e => e._originalLower.includes(kw) || e._translationLower.includes(kw)
     )
   }
 
@@ -160,9 +258,10 @@ function recomputeFilteredEntries() {
     })
   }
 
-  if (debouncedRegexPattern.value) {
+  const regex = compiledFilterRegex.value
+  if (regex) {
     try {
-      const re = new RegExp(debouncedRegexPattern.value)
+      const re = regex
       result = result.filter(e => {
         const target = filterRegexTarget.value
         if (target === 'original') return re.test(e.original)
@@ -182,10 +281,10 @@ function recomputeFilteredEntries() {
     result = [...result]
     switch (panelSortMode.value) {
       case 'alpha-asc':
-        result.sort((a, b) => collator.compare(a.original, b.original))
+        result.sort((a, b) => collator.compare(a._originalLower, b._originalLower))
         break
       case 'alpha-desc':
-        result.sort((a, b) => collator.compare(b.original, a.original))
+        result.sort((a, b) => collator.compare(b._originalLower, a._originalLower))
         break
       case 'length-asc':
         result.sort((a, b) => a.original.length - b.original.length)
@@ -272,21 +371,20 @@ const replaceMatchCount = computed(() => {
   const findText = debouncedReplaceFindText.value
   if (!findText) return 0
   if (replaceIsRegex.value) {
-    try {
-      const re = new RegExp(findText, 'g')
-      let count = 0
-      for (const entry of filteredAndSortedEntries.value) {
-        if (re.test(entry.translation)) count++
-        re.lastIndex = 0
-      }
-      return count
-    } catch {
+    const re = compiledReplaceRegex.value
+    if (!re) {
       return 0
     }
+    let count = 0
+    for (const entry of filteredAndSortedEntries.value) {
+      if (re.test(entry.translation)) count++
+      re.lastIndex = 0
+    }
+    return count
   } else {
     const lower = findText.toLowerCase()
     return filteredAndSortedEntries.value.filter(e =>
-      e.translation.toLowerCase().includes(lower)
+      e._translationLower.includes(lower)
     ).length
   }
 })
@@ -320,12 +418,12 @@ function handleReplaceAll() {
 
         let replacedText: string
         if (replaceIsRegex.value) {
-          try {
-            const re = new RegExp(findText, 'g')
-            replacedText = entry.translation.replace(re, replaceWithText.value)
-          } catch {
+          const re = compiledReplaceRegex.value
+          if (!re) {
             continue
           }
+          replacedText = entry.translation.replace(re, replaceWithText.value)
+          re.lastIndex = 0
         } else {
           const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
           const re = new RegExp(escaped, 'gi')
@@ -333,7 +431,7 @@ function handleReplaceAll() {
         }
 
         if (replacedText !== entry.translation) {
-          entry.translation = replacedText
+          updateRowTranslation(entry, replacedText)
           replaced++
         }
       }
@@ -393,6 +491,7 @@ function handleClearAll() {
     positiveText: '清空',
     negativeText: '取消',
     onPositiveClick: () => {
+      for (const row of entries.value) handleRowRemoved(row)
       entries.value = []
       bumpEntriesVersion()
       message.success('已清空全部条目')
@@ -413,7 +512,7 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
         value: row.original,
         size: 'small',
         type: 'text',
-        'onUpdate:value': (v: string) => { row.original = v },
+        'onUpdate:value': (v: string) => updateRowOriginal(row, v),
       })
     },
   },
@@ -429,7 +528,7 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
         value: row.translation,
         size: 'small',
         type: 'text',
-        'onUpdate:value': (v: string) => { row.translation = v },
+        'onUpdate:value': (v: string) => updateRowTranslation(row, v),
       })
     },
   },
@@ -458,6 +557,7 @@ const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
           onClick: () => {
             const idx = entries.value.findIndex(e => e._id === row._id)
             if (idx >= 0) {
+              handleRowRemoved(row)
               entries.value.splice(idx, 1)
               bumpEntriesVersion()
             }
@@ -564,12 +664,12 @@ function handleAddEntry() {
     message.warning('该原文已存在')
     return
   }
-  const newEntry: TranslationRow = {
-    _id: nextId++,
+  const newEntry = createRow({
     original: newOriginal.value,
     translation: newTranslation.value,
-  }
+  })
   entries.value.unshift(newEntry)
+  syncDirtyState(newEntry)
   bumpEntriesVersion()
   newOriginal.value = ''
   newTranslation.value = ''
@@ -597,7 +697,9 @@ async function handleImportClick() {
     let added = 0
     for (const entry of importedEntries) {
       if (!existingOriginals.has(entry.original)) {
-        entries.value.push({ ...entry, _id: nextId++ })
+        const row = createRow(entry)
+        entries.value.push(row)
+        syncDirtyState(row)
         existingOriginals.add(entry.original)
         added++
       }

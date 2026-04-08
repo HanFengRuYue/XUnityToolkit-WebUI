@@ -232,12 +232,20 @@ const preTranslationProgress = computed(() => {
   return Math.round((s.translatedTexts + s.failedTexts) / s.totalTexts * 100)
 })
 
+const searchableTexts = computed(() =>
+  (store.extractionResult?.texts ?? []).map(text => ({
+    ...text,
+    _textLower: text.text.toLowerCase(),
+    _sourceLower: text.source.toLowerCase(),
+  })),
+)
+
 const filteredTexts = computed(() => {
-  if (!store.extractionResult?.texts) return []
-  const kw = searchKeyword.value.toLowerCase()
-  if (!kw) return store.extractionResult.texts
-  return store.extractionResult.texts.filter(
-    t => t.text.toLowerCase().includes(kw) || t.source.toLowerCase().includes(kw)
+  const texts = searchableTexts.value
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (!kw) return texts
+  return texts.filter(
+    t => t._textLower.includes(kw) || t._sourceLower.includes(kw),
   )
 })
 

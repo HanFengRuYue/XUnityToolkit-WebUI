@@ -1,0 +1,3 @@
+[      29ms] [INFO] [2026-04-08T07:09:17.348Z] Information: Normalizing '/hubs/install' to 'http://127.0.0.1:51821/hubs/install'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      32ms] [INFO] [2026-04-08T07:09:17.351Z] Information: WebSocket connected to ws://127.0.0.1:51821/hubs/install?id=VDxw8T6khjlD6jHLWPbyrw. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      51ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:51821/api/games/52cddf4763af4e95b55515938a55b68b/icon?t=2026-04-08T07:06:01.2526588Z:0

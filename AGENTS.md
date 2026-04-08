@@ -667,6 +667,8 @@ CI：
 - 主题模式由 `useThemeStore` 控制，`resolvedTheme` 才是渲染依据；`mode` 可能是 `system`
 - 共享布局和卡片类名以 `main.css` 为准，例如 `.page-title`、`.section-card`、`.section-header`、`.header-actions`、`.table-container`
 - 顶层页面和游戏子页面的标题、回退按钮、section card 样式有明确约定，不要在每个页面重新发明一套
+- 这是桌面应用而不是全宽网页，默认窗口宽度扣掉侧边栏和卡片内边距后，经常只剩“中等内容宽度”；双列卡片、表单和设置面板不要只依赖 `768px` 这类移动端断点，优先使用 `repeat(auto-fit, minmax(...))`、`minmax(0, 1fr)` 或补充中间断点，确保默认窗口大小下不裁切
+- `section-card`、折叠区正文和局部 grid/flex 列在需要收缩时通常都要显式 `min-width: 0`；`src/assets/main.css` 已为共享卡片容器补了这层约束，新增类似 `ConfigPanel.vue`、`FontGeneratorView.vue` 的双列布局时要一起检查 Naive UI 输入控件和外层容器是否真正允许收缩
 - 避免无必要的内联样式；除一次性的 `animation-delay` 等极少数情况外，统一落到作用域 CSS
 - 颜色和边框一律使用设计系统变量，不要发明不存在的 CSS 变量名
 

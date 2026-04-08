@@ -853,7 +853,7 @@ onBeforeUnmount(async () => {
 /* Upload + Settings Grid */
 .upload-settings-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
   gap: 20px;
   align-items: start;
 }
@@ -861,12 +861,14 @@ onBeforeUnmount(async () => {
 .upload-column {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .settings-column {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 /* Upload */
@@ -930,7 +932,9 @@ onBeforeUnmount(async () => {
 .form-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  min-width: 0;
 }
 
 .form-label {
@@ -938,6 +942,12 @@ onBeforeUnmount(async () => {
   font-size: 13px;
   color: var(--text-2);
   flex-shrink: 0;
+}
+
+.form-row > :deep(.n-base-selection),
+.form-row > :deep(.n-input-number),
+.form-row > :deep(.n-space) {
+  min-width: 0;
 }
 
 .form-actions {
@@ -1091,9 +1101,6 @@ onBeforeUnmount(async () => {
 
 /* Responsive */
 @media (max-width: 768px) {
-  .upload-settings-grid {
-    grid-template-columns: 1fr;
-  }
   .form-row {
     flex-direction: column;
     align-items: stretch;

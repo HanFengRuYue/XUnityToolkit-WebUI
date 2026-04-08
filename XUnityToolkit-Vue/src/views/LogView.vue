@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, onDeactivated, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onDeactivated, onActivated, nextTick } from 'vue'
 import { NButton, NIcon, NInput, NSwitch, NTooltip } from 'naive-ui'
 import {
   TerminalOutlined,
@@ -48,17 +48,12 @@ function toggleLevel(key: string) {
   selectedLevels.value = s
 }
 
-const levelCounts = computed(() => {
-  const counts: Record<string, number> = { INF: 0, WRN: 0, ERR: 0, CRI: 0 }
-  for (const e of logStore.entries) {
-    if (e.level in counts) counts[e.level] = (counts[e.level] ?? 0) + 1
-  }
-  return counts
-})
+const levelCounts = logStore.levelCounts
+const normalizedKeyword = computed(() => keyword.value.trim().toLowerCase())
 
 const filteredEntries = computed(() => {
   const levels = selectedLevels.value
-  const kw = keyword.value.toLowerCase()
+  const kw = normalizedKeyword.value
   return logStore.entries.filter(e => {
     if (!levels.has(e.level)) return false
     if (kw && !e.message.toLowerCase().includes(kw) && !e.category.toLowerCase().includes(kw)) return false
@@ -116,6 +111,15 @@ onMounted(async () => {
   }
   await nextTick()
   scrollToBottom()
+})
+
+onActivated(async () => {
+  if (loading.value) return
+  await logStore.connect()
+  if (autoScroll.value) {
+    await nextTick()
+    scrollToBottom()
+  }
 })
 
 onDeactivated(() => {

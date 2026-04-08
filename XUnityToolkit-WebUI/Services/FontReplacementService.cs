@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using AssetsTools.NET.Texture;
@@ -16,6 +17,13 @@ public sealed class FontReplacementService(
     AppDataPaths appDataPaths,
     ILogger<FontReplacementService> logger)
 {
+    private readonly record struct FontScanCacheKey(
+        string FilePath,
+        long Length,
+        long LastWriteTicksUtc,
+        string UnityVersion,
+        bool IsBundle);
+
     private const string TtfModeDynamicEmbedded = "dynamicEmbedded";
     private const string TtfModeStaticAtlas = "staticAtlas";
     private const string TtfModeOsFallback = "osFallback";
@@ -36,6 +44,19 @@ public sealed class FontReplacementService(
         stream.CopyTo(ms);
         return ms.ToArray();
     });
+
+    private readonly ConcurrentDictionary<FontScanCacheKey, IReadOnlyList<FontInfo>> _fontScanCache = new();
+
+    private static FontScanCacheKey BuildFontScanCacheKey(string filePath, string unityVersion, bool isBundle)
+    {
+        var info = new FileInfo(filePath);
+        return new FontScanCacheKey(
+            filePath,
+            info.Length,
+            info.LastWriteTimeUtc.Ticks,
+            unityVersion,
+            isBundle);
+    }
 
     private sealed record TtfFontAnalysis(
         string Mode,
@@ -174,6 +195,13 @@ public sealed class FontReplacementService(
                     ct.ThrowIfCancellationRequested();
 
                     var fileName = Path.GetFileName(assetFile);
+                    var cacheKey = BuildFontScanCacheKey(assetFile, gameInfo.UnityVersion, isBundle: false);
+                    if (_fontScanCache.TryGetValue(cacheKey, out var cachedFonts))
+                    {
+                        results.AddRange(cachedFonts);
+                        continue;
+                    }
+
                     AssetsFileInstance? afileInst = null;
                     try
                     {
@@ -181,6 +209,7 @@ public sealed class FontReplacementService(
                         var fonts = ScanAssetsInstance(manager, afileInst, fileName,
                             gameInfo.UnityVersion, isBundle: false);
                         results.AddRange(fonts);
+                        _fontScanCache[cacheKey] = fonts;
                     }
                     catch (Exception ex)
                     {
@@ -199,11 +228,19 @@ public sealed class FontReplacementService(
                     ct.ThrowIfCancellationRequested();
 
                     var fileName = Path.GetFileName(bundleFile);
+                    var cacheKey = BuildFontScanCacheKey(bundleFile, gameInfo.UnityVersion, isBundle: true);
+                    if (_fontScanCache.TryGetValue(cacheKey, out var cachedFonts))
+                    {
+                        results.AddRange(cachedFonts);
+                        continue;
+                    }
+
                     BundleFileInstance? bunInst = null;
                     try
                     {
                         bunInst = manager.LoadBundleFile(bundleFile, true);
                         var dirInfos = bunInst.file.BlockAndDirInfo.DirectoryInfos;
+                        var bundleFonts = new List<FontInfo>();
 
                         for (int i = 0; i < dirInfos.Count; i++)
                         {
@@ -218,7 +255,7 @@ public sealed class FontReplacementService(
                                 bundleAfileInst = manager.LoadAssetsFileFromBundle(bunInst, i, false);
                                 var fonts = ScanAssetsInstance(manager, bundleAfileInst,
                                     $"{fileName}/{entryName}", gameInfo.UnityVersion, isBundle: true);
-                                results.AddRange(fonts);
+                                bundleFonts.AddRange(fonts);
                             }
                             catch (Exception ex)
                             {
@@ -230,6 +267,9 @@ public sealed class FontReplacementService(
                                     manager.UnloadAssetsFile(bundleAfileInst);
                             }
                         }
+
+                        results.AddRange(bundleFonts);
+                        _fontScanCache[cacheKey] = bundleFonts;
                     }
                     catch (Exception ex)
                     {
@@ -1762,6 +1802,7 @@ public sealed class FontReplacementService(
                             processedFonts++;
                             ReportProgress(progress, "replacing", processedFonts, totalFonts, fullAssetFileName);
                         }
+
                     }
 
                     if (entryReplacedFonts.Count > 0)

@@ -408,6 +408,7 @@ body::before {
   animation: slideUp 0.5s var(--ease-out) backwards;
   transition: border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease, padding 0.3s var(--ease-out);
   box-shadow: var(--shadow-card-rest);
+  min-width: 0;
 }
 
 .section-card:hover {
@@ -493,6 +494,7 @@ body::before {
   grid-template-rows: 1fr;
   transition: grid-template-rows 0.3s var(--ease-out), opacity 0.25s ease;
   opacity: 1;
+  min-width: 0;
 }
 
 .section-body.collapsed {
@@ -502,6 +504,7 @@ body::before {
 
 .section-body-inner {
   overflow: hidden;
+  min-width: 0;
 }
 
 /* Collapsed card uses balanced compact padding */

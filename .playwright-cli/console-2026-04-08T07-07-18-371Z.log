@@ -1,0 +1,3 @@
+[      30ms] [INFO] [2026-04-08T07:07:18.400Z] Information: Normalizing '/hubs/install' to 'http://127.0.0.1:51821/hubs/install'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      36ms] [INFO] [2026-04-08T07:07:18.406Z] Information: WebSocket connected to ws://127.0.0.1:51821/hubs/install?id=lUaPjPxwBTx0hciH8RS9RA. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[     167ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:51821/settings:0

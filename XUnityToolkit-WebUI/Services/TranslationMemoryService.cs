@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Buffers;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
@@ -35,6 +37,8 @@ public sealed class TranslationMemoryService(
         public ConcurrentDictionary<string, TranslationMemoryEntry> ExactIndex { get; } = new(StringComparer.Ordinal);
         public ConcurrentDictionary<int, (Lock Lock, List<TranslationMemoryEntry> Entries)> LengthBuckets { get; } = new();
         public List<(Regex Pattern, string TranslatedTemplate, List<VariablePosition> Variables)> CompiledPatterns { get; set; } = [];
+        public PriorityQueue<string, long> EvictionQueue { get; } = new();
+        public Lock EvictionLock { get; } = new();
         public bool LoadAttempted { get; set; }
     }
 
@@ -73,11 +77,15 @@ public sealed class TranslationMemoryService(
 
         var normalized = NormalizeKey(gameId, text);
         if (string.IsNullOrEmpty(normalized)) return null;
+        var matchStopwatch = Stopwatch.StartNew();
 
         // 1. Exact match
         if (store.ExactIndex.TryGetValue(normalized, out var exact))
         {
             Interlocked.Increment(ref _exactHits);
+            if (logger.IsEnabled(LogLevel.Debug))
+                logger.LogDebug("TM 匹配命中: game={GameId}, type=exact, elapsedMs={ElapsedMs}",
+                    gameId, matchStopwatch.Elapsed.TotalMilliseconds);
             return new TmMatchResult
             {
                 Translation = exact.Translation,
@@ -90,6 +98,9 @@ public sealed class TranslationMemoryService(
         if (patternResult is not null)
         {
             Interlocked.Increment(ref _patternHits);
+            if (logger.IsEnabled(LogLevel.Debug))
+                logger.LogDebug("TM 匹配命中: game={GameId}, type=pattern, elapsedMs={ElapsedMs}",
+                    gameId, matchStopwatch.Elapsed.TotalMilliseconds);
             return patternResult;
         }
 
@@ -98,10 +109,16 @@ public sealed class TranslationMemoryService(
         if (fuzzyResult is not null)
         {
             Interlocked.Increment(ref _fuzzyHits);
+            if (logger.IsEnabled(LogLevel.Debug))
+                logger.LogDebug("TM 匹配命中: game={GameId}, type=fuzzy, elapsedMs={ElapsedMs}",
+                    gameId, matchStopwatch.Elapsed.TotalMilliseconds);
             return fuzzyResult;
         }
 
         Interlocked.Increment(ref _misses);
+        if (logger.IsEnabled(LogLevel.Debug))
+            logger.LogDebug("TM 匹配未命中: game={GameId}, elapsedMs={ElapsedMs}",
+                gameId, matchStopwatch.Elapsed.TotalMilliseconds);
         return null;
     }
 
@@ -144,6 +161,7 @@ public sealed class TranslationMemoryService(
             // Update or add to exact index
             store.ExactIndex.AddOrUpdate(normalized, entry, (_, existing) =>
                 isFinal || !existing.IsFinal ? entry : existing);
+            EnqueueForEviction(store, normalized, entry.TranslatedAt.Ticks);
 
             // Add to length bucket
             AddToLengthBucket(store, normalized.Length, entry);
@@ -153,10 +171,17 @@ public sealed class TranslationMemoryService(
         if (added == 0) return;
 
         // Evict if over limit (LRU by TranslatedAt)
-        EvictIfNeeded(store);
+        var evicted = EvictIfNeeded(store);
+        if (evicted > 0 && logger.IsEnabled(LogLevel.Debug))
+            logger.LogDebug("TM 驱逐: game={GameId}, count={Evicted}, total={Total}",
+                gameId, evicted, store.ExactIndex.Count);
 
         ScheduleDebouncedPersist(gameId);
+#if false
         logger.LogDebug("翻译记忆库 {GameId}: 添加 {Count} 条（总计 {Total}）",
+            gameId, added, store.ExactIndex.Count);
+#endif
+        logger.LogDebug("TM 写入: game={GameId}, added={Count}, total={Total}",
             gameId, added, store.ExactIndex.Count);
     }
 
@@ -231,7 +256,7 @@ public sealed class TranslationMemoryService(
         var file = paths.TranslationMemoryFile(gameId);
         if (File.Exists(file))
         {
-            await Task.Run(() => File.Delete(file), ct);
+            File.Delete(file);
             logger.LogInformation("已删除游戏 {GameId} 的翻译记忆库", gameId);
         }
     }
@@ -389,46 +414,43 @@ public sealed class TranslationMemoryService(
         var minLen = (int)(textLen * (1 - LengthToleranceRatio));
         var maxLen = (int)(textLen * (1 + LengthToleranceRatio));
         var maxDistance = (int)(textLen * (1 - threshold));
+        TranslationMemoryEntry? bestEntry = null;
+        var bestDistance = maxDistance + 1;
+        var candidateCount = 0;
+        var fuzzyStopwatch = Stopwatch.StartNew();
 
-        // Collect candidates from length buckets within tolerance
-        var candidates = new List<TranslationMemoryEntry>();
-        for (var len = minLen; len <= maxLen; len++)
+        for (var len = minLen; len <= maxLen && candidateCount < FuzzyCandidateBudget; len++)
         {
-            if (!store.LengthBuckets.TryGetValue(len, out var bucket)) continue;
+            if (!store.LengthBuckets.TryGetValue(len, out var bucket))
+                continue;
 
             bucket.Lock.Enter();
             try
             {
-                var remaining = FuzzyCandidateBudget - candidates.Count;
-                if (remaining >= bucket.Entries.Count)
-                    candidates.AddRange(bucket.Entries);
-                else
-                    candidates.AddRange(bucket.Entries.Take(remaining));
+                foreach (var candidate in bucket.Entries)
+                {
+                    var key = candidate.NormalizedKey ?? candidate.Original;
+                    var distance = LevenshteinDistance(normalizedText, key, maxDistance);
+                    candidateCount++;
+                    if (distance >= 0 && distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestEntry = candidate;
+                    }
+
+                    if (candidateCount >= FuzzyCandidateBudget)
+                        break;
+                }
             }
             finally
             {
                 bucket.Lock.Exit();
             }
-
-            if (candidates.Count >= FuzzyCandidateBudget) break;
         }
 
-        if (candidates.Count == 0) return null;
-
-        // Find best match
-        TranslationMemoryEntry? bestEntry = null;
-        var bestDistance = maxDistance + 1;
-
-        foreach (var candidate in candidates)
-        {
-            var key = candidate.NormalizedKey ?? candidate.Original;
-            var distance = LevenshteinDistance(normalizedText, key, maxDistance);
-            if (distance >= 0 && distance < bestDistance)
-            {
-                bestDistance = distance;
-                bestEntry = candidate;
-            }
-        }
+        if (logger.IsEnabled(LogLevel.Debug))
+            logger.LogDebug("TM 模糊匹配: candidates={Candidates}, elapsedMs={ElapsedMs}",
+                candidateCount, fuzzyStopwatch.Elapsed.TotalMilliseconds);
 
         if (bestEntry is null) return null;
 
@@ -495,29 +517,37 @@ public sealed class TranslationMemoryService(
         if (sLen == 0) return tLen;
         if (tLen == 0) return sLen;
 
-        // Single-row DP
-        var prev = new int[tLen + 1];
-        for (var j = 0; j <= tLen; j++) prev[j] = j;
-
-        for (var i = 1; i <= sLen; i++)
+        var rented = ArrayPool<int>.Shared.Rent(tLen + 1);
+        try
         {
-            var rowMin = int.MaxValue;
-            var prevDiag = prev[0];
-            prev[0] = i;
+            var prev = rented.AsSpan(0, tLen + 1);
+            for (var j = 0; j <= tLen; j++)
+                prev[j] = j;
 
-            for (var j = 1; j <= tLen; j++)
+            for (var i = 1; i <= sLen; i++)
             {
-                var temp = prev[j];
-                var cost = s[i - 1] == t[j - 1] ? 0 : 1;
-                prev[j] = Math.Min(Math.Min(prev[j] + 1, prev[j - 1] + 1), prevDiag + cost);
-                prevDiag = temp;
-                rowMin = Math.Min(rowMin, prev[j]);
+                var rowMin = int.MaxValue;
+                var prevDiag = prev[0];
+                prev[0] = i;
+
+                for (var j = 1; j <= tLen; j++)
+                {
+                    var temp = prev[j];
+                    var cost = s[i - 1] == t[j - 1] ? 0 : 1;
+                    prev[j] = Math.Min(Math.Min(prev[j] + 1, prev[j - 1] + 1), prevDiag + cost);
+                    prevDiag = temp;
+                    rowMin = Math.Min(rowMin, prev[j]);
+                }
+
+                if (rowMin > maxDistance) return -1;
             }
 
-            if (rowMin > maxDistance) return -1;
+            return prev[tLen] <= maxDistance ? prev[tLen] : -1;
         }
-
-        return prev[tLen] <= maxDistance ? prev[tLen] : -1;
+        finally
+        {
+            ArrayPool<int>.Shared.Return(rented);
+        }
     }
 
     /// <summary>
@@ -575,21 +605,37 @@ public sealed class TranslationMemoryService(
         }
     }
 
-    private static void EvictIfNeeded(TranslationMemoryStore store)
+    private static void EnqueueForEviction(TranslationMemoryStore store, string key, long translatedAtTicks)
     {
-        if (store.ExactIndex.Count <= MaxEntriesPerGame) return;
-
-        // LRU eviction: remove oldest entries
-        var toRemove = store.ExactIndex
-            .OrderBy(kv => kv.Value.TranslatedAt)
-            .Take(store.ExactIndex.Count - MaxEntriesPerGame)
-            .Select(kv => kv.Key)
-            .ToList();
-
-        foreach (var key in toRemove)
+        store.EvictionLock.Enter();
+        try
         {
-            if (store.ExactIndex.TryRemove(key, out var removed))
+            store.EvictionQueue.Enqueue(key, translatedAtTicks);
+        }
+        finally
+        {
+            store.EvictionLock.Exit();
+        }
+    }
+
+    private static int EvictIfNeeded(TranslationMemoryStore store)
+    {
+        if (store.ExactIndex.Count <= MaxEntriesPerGame)
+            return 0;
+
+        var evicted = 0;
+        store.EvictionLock.Enter();
+        try
+        {
+            while (store.ExactIndex.Count > MaxEntriesPerGame && store.EvictionQueue.TryDequeue(out var key, out var translatedAtTicks))
             {
+                if (!store.ExactIndex.TryGetValue(key, out var current) || current.TranslatedAt.Ticks != translatedAtTicks)
+                    continue;
+
+                if (!store.ExactIndex.TryRemove(key, out var removed))
+                    continue;
+
+                evicted++;
                 var normalizedLen = (removed.NormalizedKey ?? removed.Original).Length;
                 if (store.LengthBuckets.TryGetValue(normalizedLen, out var bucket))
                 {
@@ -609,6 +655,12 @@ public sealed class TranslationMemoryService(
                 }
             }
         }
+        finally
+        {
+            store.EvictionLock.Exit();
+        }
+
+        return evicted;
     }
 
     private async Task LoadFromDiskAsync(string gameId, TranslationMemoryStore store, CancellationToken ct)
@@ -630,6 +682,7 @@ public sealed class TranslationMemoryService(
                 var normalizedEntry = entry with { NormalizedKey = key };
                 store.ExactIndex[key] = normalizedEntry;
                 AddToLengthBucket(store, key.Length, normalizedEntry);
+                EnqueueForEviction(store, key, normalizedEntry.TranslatedAt.Ticks);
             }
 
             logger.LogInformation("已加载游戏 {GameId} 的翻译记忆库: {Count} 条", gameId, entries.Count);
@@ -646,9 +699,8 @@ public sealed class TranslationMemoryService(
         await gameLock.WaitAsync(ct);
         try
         {
-            var entries = store.ExactIndex.Values
-                .OrderByDescending(e => e.TranslatedAt)
-                .ToList();
+            var stopwatch = Stopwatch.StartNew();
+            var entries = store.ExactIndex.Values.ToList();
 
             var file = paths.TranslationMemoryFile(gameId);
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
@@ -656,6 +708,8 @@ public sealed class TranslationMemoryService(
             var tmpPath = file + ".tmp";
             await File.WriteAllTextAsync(tmpPath, json, ct);
             File.Move(tmpPath, file, overwrite: true);
+            logger.LogDebug("TM 持久化: game={GameId}, entries={EntryCount}, elapsedMs={ElapsedMs}",
+                gameId, entries.Count, stopwatch.Elapsed.TotalMilliseconds);
         }
         catch (Exception ex)
         {

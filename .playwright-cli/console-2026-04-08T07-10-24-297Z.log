@@ -1,0 +1,4 @@
+[      23ms] [INFO] [2026-04-08T07:10:24.319Z] Information: Normalizing '/hubs/install' to 'http://127.0.0.1:51821/hubs/install'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[      42ms] [INFO] [2026-04-08T07:10:24.338Z] Information: WebSocket connected to ws://127.0.0.1:51821/hubs/install?id=v_KM50ACdSoDsemxYGrZUg. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0
+[    7032ms] [ERROR] Failed to load resource: the server responded with a status of 400 (Bad Request) @ http://127.0.0.1:51821/api/games/52cddf4763af4e95b55515938a55b68b/extract-assets:0
+[  171986ms] [ERROR] [2026-04-08T07:13:16.283Z] Error: Connection disconnected with error 'Error: WebSocket closed with status code: 1006 (no reason given).'. @ http://127.0.0.1:51821/assets/vendor-signalr-BF8nRz7D.js:0

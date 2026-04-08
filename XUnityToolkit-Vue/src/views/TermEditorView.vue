@@ -160,21 +160,30 @@ const { saving: autoSaving, enable: enableAutoSave, disable: disableAutoSave } =
   { debounceMs: 2000, deep: true },
 )
 
-// Filter counts
-const typeCounts = computed(() => {
-  const all = entries.value.length
-  const translate = entries.value.filter(e => e.type === 'translate').length
-  const dnt = entries.value.filter(e => e.type === 'doNotTranslate').length
-  return { all, translate, dnt }
+const aggregateCounts = computed(() => {
+  const type = { all: entries.value.length, translate: 0, dnt: 0 }
+  const category: Record<string, number> = {
+    character: 0,
+    location: 0,
+    item: 0,
+    skill: 0,
+    organization: 0,
+    general: 0,
+  }
+
+  for (const entry of entries.value) {
+    if (entry.type === 'translate') type.translate++
+    else if (entry.type === 'doNotTranslate') type.dnt++
+
+    const key = entry.category || 'general'
+    category[key] = (category[key] ?? 0) + 1
+  }
+
+  return { type, category }
 })
 
-const categoryCounts = computed(() => {
-  const counts: Record<string, number> = {}
-  for (const cat of ['character', 'location', 'item', 'skill', 'organization', 'general']) {
-    counts[cat] = entries.value.filter(e => (e.category || 'general') === cat).length
-  }
-  return counts
-})
+const typeCounts = computed(() => aggregateCounts.value.type)
+const categoryCounts = computed(() => aggregateCounts.value.category)
 
 const filteredEntries = computed(() => {
   let result = entries.value

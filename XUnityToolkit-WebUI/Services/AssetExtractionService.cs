@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using XUnityToolkit_WebUI.Models;
@@ -10,6 +11,13 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed partial class AssetExtractionService(ILogger<AssetExtractionService> logger)
 {
+    private readonly record struct ExtractionCacheKey(
+        string FilePath,
+        long Length,
+        long LastWriteTicksUtc,
+        string UnityVersion,
+        bool IsBundle);
+
     /// <summary>
     /// Common legacy encodings for games. Tried in order when UTF-8 validation fails.
     /// Scoring picks the best match based on decoded Unicode character quality.
@@ -40,6 +48,19 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         stream.CopyTo(ms);
         return ms.ToArray();
     });
+
+    private readonly ConcurrentDictionary<ExtractionCacheKey, IReadOnlyList<ExtractedText>> _fileExtractionCache = new();
+
+    private static ExtractionCacheKey BuildCacheKey(string filePath, string unityVersion, bool isBundle)
+    {
+        var info = new FileInfo(filePath);
+        return new ExtractionCacheKey(
+            filePath,
+            info.Length,
+            info.LastWriteTimeUtc.Ticks,
+            unityVersion,
+            isBundle);
+    }
 
     public async Task<AssetExtractionResult> ExtractTextsAsync(
         string gamePath, string? exeName, UnityGameInfo gameInfo,
@@ -107,15 +128,25 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                     ct.ThrowIfCancellationRequested();
 
                     var fileName = Path.GetFileName(assetFile);
+                    var cacheKey = BuildCacheKey(assetFile, gameInfo.UnityVersion, isBundle: false);
                     progressData.CurrentFile = fileName;
                     progressData.ScannedFiles++;
                     progress?.Report(progressData);
+
+                    if (_fileExtractionCache.TryGetValue(cacheKey, out var cachedTexts))
+                    {
+                        allTexts.AddRange(cachedTexts);
+                        progressData.ExtractedTexts = allTexts.Count;
+                        progress?.Report(progressData);
+                        continue;
+                    }
 
                     AssetsFileInstance? afileInst = null;
                     try
                     {
                         var texts = ExtractFromAssetFile(manager, assetFile, fileName, gameInfo.UnityVersion, out afileInst);
                         allTexts.AddRange(texts);
+                        _fileExtractionCache[cacheKey] = texts;
                         progressData.ExtractedTexts = allTexts.Count;
                         progress?.Report(progressData);
                     }
@@ -136,15 +167,25 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                     ct.ThrowIfCancellationRequested();
 
                     var fileName = Path.GetFileName(bundleFile);
+                    var cacheKey = BuildCacheKey(bundleFile, gameInfo.UnityVersion, isBundle: true);
                     progressData.CurrentFile = fileName;
                     progressData.ScannedFiles++;
                     progress?.Report(progressData);
+
+                    if (_fileExtractionCache.TryGetValue(cacheKey, out var cachedBundleTexts))
+                    {
+                        allTexts.AddRange(cachedBundleTexts);
+                        progressData.ExtractedTexts = allTexts.Count;
+                        progress?.Report(progressData);
+                        continue;
+                    }
 
                     BundleFileInstance? bunInst = null;
                     try
                     {
                         bunInst = manager.LoadBundleFile(bundleFile, true);
                         var dirInfos = bunInst.file.BlockAndDirInfo.DirectoryInfos;
+                        var bundleTexts = new List<ExtractedText>();
 
                         for (int i = 0; i < dirInfos.Count; i++)
                         {
@@ -159,7 +200,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                                 bundleAfileInst = manager.LoadAssetsFileFromBundle(bunInst, i, false);
                                 var texts = ExtractFromAssetsInstance(manager, bundleAfileInst,
                                     $"{fileName}/{entryName}", gameInfo.UnityVersion);
-                                allTexts.AddRange(texts);
+                                bundleTexts.AddRange(texts);
                             }
                             catch (Exception ex)
                             {
@@ -172,6 +213,8 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
                             }
                         }
 
+                        allTexts.AddRange(bundleTexts);
+                        _fileExtractionCache[cacheKey] = bundleTexts;
                         progressData.ExtractedTexts = allTexts.Count;
                         progress?.Report(progressData);
                     }

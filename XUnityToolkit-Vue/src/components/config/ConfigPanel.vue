@@ -566,21 +566,25 @@ watch(() => props.disabled, (disabled) => {
 <style scoped>
 .config-panel {
   animation: fadeIn 0.3s ease;
+  min-width: 0;
 }
 
 .config-main-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 40px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 470px), 1fr));
+  gap: 12px 32px;
+  align-items: start;
 }
 
 .config-column {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .config-section {
   margin-bottom: 8px;
+  min-width: 0;
 }
 
 .config-section-label {
@@ -594,11 +598,12 @@ watch(() => props.disabled, (disabled) => {
 
 .api-key-group {
   margin-bottom: 8px;
+  min-width: 0;
 }
 
 .framework-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   gap: 0 24px;
 }
 
@@ -608,7 +613,7 @@ watch(() => props.disabled, (disabled) => {
 
 .collapse-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 0 24px;
 }
 
@@ -616,11 +621,13 @@ watch(() => props.disabled, (disabled) => {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
   width: 100%;
 }
 
 .tmp-font-row .n-input {
-  flex: 1;
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .config-footer {
@@ -632,11 +639,24 @@ watch(() => props.disabled, (disabled) => {
   border-top: 1px solid var(--border);
 }
 
+:deep(.n-form-item),
+:deep(.n-form-item-feedback-wrapper),
+:deep(.n-base-selection),
+:deep(.n-input),
+:deep(.n-input-number) {
+  min-width: 0;
+}
+
+:deep(.n-base-selection),
+:deep(.n-input),
+:deep(.n-input-number) {
+  width: 100%;
+}
+
 /* ===== Responsive ===== */
-@media (max-width: 960px) {
+@media (max-width: 720px) {
   .config-main-grid {
-    grid-template-columns: 1fr;
-    gap: 0;
+    gap: 8px 0;
   }
 
   .collapse-grid {
@@ -644,9 +664,10 @@ watch(() => props.disabled, (disabled) => {
   }
 }
 
-@media (max-width: 480px) {
-  .framework-grid {
-    grid-template-columns: 1fr 1fr;
+@media (max-width: 560px) {
+  .framework-grid,
+  .collapse-grid {
+    grid-template-columns: 1fr;
     gap: 0 12px;
   }
 

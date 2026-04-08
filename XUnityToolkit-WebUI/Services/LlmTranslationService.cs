@@ -26,17 +26,46 @@ public sealed class LlmTranslationService(
 
     private sealed class TranslationMemoryBuffer
     {
-        private readonly ConcurrentQueue<TranslationMemoryEntry> _queue = new();
+        private readonly Lock _lock = new();
+        private readonly List<TranslationMemoryEntry> _entries = [];
 
         public void Add(IList<string> originals, IList<string> translations, int maxSize)
         {
-            for (int i = 0; i < originals.Count && i < translations.Count; i++)
-                _queue.Enqueue(new TranslationMemoryEntry(originals[i], translations[i]));
-            while (_queue.Count > maxSize)
-                _queue.TryDequeue(out _);
+            _lock.Enter();
+            try
+            {
+                for (int i = 0; i < originals.Count && i < translations.Count; i++)
+                    _entries.Add(new TranslationMemoryEntry(originals[i], translations[i]));
+
+                if (_entries.Count > maxSize)
+                    _entries.RemoveRange(0, _entries.Count - maxSize);
+            }
+            finally
+            {
+                _lock.Exit();
+            }
         }
 
-        public IList<TranslationMemoryEntry> GetSnapshot() => _queue.ToArray();
+        public IList<TranslationMemoryEntry>? GetSnapshot(int maxSize)
+        {
+            _lock.Enter();
+            try
+            {
+                if (_entries.Count == 0 || maxSize <= 0)
+                    return null;
+
+                var take = Math.Min(maxSize, _entries.Count);
+                var start = _entries.Count - take;
+                var snapshot = new List<TranslationMemoryEntry>(take);
+                for (int i = start; i < _entries.Count; i++)
+                    snapshot.Add(_entries[i]);
+                return snapshot;
+            }
+            finally
+            {
+                _lock.Exit();
+            }
+        }
     }
 
     private readonly ConcurrentDictionary<string, TranslationMemoryBuffer> _translationMemory = new();
@@ -205,28 +234,61 @@ public sealed class LlmTranslationService(
                 throw new InvalidOperationException("没有可用的 AI 提供商，请在 AI 翻译页面配置至少一个提供商");
             }
 
-            // Load unified terms
+            var batchStopwatch = Stopwatch.StartNew();
+            var termContextStopwatch = Stopwatch.StartNew();
+            var textList = texts as List<string> ?? texts.ToList();
+
             List<TermEntry>? allTerms = null;
             List<TermEntry>? matchedTerms = null;
+            List<TermEntry>? glossary = null;
+            List<TermEntry>? dntEntries = null;
+            var perTextTerms = new List<TermEntry>?[texts.Count];
+            var perTextHasTerms = new bool[texts.Count];
+            var perTextHasDnt = new bool[texts.Count];
+            var perTextAuditResult = new string?[texts.Count];
+            var perTextTranslationSource = new string?[texts.Count];
+            var matchedTextCount = 0;
+
             if (!string.IsNullOrEmpty(gameId))
             {
                 allTerms = await termService.GetAsync(gameId, ct);
                 if (allTerms.Count > 0)
-                    matchedTerms = termMatchingService.FindMatchedTerms(allTerms, texts.ToList());
-            }
+                {
+                    matchedTerms = termMatchingService.FindMatchedTerms(allTerms, textList);
+                    if (matchedTerms.Count == 0)
+                    {
+                        matchedTerms = null;
+                    }
+                    else
+                    {
+                        glossary = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
+                        if (glossary.Count == 0)
+                            glossary = null;
 
-            // Split matched terms into glossary (Translate) and DNT lists
-            List<TermEntry>? glossary = null;
-            List<TermEntry>? dntEntries = null;
-            if (matchedTerms is { Count: > 0 })
-            {
-                var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
-                if (translateTerms.Count > 0)
-                    glossary = translateTerms;
+                        dntEntries = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
+                        if (dntEntries.Count == 0)
+                            dntEntries = null;
 
-                var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
-                if (dntTerms.Count > 0)
-                    dntEntries = dntTerms;
+                        var singleText = new List<string>(1);
+                        for (int i = 0; i < texts.Count; i++)
+                        {
+                            singleText.Clear();
+                            singleText.Add(texts[i]);
+
+                            var relevant = termMatchingService.FindMatchedTerms(matchedTerms, singleText);
+                            if (relevant.Count == 0)
+                                continue;
+
+                            perTextTerms[i] = relevant;
+                            perTextHasTerms[i] = relevant.Any(t => t.Type == TermType.Translate);
+                            perTextHasDnt[i] = relevant.Any(t => t.Type == TermType.DoNotTranslate);
+                            matchedTextCount++;
+                        }
+
+                        if (matchedTextCount > 0)
+                            Interlocked.Add(ref _termMatchedTextCount, matchedTextCount);
+                    }
+                }
             }
 
             if (logger.IsEnabled(LogLevel.Debug))
@@ -239,6 +301,16 @@ public sealed class LlmTranslationService(
                 if (dntEntries is { Count: > 0 })
                     logger.LogDebug("禁翻词: {Count} 条 [{Terms}]",
                         dntEntries.Count, string.Join(", ", dntEntries.Select(d => $"\"{d.Original}\"")));
+            }
+
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "术语预处理: game={GameId}, texts={TextCount}, matchedTexts={MatchedTextCount}, elapsedMs={ElapsedMs}",
+                    gameId ?? "(none)",
+                    texts.Count,
+                    matchedTextCount,
+                    termContextStopwatch.Elapsed.TotalMilliseconds);
             }
 
             // Load per-game description (cached in-memory, no disk I/O)
@@ -264,8 +336,9 @@ public sealed class LlmTranslationService(
             if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
             {
                 var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
-                memoryContext = buffer.GetSnapshot();
-                if (memoryContext.Count == 0) memoryContext = null;
+                memoryContext = buffer.GetSnapshot(contextSize);
+                if (memoryContext is { Count: 0 })
+                    memoryContext = null;
             }
 
             // Ensure semaphore matches configured concurrency — forced to 1 in local mode
@@ -284,31 +357,17 @@ public sealed class LlmTranslationService(
             long tokens = 0;
             double ms = 0;
             string endpointName = "";
-            var translations = new List<string>(new string[texts.Count]);
-            var phase1Resolved = new HashSet<int>(); // indices resolved by Phase 1
-
-            // Per-text term tracking for RecentTranslation metadata
-            var perTextHasTerms = new bool[texts.Count];
-            var perTextHasDnt = new bool[texts.Count];
-            var perTextAuditResult = new string?[texts.Count];
-            var perTextTranslationSource = new string?[texts.Count];
-
-            // Compute per-text term info
-            if (matchedTerms is { Count: > 0 })
-            {
-                int matchedCount = 0;
-                for (int i = 0; i < texts.Count; i++)
-                {
-                    var relevant = termMatchingService.FindMatchedTerms(matchedTerms, [texts[i]]);
-                    perTextHasTerms[i] = relevant.Any(t => t.Type == TermType.Translate);
-                    perTextHasDnt[i] = relevant.Any(t => t.Type == TermType.DoNotTranslate);
-                    if (perTextHasTerms[i] || perTextHasDnt[i])
-                        matchedCount++;
-                }
-                Interlocked.Add(ref _termMatchedTextCount, matchedCount);
-            }
+            var translations = new string[texts.Count];
+            var phase0Resolved = new bool[texts.Count];
+            var phase1Resolved = new bool[texts.Count];
+            var phase2Resolved = new bool[texts.Count];
+            var phase0ResolvedCount = 0;
+            var phase1ResolvedCount = 0;
+            var phase2ResolvedCount = 0;
+            var phase3CorrectedCount = 0;
 
             // ── Phase 0: Translation Memory lookup ──
+            var tmStopwatch = Stopwatch.StartNew();
             var tmResults = new Dictionary<int, (string translation, TmMatchType matchType)>();
             if (ai.EnableTranslationMemory && !string.IsNullOrEmpty(gameId))
             {
@@ -326,8 +385,8 @@ public sealed class LlmTranslationService(
                     // Term audit check if terms exist
                     if (matchedTerms is { Count: > 0 } && ai.TermAuditEnabled)
                     {
-                        var termsForText = termMatchingService.FindMatchedTerms(allTerms!, [texts[i]]);
-                        if (termsForText.Count > 0)
+                        var termsForText = perTextTerms[i];
+                        if (termsForText is { Count: > 0 })
                         {
                             var auditResult = termAuditService.AuditTranslation(tmMatch.Translation, termsForText);
                             if (!auditResult.Passed)
@@ -354,13 +413,16 @@ public sealed class LlmTranslationService(
             }
 
             // Apply Phase 0 results — mark resolved indices so Phases 1-3 skip them
-            var phase0Resolved = new HashSet<int>();
             if (tmResults.Count > 0)
             {
                 foreach (var (idx, (translation, matchType)) in tmResults)
                 {
                     translations[idx] = translation;
-                    phase0Resolved.Add(idx);
+                    if (!phase0Resolved[idx])
+                    {
+                        phase0Resolved[idx] = true;
+                        phase0ResolvedCount++;
+                    }
                     perTextTranslationSource[idx] = matchType switch
                     {
                         TmMatchType.Exact => "tmExact",
@@ -368,6 +430,17 @@ public sealed class LlmTranslationService(
                         TmMatchType.Pattern => "tmPattern",
                         _ => null
                     };
+                }
+
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(
+                        "翻译阶段: game={GameId}, phase=tm, texts={TextCount}, resolved={ResolvedCount}, skipped={SkippedCount}, elapsedMs={ElapsedMs}",
+                        gameId ?? "(none)",
+                        texts.Count,
+                        phase0ResolvedCount,
+                        texts.Count - phase0ResolvedCount,
+                        tmStopwatch.Elapsed.TotalMilliseconds);
                 }
 
                 if (tmResults.Count == texts.Count)
@@ -380,6 +453,7 @@ public sealed class LlmTranslationService(
             // ── Phase 1: Natural Translation Mode ──
             // Send source texts unmodified to LLM with terms in structured prompt format.
             // Only when NaturalTranslationMode is enabled, matched terms exist, and token budget allows.
+            var phase1Stopwatch = Stopwatch.StartNew();
             var usePhase1 = ai.NaturalTranslationMode
                 && !isLocalMode
                 && matchedTerms is { Count: > 0 };
@@ -409,7 +483,7 @@ public sealed class LlmTranslationService(
                     var p1Texts = new List<string>();
                     for (int i = 0; i < texts.Count; i++)
                     {
-                        if (!phase0Resolved.Contains(i))
+                        if (!phase0Resolved[i])
                         {
                             p1Indices.Add(i);
                             p1Texts.Add(texts[i]);
@@ -436,15 +510,18 @@ public sealed class LlmTranslationService(
                             if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                             {
                                 // Find terms relevant to this specific text
-                                var relevantTerms = termMatchingService.FindMatchedTerms(
-                                    matchedTerms, [texts[i]]);
-                                if (relevantTerms.Count > 0)
+                                var relevantTerms = perTextTerms[i];
+                                if (relevantTerms is { Count: > 0 })
                                 {
                                     var audit = termAuditService.AuditTranslation(translated, relevantTerms);
                                     if (audit.Passed)
                                     {
                                         translations[i] = translated;
-                                        phase1Resolved.Add(i);
+                                        if (!phase1Resolved[i])
+                                        {
+                                            phase1Resolved[i] = true;
+                                            phase1ResolvedCount++;
+                                        }
                                         perTextAuditResult[i] = "phase1Pass";
                                         Interlocked.Increment(ref _termAuditPhase1PassCount);
                                     }
@@ -455,26 +532,39 @@ public sealed class LlmTranslationService(
 
                             // No audit or no relevant terms — accept Phase 1 result
                             translations[i] = translated;
-                            phase1Resolved.Add(i);
+                            if (!phase1Resolved[i])
+                            {
+                                phase1Resolved[i] = true;
+                                phase1ResolvedCount++;
+                            }
                         }
                     }
 
                     if (logger.IsEnabled(LogLevel.Debug))
                         logger.LogDebug("Phase 1 自然翻译: {Resolved}/{Total} 段通过审查",
-                            phase1Resolved.Count, texts.Count);
+                            phase1ResolvedCount, texts.Count);
+                    if (logger.IsEnabled(LogLevel.Debug))
+                    {
+                        logger.LogDebug(
+                            "翻译阶段: game={GameId}, phase=phase1, texts={TextCount}, resolved={ResolvedCount}, skipped={SkippedCount}, elapsedMs={ElapsedMs}",
+                            gameId ?? "(none)",
+                            texts.Count,
+                            phase1ResolvedCount,
+                            phase0ResolvedCount,
+                            phase1Stopwatch.Elapsed.TotalMilliseconds);
+                    }
                 }
             }
 
             // ── Phase 2: Placeholder-based translation ──
             // For segments not resolved by Phase 0 or Phase 1
+            var phase2Stopwatch = Stopwatch.StartNew();
             var phase2Indices = new List<int>();
             for (int i = 0; i < texts.Count; i++)
             {
-                if (!phase0Resolved.Contains(i) && !phase1Resolved.Contains(i))
+                if (!phase0Resolved[i] && !phase1Resolved[i])
                     phase2Indices.Add(i);
             }
-
-            var phase2Resolved = new HashSet<int>();
 
             if (phase2Indices.Count > 0)
             {
@@ -668,47 +758,70 @@ public sealed class LlmTranslationService(
 
                     if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                     {
-                        var relevantTerms = termMatchingService.FindMatchedTerms(
-                            matchedTerms, [texts[originalIdx]]);
-                        if (relevantTerms.Count > 0)
+                        var relevantTerms = perTextTerms[originalIdx];
+                        if (relevantTerms is { Count: > 0 })
                         {
                             var audit = termAuditService.AuditTranslation(translated, relevantTerms);
                             if (audit.Passed)
                             {
                                 Interlocked.Increment(ref _termAuditPhase2PassCount);
-                                phase2Resolved.Add(originalIdx);
+                                if (!phase2Resolved[originalIdx])
+                                {
+                                    phase2Resolved[originalIdx] = true;
+                                    phase2ResolvedCount++;
+                                }
                                 perTextAuditResult[originalIdx] = "phase2Pass";
                             }
                             // else: leave for Phase 3 force correction
                         }
                         else
                         {
-                            phase2Resolved.Add(originalIdx);
+                            if (!phase2Resolved[originalIdx])
+                            {
+                                phase2Resolved[originalIdx] = true;
+                                phase2ResolvedCount++;
+                            }
                         }
                     }
                     else
                     {
-                        phase2Resolved.Add(originalIdx);
+                        if (!phase2Resolved[originalIdx])
+                        {
+                            phase2Resolved[originalIdx] = true;
+                            phase2ResolvedCount++;
+                        }
                     }
 
                     translations[originalIdx] = translated;
                 }
             }
 
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "翻译阶段: game={GameId}, phase=phase2, texts={TextCount}, resolved={ResolvedCount}, skipped={SkippedCount}, elapsedMs={ElapsedMs}",
+                    gameId ?? "(none)",
+                    texts.Count,
+                    phase2ResolvedCount,
+                    phase0ResolvedCount + phase1ResolvedCount,
+                    phase2Stopwatch.Elapsed.TotalMilliseconds);
+            }
+
             if (logger.IsEnabled(LogLevel.Debug) && matchedTerms is { Count: > 0 })
             {
-                var phase3Candidates = texts.Count - phase0Resolved.Count - phase1Resolved.Count - phase2Resolved.Count;
+                var phase3Candidates = texts.Count - phase0ResolvedCount - phase1ResolvedCount - phase2ResolvedCount;
                 logger.LogDebug("术语审查汇总: Phase0(TM)={P0}, Phase1通过={P1}/{Total}, Phase2通过={P2}, 待强制修正={P3}",
-                    phase0Resolved.Count, phase1Resolved.Count, texts.Count, phase2Resolved.Count, phase3Candidates);
+                    phase0ResolvedCount, phase1ResolvedCount, texts.Count, phase2ResolvedCount, phase3Candidates);
             }
 
             // ── Phase 3: Force Correction ──
             // For segments that failed both Phase 1 and Phase 2 audit
             if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
             {
+                var phase3Stopwatch = Stopwatch.StartNew();
                 for (int i = 0; i < texts.Count; i++)
                 {
-                    if (phase0Resolved.Contains(i) || phase1Resolved.Contains(i) || phase2Resolved.Contains(i))
+                    if (phase0Resolved[i] || phase1Resolved[i] || phase2Resolved[i])
                         continue;
 
                     // This segment failed audit in previous phases — apply force correction
@@ -716,8 +829,9 @@ public sealed class LlmTranslationService(
                     if (string.IsNullOrEmpty(translated))
                         continue;
 
-                    var relevantTerms = termMatchingService.FindMatchedTerms(
-                        matchedTerms, [texts[i]]);
+                    var relevantTerms = perTextTerms[i];
+                    if (relevantTerms is not { Count: > 0 })
+                        continue;
 
                     // Track protected spans in the translated text to prevent shorter terms
                     // from corrupting substrings inside already-correct longer terms.
@@ -771,6 +885,18 @@ public sealed class LlmTranslationService(
                     translations[i] = translated;
                     perTextAuditResult[i] = "forceCorrected";
                     Interlocked.Increment(ref _termAuditForceCorrectedCount);
+                    phase3CorrectedCount++;
+                }
+
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(
+                        "翻译阶段: game={GameId}, phase=phase3, texts={TextCount}, resolved={ResolvedCount}, skipped={SkippedCount}, elapsedMs={ElapsedMs}",
+                        gameId ?? "(none)",
+                        texts.Count,
+                        phase3CorrectedCount,
+                        phase0ResolvedCount + phase1ResolvedCount + phase2ResolvedCount,
+                        phase3Stopwatch.Elapsed.TotalMilliseconds);
                 }
             }
 
@@ -779,13 +905,13 @@ public sealed class LlmTranslationService(
             // Guard: empty translations cause XUnity.AutoTranslator to count as errors;
             // 5 consecutive errors trigger automatic translator shutdown.
             // Fall back to the original text when the LLM returns an empty string.
-            for (int i = 0; i < translations.Count; i++)
+            for (int i = 0; i < translations.Length; i++)
             {
                 if (string.IsNullOrWhiteSpace(translations[i]))
                     translations[i] = texts[i];
             }
 
-            for (int i = 0; i < translations.Count; i++)
+            for (int i = 0; i < translations.Length; i++)
             {
                 // Record recent translation with term metadata
                 var tokensPerText = texts.Count > 0 ? tokens / texts.Count : 0;
@@ -801,6 +927,19 @@ public sealed class LlmTranslationService(
                 _recentTranslations.Enqueue(recent);
                 while (_recentTranslations.Count > MaxRecentTranslations)
                     _recentTranslations.TryDequeue(out _);
+            }
+
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "翻译批次完成: game={GameId}, texts={TextCount}, phase0={Phase0Resolved}, phase1={Phase1Resolved}, phase2={Phase2Resolved}, phase3={Phase3Resolved}, elapsedMs={ElapsedMs}",
+                    gameId ?? "(none)",
+                    texts.Count,
+                    phase0ResolvedCount,
+                    phase1ResolvedCount,
+                    phase2ResolvedCount,
+                    phase3CorrectedCount,
+                    batchStopwatch.Elapsed.TotalMilliseconds);
             }
 
             // Accumulate volatile translation memory (for LLM context)
