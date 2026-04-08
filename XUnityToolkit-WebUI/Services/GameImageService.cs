@@ -84,11 +84,11 @@ public sealed class GameImageService(
     {
         PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
-        var response = await client.GetAsync(imageUrl, ct);
+        using var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();
 
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var contentType = ValidateSupportedImage(bytes);
 
         await _lock.WaitAsync(ct);
         try
@@ -131,6 +131,8 @@ public sealed class GameImageService(
         string gameId, byte[] bytes, string contentType,
         string sourceUrl, CancellationToken ct = default)
     {
+        contentType = ValidateSupportedImage(bytes);
+
         await _lock.WaitAsync(ct);
         try
         {
@@ -166,6 +168,7 @@ public sealed class GameImageService(
         using var ms = new MemoryStream();
         await imageStream.CopyToAsync(ms, ct);
         var bytes = ms.ToArray();
+        contentType = ValidateSupportedImage(bytes);
 
         await _lock.WaitAsync(ct);
         try
@@ -239,7 +242,9 @@ public sealed class GameImageService(
     {
         using var ms = new MemoryStream();
         await imageStream.CopyToAsync(ms, ct);
-        var pngBytes = ConvertToPng(ms.ToArray());
+        var bytes = ms.ToArray();
+        ValidateSupportedImage(bytes);
+        var pngBytes = ConvertToPng(bytes);
         await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
     }
 
@@ -280,10 +285,11 @@ public sealed class GameImageService(
     {
         PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
-        var response = await client.GetAsync(imageUrl, ct);
+        using var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();
 
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        ValidateSupportedImage(bytes);
         var pngBytes = ConvertToPng(bytes);
         await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
     }
@@ -306,10 +312,11 @@ public sealed class GameImageService(
             if (icons.Count == 0) return;
 
             // Download first icon
-            var iconResponse = await client.GetAsync(icons[0].Url, ct);
+            using var iconResponse = await client.GetAsync(icons[0].Url, ct);
             iconResponse.EnsureSuccessStatusCode();
             var bytes = await iconResponse.Content.ReadAsByteArrayAsync(ct);
 
+            ValidateSupportedImage(bytes);
             var pngBytes = ConvertToPng(bytes);
             await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
         }
@@ -368,11 +375,18 @@ public sealed class GameImageService(
 
     private static byte[] ConvertToPng(byte[] imageBytes)
     {
-        using var inputStream = new MemoryStream(imageBytes);
-        using var bitmap = new Bitmap(inputStream);
-        using var ms = new MemoryStream();
-        bitmap.Save(ms, ImageFormat.Png);
-        return ms.ToArray();
+        try
+        {
+            using var inputStream = new MemoryStream(imageBytes);
+            using var bitmap = new Bitmap(inputStream);
+            using var ms = new MemoryStream();
+            bitmap.Save(ms, ImageFormat.Png);
+            return ms.ToArray();
+        }
+        catch (Exception ex) when (ex is ArgumentException or System.Runtime.InteropServices.ExternalException)
+        {
+            throw new InvalidDataException("图片文件无法解析，请使用有效的 JPEG、PNG 或 WebP 图片。", ex);
+        }
     }
 
     public async Task<List<SteamStoreSearchResult>> SearchSteamGamesAsync(string query, CancellationToken ct = default)
@@ -435,8 +449,8 @@ public sealed class GameImageService(
         byte[] coverBytes;
         using (response)
         {
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
             coverBytes = await response.Content.ReadAsByteArrayAsync(ct);
+            var contentType = ValidateSupportedImage(coverBytes);
 
             await _lock.WaitAsync(ct);
             try
@@ -495,11 +509,11 @@ public sealed class GameImageService(
     {
         PathSecurity.ValidateExternalUrl(imageUrl);
         var client = httpClientFactory.CreateClient("SteamGridDB");
-        var response = await client.GetAsync(imageUrl, ct);
+        using var response = await client.GetAsync(imageUrl, ct);
         response.EnsureSuccessStatusCode();
 
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
         var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var contentType = ValidateSupportedImage(bytes);
 
         await _lock.WaitAsync(ct);
         try
@@ -562,8 +576,8 @@ public sealed class GameImageService(
 
         using (response)
         {
-            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
             var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+            var contentType = ValidateSupportedImage(bytes);
 
             await _lock.WaitAsync(ct);
             try
@@ -631,6 +645,7 @@ public sealed class GameImageService(
         using var ms = new MemoryStream();
         await imageStream.CopyToAsync(ms, ct);
         var bytes = ms.ToArray();
+        contentType = ValidateSupportedImage(bytes);
 
         await _lock.WaitAsync(ct);
         try
@@ -665,6 +680,8 @@ public sealed class GameImageService(
         string gameId, byte[] bytes, string contentType,
         string sourceUrl, CancellationToken ct = default)
     {
+        contentType = ValidateSupportedImage(bytes);
+
         await _lock.WaitAsync(ct);
         try
         {
@@ -725,6 +742,48 @@ public sealed class GameImageService(
 
     public static bool IsAllowedContentType(string contentType) =>
         AllowedContentTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase);
+
+    private static string ValidateSupportedImage(byte[] bytes)
+    {
+        var detectedContentType = TryDetectSupportedImageContentType(bytes);
+        if (detectedContentType is null)
+            throw new InvalidDataException("图片文件无效，或格式不受支持。仅支持 JPEG、PNG 和 WebP。");
+
+        return detectedContentType;
+    }
+
+    private static string? TryDetectSupportedImageContentType(byte[] bytes)
+    {
+        if (bytes.Length >= 8
+            && bytes[0] == 0x89
+            && bytes[1] == 0x50
+            && bytes[2] == 0x4E
+            && bytes[3] == 0x47
+            && bytes[4] == 0x0D
+            && bytes[5] == 0x0A
+            && bytes[6] == 0x1A
+            && bytes[7] == 0x0A)
+            return "image/png";
+
+        if (bytes.Length >= 12
+            && bytes[0] == 0x52
+            && bytes[1] == 0x49
+            && bytes[2] == 0x46
+            && bytes[3] == 0x46
+            && bytes[8] == 0x57
+            && bytes[9] == 0x45
+            && bytes[10] == 0x42
+            && bytes[11] == 0x50)
+            return "image/webp";
+
+        if (bytes.Length >= 3
+            && bytes[0] == 0xFF
+            && bytes[1] == 0xD8
+            && bytes[2] == 0xFF)
+            return "image/jpeg";
+
+        return null;
+    }
 
     private async Task<string> GetApiKeyAsync(CancellationToken ct)
     {

@@ -311,8 +311,15 @@ public static class GameEndpoints
             if (!GameImageService.IsAllowedContentType(file.ContentType))
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            using var stream = file.OpenReadStream();
-            await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+            try
+            {
+                using var stream = file.OpenReadStream();
+                await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             // Update game timestamp for cache busting
             await library.UpdateAsync(game);
@@ -344,8 +351,15 @@ public static class GameEndpoints
             if (ext is not ".jpg" and not ".jpeg" and not ".png" and not ".webp")
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            await using var stream = File.OpenRead(request.FilePath);
-            await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+            try
+            {
+                await using var stream = File.OpenRead(request.FilePath);
+                await imageService.SaveCustomIconFromUploadAsync(id, stream, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             await library.UpdateAsync(game);
             return Results.Ok(ApiResult.Ok());
@@ -411,6 +425,10 @@ public static class GameEndpoints
                 await webSearch.SelectAsIconAsync(id, request.ImageUrl, ct);
                 await library.UpdateAsync(game);
                 return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)
             {
@@ -496,6 +514,10 @@ public static class GameEndpoints
                 game.SteamGridDbGameId = request.SteamGridDbGameId;
                 await library.UpdateAsync(game);
                 return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)
             {

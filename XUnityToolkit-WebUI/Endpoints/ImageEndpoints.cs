@@ -48,8 +48,15 @@ public static class ImageEndpoints
             if (!GameImageService.IsAllowedContentType(file.ContentType))
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            using var stream = file.OpenReadStream();
-            await imageService.SaveCoverFromUploadAsync(id, stream, file.ContentType, ct);
+            try
+            {
+                using var stream = file.OpenReadStream();
+                await imageService.SaveCoverFromUploadAsync(id, stream, file.ContentType, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             return Results.Ok(ApiResult<CoverInfo>.Ok(
                 new CoverInfo(true, "upload", game.SteamGridDbGameId)));
@@ -80,8 +87,15 @@ public static class ImageEndpoints
             if (contentType is null || !GameImageService.IsAllowedContentType(contentType))
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            await using var stream = File.OpenRead(request.FilePath);
-            await imageService.SaveCoverFromUploadAsync(id, stream, contentType, ct);
+            try
+            {
+                await using var stream = File.OpenRead(request.FilePath);
+                await imageService.SaveCoverFromUploadAsync(id, stream, contentType, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             return Results.Ok(ApiResult<CoverInfo>.Ok(
                 new CoverInfo(true, "upload", game.SteamGridDbGameId)));
@@ -168,6 +182,10 @@ public static class ImageEndpoints
                 return Results.Ok(ApiResult<CoverInfo>.Ok(
                     new CoverInfo(true, "steamgriddb", request.SteamGridDbGameId)));
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (HttpRequestException ex)
             {
                 return Results.Json(
@@ -228,6 +246,10 @@ public static class ImageEndpoints
                 return Results.Ok(ApiResult<CoverInfo>.Ok(
                     new CoverInfo(true, "steam", null)));
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (HttpRequestException ex)
             {
                 return Results.Json(
@@ -281,6 +303,10 @@ public static class ImageEndpoints
                 await library.UpdateAsync(game);
                 return Results.Ok(ApiResult<CoverInfo>.Ok(
                     new CoverInfo(true, "web", null)));
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)
             {
@@ -372,6 +398,10 @@ public static class ImageEndpoints
 
                 return Results.Ok(ApiResult.Ok());
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (HttpRequestException ex)
             {
                 return Results.Json(
@@ -431,6 +461,10 @@ public static class ImageEndpoints
 
                 return Results.Ok(ApiResult.Ok());
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (HttpRequestException ex)
             {
                 return Results.Json(
@@ -478,8 +512,15 @@ public static class ImageEndpoints
             if (!GameImageService.IsAllowedContentType(file.ContentType))
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            using var stream = file.OpenReadStream();
-            await imageService.SaveBackgroundFromUploadAsync(id, stream, file.ContentType, ct);
+            try
+            {
+                using var stream = file.OpenReadStream();
+                await imageService.SaveBackgroundFromUploadAsync(id, stream, file.ContentType, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             return Results.Ok(ApiResult.Ok());
         }).DisableAntiforgery();
@@ -509,8 +550,15 @@ public static class ImageEndpoints
             if (contentType is null || !GameImageService.IsAllowedContentType(contentType))
                 return Results.BadRequest(ApiResult.Fail("仅支持 JPEG、PNG 或 WebP 格式。"));
 
-            await using var stream = File.OpenRead(request.FilePath);
-            await imageService.SaveBackgroundFromUploadAsync(id, stream, contentType, ct);
+            try
+            {
+                await using var stream = File.OpenRead(request.FilePath);
+                await imageService.SaveBackgroundFromUploadAsync(id, stream, contentType, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
 
             return Results.Ok(ApiResult.Ok());
         });
@@ -558,6 +606,10 @@ public static class ImageEndpoints
             {
                 await webSearch.SelectAsBackgroundAsync(id, request.ImageUrl, ct);
                 return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
             catch (HttpRequestException ex)
             {
