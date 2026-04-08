@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "4.3.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "4.4.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -437,6 +437,73 @@ jobs:
             @{ Name='lite';     SC='false'; Suffix='-lite';     Edition='lite' }
           )
 
+          function Test-FrontendSmoke {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string]$ExePath,
+              [Parameter(Mandatory = $true)]
+              [string]$Label
+            )
+
+            function Get-StatusCode {
+              param([string]$Url)
+              try {
+                return [int](Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2).StatusCode
+              } catch {
+                if ($_.Exception.Response) {
+                  return [int]$_.Exception.Response.StatusCode
+                }
+                return $null
+              }
+            }
+
+            $probeRoot = Join-Path $env:RUNNER_TEMP ("xunitytoolkit-smoke-" + [guid]::NewGuid().ToString('N'))
+            $launcherDir = Join-Path $env:RUNNER_TEMP ("xunitytoolkit-launcher-" + [guid]::NewGuid().ToString('N'))
+            $port = Get-Random -Minimum 42000 -Maximum 52000
+            $proc = $null
+
+            try {
+              New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
+              New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
+
+              $settings = @{ aiTranslation = @{ port = $port } } | ConvertTo-Json -Depth 3
+              Set-Content -Path (Join-Path $probeRoot 'settings.json') -Value $settings -Encoding UTF8
+
+              $env:AppData__Root = $probeRoot
+              $proc = Start-Process -FilePath $ExePath -WorkingDirectory $launcherDir -PassThru
+
+              $rootStatus = $null
+              $apiStatus = $null
+              for ($i = 0; $i -lt 40; $i++) {
+                Start-Sleep -Milliseconds 500
+                $rootStatus = Get-StatusCode "http://127.0.0.1:$port/"
+                $apiStatus = Get-StatusCode "http://127.0.0.1:$port/api/settings/version"
+                if ($null -ne $rootStatus -and $null -ne $apiStatus) {
+                  break
+                }
+              }
+
+              if ($rootStatus -ne 200 -or $apiStatus -ne 200) {
+                $rootText = if ($null -eq $rootStatus) { 'n/a' } else { [string]$rootStatus }
+                $apiText = if ($null -eq $apiStatus) { 'n/a' } else { [string]$apiStatus }
+                throw "Smoke check failed for $Label: root=$rootText api=$apiText"
+              }
+
+              Write-Host "Smoke check passed for $Label (root=$rootStatus, api=$apiStatus)"
+            } finally {
+              if ($proc -and -not $proc.HasExited) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              }
+              Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
+              if (Test-Path $probeRoot) {
+                Remove-Item $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+              }
+              if (Test-Path $launcherDir) {
+                Remove-Item $launcherDir -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          }
+
           foreach ($ed in $editions) {
             $outDir = "Release\win-x64$($ed.Suffix)"
             Write-Host "`n--- Publishing edition: $($ed.Name) ---"
@@ -482,6 +549,8 @@ jobs:
             if (Test-Path $updaterExe) {
               Copy-Item $updaterExe "$outDir/" -Force
             }
+
+            Test-FrontendSmoke -ExePath (Join-Path $outDir "XUnityToolkit-WebUI.exe") -Label $ed.Name
 
             $exeFile = Get-Item (Join-Path $outDir "XUnityToolkit-WebUI.exe")
             $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)

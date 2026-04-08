@@ -250,7 +250,11 @@ string exePath = Path.Combine(appDir, exeName);
 Log($"Launching: {exePath}");
 try
 {
-    Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+    Process.Start(new ProcessStartInfo(exePath)
+    {
+        UseShellExecute = true,
+        WorkingDirectory = appDir
+    });
 }
 catch (Exception ex)
 {
@@ -333,7 +337,11 @@ static void Rollback(
     Log($"Launching original app: {exePath}");
     try
     {
-        Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo(exePath)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = appDir
+        });
     }
     catch (Exception ex)
     {

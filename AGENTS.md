@@ -115,6 +115,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `XUnityToolkit-WebUI.csproj` 默认会在构建前自动执行前端 `npm install` + `npm run build`。
 - 前端开发代理到 `http://127.0.0.1:51821`，不要改成 `localhost`。
 - 完整 UI 预览优先看后端端口 `51821`，因为它同时承载静态前端和 API。
+- 发布产物首页可用性现在由 `build.ps1` 与 `.github/workflows/build.yml` 中的 `Test-FrontendSmoke` 双重守卫；它们会从错误工作目录启动 EXE，并要求 `/` 与 `/api/settings/version` 同时返回 `200`。
 
 ## 6. 运行时架构
 
@@ -126,10 +127,12 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 
 - 读取 `settings.json` 中 `aiTranslation.port`，动态决定监听端口，默认 `51821`
 - 强制绑定 `http://127.0.0.1:{port}`
+- `ContentRootPath` 与 `WebRootPath` 必须固定到 `AppContext.BaseDirectory`，不要依赖当前工作目录；否则更新器、安装器或外部启动器从错误目录拉起时会出现首页 404 但 API 仍可访问
 - 注册各类命名 `HttpClient`
 - 注册所有核心服务为单例
 - 配置 SignalR
 - 提供静态文件与 SPA fallback
+- 启动日志必须记录 `CurrentDirectory`、`BaseDirectory`、`ContentRoot`、`WebRoot` 以及 `wwwroot/index.html` 是否存在；若入口文件缺失应记录 `Critical`
 - 注册全部 Minimal API 端点
 - 在 `ApplicationStopping` 时立即隐藏 UI，并刷新脏的翻译记忆
 - 在 `ApplicationStarted` 时异步初始化 AI 翻译状态，并自动检查更新
@@ -364,11 +367,14 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 
 - `FontReplacementService`
 - 支持扫描并替换 TMP_FontAsset
-- 也支持扫描 Unity Legacy `Font` 资源，但当前只允许替换 `dynamicEmbedded` 类型的 TTF/OTF
-- 带 `CharacterRects` 的静态图集字体、依赖 `FontNames` 的系统回退字体、以及模式不明的 Legacy `Font` 会明确标记为不支持，避免误报替换成功
+- 也支持扫描 Unity Legacy `Font` 资源；支持直接替换 `dynamicEmbedded` 类型的 TTF/OTF，也支持把依赖 `FontNames` 的 `osFallback` / 名称映射动态字体转为内嵌字体
+- 带 `CharacterRects` 的静态图集字体以及模式不明的 Legacy `Font` 会明确标记为不支持；`osFallback` 转内嵌时默认保留原 `FontNames` 作为缺字兜底
+- Legacy `Font.m_FontData` 在不少游戏里是 `vector -> Array -> char` 结构，字段 `Value` 可能为 `null`；扫描和替换时判断字节长度要优先看 `m_FontData["Array"].Children.Count`，不能只依赖 `AsByteArray`
+- TTF 替换写回后必须立即重新读取目标 `Font` 并验证 `FontDataSize ==` 目标字节长度且 `TtfMode == dynamicEmbedded`；验证失败要视为替换失败并回滚该字体
 - 自定义替换源按游戏隔离，目录为 `custom-fonts/<gameId>/ttf/` 与 `custom-fonts/<gameId>/tmp/`，支持累计上传多个源，不再按类型整类覆盖
 - 替换请求按逐字体 `sourceId` 传递，允许同一次操作里为不同 TMP / TTF 字体选择不同默认源或自定义源
 - 状态接口会返回 `availableSources` 与 `usedSources`；备份清单中的 `ReplacedFontEntry` 会记录 `SourceId` 与 `SourceDisplayName`
+- `GET /font-replacement/status` 当前主要返回备份、来源和外部还原状态；其中 `ReplacedFonts` 来自 `manifest.json` 摘要，不是实时重扫结果。需要当前 `ttfMode` / `fontDataSize` 时，以 `POST /font-replacement/scan` 为准
 - 替换前会建立备份，恢复依赖备份清单和哈希
 
 字体生成：
@@ -409,6 +415,7 @@ CI：
 - CI 逻辑与 `build.ps1` 是两份并行维护的实现，改构建流程时必须双改
 - CI 不直接调用 `build.ps1`
 - 更新器是增量更新的关键组件，含备份、替换、删除、回滚逻辑
+- 首页静态资源可用性 smoke check 现在也是双维护实现；若调整启动端口解析、静态资源目录、启动方式或首页健康检查，必须同时更新 `build.ps1` 与 `.github/workflows/build.yml` 中的 `Test-FrontendSmoke`
 - MSI 由 WiX 生成，且不同 edition 构建时必须注意清理 `Installer/obj/...`
 
 ## 14. 关键约束与不变量
@@ -428,6 +435,7 @@ CI：
 - 热路径避免磁盘 I/O，尤其 `POST /api/translate`
 - `GameId` 用作文件路径时必须校验 GUID
 - 用户提供的 URL 在真正请求前必须走 SSRF 校验
+- `Program.cs` 中首页静态资源根目录必须锚定到 `AppContext.BaseDirectory`，不要让 `wwwroot` 跟随 `Environment.CurrentDirectory`
 
 前端：
 
@@ -562,6 +570,7 @@ CI：
 - 翻译编辑器：`GET/PUT /api/games/{id}/translation-editor`、`POST /api/games/{id}/translation-editor/import`、`GET /api/games/{id}/translation-editor/export`
 - 字体替换：`POST /api/games/{id}/font-replacement/scan`、`POST /api/games/{id}/font-replacement/replace`、`POST /api/games/{id}/font-replacement/restore`、`GET /api/games/{id}/font-replacement/status`、`POST /api/games/{id}/font-replacement/upload`、`POST /api/games/{id}/font-replacement/upload-from-path`、`POST /api/games/{id}/font-replacement/cancel`、`DELETE /api/games/{id}/font-replacement/custom-fonts/{sourceId}`
 - 字体替换上传端点现在要求显式区分 `kind={ttf|tmp}`；状态端点会返回默认源/自定义源列表与已使用源摘要；替换请求中的 `fonts[]` 需要携带逐字体 `sourceId`
+- `POST /api/games/{id}/font-replacement/scan` 是字体当前资源状态的权威来源；`GET /api/games/{id}/font-replacement/status` 主要基于 `manifest.json` 汇总替换状态，不返回实时重扫后的 `ttfMode` / `fontDataSize`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
 - BepInEx 日志与健康：`/api/games/{id}/bepinex-log`、`/api/games/{id}/health-check`
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
@@ -575,12 +584,14 @@ CI：
 
 - `InstallStep`、`UpdateInfo`、`VersionInfo`、`DataPathInfo`、`BatchAddResult`、`UnityGameInfo`、`FileExplorer`、`FontReplacement`、`FontGeneration`、`PluginHealth`、`BepInExPlugin`、`LocalLlmSettings`、`BuiltInModelInfo`、`LlamaStatus` 等模型，新增字段时都必须同时同步 C# 模型、TS 类型、相关 API、对应前端页面
 - 字体替换链路改动时，要一起核对 `FontReplacementRequest.Fonts[].SourceId`、`ReplacementSource` / `ReplacementSourceSet`、`FontReplacementStatus.AvailableSources` / `UsedSources`、`ReplacedFontEntry.SourceId` / `SourceDisplayName`，并同步 `FontReplacement.cs`、`src/api/types.ts`、`FontReplacementView.vue`、`FontReplacementEndpoints.cs`、`FontReplacementService.cs`
+- 涉及 Legacy `Font` 的 TTF 分析或写回时，还要一起核对 `AnalyzeTtfFont`、`GetByteArrayLength`、`SetByteArrayContents`、写后重读验证日志、`GetStatusAsync` 和前端状态文案；`scan` 与 `status` 的语义不要混用
 - `SettingsView.vue` 的默认 `AppSettings`、`AiTranslationView.vue` 的 `DEFAULT_AI_TRANSLATION`、后端 `AppSettings`/`AiTranslationSettings` 默认值必须保持一致
 - 数值型设置新增字段时，要同步后端的 `Math.Clamp` 逻辑，否则前端与后端会出现边界不一致
 - `TermEntry` 的 `Type`/`Category`/`Source`、`ScriptTagRule`/`ScriptTagConfig`、`TranslationStats`/`RecentTranslation`/`TranslationError`、`PreTranslationStatus`/`PreTranslationCacheStats` 都属于容易漏同步的高频模型
 - 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
+- 若变更首页可用性、静态资源目录、启动端口或启动方式，还要同步更新两处 `Test-FrontendSmoke`，确保“错误工作目录启动时 `/` 与 `/api/settings/version` 都返回 `200`”这个回归守卫不失效
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
 
 ## 21. 后端专项补充
@@ -623,10 +634,13 @@ CI：
 ### 21.5 资源、字体、WebView2 与周边服务
 
 - `AssetExtractionService` 使用 AssetsTools.NET，数组字段访问统一遵循 `field -> "Array" -> elements` 模式
-- TTF 字体替换当前只支持 `dynamicEmbedded` 的 Unity Legacy `Font`；`staticAtlas`、`osFallback`、`unknown` 统一扫描但拒绝替换
+- TTF 字体替换支持 `dynamicEmbedded` 的 Unity Legacy `Font`，也支持将 `osFallback` / 名称映射动态字体原位转成内嵌字体；`staticAtlas` 与 `unknown` 仍统一扫描但拒绝替换
+- Legacy `Font.m_FontData` 的单字节元素既可能是 `UInt8` 也可能是 `Int8/char`；写回数组项时要按 `AssetValueType` 选择 `AsByte` 或 `AsSByte`，否则会在 `SetNewData` 时触发有符号溢出
 - `TmpFontGeneratorService` 基于 FreeTypeSharp 与 Felzenszwalb EDT 生成 SDF；生成出的 atlas、padding、gradient scale、render mode 之间有强耦合，不要局部改一个字段
 - `WebImageSearchService` 通过网页抓取提供图片搜索；所有 URL 在真正请求之前必须先走 SSRF 校验，保存前还要校验内容类型
 - `WebViewWindow`、`SystemTrayService`、WebView2 预热、加载 overlay、快速隐藏 UI、关闭超时等机制都属于桌面宿主层不变量，改动前要完整回看历史实现
+- `WebViewWindow.InitializeAsync()` 现在会先探测 `GET /`，并且只在首页首次 `NavigationCompleted` 成功后才隐藏原生 loading overlay；首页探测或首屏导航失败时必须保留 overlay 并给出明确错误，不能直接暴露系统 404 页面
+- `Updater/Program.cs` 在成功重启和回滚重启两条路径里都必须保持 `WorkingDirectory = appDir`，否则可能出现 API 正常但首页因 `wwwroot` 解析到错误目录而 404
 - `QuickAccessHelper` 使用 Shell COM 且要求 STA 线程；相关 COM 对象必须逐级 `Marshal.ReleaseComObject`
 - `BepInExLogService`、`PluginHealthCheckService`、`BepInExPluginService` 都依赖文件共享读或被动分析模式，不要在这些路径里引入“加载用户 DLL 到当前进程”这类高风险操作
 

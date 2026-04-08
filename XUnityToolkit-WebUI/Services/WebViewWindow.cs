@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Net;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -11,6 +12,9 @@ internal sealed class WebViewWindow : Form
     private readonly Task<CoreWebView2Environment>? _preCreatedEnvTask;
     private readonly ILogger _logger;
     private Panel? _loadingOverlay;
+    private string _overlayTitle = "XUnity Toolkit";
+    private string _overlayMessage = "Loading...";
+    private string? _overlayDetail;
 
     // Win32 constants
     private const int WM_NCHITTEST = 0x0084;
@@ -79,16 +83,28 @@ internal sealed class WebViewWindow : Form
         // App name
         using var titleFont = new Font("Segoe UI", 16f, FontStyle.Regular);
         using var titleBrush = new SolidBrush(Color.FromArgb(0xe0, 0xe0, 0xe8));
-        var titleText = "XUnity Toolkit";
+        var titleText = _overlayTitle;
         var titleSize = g.MeasureString(titleText, titleFont);
         g.DrawString(titleText, titleFont, titleBrush, cx - titleSize.Width / 2, cy + 4);
 
-        // Loading text
-        using var loadFont = new Font("Segoe UI", 10f, FontStyle.Regular);
-        using var loadBrush = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x90));
-        var loadText = "Loading...";
-        var loadSize = g.MeasureString(loadText, loadFont);
-        g.DrawString(loadText, loadFont, loadBrush, cx - loadSize.Width / 2, cy + 32);
+        // Loading or error text
+        using var messageFont = new Font("Segoe UI", 10f, FontStyle.Regular);
+        using var messageBrush = new SolidBrush(Color.FromArgb(0x80, 0x80, 0x90));
+        using var detailFont = new Font("Segoe UI", 9f, FontStyle.Regular);
+        using var detailBrush = new SolidBrush(Color.FromArgb(0xa8, 0xa8, 0xb6));
+        var messageRect = new RectangleF(cx - 280, cy + 32, 560, 48);
+        var detailRect = new RectangleF(cx - 280, cy + 72, 560, 88);
+        using var centeredFormat = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Near
+        };
+
+        g.DrawString(_overlayMessage, messageFont, messageBrush, messageRect, centeredFormat);
+        if (!string.IsNullOrWhiteSpace(_overlayDetail))
+        {
+            g.DrawString(_overlayDetail, detailFont, detailBrush, detailRect, centeredFormat);
+        }
     }
 
     public void HideLoadingOverlay()
@@ -134,11 +150,99 @@ internal sealed class WebViewWindow : Form
         catch { /* Older runtime — drag region won't work, but the app is still usable */ }
 
         _webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+        _logger.LogInformation("WebView2 initialized, probing startup page {Url}", _appUrl);
 
-        _webView.CoreWebView2.Navigate(_appUrl);
-        _logger.LogInformation("WebView2 initialized, navigating to {Url}", _appUrl);
+        var probeResult = await ProbeHomePageAsync();
+        if (!probeResult.Success)
+        {
+            _logger.LogError("Startup page probe failed for {Url}: {Detail}", _appUrl, probeResult.Detail);
+            ShowOverlayError(
+                "前端页面无法访问，请检查安装目录中的 wwwroot 文件。",
+                probeResult.Detail);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Startup page probe succeeded with status {StatusCode}, navigating to {Url}",
+            probeResult.StatusCode,
+            _appUrl);
+
+        var navigationResult = await NavigateAndWaitForReadyAsync();
+        if (!navigationResult.Success)
+        {
+            _logger.LogError("Initial WebView2 navigation failed for {Url}: {Detail}", _appUrl, navigationResult.Detail);
+            ShowOverlayError("前端页面加载失败，请重启工具箱或查看日志。", navigationResult.Detail);
+            return;
+        }
 
         HideLoadingOverlay();
+    }
+
+    private async Task<StartupProbeResult> ProbeHomePageAsync()
+    {
+        try
+        {
+            using var client = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+            using var response = await client.GetAsync(_appUrl, HttpCompletionOption.ResponseHeadersRead);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new StartupProbeResult(
+                    false,
+                    $"首页返回 HTTP {(int)response.StatusCode} {response.ReasonPhrase}",
+                    response.StatusCode);
+            }
+
+            return new StartupProbeResult(true, null, response.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            return new StartupProbeResult(false, ex.Message);
+        }
+    }
+
+    private async Task<StartupProbeResult> NavigateAndWaitForReadyAsync()
+    {
+        var navigationTcs = new TaskCompletionSource<StartupProbeResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<CoreWebView2NavigationCompletedEventArgs>? handler = null;
+        handler = (_, args) =>
+        {
+            if (!args.IsSuccess)
+            {
+                navigationTcs.TrySetResult(new StartupProbeResult(
+                    false,
+                    $"WebView2 导航失败: {args.WebErrorStatus}"));
+                return;
+            }
+
+            navigationTcs.TrySetResult(new StartupProbeResult(true, null, HttpStatusCode.OK));
+        };
+
+        _webView.CoreWebView2.NavigationCompleted += handler;
+        try
+        {
+            _webView.CoreWebView2.Navigate(_appUrl);
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            using var registration = timeoutCts.Token.Register(() =>
+                navigationTcs.TrySetResult(new StartupProbeResult(false, "首页导航超时")));
+            return await navigationTcs.Task;
+        }
+        finally
+        {
+            _webView.CoreWebView2.NavigationCompleted -= handler;
+        }
+    }
+
+    private void ShowOverlayError(string message, string? detail)
+    {
+        _overlayTitle = "前端页面加载失败";
+        _overlayMessage = message;
+        _overlayDetail = detail;
+        _webView.Visible = false;
+        _loadingOverlay?.Invalidate();
     }
 
     private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -260,4 +364,6 @@ internal sealed class WebViewWindow : Form
         public Point ptMinTrackSize;
         public Point ptMaxTrackSize;
     }
+
+    private readonly record struct StartupProbeResult(bool Success, string? Detail, HttpStatusCode? StatusCode = null);
 }

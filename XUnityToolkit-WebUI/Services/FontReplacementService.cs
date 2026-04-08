@@ -391,7 +391,9 @@ public sealed class FontReplacementService(
 
     private static TtfFontAnalysis AnalyzeTtfFont(AssetTypeValueField fontBase)
     {
-        var fontDataSize = GetByteArrayLength(fontBase["m_FontData"]);
+        var fontDataField = fontBase["m_FontData"];
+        var hasFontDataField = !fontDataField.IsDummy;
+        var fontDataSize = hasFontDataField ? GetByteArrayLength(fontDataField) : 0;
         var characterRectCount = GetArrayCount(fontBase["m_CharacterRects"]);
         var fontNamesCount = GetArrayCount(fontBase["m_FontNames"]);
         var hasTextureRef = HasObjectReference(fontBase["m_Texture"]);
@@ -422,10 +424,22 @@ public sealed class FontReplacementService(
 
         if (fontNamesCount > 0)
         {
+            if (!hasFontDataField)
+            {
+                return new TtfFontAnalysis(
+                    TtfModeOsFallback,
+                    false,
+                    "该字体依赖字体名映射或系统回退，但资源中缺少 m_FontData 字段，暂不支持转为内嵌字体。",
+                    fontDataSize,
+                    characterRectCount,
+                    fontNamesCount,
+                    hasTextureRef);
+            }
+
             return new TtfFontAnalysis(
                 TtfModeOsFallback,
-                false,
-                "\u8BE5\u5B57\u4F53\u4F9D\u8D56\u5B57\u4F53\u540D\u79F0\u6620\u5C04\u6216\u64CD\u4F5C\u7CFB\u7EDF\u56DE\u9000\u5B57\u4F53\uFF0C\u6682\u4E0D\u652F\u6301\u66FF\u6362\u3002",
+                true,
+                null,
                 fontDataSize,
                 characterRectCount,
                 fontNamesCount,
@@ -446,6 +460,10 @@ public sealed class FontReplacementService(
     {
         if (field.IsDummy)
             return 0;
+
+        var arrayField = field["Array"];
+        if (!arrayField.IsDummy && arrayField.Children is not null)
+            return arrayField.Children.Count;
 
         try
         {
@@ -2374,25 +2392,54 @@ public sealed class FontReplacementService(
         }
 
         // Replace m_FontData with new TTF bytes �?preserve all other fields
+        // osFallback fonts keep their original m_FontNames entries as a glyph fallback chain.
         var fontData = fontBase["m_FontData"];
         if (fontData.IsDummy)
             throw new InvalidOperationException($"Font '{fontName}' has no m_FontData field.");
-        if (ttfAnalysis.FontDataSize <= 0)
-            throw new InvalidOperationException($"Font '{fontName}' has empty embedded font data and cannot be replaced.");
+
+        var originalFontBase = fontBase.Clone();
 
         // Value may be null for fonts with empty embedded data �?create new AssetTypeValue
         logger.LogInformation(
-            "Replacing embedded TTF font {FontName} PathId={PathId} Mode={Mode} OldSize={OldSize} NewSize={NewSize}",
+            "Replacing TTF font {FontName} PathId={PathId} Mode={Mode} OldSize={OldSize} NewSize={NewSize}",
             fontName,
             targetPathId,
             ttfAnalysis.Mode,
             ttfAnalysis.FontDataSize,
             ttfSourceBytes.LongLength);
 
-        fontData.Value = new AssetTypeValue(ttfSourceBytes, false);
+        try
+        {
+            SetByteArrayContents(fontData, ttfSourceBytes);
 
-        // Commit modified data
-        targetFontInfo.SetNewData(fontBase);
+            // Commit modified data.
+            targetFontInfo.SetNewData(fontBase);
+
+            var verifiedFontBase = manager.GetBaseField(afileInst, targetFontInfo);
+            if (verifiedFontBase.IsDummy)
+                throw new InvalidOperationException($"Font '{fontName}' could not be re-read after replacement.");
+
+            var verifiedAnalysis = AnalyzeTtfFont(verifiedFontBase);
+            logger.LogInformation(
+                "Verified TTF font {FontName} PathId={PathId} ExpectedNewSize={ExpectedNewSize} VerifiedNewSize={VerifiedNewSize} VerifiedMode={VerifiedMode}",
+                fontName,
+                targetPathId,
+                ttfSourceBytes.LongLength,
+                verifiedAnalysis.FontDataSize,
+                verifiedAnalysis.Mode);
+
+            if (verifiedAnalysis.FontDataSize != ttfSourceBytes.LongLength
+                || !string.Equals(verifiedAnalysis.Mode, TtfModeDynamicEmbedded, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Font '{fontName}' write verification failed: expected embedded size {ttfSourceBytes.LongLength}, got {verifiedAnalysis.FontDataSize} ({verifiedAnalysis.Mode}).");
+            }
+        }
+        catch
+        {
+            targetFontInfo.SetNewData(originalFontBase);
+            throw;
+        }
     }
 
     private static void CopyFontFields(AssetTypeValueField src, AssetTypeValueField dst)
@@ -2492,6 +2539,59 @@ public sealed class FontReplacementService(
             newEntries.Add(newEntry);
         }
         dstArrayNode.Children = newEntries;
+    }
+
+    private static void SetByteArrayContents(AssetTypeValueField field, byte[] bytes)
+    {
+        if (field.IsDummy)
+            throw new InvalidOperationException("Cannot write byte array to a dummy field.");
+
+        var arrayNode = field["Array"];
+        if (arrayNode.IsDummy)
+        {
+            field.AsByteArray = bytes;
+            return;
+        }
+
+        AssetTypeTemplateField? elementTemplate = null;
+        if (arrayNode.Children is { Count: > 0 })
+            elementTemplate = arrayNode.Children[0].TemplateField;
+        else if (arrayNode.TemplateField?.Children is { Count: >= 2 })
+            elementTemplate = arrayNode.TemplateField.Children[^1];
+
+        if (elementTemplate is null)
+            throw new InvalidOperationException($"Byte array field '{field.FieldName}' does not expose an element template.");
+
+        var existingChildren = arrayNode.Children ?? [];
+        var newEntries = new List<AssetTypeValueField>(bytes.Length);
+        var reuseCount = Math.Min(existingChildren.Count, bytes.Length);
+
+        for (int i = 0; i < reuseCount; i++)
+        {
+            var entry = existingChildren[i];
+            SetByteArrayEntryValue(entry, bytes[i]);
+            newEntries.Add(entry);
+        }
+
+        for (int i = reuseCount; i < bytes.Length; i++)
+        {
+            var entry = ValueBuilder.DefaultValueFieldFromTemplate(elementTemplate);
+            SetByteArrayEntryValue(entry, bytes[i]);
+            newEntries.Add(entry);
+        }
+
+        arrayNode.Children = newEntries;
+    }
+
+    private static void SetByteArrayEntryValue(AssetTypeValueField entry, byte value)
+    {
+        if (entry.Value?.ValueType == AssetValueType.Int8)
+        {
+            entry.AsSByte = unchecked((sbyte)value);
+            return;
+        }
+
+        entry.AsByte = value;
     }
 
     private static void LoadClassDatabase(AssetsManager manager, AssetsFile afile, string unityVersion)

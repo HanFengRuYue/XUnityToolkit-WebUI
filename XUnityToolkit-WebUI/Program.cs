@@ -17,7 +17,14 @@ catch
     // WinExe subsystem: no console allocated — encoding is irrelevant
 }
 
-var builder = WebApplication.CreateBuilder(args);
+var appBaseDirectory = AppContext.BaseDirectory;
+var webRootPath = Path.Combine(appBaseDirectory, "wwwroot");
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = appBaseDirectory,
+    WebRootPath = webRootPath
+});
 
 // 从 settings.json 读取端口，如果文件不存在或端口无效则使用默认值
 var appDataRoot = builder.Configuration["AppData:Root"]
@@ -178,6 +185,25 @@ var app = builder.Build();
 // Ensure app data directories exist
 var appDataPaths = app.Services.GetRequiredService<AppDataPaths>();
 appDataPaths.EnsureDirectoriesExist();
+
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger("XUnityToolkit_WebUI.Startup");
+var indexPath = Path.Combine(app.Environment.WebRootPath, "index.html");
+var indexExists = File.Exists(indexPath);
+startupLogger.LogInformation(
+    "Startup paths: CurrentDirectory={CurrentDirectory}, BaseDirectory={BaseDirectory}, ContentRoot={ContentRoot}, WebRoot={WebRoot}, IndexHtml={IndexHtml}, IndexExists={IndexExists}",
+    Environment.CurrentDirectory,
+    appBaseDirectory,
+    app.Environment.ContentRootPath,
+    app.Environment.WebRootPath,
+    indexPath,
+    indexExists);
+if (!indexExists)
+{
+    startupLogger.LogCritical(
+        "前端入口文件缺失: {IndexHtml}。程序将无法提供首页，请检查安装目录中的 wwwroot 目录。",
+        indexPath);
+}
 
 // Clean up orphaned font generation temp directories
 try

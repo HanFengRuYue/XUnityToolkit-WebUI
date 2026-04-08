@@ -115,6 +115,14 @@ function getStatusText(font: FontInfo): string {
     return '当前没有可用的替换源'
   }
 
+  if (font.fontType === 'TTF' && font.ttfMode === 'osFallback') {
+    return '可转内嵌替换'
+  }
+
+  if (font.fontType === 'TTF' && font.ttfMode === 'dynamicEmbedded') {
+    return '可直接替换'
+  }
+
   return '可替换'
 }
 
@@ -145,7 +153,7 @@ function getTtfModeLabel(mode: FontInfo['ttfMode']): string {
     case 'staticAtlas':
       return '静态图集'
     case 'osFallback':
-      return '系统回退'
+      return '系统回退 / 名称映射'
     case 'unknown':
       return '未知'
     default:
@@ -155,6 +163,7 @@ function getTtfModeLabel(mode: FontInfo['ttfMode']): string {
 
 function getTtfDetails(font: FontInfo): string {
   const parts: string[] = []
+  if (font.ttfMode === 'osFallback') parts.push('可转内嵌')
   if (font.characterRectCount > 0) parts.push(`字符矩形 ${font.characterRectCount} 项`)
   if (font.fontNamesCount > 0) parts.push(`字体名 ${font.fontNamesCount} 项`)
   if (font.hasTextureRef) parts.push('纹理引用')
@@ -368,6 +377,16 @@ async function doReplace() {
     replacing.value = false
     cancelling.value = false
     await loadStatus()
+    if (fonts.value.length > 0) {
+      try {
+        fonts.value = await api.post<FontInfo[]>(`/api/games/${gameId.value}/font-replacement/scan`)
+        checkedTmpRowKeys.value = []
+        checkedTtfRowKeys.value = []
+        reconcileSelections()
+      } catch {
+        // Keep the replacement result if the follow-up refresh fails.
+      }
+    }
   } catch (error: any) {
     const isCancelled = error.message === '字体替换已取消'
     const currentProgress = getCurrentProgress()
@@ -594,7 +613,11 @@ const ttfColumns = computed<DataTableColumns<FontInfo>>(() => [
         {
           size: 'small',
           bordered: false,
-          type: row.ttfMode === 'dynamicEmbedded' ? 'success' : 'warning',
+          type: row.ttfMode === 'dynamicEmbedded'
+            ? 'success'
+            : row.ttfMode === 'osFallback'
+              ? 'info'
+              : 'warning',
         },
         { default: () => getTtfModeLabel(row.ttfMode) },
       ),
@@ -999,7 +1022,7 @@ onBeforeUnmount(async () => {
       </div>
 
       <NAlert type="info" :show-icon="false" class="mode-note">
-        只有“内嵌动态字体”模式支持直接替换。静态图集字体、系统回退字体以及未知模式会保留展示，但不可勾选。
+        “内嵌动态字体”支持直接替换；“系统回退 / 名称映射”会在替换时转为内嵌动态字体。静态图集字体和未知模式仍只展示、不支持勾选。
       </NAlert>
 
       <div v-if="ttfFonts.length > 0" class="table-container">
