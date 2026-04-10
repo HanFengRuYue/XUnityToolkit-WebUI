@@ -42,6 +42,8 @@ XUnityToolkit-WebUI 是一个面向 Unity 游戏汉化/翻译工作流的 Window
   后端主程序。ASP.NET Core Minimal API + WinForms/WebView2 宿主。
 - `XUnityToolkit-Vue/`
   前端。Vue 3 + TypeScript + Naive UI + Pinia + Vite。
+- `XUnityToolkit-WebUI.Tests/`
+  后端测试工程。xUnit，当前覆盖翻译响应解析与运行时占位符保护等关键回归。
 - `TranslatorEndpoint/`
   `net35` 的 `LLMTranslate.dll`，供 XUnity.AutoTranslator 调用。
 - `Updater/`
@@ -95,6 +97,12 @@ cd XUnityToolkit-Vue
 npm run dev
 npm run build
 npx vue-tsc --build
+```
+
+测试：
+
+```bash
+dotnet test
 ```
 
 翻译端点：
@@ -310,6 +318,9 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `LLMTranslate.dll` 目标框架是 `net35`
 - `LLMTranslate.dll` 通过 `[LLMTranslate]` INI 区段读取 `ToolkitUrl`、`GameId` 等配置
 - `Program.cs` 必须使用 `127.0.0.1`，不要使用 `localhost`
+- `LlmTranslationService.TranslateDetailedAsync(...)` 是翻译主链路的权威实现；`TranslateAsync(...)` 只是返回 `Translations` 的轻包装。凡是需要决定“是否允许写入 TM / 术语提取 / 运行时上下文缓存”的调用点，都必须使用详细结果而不是只拿字符串数组
+- LLM 返回解析顺序当前固定为：剥离 `<think>` / 代码块包装 → JSON 数组 → 单条 JSON 字符串（仅单条场景）→ 单条纯文本候选（仅单条场景）；批量场景不再接受非结构化原始输出作为译文
+- `POST /api/translate` 与 `PreTranslationService` 现在都会过滤 `Persistable == false` 的结果：这些结果可以回显给调用方，但不能进入自动术语提取、运行时上下文缓存或翻译记忆
 
 多阶段翻译：
 
@@ -317,6 +328,9 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - Phase 1：自然翻译
 - Phase 2：术语/DNT 占位符替换
 - Phase 3：强制修正
+- 在 Phase 1 / Phase 2 进入 LLM 之前，运行时 `SPECIAL_*` 占位符会先替换成内部 `{{XU_RT_n}}` 占位符；LLM 返回后会做宽松恢复，但最终必须逐字回到源文本中的原始 token
+- `SPECIAL_*` 运行时占位符同时覆盖半角 `[SPECIAL_01]` 与全角 `【SPECIAL_01】`；括号样式、大小写、数量和位置都必须与输入完全一致。任一环节校验失败时，整段安全回退原文
+- Phase 0 的 TM 命中也必须经过同样的运行时占位符 round-trip 校验；历史坏缓存命中要视为 miss，不能继续复用
 
 翻译记忆：
 
@@ -427,6 +441,11 @@ CI：
 - 新增每游戏数据文件时，必须同步补充删除逻辑与缓存清理
 - 新增设置字段时，要检查后端默认值、TS 类型、前端默认值、保存逻辑是否同步
 - 提交到 Git 与 GitHub 的提交标题、提交正文、PR 标题、PR 描述、评审回复等协作文案统一使用中文，保持与仓库既有历史风格一致；仅在引用外部专有名词、接口名或命令时保留必要英文
+- Git 提交标题默认使用 `type: 中文摘要` 单行格式，`type` 统一使用仓库和更新面板已识别的英文小写类型：`feat`、`fix`、`docs`、`refactor`、`perf`、`ci`、`chore`、`style`、`test`；不要写成中文类型、emoji、无类型标题、`[标签] 标题`、`type(scope):` 或其他自造前缀
+- Git 提交标题中的冒号必须使用半角 `:` 且后跟一个空格；摘要要直接描述本次主要改动结果，保持中文、具体、可读，避免“更新一下”“修一点问题”“若干调整”这类空泛表述
+- 工具箱内更新内容当前由 `.github/workflows/build.yml` 通过 `git log --pretty=format:"- %s (\`%h\`)" --no-merges` 生成，再由 `XUnityToolkit-Vue/src/views/SettingsView.vue` 按 `- type: description (hash)` 解析；想让更新面板正确显示类型徽标和文本时，提交标题必须遵循上述格式，且不要把关键变更信息只写进提交正文或 merge commit 标题
+- Git 提交正文用于补充背景、约束、风险与验证结论，统一中文书写；正文应围绕“为什么改 / 改了什么 / 需要注意什么”展开，不要套英文模板、AI 套话或与实际改动不符的泛化总结
+- 版本相关提交沿用仓库既有风格：正式发布使用 `feat: 发布 vX.Y`，纯版本号抬升使用 `chore: 版本号提升至 vX.Y`
 
 后端：
 
@@ -467,6 +486,7 @@ CI：
   - AI 翻译页
   - 设置页默认值
   - 后端 `Math.Clamp`
+  - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` 按输入原样保留
 - `LocalLlmSettings`
   需要同步：
   - C# 模型
@@ -590,8 +610,10 @@ CI：
 - `TermEntry` 的 `Type`/`Category`/`Source`、`ScriptTagRule`/`ScriptTagConfig`、`TranslationStats`/`RecentTranslation`/`TranslationError`、`PreTranslationStatus`/`PreTranslationCacheStats` 都属于容易漏同步的高频模型
 - 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
+- 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
 - `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
 - 若变更首页可用性、静态资源目录、启动端口或启动方式，还要同步更新两处 `Test-FrontendSmoke`，确保“错误工作目录启动时 `/` 与 `/api/settings/version` 都返回 `200`”这个回归守卫不失效
+- Git 提交标题规范、`.github/workflows/build.yml` 中 `### Changelog` 的生成逻辑，以及 `XUnityToolkit-Vue/src/views/SettingsView.vue` 的 `typeLabels` / 正则解析属于联动点；若调整提交格式、更新内容展示样式或 changelog 生成方式，必须同时核对这三处，且注意 `--no-merges` 会让 merge commit 不进入工具箱更新列表
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
 
 ## 21. 后端专项补充

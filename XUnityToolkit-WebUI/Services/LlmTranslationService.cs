@@ -5,10 +5,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
+
+internal sealed record TranslationBatchResult(IList<string> Translations, IReadOnlyList<bool> Persistable);
 
 public sealed class LlmTranslationService(
     IHttpClientFactory httpClientFactory,
@@ -218,7 +221,15 @@ public sealed class LlmTranslationService(
         IList<string> texts, string from, string to,
         string? gameId = null, CancellationToken ct = default)
     {
-        if (texts.Count == 0) return [];
+        var result = await TranslateDetailedAsync(texts, from, to, gameId, ct);
+        return result.Translations;
+    }
+
+    internal async Task<TranslationBatchResult> TranslateDetailedAsync(
+        IList<string> texts, string from, string to,
+        string? gameId = null, CancellationToken ct = default)
+    {
+        if (texts.Count == 0) return new TranslationBatchResult([], Array.Empty<bool>());
 
         Interlocked.Add(ref _totalReceived, texts.Count);
         Interlocked.Exchange(ref _lastRequestTicks, DateTime.UtcNow.Ticks);
@@ -263,6 +274,7 @@ public sealed class LlmTranslationService(
             var perTextHasDnt = new bool[texts.Count];
             var perTextAuditResult = new string?[texts.Count];
             var perTextTranslationSource = new string?[texts.Count];
+            var perTextCanPersist = new bool[texts.Count];
             var matchedTextCount = 0;
 
             if (!string.IsNullOrEmpty(gameId))
@@ -398,6 +410,13 @@ public sealed class LlmTranslationService(
                         continue;
                     }
 
+                    if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[i], tmMatch.Translation))
+                    {
+                        logger.LogDebug("TM 命中结果包含无效的运行时占位符，已忽略: game={GameId}, index={Index}", gameId, i);
+                        Interlocked.Increment(ref _tmMisses);
+                        continue;
+                    }
+
                     // Term audit check if terms exist
                     if (matchedTerms is { Count: > 0 } && ai.TermAuditEnabled)
                     {
@@ -446,6 +465,7 @@ public sealed class LlmTranslationService(
                         TmMatchType.Pattern => "tmPattern",
                         _ => null
                     };
+                    perTextCanPersist[idx] = true;
                 }
 
                 if (logger.IsEnabled(LogLevel.Debug))
@@ -487,31 +507,34 @@ public sealed class LlmTranslationService(
 
                 if (tokenBudgetOk)
                 {
-                    // Build natural-mode system prompt with structured term list
-                    var naturalPrompt = BuildSystemPromptWithTerms(
-                        ai.SystemPrompt, from, to, matchedTerms!, gameDescription, memoryContext);
 
                     // Local mode: skip glossary in system prompt — not applicable here since usePhase1 excludes local mode
                     List<TermEntry>? nullGlossary = null;
 
                     // Filter out Phase 0 TM-resolved texts to avoid wasting LLM tokens
                     var p1Indices = new List<int>();
-                    var p1Texts = new List<string>();
+                    var p1SourceTexts = new List<string>();
                     for (int i = 0; i < texts.Count; i++)
                     {
                         if (!phase0Resolved[i])
                         {
                             p1Indices.Add(i);
-                            p1Texts.Add(texts[i]);
+                            p1SourceTexts.Add(texts[i]);
                         }
                     }
 
-                    // Send unmodified source texts to LLM
-                    if (p1Texts.Count > 0)
+                    if (p1SourceTexts.Count > 0)
                     {
+                        var p1RuntimeProtection = RuntimePlaceholderProtector.Protect(p1SourceTexts);
+                        var phase1Hint = p1RuntimeProtection.HasProtectedTokens
+                            ? "\n\n附加硬性规则：文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始的 [SPECIAL_*] 或 【SPECIAL_*】 形式，括号样式不得转换。"
+                            : null;
+                        var naturalPrompt = BuildSystemPromptWithTerms(
+                            ai.SystemPrompt, from, to, matchedTerms!, gameDescription, memoryContext, phase1Hint);
                         var (p1Result, p1Tokens, p1Ms, p1Endpoint) = await TranslateBatchAsync(
-                            p1Texts, from, to, ai, enabledEndpoints, nullGlossary,
+                            p1RuntimeProtection.Texts, from, to, ai, enabledEndpoints, nullGlossary,
                             gameDescription, memoryContext, null, semaphore, ct,
+                            fallbackTexts: p1SourceTexts,
                             overrideSystemPrompt: naturalPrompt);
                         tokens += p1Tokens;
                         ms += p1Ms;
@@ -521,7 +544,15 @@ public sealed class LlmTranslationService(
                         for (int j = 0; j < p1Indices.Count; j++)
                         {
                             var i = p1Indices[j];
-                            var translated = j < p1Result.Count ? p1Result[j] : texts[i];
+                            if (j >= p1Result.Count || !p1Result[j].CanPersist)
+                                continue;
+
+                            if (!RuntimePlaceholderProtector.TryRestoreAndValidate(
+                                    p1SourceTexts[j], p1Result[j].Text, p1RuntimeProtection.Mapping, out var translated))
+                            {
+                                logger.LogDebug("Phase 1 运行时占位符校验失败，转入 Phase 2: index={Index}", i);
+                                continue;
+                            }
 
                             if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                             {
@@ -539,6 +570,7 @@ public sealed class LlmTranslationService(
                                             phase1ResolvedCount++;
                                         }
                                         perTextAuditResult[i] = "phase1Pass";
+                                        perTextCanPersist[i] = true;
                                         Interlocked.Increment(ref _termAuditPhase1PassCount);
                                     }
                                     // else: leave for Phase 2
@@ -553,6 +585,7 @@ public sealed class LlmTranslationService(
                                 phase1Resolved[i] = true;
                                 phase1ResolvedCount++;
                             }
+                            perTextCanPersist[i] = true;
                         }
                     }
 
@@ -590,8 +623,11 @@ public sealed class LlmTranslationService(
                 // Glossary placeholders are applied BEFORE DNT to ensure longer glossary
                 // terms take priority. Example: glossary "魔法師"→"大法师" must match before
                 // DNT "魔法" can consume the substring.
-                IList<string> textsToTranslate = phase2SourceTexts;
-                string? dntHint = null;
+                var runtimeProtection = RuntimePlaceholderProtector.Protect(phase2SourceTexts);
+                IList<string> textsToTranslate = runtimeProtection.Texts;
+                string? dntHint = runtimeProtection.HasProtectedTokens
+                    ? "\n\n文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始的 [SPECIAL_*] 或 【SPECIAL_*】 形式，括号样式不得转换。"
+                    : null;
 
                 // Apply glossary placeholder substitution for non-regex entries
                 Dictionary<string, string>? glossaryMapping = null;
@@ -642,6 +678,7 @@ public sealed class LlmTranslationService(
                 // Pre-compute results for texts that are ENTIRELY a single placeholder.
                 var preComputed = new Dictionary<int, string>(); // index within phase2SourceTexts → result
                 var llmTexts = new List<string>();
+                var preComputedKinds = new Dictionary<int, TranslationCandidateKind>();
                 var llmIndexMap = new List<int>(); // llmTexts idx → phase2SourceTexts idx
 
                 for (int i = 0; i < textsToTranslate.Count; i++)
@@ -671,9 +708,16 @@ public sealed class LlmTranslationService(
                         }
                     }
 
+                    if (directResult is null
+                        && RuntimePlaceholderProtector.TryGetDirectReplacement(text, runtimeProtection.Mapping, out var runtimeToken))
+                    {
+                        directResult = runtimeToken;
+                    }
+
                     if (directResult is not null)
                     {
                         preComputed[i] = directResult;
+                        preComputedKinds[i] = TranslationCandidateKind.DirectPlaceholder;
                     }
                     else
                     {
@@ -689,7 +733,7 @@ public sealed class LlmTranslationService(
                 }
 
                 // Call LLM only for texts that actually need translation
-                IList<string> batchResult;
+                IList<TranslationCandidate> batchResult;
 
                 if (llmTexts.Count > 0)
                 {
@@ -698,7 +742,8 @@ public sealed class LlmTranslationService(
                         // Optimized local path: single semaphore acquisition, cached system prompt, throttled broadcasts
                         var (r, t, m, e) = await TranslateLocalSequentialAsync(
                             llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
-                            gameDescription, memoryContext, dntHint, semaphore, ct);
+                            gameDescription, memoryContext, dntHint, semaphore, ct,
+                            fallbackTexts: llmIndexMap.Select(index => phase2SourceTexts[index]).ToList());
                         batchResult = r;
                         tokens += t;
                         ms += m;
@@ -706,13 +751,14 @@ public sealed class LlmTranslationService(
                     }
                     else
                     {
-                        IList<string> p2Result;
+                        IList<TranslationCandidate> p2Result;
                         long p2Tokens;
                         double p2Ms;
                         string p2Endpoint;
                         (p2Result, p2Tokens, p2Ms, p2Endpoint) = await TranslateBatchAsync(
                             llmTexts, from, to, ai, enabledEndpoints, promptGlossary,
-                            gameDescription, memoryContext, dntHint, semaphore, ct);
+                            gameDescription, memoryContext, dntHint, semaphore, ct,
+                            fallbackTexts: llmIndexMap.Select(index => phase2SourceTexts[index]).ToList());
                         batchResult = p2Result;
                         tokens += p2Tokens;
                         ms += p2Ms;
@@ -725,20 +771,31 @@ public sealed class LlmTranslationService(
                 }
 
                 // Merge LLM results with pre-computed results
-                var phase2Translations = new List<string>(textsToTranslate.Count);
+                var phase2Candidates = new List<TranslationCandidate>(textsToTranslate.Count);
                 int llmIdx = 0;
                 for (int i = 0; i < textsToTranslate.Count; i++)
                 {
                     if (preComputed.TryGetValue(i, out var direct))
-                        phase2Translations.Add(direct);
+                    {
+                        phase2Candidates.Add(new TranslationCandidate(
+                            direct,
+                            preComputedKinds.TryGetValue(i, out var kind) ? kind : TranslationCandidateKind.DirectPlaceholder));
+                    }
                     else
-                        phase2Translations.Add(batchResult[llmIdx++]);
+                    {
+                        phase2Candidates.Add(batchResult[llmIdx++]);
+                    }
                 }
 
                 // Restore glossary placeholders (for partial-placeholder texts from LLM)
                 if (glossaryMapping is not null)
                 {
-                    phase2Translations = RestoreGlossaryPlaceholders(phase2Translations, glossaryMapping);
+                    phase2Candidates = phase2Candidates
+                        .Select(candidate => candidate with
+                        {
+                            Text = RestoreGlossaryPlaceholders([candidate.Text], glossaryMapping)[0]
+                        })
+                        .ToList();
                     if (logger.IsEnabled(LogLevel.Debug))
                         logger.LogDebug("术语占位符恢复完成: {Count} 条映射已还原", glossaryMapping.Count);
                 }
@@ -747,12 +804,13 @@ public sealed class LlmTranslationService(
                 if (glossary is not null)
                 {
                     int postProcessCount = 0;
-                    for (int i = 0; i < phase2Translations.Count; i++)
+                    for (int i = 0; i < phase2Candidates.Count; i++)
                     {
                         if (preComputed.ContainsKey(i)) continue; // pre-computed results are final
-                        var before = phase2Translations[i];
-                        phase2Translations[i] = ApplyGlossaryPostProcess(phase2Translations[i], glossary, logger);
-                        if (before != phase2Translations[i]) postProcessCount++;
+                        var before = phase2Candidates[i].Text;
+                        var after = ApplyGlossaryPostProcess(before, glossary, logger);
+                        phase2Candidates[i] = phase2Candidates[i] with { Text = after };
+                        if (before != after) postProcessCount++;
                     }
                     if (logger.IsEnabled(LogLevel.Debug) && postProcessCount > 0)
                         logger.LogDebug("术语后处理: {Count} 段译文被修正", postProcessCount);
@@ -761,16 +819,57 @@ public sealed class LlmTranslationService(
                 // Restore do-not-translate placeholders AFTER glossary post-processing
                 if (dntMapping is not null)
                 {
-                    phase2Translations = RestoreDoNotTranslatePlaceholders(phase2Translations, dntMapping);
+                    phase2Candidates = phase2Candidates
+                        .Select(candidate => candidate with
+                        {
+                            Text = RestoreDoNotTranslatePlaceholders([candidate.Text], dntMapping)[0]
+                        })
+                        .ToList();
                     if (logger.IsEnabled(LogLevel.Debug))
                         logger.LogDebug("禁翻占位符恢复完成: {Count} 条映射已还原", dntMapping.Count);
+                }
+
+                if (runtimeProtection.HasProtectedTokens)
+                {
+                    phase2Candidates = phase2Candidates
+                        .Select(candidate => candidate with
+                        {
+                            Text = RuntimePlaceholderProtector.Restore(candidate.Text, runtimeProtection.Mapping)
+                        })
+                        .ToList();
                 }
 
                 // Write Phase 2 results back and optionally audit
                 for (int p2i = 0; p2i < phase2Indices.Count; p2i++)
                 {
                     var originalIdx = phase2Indices[p2i];
-                    var translated = phase2Translations[p2i];
+                    var candidate = phase2Candidates[p2i];
+                    var translated = candidate.Text;
+
+                    if (!candidate.CanPersist)
+                    {
+                        translations[originalIdx] = texts[originalIdx];
+                        if (!phase2Resolved[originalIdx])
+                        {
+                            phase2Resolved[originalIdx] = true;
+                            phase2ResolvedCount++;
+                        }
+
+                        continue;
+                    }
+
+                    if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[originalIdx], translated))
+                    {
+                        logger.LogDebug("Phase 2 运行时占位符校验失败，已安全回退原文: index={Index}", originalIdx);
+                        translations[originalIdx] = texts[originalIdx];
+                        if (!phase2Resolved[originalIdx])
+                        {
+                            phase2Resolved[originalIdx] = true;
+                            phase2ResolvedCount++;
+                        }
+
+                        continue;
+                    }
 
                     if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                     {
@@ -787,6 +886,7 @@ public sealed class LlmTranslationService(
                                     phase2ResolvedCount++;
                                 }
                                 perTextAuditResult[originalIdx] = "phase2Pass";
+                                perTextCanPersist[originalIdx] = candidate.CanPersist;
                             }
                             // else: leave for Phase 3 force correction
                         }
@@ -797,6 +897,7 @@ public sealed class LlmTranslationService(
                                 phase2Resolved[originalIdx] = true;
                                 phase2ResolvedCount++;
                             }
+                            perTextCanPersist[originalIdx] = candidate.CanPersist;
                         }
                     }
                     else
@@ -806,6 +907,7 @@ public sealed class LlmTranslationService(
                             phase2Resolved[originalIdx] = true;
                             phase2ResolvedCount++;
                         }
+                        perTextCanPersist[originalIdx] = candidate.CanPersist;
                     }
 
                     translations[originalIdx] = translated;
@@ -898,8 +1000,17 @@ public sealed class LlmTranslationService(
                         }
                     }
 
+                    if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[i], translated))
+                    {
+                        logger.LogDebug("Phase 3 运行时占位符校验失败，已安全回退原文: index={Index}", i);
+                        translations[i] = texts[i];
+                        perTextCanPersist[i] = false;
+                        continue;
+                    }
+
                     translations[i] = translated;
                     perTextAuditResult[i] = "forceCorrected";
+                    perTextCanPersist[i] = true;
                     Interlocked.Increment(ref _termAuditForceCorrectedCount);
                     phase3CorrectedCount++;
                 }
@@ -924,7 +1035,10 @@ public sealed class LlmTranslationService(
             for (int i = 0; i < translations.Length; i++)
             {
                 if (string.IsNullOrWhiteSpace(translations[i]))
+                {
                     translations[i] = texts[i];
+                    perTextCanPersist[i] = false;
+                }
             }
 
             for (int i = 0; i < translations.Length; i++)
@@ -961,20 +1075,31 @@ public sealed class LlmTranslationService(
             // Accumulate volatile translation memory (for LLM context)
             if (contextSize > 0 && !string.IsNullOrEmpty(gameId))
             {
-                var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
-                buffer.Add(texts, translations, contextSize);
+                var (persistableOriginals, persistableTranslations) =
+                    CollectPersistableTranslations(texts, translations, perTextCanPersist);
+                if (persistableOriginals.Count > 0)
+                {
+                    var buffer = _translationMemory.GetOrAdd(gameId, _ => new TranslationMemoryBuffer());
+                    buffer.Add(persistableOriginals, persistableTranslations, contextSize);
+                }
             }
 
             // Persist to Translation Memory service (in-memory + debounced disk write)
             if (ai.EnableTranslationMemory && !string.IsNullOrEmpty(gameId))
             {
-                try { translationMemoryService.Add(gameId, texts, translations, round: 1, isFinal: true); }
+                try
+                {
+                    var (persistableOriginals, persistableTranslations) =
+                        CollectPersistableTranslations(texts, translations, perTextCanPersist);
+                    if (persistableOriginals.Count > 0)
+                        translationMemoryService.Add(gameId, persistableOriginals, persistableTranslations, round: 1, isFinal: true);
+                }
                 catch (Exception ex) { logger.LogWarning(ex, "翻译记忆写入失败"); }
             }
 
             Interlocked.Add(ref _totalTranslated, texts.Count);
             completed = true;
-            return translations;
+            return new TranslationBatchResult(translations, perTextCanPersist);
         }
         finally
         {
@@ -984,12 +1109,13 @@ public sealed class LlmTranslationService(
         }
     }
 
-    private async Task<(IList<string> translations, long tokens, double ms, string endpointName)> TranslateBatchAsync(
+    private async Task<(IList<TranslationCandidate> translations, long tokens, double ms, string endpointName)> TranslateBatchAsync(
         IList<string> texts, string from, string to,
         AiTranslationSettings ai, List<ApiEndpointConfig> endpoints,
         List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext,
         string? dntHint, SemaphoreSlim semaphore, CancellationToken ct,
+        IList<string>? fallbackTexts = null,
         string? overrideSystemPrompt = null)
     {
         Interlocked.Increment(ref _queued);
@@ -1031,6 +1157,7 @@ public sealed class LlmTranslationService(
 
                     var (result, tokens) = await CallProviderAsync(
                         chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
+                        fallbackTexts ?? texts,
                         overrideSystemPrompt);
                     sw.Stop();
 
@@ -1050,9 +1177,11 @@ public sealed class LlmTranslationService(
                     if (result.Count != texts.Count)
                     {
                         logger.LogWarning("LLM 返回数量不匹配: 期望 {Expected}, 实际 {Actual}", texts.Count, result.Count);
-                        var padded = new List<string>(texts.Count);
+                        var padded = new List<TranslationCandidate>(texts.Count);
                         for (int i = 0; i < texts.Count; i++)
-                            padded.Add(i < result.Count ? result[i] : texts[i]);
+                            padded.Add(i < result.Count
+                                ? result[i]
+                                : new TranslationCandidate((fallbackTexts ?? texts)[i], TranslationCandidateKind.FallbackOriginal));
                         result = padded;
                     }
 
@@ -1108,13 +1237,14 @@ public sealed class LlmTranslationService(
     /// Optimized local-mode path: acquires semaphore once, caches system prompt,
     /// and translates texts one by one with throttled broadcasts.
     /// </summary>
-    private async Task<(IList<string> translations, long tokens, double ms, string endpointName)>
+    private async Task<(IList<TranslationCandidate> translations, long tokens, double ms, string endpointName)>
         TranslateLocalSequentialAsync(
             IList<string> texts, string from, string to,
             AiTranslationSettings ai, List<ApiEndpointConfig> endpoints,
             List<TermEntry>? glossary, string? gameDescription,
             IList<TranslationMemoryEntry>? memoryContext,
-            string? dntHint, SemaphoreSlim semaphore, CancellationToken ct)
+            string? dntHint, SemaphoreSlim semaphore, CancellationToken ct,
+            IList<string>? fallbackTexts = null)
     {
         Interlocked.Increment(ref _queued);
         _ = BroadcastStats(force: true);
@@ -1151,14 +1281,14 @@ public sealed class LlmTranslationService(
             // Build system prompt once for the entire batch
             var systemPrompt = BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
 
-            var results = new List<string>(texts.Count);
+            var results = new List<TranslationCandidate>(texts.Count);
             long totalTokens = 0;
             double totalMs = 0;
 
             for (int i = 0; i < texts.Count; i++)
             {
                 var userContent = JsonSerializer.Serialize(new[] { texts[i] });
-                string? translatedText = null;
+                TranslationCandidate? translatedText = null;
 
                 for (int attempt = 0; attempt <= maxRetries; attempt++)
                 {
@@ -1172,7 +1302,11 @@ public sealed class LlmTranslationService(
                         sw.Stop();
 
                         var elapsedMs = sw.Elapsed.TotalMilliseconds;
-                        var parsed = ParseTranslationArray(content, 1, logger);
+                        var parsed = TranslationResponseParser.Parse(
+                            content,
+                            1,
+                            [fallbackTexts?[i] ?? texts[i]],
+                            logger);
                         translatedText = parsed[0];
 
                         // Update stats
@@ -1209,7 +1343,8 @@ public sealed class LlmTranslationService(
                     }
                 }
 
-                results.Add(translatedText ?? texts[i]); // Fallback to original on failure
+                results.Add(translatedText
+                    ?? new TranslationCandidate(fallbackTexts?[i] ?? texts[i], TranslationCandidateKind.FallbackOriginal));
                 _ = BroadcastStats(force: false); // Throttled (200ms)
             }
 
@@ -1262,31 +1397,32 @@ public sealed class LlmTranslationService(
 
     // ── Provider dispatch ──
 
-    private async Task<(IList<string> translations, long tokens)> CallProviderAsync(
+    private async Task<(IList<TranslationCandidate> translations, long tokens)> CallProviderAsync(
         ApiEndpointConfig endpoint, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        IList<string> fallbackTexts,
         string? overrideSystemPrompt = null)
     {
         return endpoint.Provider switch
         {
             LlmProvider.OpenAI => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.DeepSeek => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.Qwen => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.GLM => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.Kimi => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, GetDefaultBaseUrl(endpoint), ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.Custom => await CallOpenAiCompatAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, endpoint.ApiBaseUrl, ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, endpoint.ApiBaseUrl, ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.Claude => await CallClaudeAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, ct, fallbackTexts, overrideSystemPrompt),
             LlmProvider.Gemini => await CallGeminiAsync(endpoint, ai, texts, from, to, glossary,
-                gameDescription, memoryContext, dntHint, ct, overrideSystemPrompt),
+                gameDescription, memoryContext, dntHint, ct, fallbackTexts, overrideSystemPrompt),
             _ => throw new NotSupportedException($"未支持的 LLM 提供商: {endpoint.Provider}")
         };
     }
@@ -1395,11 +1531,12 @@ public sealed class LlmTranslationService(
         return (content, tokens);
     }
 
-    private async Task<(IList<string>, long)> CallOpenAiCompatAsync(
+    private async Task<(IList<TranslationCandidate>, long)> CallOpenAiCompatAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, string baseUrl, CancellationToken ct,
+        IList<string> fallbackTexts,
         string? overrideSystemPrompt = null)
     {
         var systemPrompt = overrideSystemPrompt
@@ -1415,7 +1552,7 @@ public sealed class LlmTranslationService(
             isLocal ? ai.LocalMinP : null,
             isLocal ? ai.LocalRepeatPenalty : null,
             maxTokens);
-        return (ParseTranslationArray(content, texts.Count, logger), tokens);
+        return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
 
     // ── Claude ──
@@ -1463,18 +1600,19 @@ public sealed class LlmTranslationService(
         return (content, inputTokens + outputTokens);
     }
 
-    private async Task<(IList<string>, long)> CallClaudeAsync(
+    private async Task<(IList<TranslationCandidate>, long)> CallClaudeAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        IList<string> fallbackTexts,
         string? overrideSystemPrompt = null)
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
-        return (ParseTranslationArray(content, texts.Count, logger), tokens);
+        return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
 
     // ── Gemini ──
@@ -1521,18 +1659,19 @@ public sealed class LlmTranslationService(
         return (content, promptTokens + candidateTokens);
     }
 
-    private async Task<(IList<string>, long)> CallGeminiAsync(
+    private async Task<(IList<TranslationCandidate>, long)> CallGeminiAsync(
         ApiEndpointConfig ep, AiTranslationSettings ai,
         IList<string> texts, string from, string to,
         List<TermEntry>? glossary, string? gameDescription,
         IList<TranslationMemoryEntry>? memoryContext, string? dntHint, CancellationToken ct,
+        IList<string> fallbackTexts,
         string? overrideSystemPrompt = null)
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
         var userContent = JsonSerializer.Serialize(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
-        return (ParseTranslationArray(content, texts.Count, logger), tokens);
+        return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
 
     // ── Do-not-translate placeholder substitution ──
@@ -1741,6 +1880,7 @@ public sealed class LlmTranslationService(
         var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
 
         AppendGameDescription(sb, gameDescription);
+        AppendExactPlaceholderRule(sb);
 
         if (glossary is { Count: > 0 })
         {
@@ -1772,11 +1912,13 @@ public sealed class LlmTranslationService(
     /// </summary>
     private static string BuildSystemPromptWithTerms(string template, string from, string to,
         List<TermEntry> matchedTerms, string? gameDescription = null,
-        IList<TranslationMemoryEntry>? memoryContext = null)
+        IList<TranslationMemoryEntry>? memoryContext = null,
+        string? extraHint = null)
     {
         var sb = new StringBuilder(template.Replace("{from}", from).Replace("{to}", to));
 
         AppendGameDescription(sb, gameDescription);
+        AppendExactPlaceholderRule(sb);
 
         var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
         var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
@@ -1810,7 +1952,16 @@ public sealed class LlmTranslationService(
 
         AppendMemoryContext(sb, memoryContext, from, to);
 
+        if (!string.IsNullOrEmpty(extraHint))
+            sb.Append(extraHint);
+
         return sb.ToString();
+    }
+
+    private static void AppendExactPlaceholderRule(StringBuilder sb)
+    {
+        sb.Append("\n\n附加硬性规则：所有运行时占位符都必须按输入逐字保留。");
+        sb.Append("例如 [SPECIAL_01] 或 【SPECIAL_01】 必须保持完全一致，括号样式、大小写和位置都不得改变。");
     }
 
     private static void AppendGameDescription(StringBuilder sb, string? gameDescription)
@@ -1989,25 +2140,24 @@ public sealed class LlmTranslationService(
 
     // ── Response parsing ──
 
-    private static IList<string> ParseTranslationArray(string content, int expectedCount,
-        ILogger? log = null)
+    private static (List<string> Originals, List<string> Translations) CollectPersistableTranslations(
+        IList<string> originals,
+        IList<string> translations,
+        IReadOnlyList<bool> persistableFlags)
     {
-        var json = Infrastructure.LlmResponseParser.ExtractJsonArray(content);
+        var persistableOriginals = new List<string>(originals.Count);
+        var persistableTranslations = new List<string>(originals.Count);
+        var count = Math.Min(Math.Min(originals.Count, translations.Count), persistableFlags.Count);
 
-        try
+        for (int i = 0; i < count; i++)
         {
-            var result = JsonSerializer.Deserialize<List<string>>(json);
-            if (result is not null)
-                return result;
-        }
-        catch (Exception ex)
-        {
-            var preview = content.Length > 200 ? content[..200] + "..." : content;
-            log?.LogDebug(ex, "LLM响应JSON解析失败，回退到原文: \"{Preview}\"", preview);
-        }
+            if (!persistableFlags[i])
+                continue;
 
-        // Fallback: return raw content for all slots
-        return Enumerable.Repeat(content, expectedCount).ToList();
+            persistableOriginals.Add(originals[i]);
+            persistableTranslations.Add(translations[i]);
+        }
+        return (persistableOriginals, persistableTranslations);
     }
 
     // ── Concurrency ──
@@ -2076,9 +2226,16 @@ public sealed class LlmTranslationService(
             try
             {
                 var sw = Stopwatch.StartNew();
-                var (translations, _) = await CallProviderAsync(ep, ai, testTexts, "en", "zh", null, null, null, null, ct);
+                var (translations, _) = await CallProviderAsync(
+                    ep, ai, testTexts, "en", "zh", null, null, null, null, ct, testTexts);
                 sw.Stop();
-                return new EndpointTestResult(ep.Id, ep.Name, true, translations, null, Math.Round(sw.Elapsed.TotalMilliseconds, 1));
+                return new EndpointTestResult(
+                    ep.Id,
+                    ep.Name,
+                    true,
+                    translations.Select(t => t.Text).ToList(),
+                    null,
+                    Math.Round(sw.Elapsed.TotalMilliseconds, 1));
             }
             catch (OperationCanceledException)
             {

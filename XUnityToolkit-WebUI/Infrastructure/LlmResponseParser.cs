@@ -7,21 +7,46 @@ namespace XUnityToolkit_WebUI.Infrastructure;
 public static class LlmResponseParser
 {
     /// <summary>
+    /// Strip reasoning blocks and markdown fences while preserving the raw payload content.
+    /// </summary>
+    public static string StripNonJsonDecorations(string content)
+    {
+        var normalized = content.Trim();
+
+        var thinkEnd = normalized.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
+        if (thinkEnd >= 0)
+            normalized = normalized[(thinkEnd + "</think>".Length)..].TrimStart();
+
+        if (normalized.StartsWith("```", StringComparison.Ordinal))
+        {
+            var firstLineEnd = normalized.IndexOf('\n');
+            if (firstLineEnd >= 0)
+            {
+                normalized = normalized[(firstLineEnd + 1)..];
+                var closingFence = normalized.LastIndexOf("```", StringComparison.Ordinal);
+                if (closingFence >= 0)
+                    normalized = normalized[..closingFence];
+            }
+            else
+            {
+                normalized = normalized[3..];
+            }
+
+            normalized = normalized.Trim();
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
     /// Strip &lt;think&gt;...&lt;/think&gt; blocks and markdown code fences from LLM output,
     /// then extract JSON content (array or object).
     /// </summary>
     public static string ExtractJsonContent(string content)
     {
-        var json = content.Trim();
+        var json = StripNonJsonDecorations(content);
 
-        // Strip <think>...</think> blocks produced by reasoning models (e.g. Qwen3).
-        // Find the LAST </think> tag to handle multi-block or nested output.
-        var thinkEnd = json.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
-        if (thinkEnd >= 0)
-            json = json[(thinkEnd + "</think>".Length)..].TrimStart();
-
-        // Strip markdown code fences (``` or ```json)
-        if (json.StartsWith("```"))
+        if (json.StartsWith("```", StringComparison.Ordinal))
         {
             var start = FindJsonStart(json);
             var end = FindJsonEnd(json);
@@ -49,15 +74,9 @@ public static class LlmResponseParser
     /// </summary>
     public static string ExtractJsonArray(string content)
     {
-        var json = content.Trim();
+        var json = StripNonJsonDecorations(content);
 
-        // Strip <think> blocks
-        var thinkEnd = json.LastIndexOf("</think>", StringComparison.OrdinalIgnoreCase);
-        if (thinkEnd >= 0)
-            json = json[(thinkEnd + "</think>".Length)..].TrimStart();
-
-        // Strip markdown code fences
-        if (json.StartsWith("```"))
+        if (json.StartsWith("```", StringComparison.Ordinal))
         {
             var start = json.IndexOf('[');
             var end = json.LastIndexOf(']');

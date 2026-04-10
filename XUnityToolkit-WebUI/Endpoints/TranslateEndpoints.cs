@@ -42,9 +42,10 @@ public static class TranslateEndpoints
 
             try
             {
-                var translations = await translationService.TranslateAsync(
+                var result = await translationService.TranslateDetailedAsync(
                     request.Texts, request.From ?? "ja", request.To ?? "zh",
                     request.GameId, ct);
+                var translations = result.Translations;
                 logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
 
                 // Buffer for glossary extraction (fire-and-forget, non-blocking)
@@ -53,8 +54,15 @@ public static class TranslateEndpoints
                 if (!isLocalMode && validGameId)
                 {
                     for (int i = 0; i < request.Texts.Count; i++)
+                    {
+                        if (!result.Persistable[i])
+                            continue;
+
                         extractionService.BufferTranslation(request.GameId!, request.Texts[i], translations[i]);
-                    extractionService.TryTriggerExtraction(request.GameId!);
+                    }
+
+                    if (result.Persistable.Any(static canPersist => canPersist))
+                        extractionService.TryTriggerExtraction(request.GameId!);
                 }
 
                 return Results.Ok(new TranslateResponse(translations));

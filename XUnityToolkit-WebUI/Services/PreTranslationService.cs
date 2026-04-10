@@ -302,6 +302,14 @@ public sealed partial class PreTranslationService(
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
         var round1Translations = new ConcurrentDictionary<string, string>(round1Seed, StringComparer.Ordinal);
         var round2Translations = new ConcurrentDictionary<string, string>(round2Seed, StringComparer.Ordinal);
+        var round1PersistableTranslations = new ConcurrentDictionary<string, string>(
+            FilterPersistableTranslations(round1Seed), StringComparer.Ordinal);
+        var finalPersistableTranslations = new ConcurrentDictionary<string, string>(
+            round1PersistableTranslations, StringComparer.Ordinal);
+        foreach (var key in round2Seed.Keys)
+            finalPersistableTranslations.TryRemove(key, out _);
+        foreach (var (key, value) in FilterPersistableTranslations(round2Seed))
+            finalPersistableTranslations[key] = value;
         var translations = new ConcurrentDictionary<string, string>(round1Translations, StringComparer.Ordinal);
         foreach (var (key, value) in round2Translations)
             translations[key] = value;
@@ -362,13 +370,24 @@ public sealed partial class PreTranslationService(
                     try
                     {
                         var batchList = batch.ToList();
-                        var results = await translationService.TranslateAsync(
+                        var result = await translationService.TranslateDetailedAsync(
                             batchList, fromLang, toLang, gameId, token);
+                        var results = result.Translations;
 
                         for (var i = 0; i < batchList.Count; i++)
                         {
                             round1Translations[batchList[i]] = results[i];
                             translations[batchList[i]] = results[i];
+                            if (result.Persistable[i])
+                            {
+                                round1PersistableTranslations[batchList[i]] = results[i];
+                                finalPersistableTranslations[batchList[i]] = results[i];
+                            }
+                            else
+                            {
+                                round1PersistableTranslations.TryRemove(batchList[i], out _);
+                                finalPersistableTranslations.TryRemove(batchList[i], out _);
+                            }
                         }
 
                         Interlocked.Add(ref round1Counters.Translated, batchList.Count);
@@ -449,7 +468,7 @@ public sealed partial class PreTranslationService(
         }
 
         if (aiSettings.EnableAutoTermExtraction
-            && round1Translations.Count > 0
+            && round1PersistableTranslations.Count > 0
             && (checkpoint is null || resumePhaseIndex <= GetPhaseIndex("termExtraction")))
         {
             ct.ThrowIfCancellationRequested();
@@ -465,7 +484,7 @@ public sealed partial class PreTranslationService(
 
             try
             {
-                var pairs = round1Translations
+                var pairs = round1PersistableTranslations
                     .Select(kv => (original: kv.Key, translation: kv.Value))
                     .ToList();
                 logger.LogInformation("开始术语提取: {Count} 对翻译, 游戏 {GameId}", pairs.Count, gameId);
@@ -554,13 +573,18 @@ public sealed partial class PreTranslationService(
                     try
                     {
                         var batchList = batch.ToList();
-                        var results = await translationService.TranslateAsync(
+                        var result = await translationService.TranslateDetailedAsync(
                             batchList, fromLang, toLang, gameId, token);
+                        var results = result.Translations;
 
                         for (var i = 0; i < batchList.Count; i++)
                         {
                             round2Translations[batchList[i]] = results[i];
                             translations[batchList[i]] = results[i];
+                            if (result.Persistable[i])
+                                finalPersistableTranslations[batchList[i]] = results[i];
+                            else
+                                finalPersistableTranslations.TryRemove(batchList[i], out _);
                         }
 
                         Interlocked.Add(ref round2Counters.Translated, batchList.Count);
@@ -617,17 +641,17 @@ public sealed partial class PreTranslationService(
                 translations.Count, textList.Count, gameId);
         }
 
-        if (translations.Count > 0)
+        if (finalPersistableTranslations.Count > 0)
         {
             try
             {
-                var originals = translations.Keys.ToList();
-                var translationValues = originals.Select(key => translations[key]).ToList();
+                var originals = finalPersistableTranslations.Keys.ToList();
+                var translationValues = originals.Select(key => finalPersistableTranslations[key]).ToList();
                 var finalRound = status.CurrentRound > 0 ? status.CurrentRound : 1;
                 translationMemoryService.Add(gameId, originals, translationValues, finalRound, isFinal: true);
                 await translationMemoryService.FlushAsync(gameId, ct);
                 logger.LogInformation("翻译记忆库写入 {Count} 条, 游戏 {GameId}",
-                    translations.Count, gameId);
+                    finalPersistableTranslations.Count, gameId);
             }
             catch (Exception ex)
             {
@@ -645,6 +669,22 @@ public sealed partial class PreTranslationService(
 
         trayService.ShowNotification("预翻译完成",
             $"《{game.Name}》已翻译 {translations.Count}/{textList.Count} 条文本");
+    }
+
+    private static Dictionary<string, string> FilterPersistableTranslations(
+        IEnumerable<KeyValuePair<string, string>> source)
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var (original, translation) in source)
+        {
+            if (!RuntimePlaceholderProtector.HasExactRoundTrip(original, translation))
+                continue;
+
+            result[original] = translation;
+        }
+
+        return result;
     }
 
     private async Task WaitForTermReviewAsync(
