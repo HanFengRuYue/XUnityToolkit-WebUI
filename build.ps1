@@ -134,8 +134,8 @@ $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 $hasUpdater = Test-Path $UpdaterProject
 
-# Generate version: 4.4.{YYYYMMDDHHmm}
-$BuildVersion = "4.4.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 4.5.{YYYYMMDDHHmm}
+$BuildVersion = "4.5.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"

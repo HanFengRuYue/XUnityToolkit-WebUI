@@ -50,6 +50,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             MaxTextParserRecursion = GetInt(ini, "Behaviour", "MaxTextParserRecursion", 1),
             EnableTranslationHelper = GetBool(ini, "Behaviour", "EnableTranslationHelper", false),
             TemplateAllNumberAway = GetBool(ini, "Behaviour", "TemplateAllNumberAway", false),
+            ReloadTranslationsOnFileChange = GetBool(ini, "Behaviour", "ReloadTranslationsOnFileChange", false),
             DisableTextMeshProScrollInEffects = GetBool(ini, "Behaviour", "DisableTextMeshProScrollInEffects", false),
             CacheParsedTranslations = GetBool(ini, "Behaviour", "CacheParsedTranslations", false),
             CacheWhitespaceDifferences = GetBool(ini, "Behaviour", "CacheWhitespaceDifferences", false),
@@ -146,6 +147,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
                 ["MaxCharactersPerTranslation"] = "2500",
                 ["OverrideFont"] = "Microsoft YaHei",
                 ["MaxTextParserRecursion"] = "4",
+                ["ReloadTranslationsOnFileChange"] = "False",
                 ["CacheParsedTranslations"] = "True",
             },
             ["Service"] = new(StringComparer.OrdinalIgnoreCase)
@@ -215,6 +217,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
                 ("MaxTextParserRecursion", config.MaxTextParserRecursion.ToString()),
                 ("EnableTranslationHelper", config.EnableTranslationHelper.ToString()),
                 ("TemplateAllNumberAway", config.TemplateAllNumberAway.ToString()),
+                ("ReloadTranslationsOnFileChange", config.ReloadTranslationsOnFileChange.ToString()),
                 ("DisableTextMeshProScrollInEffects", config.DisableTextMeshProScrollInEffects.ToString()),
                 ("CacheParsedTranslations", config.CacheParsedTranslations.ToString()),
                 ("CacheWhitespaceDifferences", config.CacheWhitespaceDifferences.ToString()),
@@ -302,6 +305,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
         sb.AppendLine($"MaxTextParserRecursion={config.MaxTextParserRecursion}");
         sb.AppendLine($"EnableTranslationHelper={config.EnableTranslationHelper}");
         sb.AppendLine($"TemplateAllNumberAway={config.TemplateAllNumberAway}");
+        sb.AppendLine($"ReloadTranslationsOnFileChange={config.ReloadTranslationsOnFileChange}");
         sb.AppendLine($"DisableTextMeshProScrollInEffects={config.DisableTextMeshProScrollInEffects}");
         sb.AppendLine($"CacheParsedTranslations={config.CacheParsedTranslations}");
         sb.AppendLine($"CacheWhitespaceDifferences={config.CacheWhitespaceDifferences}");

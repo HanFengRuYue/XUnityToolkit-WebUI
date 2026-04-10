@@ -36,6 +36,7 @@ public sealed class XUnityConfig
     public int MaxTextParserRecursion { get; set; } = 1;
     public bool EnableTranslationHelper { get; set; }
     public bool TemplateAllNumberAway { get; set; }
+    public bool ReloadTranslationsOnFileChange { get; set; }
     public bool DisableTextMeshProScrollInEffects { get; set; }
     public bool CacheParsedTranslations { get; set; }
     public bool CacheWhitespaceDifferences { get; set; }

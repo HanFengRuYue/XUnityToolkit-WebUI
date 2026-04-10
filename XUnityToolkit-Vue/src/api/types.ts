@@ -134,6 +134,7 @@ export interface XUnityConfig {
   maxTextParserRecursion: number
   enableTranslationHelper: boolean
   templateAllNumberAway: boolean
+  reloadTranslationsOnFileChange: boolean
   disableTextMeshProScrollInEffects: boolean
   cacheParsedTranslations: boolean
   cacheWhitespaceDifferences: boolean
