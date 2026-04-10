@@ -177,8 +177,10 @@ export const assetApi = {
     api.get<AssetExtractionResult | null>(`/api/games/${id}/extracted-texts`),
   deleteExtractedTexts: (id: string) =>
     api.del<void>(`/api/games/${id}/extracted-texts`),
-  startPreTranslation: (id: string, fromLang?: string, toLang?: string) =>
-    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate`, { fromLang, toLang }),
+  startPreTranslation: (id: string, fromLang?: string, toLang?: string, restart = false) =>
+    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate`, { fromLang, toLang, restart }),
+  resumePreTranslation: (id: string) =>
+    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate/resume`, {}),
   getPreTranslationStatus: (id: string) =>
     api.get<PreTranslationStatus>(`/api/games/${id}/pre-translate/status`),
   cancelPreTranslation: (id: string) =>

@@ -179,6 +179,18 @@ public sealed class UpdateService(
         return status;
     }
 
+    public void ResetRuntimeState()
+    {
+        _status = new UpdateStatusInfo { State = UpdateState.None };
+        _lastCheckResult = null;
+        _remoteManifest = null;
+        _releaseAssets = null;
+        _availableInfo = null;
+        _dismissedVersion = null;
+        _resolvedTag = null;
+        _lastCheckTime = DateTime.MinValue;
+    }
+
     public async Task<UpdateCheckResult> CheckForUpdateAsync(
         CancellationToken ct = default, bool bypassThrottle = false)
     {

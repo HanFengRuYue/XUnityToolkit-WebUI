@@ -61,6 +61,20 @@ public sealed class GlossaryExtractionService(
     /// Buffer a completed translation pair for future extraction.
     /// Called from the translate endpoint after successful translation.
     /// </summary>
+    public void ClearAllRuntimeState()
+    {
+        _buffers.Clear();
+        _totalPerGame.Clear();
+        _gameStates.Clear();
+    }
+
+    public void RemoveGameState(string gameId)
+    {
+        _buffers.TryRemove(gameId, out _);
+        _totalPerGame.TryRemove(gameId, out _);
+        _gameStates.TryRemove(gameId, out _);
+    }
+
     public void BufferTranslation(string gameId, string original, string translated)
     {
         var buffer = _buffers.GetOrAdd(gameId, _ => new ConcurrentQueue<TranslationPair>());

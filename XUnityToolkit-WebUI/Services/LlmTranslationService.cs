@@ -81,6 +81,22 @@ public sealed class LlmTranslationService(
         _descriptionCache[gameId] = description;
     }
 
+    public void ClearAllRuntimeState()
+    {
+        _descriptionCache.Clear();
+        _translationMemory.Clear();
+        Interlocked.Exchange(ref _currentGameId, null);
+    }
+
+    public void RemoveGameRuntimeState(string gameId)
+    {
+        _descriptionCache.TryRemove(gameId, out _);
+        _translationMemory.TryRemove(gameId, out _);
+
+        if (string.Equals(Volatile.Read(ref _currentGameId), gameId, StringComparison.Ordinal))
+            Interlocked.CompareExchange(ref _currentGameId, null, gameId);
+    }
+
     // ── Core stats (thread-safe) ──
     private long _totalTranslated;
     private long _totalReceived; // total incoming translation requests

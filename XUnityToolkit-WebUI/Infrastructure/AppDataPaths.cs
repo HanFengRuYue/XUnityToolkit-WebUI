@@ -30,6 +30,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string DoNotTranslateDirectory => Path.Combine(_root, "do-not-translate");
     public string ScriptTagsDirectory => Path.Combine(_root, "script-tags");
     public string PreTranslationRegexDirectory => Path.Combine(CacheDirectory, "pre-translation-regex");
+    public string PreTranslationSessionDirectory => Path.Combine(CacheDirectory, "pre-translation-sessions");
     public string TranslationMemoryDirectory => Path.Combine(_root, "translation-memory");
     public string DynamicPatternsDirectory => Path.Combine(_root, "dynamic-patterns");
     public string TermCandidatesDirectory => Path.Combine(_root, "term-candidates");
@@ -69,6 +70,9 @@ public sealed class AppDataPaths(IConfiguration config)
 
     public string PreTranslationRegexFile(string gameId) =>
         Path.Combine(PreTranslationRegexDirectory, $"{gameId}.txt");
+
+    public string PreTranslationSessionFile(string gameId) =>
+        Path.Combine(PreTranslationSessionDirectory, $"{gameId}.json");
 
     public string ScriptTagFile(string gameId) =>
         Path.Combine(ScriptTagsDirectory, $"{gameId}.json");
@@ -117,6 +121,7 @@ public sealed class AppDataPaths(IConfiguration config)
 #pragma warning restore CS0618
         Directory.CreateDirectory(ScriptTagsDirectory);
         Directory.CreateDirectory(PreTranslationRegexDirectory);
+        Directory.CreateDirectory(PreTranslationSessionDirectory);
         Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTranslationUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTempDirectory);

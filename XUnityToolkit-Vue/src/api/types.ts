@@ -489,6 +489,11 @@ export interface PreTranslationStatus {
   phaseTotal: number
   extractedTermCount: number
   dynamicPatternCount: number
+  canResume: boolean
+  fromLang?: string
+  toLang?: string
+  checkpointUpdatedAt?: string
+  resumeBlockedReason?: string
 }
 
 export interface DynamicPattern {

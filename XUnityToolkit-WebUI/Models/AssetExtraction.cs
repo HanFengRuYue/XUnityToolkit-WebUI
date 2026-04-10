@@ -40,6 +40,11 @@ public sealed class PreTranslationStatus
     public int PhaseTotal { get; set; }     // total batches within non-translation phases
     public int ExtractedTermCount { get; set; }
     public int DynamicPatternCount { get; set; }
+    public bool CanResume { get; set; }
+    public string? FromLang { get; set; }
+    public string? ToLang { get; set; }
+    public DateTime? CheckpointUpdatedAt { get; set; }
+    public string? ResumeBlockedReason { get; set; }
 }
 
 public enum PreTranslationState
@@ -50,4 +55,26 @@ public enum PreTranslationState
     Failed,
     Cancelled,
     AwaitingTermReview
+}
+
+public sealed class PreTranslationCheckpoint
+{
+    public required string GameId { get; init; }
+    public required string FromLang { get; set; }
+    public required string ToLang { get; set; }
+    public required string TextSignature { get; set; }
+    public PreTranslationState State { get; set; } = PreTranslationState.Idle;
+    public int TotalTexts { get; set; }
+    public int TranslatedTexts { get; set; }
+    public int FailedTexts { get; set; }
+    public string? Error { get; set; }
+    public int CurrentRound { get; set; }
+    public string? CurrentPhase { get; set; }
+    public int PhaseProgress { get; set; }
+    public int PhaseTotal { get; set; }
+    public int ExtractedTermCount { get; set; }
+    public int DynamicPatternCount { get; set; }
+    public Dictionary<string, string> Round1Translations { get; set; } = [];
+    public Dictionary<string, string> Round2Translations { get; set; } = [];
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -99,6 +99,20 @@ public sealed class GameLibraryService(AppDataPaths paths, ILogger<GameLibrarySe
         }
     }
 
+    public async Task ReloadAsync(CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var games = await ReadLibraryAsync(ct);
+            ReplaceSnapshot(games);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private async Task EnsureLoadedAsync(CancellationToken ct)
     {
         if (_loaded)

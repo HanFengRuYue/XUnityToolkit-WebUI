@@ -82,15 +82,17 @@ public static class AssetEndpoints
         });
 
         // Delete cached extracted texts
-        app.MapDelete("/api/games/{id}/extracted-texts", (
+        app.MapDelete("/api/games/{id}/extracted-texts", async (
             string id,
-            AppDataPaths paths) =>
+            AppDataPaths paths,
+            PreTranslationService preTranslation) =>
         {
             if (!Guid.TryParse(id, out _))
                 return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
             var cachePath = paths.ExtractedTextsFile(id);
             if (File.Exists(cachePath))
                 File.Delete(cachePath);
+            await preTranslation.DeleteCheckpointAsync(id, clearInactiveStatus: true);
             return Results.Ok(ApiResult.Ok());
         });
 
@@ -137,7 +139,7 @@ public static class AssetEndpoints
             try
             {
                 var status = await preTranslation.StartPreTranslationAsync(
-                    id, extractResult.Texts, fromLang, toLang);
+                    id, extractResult.Texts, fromLang, toLang, request.Restart, ct);
 
                 return Results.Ok(ApiResult<PreTranslationStatus>.Ok(status));
             }
@@ -147,12 +149,42 @@ public static class AssetEndpoints
             }
         });
 
-        // Get pre-translation status
-        app.MapGet("/api/games/{id}/pre-translate/status", (
+        app.MapPost("/api/games/{id}/pre-translate/resume", async (
             string id,
-            PreTranslationService preTranslation) =>
+            PreTranslationService preTranslation,
+            AppDataPaths paths,
+            CancellationToken ct) =>
         {
-            var status = preTranslation.GetStatus(id);
+            if (!Guid.TryParse(id, out _))
+                return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
+            var cachePath = paths.ExtractedTextsFile(id);
+            if (!File.Exists(cachePath))
+                return Results.BadRequest(ApiResult.Fail("请先提取游戏资产"));
+
+            var json = await File.ReadAllTextAsync(cachePath, ct);
+            var extractResult = JsonSerializer.Deserialize<AssetExtractionResult>(json, FileHelper.DataJsonOptions);
+            if (extractResult is null || extractResult.Texts.Count == 0)
+                return Results.BadRequest(ApiResult.Fail("没有可翻译的文本"));
+
+            try
+            {
+                var status = await preTranslation.ResumePreTranslationAsync(id, extractResult.Texts, ct);
+                return Results.Ok(ApiResult<PreTranslationStatus>.Ok(status));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+        });
+
+        // Get pre-translation status
+        app.MapGet("/api/games/{id}/pre-translate/status", async (
+            string id,
+            PreTranslationService preTranslation,
+            CancellationToken ct) =>
+        {
+            var status = await preTranslation.GetStatusAsync(id, ct);
             return Results.Ok(ApiResult<PreTranslationStatus>.Ok(status));
         });
 
@@ -219,5 +251,5 @@ public static class AssetEndpoints
     }
 }
 
-public record PreTranslateRequest(string? FromLang, string? ToLang);
+public record PreTranslateRequest(string? FromLang, string? ToLang, bool Restart = false);
 public record RegexPatternsRequest(string? Patterns);

@@ -84,6 +84,8 @@ public sealed class LocalLlmService(
         File.Move(tmpPath, paths.LocalLlmSettingsFile, overwrite: true);
     }
 
+    public void InvalidateSettingsCache() => _settingsCache = null;
+
     /// <summary>Merges user-editable fields without overwriting Models/PausedDownloads.</summary>
     public async Task UpdateUserSettingsAsync(Endpoints.UpdateLocalLlmSettingsRequest req, CancellationToken ct = default)
     {

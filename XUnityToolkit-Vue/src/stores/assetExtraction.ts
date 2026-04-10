@@ -88,9 +88,14 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
     }
   }
 
-  async function startPreTranslation(gameId: string, fromLang?: string, toLang?: string) {
+  async function startPreTranslation(gameId: string, fromLang?: string, toLang?: string, restart = false) {
     await connect(gameId)
-    preTranslationStatus.value = await assetApi.startPreTranslation(gameId, fromLang, toLang)
+    preTranslationStatus.value = await assetApi.startPreTranslation(gameId, fromLang, toLang, restart)
+  }
+
+  async function resumePreTranslation(gameId: string) {
+    await connect(gameId)
+    preTranslationStatus.value = await assetApi.resumePreTranslation(gameId)
   }
 
   async function cancelPreTranslation(gameId: string) {
@@ -104,6 +109,7 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
   async function clearCache(gameId: string) {
     await assetApi.deleteExtractedTexts(gameId)
     extractionResult.value = null
+    preTranslationStatus.value = await assetApi.getPreTranslationStatus(gameId)
   }
 
   function resetTermExtractionComplete() {
@@ -121,6 +127,7 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
     loadCachedResult,
     extractAssets,
     startPreTranslation,
+    resumePreTranslation,
     cancelPreTranslation,
     fetchPreTranslationStatus,
     clearCache,

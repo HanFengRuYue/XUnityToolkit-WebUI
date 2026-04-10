@@ -199,12 +199,28 @@ function getPhaseStatus(phaseKey: string): 'done' | 'active' | 'pending' {
   return 'pending'
 }
 
+const hasCheckpoint = computed(() =>
+  Boolean(store.preTranslationStatus?.checkpointUpdatedAt)
+)
+
+const hasResumableCheckpoint = computed(() =>
+  hasCheckpoint.value && store.preTranslationStatus?.canResume === true
+)
+
+const hasBlockedCheckpoint = computed(() =>
+  hasCheckpoint.value
+  && !hasResumableCheckpoint.value
+  && Boolean(store.preTranslationStatus?.resumeBlockedReason)
+)
+
 const isPreTranslating = computed(() =>
   store.preTranslationStatus?.state === 'Running'
+  && !store.preTranslationStatus?.canResume
 )
 
 const isAwaitingTermReview = computed(() =>
   store.preTranslationStatus?.state === 'AwaitingTermReview'
+  && !store.preTranslationStatus?.canResume
 )
 
 const isPhaseWithBatchProgress = computed(() => {
@@ -278,6 +294,12 @@ onMounted(async () => {
       fromLang.value = store.extractionResult.detectedLanguage
     }
     await store.fetchPreTranslationStatus(gameId)
+    if (store.preTranslationStatus?.fromLang) {
+      fromLang.value = store.preTranslationStatus.fromLang
+    }
+    if (store.preTranslationStatus?.toLang) {
+      toLang.value = store.preTranslationStatus.toLang
+    }
     if (isPreTranslating.value || isAwaitingTermReview.value) {
       await store.connect(gameId)
     }
@@ -301,7 +323,7 @@ onMounted(async () => {
 })
 
 watch(() => store.preTranslationStatus?.state, (newState) => {
-  if (newState === 'AwaitingTermReview') {
+  if (newState === 'AwaitingTermReview' && !store.preTranslationStatus?.canResume) {
     loadTermCandidates()
   }
 })
@@ -344,6 +366,45 @@ async function handleCancelPreTranslation() {
     message.info('已取消')
   } catch {
     message.error('取消失败')
+  }
+}
+
+/*
+async function handleResumePreTranslation() {
+  try {
+    await store.resumePreTranslation(gameId)
+    message.info('棰勭炕璇戝凡鎭㈠')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '鎭㈠棰勭炕璇戝け璐?)
+  }
+}
+
+async function handleRestartPreTranslation() {
+  try {
+    await store.startPreTranslation(gameId, fromLang.value, toLang.value, true)
+    message.info('棰勭炕璇戝凡閲嶆柊寮€濮?)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '閲嶆柊寮€濮嬮缈昏瘧澶辫触')
+  }
+}
+
+*/
+
+async function handleResumePreTranslation() {
+  try {
+    await store.resumePreTranslation(gameId)
+    message.info('预翻译已恢复')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '恢复预翻译失败')
+  }
+}
+
+async function handleRestartPreTranslation() {
+  try {
+    await store.startPreTranslation(gameId, fromLang.value, toLang.value, true)
+    message.info('预翻译已重新开始')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '重新开始预翻译失败')
   }
 }
 
@@ -669,7 +730,7 @@ function langLabel(code: string): string {
         <!-- Action Buttons -->
         <div class="action-row">
           <NButton
-            v-if="!isPreTranslating && !isAwaitingTermReview"
+            v-if="!isPreTranslating && !isAwaitingTermReview && !hasResumableCheckpoint && !hasBlockedCheckpoint"
             type="primary"
             :disabled="!hasAiProvider"
             @click="handleStartPreTranslation"
@@ -677,8 +738,44 @@ function langLabel(code: string): string {
             <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
             开始预翻译 ({{ store.extractionResult.totalTextsExtracted }} 条)
           </NButton>
+          <template v-if="hasResumableCheckpoint">
+            <NButton type="primary" :disabled="!hasAiProvider" @click="handleResumePreTranslation">
+              <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
+              继续预翻译
+            </NButton>
+            <NButton :disabled="!hasAiProvider" @click="handleRestartPreTranslation">
+              重新开始
+            </NButton>
+          </template>
+          <template v-if="false">
+            <NButton type="primary" @click="handleResumePreTranslation">
+              <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
+              缁х画棰勭炕璇?
+            </NButton>
+            <NButton :disabled="!hasAiProvider" @click="handleRestartPreTranslation">
+              閲嶆柊寮€濮?
+            </NButton>
+          </template>
           <NButton
-            v-else
+            v-if="hasBlockedCheckpoint"
+            type="primary"
+            :disabled="!hasAiProvider"
+            @click="handleRestartPreTranslation"
+          >
+            <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
+            重新开始
+          </NButton>
+          <NButton
+            v-if="false"
+            type="primary"
+            :disabled="!hasAiProvider"
+            @click="handleRestartPreTranslation"
+          >
+            <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
+            閲嶆柊寮€濮?
+          </NButton>
+          <NButton
+            v-else-if="isPreTranslating || isAwaitingTermReview"
             type="warning"
             @click="handleCancelPreTranslation"
           >
@@ -690,7 +787,7 @@ function langLabel(code: string): string {
         <!-- Progress -->
         <div v-if="store.preTranslationStatus && store.preTranslationStatus.state !== 'Idle'" class="progress-section">
           <!-- Phase Steps -->
-          <div v-if="isPreTranslating || isAwaitingTermReview || store.preTranslationStatus.state === 'Completed'" class="phase-steps">
+          <div v-if="isPreTranslating || isAwaitingTermReview || hasCheckpoint || store.preTranslationStatus.state === 'Completed'" class="phase-steps">
             <div
               v-for="(phase, idx) in phases"
               :key="phase.key"
@@ -708,7 +805,7 @@ function langLabel(code: string): string {
           </div>
 
           <!-- Round indicator -->
-          <div v-if="(store.preTranslationStatus.currentRound ?? 0) > 0 && isPreTranslating" class="round-indicator">
+          <div v-if="(store.preTranslationStatus.currentRound ?? 0) > 0 && (isPreTranslating || hasCheckpoint)" class="round-indicator">
             <NTag size="small" :bordered="false">
               第 {{ store.preTranslationStatus.currentRound }} 轮
             </NTag>
@@ -755,7 +852,28 @@ function langLabel(code: string): string {
             预翻译完成！翻译结果已写入游戏翻译缓存，启动游戏即可使用。
           </NAlert>
           <NAlert
-            v-if="store.preTranslationStatus.state === 'AwaitingTermReview'"
+            v-if="hasResumableCheckpoint"
+            type="info"
+            style="margin-top: 12px"
+          >
+            检测到未完成的预翻译检查点。你可以继续按上次进度恢复，或重新开始覆盖旧检查点。
+          </NAlert>
+          <NAlert
+            v-if="false"
+            type="info"
+            style="margin-top: 12px"
+          >
+            妫€娴嬪埌鍙户缁殑棰勭炕璇戜换鍔★紝璇风偣鍑汇€岀户缁缈昏瘧銆嶆仮澶嶄笂娆¤繘搴︺€?
+          </NAlert>
+          <NAlert
+            v-if="hasBlockedCheckpoint"
+            type="warning"
+            style="margin-top: 12px"
+          >
+            {{ store.preTranslationStatus.resumeBlockedReason }}
+          </NAlert>
+          <NAlert
+            v-if="isAwaitingTermReview"
             type="info"
             style="margin-top: 12px"
           >

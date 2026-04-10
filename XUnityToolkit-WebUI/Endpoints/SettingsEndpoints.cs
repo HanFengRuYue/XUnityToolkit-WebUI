@@ -36,27 +36,24 @@ public static class SettingsEndpoints
             return Results.Ok(ApiResult<AppSettings>.Ok(saved));
         });
 
-        group.MapPost("/reset", (
+        group.MapPost("/reset", async (
             AppDataPaths paths,
             AppSettingsService settingsService,
+            GameLibraryService gameLibraryService,
+            LocalLlmService localLlmService,
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
             DynamicPatternService dynamicPatternService,
             TermExtractionService extractionService,
             PreTranslationCacheMonitor cacheMonitor,
+            LlmTranslationService translationService,
+            GlossaryExtractionService glossaryExtractionService,
+            UpdateService updateService,
             FileLoggerProvider fileLoggerProvider,
-            ILogger<AppSettingsService> logger) =>
+            ILogger<AppSettingsService> logger,
+            CancellationToken ct) =>
         {
-            // Invalidate all in-memory caches
-            settingsService.InvalidateCache();
-            termService.ClearAllCache();
-            scriptTagService.ClearAllCache();
-            tmService.ClearAllCache();
-            dynamicPatternService.ClearAllCache();
-            extractionService.ClearAllCache();
-            cacheMonitor.UnloadCache();
-
             var errors = new List<string>();
 
             // Suspend file logging so the log file handle is released,
@@ -76,6 +73,21 @@ public static class SettingsEndpoints
                 fileLoggerProvider.ResumeFileLog();
                 paths.EnsureDirectoriesExist();
             }
+
+            await RefreshApplicationRuntimeStateAsync(
+                settingsService,
+                gameLibraryService,
+                localLlmService,
+                termService,
+                scriptTagService,
+                tmService,
+                dynamicPatternService,
+                extractionService,
+                cacheMonitor,
+                translationService,
+                glossaryExtractionService,
+                updateService,
+                ct);
 
             if (errors.Count > 0)
             {
@@ -172,13 +184,19 @@ public static class SettingsEndpoints
 
         group.MapPost("/import", async (HttpRequest request, AppDataPaths paths,
             AppSettingsService settingsService,
+            GameLibraryService gameLibraryService,
+            LocalLlmService localLlmService,
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
             DynamicPatternService dynamicPatternService,
             TermExtractionService extractionService,
             PreTranslationCacheMonitor cacheMonitor,
-            ILogger<AppSettingsService> logger) =>
+            LlmTranslationService translationService,
+            GlossaryExtractionService glossaryExtractionService,
+            UpdateService updateService,
+            ILogger<AppSettingsService> logger,
+            CancellationToken ct) =>
         {
             if (!request.HasFormContentType)
                 return Results.BadRequest(ApiResult.Fail("请求必须是 multipart/form-data"));
@@ -283,14 +301,20 @@ public static class SettingsEndpoints
                         Directory.Delete(dntDir);
                 }
 
-                // Invalidate all in-memory caches so services pick up imported data
-                settingsService.InvalidateCache();
-                termService.ClearAllCache();
-                scriptTagService.ClearAllCache();
-                tmService.ClearAllCache();
-                dynamicPatternService.ClearAllCache();
-                extractionService.ClearAllCache();
-                cacheMonitor.UnloadCache();
+                await RefreshApplicationRuntimeStateAsync(
+                    settingsService,
+                    gameLibraryService,
+                    localLlmService,
+                    termService,
+                    scriptTagService,
+                    tmService,
+                    dynamicPatternService,
+                    extractionService,
+                    cacheMonitor,
+                    translationService,
+                    glossaryExtractionService,
+                    updateService,
+                    ct);
 
                 logger.LogInformation("已导入配置数据");
                 return Results.Ok(ApiResult.Ok());
@@ -307,13 +331,19 @@ public static class SettingsEndpoints
 
         group.MapPost("/import-from-path", async (UploadFromPathRequest request, AppDataPaths paths,
             AppSettingsService settingsService,
+            GameLibraryService gameLibraryService,
+            LocalLlmService localLlmService,
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
             DynamicPatternService dynamicPatternService,
             TermExtractionService extractionService,
             PreTranslationCacheMonitor cacheMonitor,
-            ILogger<AppSettingsService> logger) =>
+            LlmTranslationService translationService,
+            GlossaryExtractionService glossaryExtractionService,
+            UpdateService updateService,
+            ILogger<AppSettingsService> logger,
+            CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.FilePath))
                 return Results.BadRequest(ApiResult.Fail("请选择文件"));
@@ -419,14 +449,20 @@ public static class SettingsEndpoints
                         Directory.Delete(dntDir);
                 }
 
-                // Invalidate all in-memory caches
-                settingsService.InvalidateCache();
-                termService.ClearAllCache();
-                scriptTagService.ClearAllCache();
-                tmService.ClearAllCache();
-                dynamicPatternService.ClearAllCache();
-                extractionService.ClearAllCache();
-                cacheMonitor.UnloadCache();
+                await RefreshApplicationRuntimeStateAsync(
+                    settingsService,
+                    gameLibraryService,
+                    localLlmService,
+                    termService,
+                    scriptTagService,
+                    tmService,
+                    dynamicPatternService,
+                    extractionService,
+                    cacheMonitor,
+                    translationService,
+                    glossaryExtractionService,
+                    updateService,
+                    ct);
 
                 logger.LogInformation("已从路径导入配置数据");
                 return Results.Ok(ApiResult.Ok());
@@ -441,6 +477,35 @@ public static class SettingsEndpoints
             }
         });
     }
+    private static async Task RefreshApplicationRuntimeStateAsync(
+        AppSettingsService settingsService,
+        GameLibraryService gameLibraryService,
+        LocalLlmService localLlmService,
+        TermService termService,
+        ScriptTagService scriptTagService,
+        TranslationMemoryService tmService,
+        DynamicPatternService dynamicPatternService,
+        TermExtractionService extractionService,
+        PreTranslationCacheMonitor cacheMonitor,
+        LlmTranslationService translationService,
+        GlossaryExtractionService glossaryExtractionService,
+        UpdateService updateService,
+        CancellationToken ct)
+    {
+        settingsService.InvalidateCache();
+        await gameLibraryService.ReloadAsync(ct);
+        localLlmService.InvalidateSettingsCache();
+        termService.ClearAllCache();
+        scriptTagService.ClearAllCache();
+        tmService.ClearAllCache();
+        dynamicPatternService.ClearAllCache();
+        extractionService.ClearAllCache();
+        cacheMonitor.UnloadCache();
+        translationService.ClearAllRuntimeState();
+        glossaryExtractionService.ClearAllRuntimeState();
+        updateService.ResetRuntimeState();
+    }
+
     private static void TryDelete(Action action, string name, List<string> errors)
     {
         try { action(); }
