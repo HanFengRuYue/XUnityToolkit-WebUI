@@ -109,11 +109,25 @@ builder.Services.AddHttpClient("WebImageSearch", client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddHttpClient("ExternalDownload", client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+    client.DefaultRequestHeaders.Add("Accept", "*/*");
+    client.Timeout = TimeSpan.FromSeconds(30);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false
+});
+
 // HTTP client for local LLM model downloads — long timeout for large files
 builder.Services.AddHttpClient("LocalLlmDownload", client =>
 {
     client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
     client.Timeout = TimeSpan.FromHours(12);
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false
 });
 
 // HTTP client for GitHub update checks

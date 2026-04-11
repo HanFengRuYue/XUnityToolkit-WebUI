@@ -896,7 +896,11 @@ public sealed class LocalLlmService(
             // Try range request for resume
             using var rangeReq = new HttpRequestMessage(HttpMethod.Get, url);
             rangeReq.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existingBytes, null);
-            using var rangeResp = await client.SendAsync(rangeReq, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var rangeResp = await PathSecurity.SendWithValidatedRedirectsAsync(
+                client,
+                rangeReq,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
 
             if (rangeResp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable)
             {
@@ -923,7 +927,11 @@ public sealed class LocalLlmService(
 
         // Fresh download
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var resp = await PathSecurity.SendWithValidatedRedirectsAsync(
+            client,
+            req,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
         resp.EnsureSuccessStatusCode();
 
         var freshTotal = resp.Content.Headers.ContentLength ?? entry.FileSizeBytes;

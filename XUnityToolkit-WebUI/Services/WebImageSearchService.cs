@@ -62,54 +62,72 @@ public sealed partial class WebImageSearchService(
 
     public async Task SelectAsCoverAsync(string gameId, string imageUrl, CancellationToken ct = default)
     {
-        ValidateImageUrl(imageUrl);
-
-        var client = httpClientFactory.CreateClient("WebImageSearch");
-        var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-        if (!GameImageService.IsAllowedContentType(contentType))
-            throw new HttpRequestException($"不支持的图片格式: {contentType}");
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var (bytes, contentType) = await DownloadImageAsync(imageUrl, ct);
         await imageService.SaveCoverFromWebSearchAsync(gameId, bytes, contentType, imageUrl, ct);
     }
 
     public async Task SelectAsBackgroundAsync(string gameId, string imageUrl, CancellationToken ct = default)
     {
-        ValidateImageUrl(imageUrl);
-
-        var client = httpClientFactory.CreateClient("WebImageSearch");
-        var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-        if (!GameImageService.IsAllowedContentType(contentType))
-            throw new HttpRequestException($"不支持的图片格式: {contentType}");
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var (bytes, contentType) = await DownloadImageAsync(imageUrl, ct);
         await imageService.SaveBackgroundFromWebSearchAsync(gameId, bytes, contentType, imageUrl, ct);
     }
 
     public async Task SelectAsIconAsync(string gameId, string imageUrl, CancellationToken ct = default)
     {
-        ValidateImageUrl(imageUrl);
-
-        var client = httpClientFactory.CreateClient("WebImageSearch");
-        var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
-        if (!GameImageService.IsAllowedContentType(contentType))
-            throw new HttpRequestException($"不支持的图片格式: {contentType}");
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        var (bytes, _) = await DownloadImageAsync(imageUrl, ct);
         using var ms = new MemoryStream(bytes);
         await imageService.SaveCustomIconFromUploadAsync(gameId, ms, ct);
     }
 
-    private static void ValidateImageUrl(string imageUrl) => PathSecurity.ValidateExternalUrl(imageUrl);
+    private async Task<(byte[] Bytes, string ContentType)> DownloadImageAsync(string imageUrl, CancellationToken ct)
+    {
+        try
+        {
+            PathSecurity.ValidateExternalUrl(imageUrl);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException(ex.Message, ex);
+        }
+
+        var client = httpClientFactory.CreateClient("ExternalDownload");
+        using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+        HttpResponseMessage response;
+        try
+        {
+            response = await PathSecurity.SendWithValidatedRedirectsAsync(
+                client,
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException(ex.Message, ex);
+        }
+
+        using (response)
+        {
+            response.EnsureSuccessStatusCode();
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            if (!GameImageService.IsAllowedContentType(contentType))
+                throw new HttpRequestException($"不支持的图片格式: {contentType}");
+
+            try
+            {
+                var bytes = await PathSecurity.ReadBytesWithLimitAsync(
+                    response.Content,
+                    GameImageService.MaxDownloadedImageBytes,
+                    ct);
+                return (bytes, contentType);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException("图片文件不能超过 10 MB。", ex);
+            }
+        }
+    }
 
     // ===== Bing =====
 

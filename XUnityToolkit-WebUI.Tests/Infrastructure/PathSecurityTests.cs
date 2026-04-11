@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Net;
+using System.Net.Http;
 using XUnityToolkit_WebUI.Infrastructure;
 using Xunit;
 
@@ -25,9 +27,40 @@ public sealed class PathSecurityTests : IDisposable
     [InlineData("http://[::1]")]
     [InlineData("http://[::ffff:127.0.0.1]")]
     [InlineData("http://10.0.0.1")]
+    [InlineData("http://100.64.0.1")]
+    [InlineData("http://198.18.0.1")]
+    [InlineData("http://0.0.0.7")]
+    [InlineData("http://239.1.2.3")]
+    [InlineData("http://[ff02::1]")]
     public void ValidateExternalUrl_ShouldRejectPrivateTargets(string url)
     {
         Assert.Throws<ArgumentException>(() => PathSecurity.ValidateExternalUrl(url));
+    }
+
+    [Fact]
+    public async Task SendWithValidatedRedirectsAsync_ShouldRejectRedirectToPrivateTarget()
+    {
+        using var client = new HttpClient(new StubHttpMessageHandler(request =>
+        {
+            Assert.Equal("https://example.com/start", request.RequestUri?.ToString());
+            return new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Headers = { Location = new Uri("http://127.0.0.1/internal") }
+            };
+        }));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://example.com/start");
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            PathSecurity.SendWithValidatedRedirectsAsync(client, request));
+    }
+
+    [Fact]
+    public async Task ReadBytesWithLimitAsync_ShouldRejectOversizedPayloadWithoutContentLength()
+    {
+        using var content = new StreamContent(new MemoryStream(new byte[32]));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            PathSecurity.ReadBytesWithLimitAsync(content, maxBytes: 16));
     }
 
     [Fact]
@@ -85,5 +118,11 @@ public sealed class PathSecurityTests : IDisposable
     {
         if (Directory.Exists(_root))
             Directory.Delete(_root, recursive: true);
+    }
+
+    private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(handler(request));
     }
 }

@@ -707,6 +707,8 @@ CI：
 - Legacy `Font.m_FontData` 的单字节元素既可能是 `UInt8` 也可能是 `Int8/char`；写回数组项时要按 `AssetValueType` 选择 `AsByte` 或 `AsSByte`，否则会在 `SetNewData` 时触发有符号溢出
 - `TmpFontGeneratorService` 基于 FreeTypeSharp 与 Felzenszwalb EDT 生成 SDF；生成出的 atlas、padding、gradient scale、render mode 之间有强耦合，不要局部改一个字段
 - `WebImageSearchService` 通过网页抓取提供图片搜索；所有 URL 在真正请求之前必须先走 SSRF 校验，保存前还要校验内容类型
+- 图标、封面、背景图这类外链下载现在统一通过禁用自动重定向的 `HttpClient` + `PathSecurity.SendWithValidatedRedirectsAsync(...)` 逐跳校验；不要再直接 `GetAsync(url)` 后信任框架自动跟随 30x
+- 外链图片下载必须额外限制响应体积（当前上限 10 MB），避免网页搜索结果或第三方 CDN 把超大文件直接读进内存
 - `WebViewWindow`、`SystemTrayService`、WebView2 预热、加载 overlay、快速隐藏 UI、关闭超时等机制都属于桌面宿主层不变量，改动前要完整回看历史实现
 - `WebViewWindow.InitializeAsync()` 现在会先探测 `GET /`，并且只在首页首次 `NavigationCompleted` 成功后才隐藏原生 loading overlay；首页探测或首屏导航失败时必须保留 overlay 并给出明确错误，不能直接暴露系统 404 页面
 - `Updater/Program.cs` 在成功重启和回滚重启两条路径里都必须保持 `WorkingDirectory = appDir`，否则可能出现 API 正常但首页因 `wwwroot` 解析到错误目录而 404
@@ -718,6 +720,7 @@ CI：
 - `gameId`、语言代码、用户上传文件名、可执行文件名、导入 ZIP 内部路径都必须做路径穿越和格式校验
 - `PathSecurity.SafeJoin` 与 `PathSecurity.ValidateExternalUrl` 是路径安全和 SSRF 防护的统一入口；不要自行复制一套近似实现
 - 外部 URL 的 SSRF 校验不能只看原始主机名；若输入是域名，还必须检查 DNS 解析后的 IP 是否落到回环、链路本地或私网网段
+- 任何允许重定向的外链下载都必须对每一跳目标重复做同样的 SSRF 校验；首跳安全不代表后续跳转安全
 - 用户提供或本地选择的 ZIP 导入（设置导入、插件 ZIP、汉化包导入等）必须同时限制压缩包原始大小、单文件解压大小与总解压大小，并统一走 `PathSecurity.PrepareZipExtractionPath(...)` / `ExtractZipEntryAsync(...)`
 - `POST /api/settings/reset`、`POST /api/settings/import` 会引发跨服务缓存失效，相关服务新增缓存后必须并入这两条路径
 - JSON 数据文件统一走 `FileHelper.WriteJsonAtomicAsync`；非 JSON 关键文件也应采用 `.tmp + move` 的原子落盘模式

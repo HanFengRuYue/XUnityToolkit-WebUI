@@ -23,6 +23,7 @@ public sealed class GameImageService(
     };
 
     private static readonly string[] AllowedContentTypes = ["image/jpeg", "image/png", "image/webp"];
+    internal const long MaxDownloadedImageBytes = 10L * 1024 * 1024;
 
     public bool HasCover(string gameId) => File.Exists(paths.CoverFile(gameId));
 
@@ -82,13 +83,7 @@ public sealed class GameImageService(
 
     public async Task SaveCoverFromUrlAsync(string gameId, string imageUrl, int? steamGridDbGameId, CancellationToken ct = default)
     {
-        PathSecurity.ValidateExternalUrl(imageUrl);
-        var client = httpClientFactory.CreateClient("SteamGridDB");
-        using var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var contentType = ValidateSupportedImage(bytes);
+        var (bytes, contentType) = await DownloadExternalImageAsync(imageUrl, ct);
 
         await _lock.WaitAsync(ct);
         try
@@ -283,13 +278,7 @@ public sealed class GameImageService(
 
     public async Task SaveCustomIconFromUrlAsync(string gameId, string imageUrl, CancellationToken ct = default)
     {
-        PathSecurity.ValidateExternalUrl(imageUrl);
-        var client = httpClientFactory.CreateClient("SteamGridDB");
-        using var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        ValidateSupportedImage(bytes);
+        var (bytes, _) = await DownloadExternalImageAsync(imageUrl, ct);
         var pngBytes = ConvertToPng(bytes);
         await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
     }
@@ -312,11 +301,7 @@ public sealed class GameImageService(
             if (icons.Count == 0) return;
 
             // Download first icon
-            using var iconResponse = await client.GetAsync(icons[0].Url, ct);
-            iconResponse.EnsureSuccessStatusCode();
-            var bytes = await iconResponse.Content.ReadAsByteArrayAsync(ct);
-
-            ValidateSupportedImage(bytes);
+            var (bytes, _) = await DownloadExternalImageAsync(icons[0].Url, ct);
             var pngBytes = ConvertToPng(bytes);
             await SaveCustomIconBytesAsync(gameId, pngBytes, ct);
         }
@@ -507,13 +492,7 @@ public sealed class GameImageService(
 
     public async Task SaveBackgroundFromUrlAsync(string gameId, string imageUrl, int? steamGridDbGameId, CancellationToken ct = default)
     {
-        PathSecurity.ValidateExternalUrl(imageUrl);
-        var client = httpClientFactory.CreateClient("SteamGridDB");
-        using var response = await client.GetAsync(imageUrl, ct);
-        response.EnsureSuccessStatusCode();
-
-        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-        var contentType = ValidateSupportedImage(bytes);
+        var (bytes, contentType) = await DownloadExternalImageAsync(imageUrl, ct);
 
         await _lock.WaitAsync(ct);
         try
@@ -543,6 +522,58 @@ public sealed class GameImageService(
         finally
         {
             _lock.Release();
+        }
+    }
+
+    private async Task<(byte[] Bytes, string ContentType)> DownloadExternalImageAsync(
+        string imageUrl,
+        CancellationToken ct)
+    {
+        try
+        {
+            PathSecurity.ValidateExternalUrl(imageUrl);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException(ex.Message, ex);
+        }
+
+        var client = httpClientFactory.CreateClient("ExternalDownload");
+        using var request = new HttpRequestMessage(HttpMethod.Get, imageUrl);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await PathSecurity.SendWithValidatedRedirectsAsync(
+                client,
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new InvalidDataException(ex.Message, ex);
+        }
+
+        using (response)
+        {
+            response.EnsureSuccessStatusCode();
+
+            byte[] bytes;
+            try
+            {
+                bytes = await PathSecurity.ReadBytesWithLimitAsync(
+                    response.Content,
+                    MaxDownloadedImageBytes,
+                    ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new InvalidDataException("图片文件不能超过 10 MB。", ex);
+            }
+
+            var contentType = ValidateSupportedImage(bytes);
+            return (bytes, contentType);
         }
     }
 
