@@ -527,6 +527,10 @@ jobs:
             $releaseDirAbs = (Resolve-Path $releaseDir).Path
 
             $manifest = @{ version = $version; rid = $ed.ManifestRid; files = @{} }
+            # Keep manifest coverage aligned with the desktop updater's managed path roots.
+            # The client now compares all files under root/wwwroot/bundled/runtimes by path,
+            # not by extension whitelist, so entries like version.txt, .xml, .gz and .br
+            # must remain in the manifest when they live under those managed roots.
             Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
               $relativePath = $_.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }

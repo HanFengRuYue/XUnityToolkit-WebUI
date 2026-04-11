@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
@@ -28,15 +27,6 @@ public sealed class UpdateService(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true
     };
-
-    // Managed file extensions for delete-list computation (used in check and download)
-    private static readonly HashSet<string> ManagedExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".dll", ".json", ".js", ".css", ".html", ".map", ".svg",
-        ".png", ".woff", ".woff2", ".ttf", ".zip"
-    };
-
-    private readonly record struct LocalManagedFile(string RelativePath, string FullPath, long Size);
 
     private readonly SemaphoreSlim _lock = new(1, 1);
     private UpdateStatusInfo _status = new() { State = UpdateState.None };
@@ -115,50 +105,6 @@ public sealed class UpdateService(
         return tag.TrimStart('v');
     }
 
-    private static string ComputeFileHash(string filePath)
-    {
-        using var stream = File.OpenRead(filePath);
-        var hash = SHA256.HashData(stream);
-        return "sha256:" + Convert.ToHexStringLower(hash);
-    }
-
-    private static Dictionary<string, LocalManagedFile> EnumerateManagedLocalFiles(
-        string appDir,
-        bool preserveCustomLlamaFiles)
-    {
-        var files = new Dictionary<string, LocalManagedFile>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var filePath in Directory.EnumerateFiles(appDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(appDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
-            if (relative.StartsWith("data/", StringComparison.OrdinalIgnoreCase)) continue;
-            if (relative.StartsWith("appsettings", StringComparison.OrdinalIgnoreCase)) continue;
-            if (!ManagedExtensions.Contains(Path.GetExtension(filePath))) continue;
-            if (preserveCustomLlamaFiles
-                && relative.StartsWith("bundled/llama/", StringComparison.OrdinalIgnoreCase)
-                && !EditionInfo.HasBundledLlama)
-            {
-                continue;
-            }
-
-            var info = new FileInfo(filePath);
-            files[relative] = new LocalManagedFile(relative, filePath, info.Length);
-        }
-
-        return files;
-    }
-
-    private static bool IsManifestFileChanged(LocalManagedFile? localFile, ManifestFileEntry entry)
-    {
-        if (localFile is null)
-            return true;
-
-        if (localFile.Value.Size != entry.Size)
-            return true;
-
-        return ComputeFileHash(localFile.Value.FullPath) != entry.Hash;
-    }
-
     public UpdateStatusInfo GetUpdateStatus()
     {
         var status = _status;
@@ -207,7 +153,6 @@ public sealed class UpdateService(
             await BroadcastStatus();
 
             var settings = await settingsService.GetAsync(ct);
-            var rid = GetCurrentRid();
             var localVersion = GetCurrentVersion();
 
             // Reset state from previous check
@@ -308,26 +253,15 @@ public sealed class UpdateService(
 
             // Generate local manifest and compute diff
             var appDir = AppContext.BaseDirectory;
-            var changedPackages = new HashSet<string>();
-            var changedCount = 0;
-            var deletedCount = 0;
-            var localFiles = EnumerateManagedLocalFiles(appDir, preserveCustomLlamaFiles: false);
-
-            foreach (var (relativePath, entry) in _remoteManifest.Files)
-            {
-                localFiles.TryGetValue(relativePath, out var localFile);
-                if (IsManifestFileChanged(localFile, entry))
-                {
-                    changedPackages.Add(entry.Package);
-                    changedCount++;
-                }
-            }
-
-            deletedCount = localFiles.Keys.Count(relative => !_remoteManifest.Files.ContainsKey(relative));
+            var diff = UpdateManifestFileSet.ComputeDiff(
+                appDir,
+                _remoteManifest,
+                preserveCustomLlamaFiles: false,
+                hasBundledLlama: EditionInfo.HasBundledLlama);
 
             // Calculate download size
             long downloadSize = 0;
-            foreach (var pkg in changedPackages)
+            foreach (var pkg in diff.ChangedPackages)
             {
                 var zipName = GetPackageZipName(pkg);
                 if (_resolvedTag is not null)
@@ -348,13 +282,13 @@ public sealed class UpdateService(
 
             _lastCheckResult = new UpdateCheckResult
             {
-                UpdateAvailable = changedCount > 0 || deletedCount > 0,
+                UpdateAvailable = diff.ChangedFileCount > 0 || diff.DeletedFiles.Count > 0,
                 NewVersion = remoteVersion,
                 Changelog = changelog,
                 DownloadSize = downloadSize,
-                ChangedPackages = changedPackages.ToList(),
-                ChangedFileCount = changedCount,
-                DeletedFileCount = deletedCount
+                ChangedPackages = diff.ChangedPackages,
+                ChangedFileCount = diff.ChangedFileCount,
+                DeletedFileCount = diff.DeletedFiles.Count
             };
 
             if (_lastCheckResult.UpdateAvailable)
@@ -364,13 +298,13 @@ public sealed class UpdateService(
                     Version = remoteVersion,
                     Changelog = changelog,
                     DownloadSize = downloadSize,
-                    ChangedPackages = changedPackages.ToList()
+                    ChangedPackages = diff.ChangedPackages
                 };
                 _status = new UpdateStatusInfo { State = UpdateState.Available, Message = $"新版本 {remoteVersion} 可用" };
                 await BroadcastStatus();
                 await hubContext.Clients.Group("update").SendAsync("UpdateAvailable", _availableInfo, ct);
                 logger.LogInformation("发现新版本 {Version}，需要下载 {Packages}",
-                    remoteVersion, string.Join(", ", changedPackages));
+                    remoteVersion, string.Join(", ", diff.ChangedPackages));
                 trayService.ShowNotification("XUnityToolkit", $"发现新版本 v{remoteVersion} 可用");
             }
             else
@@ -427,9 +361,11 @@ public sealed class UpdateService(
             Directory.CreateDirectory(filesDir);
 
             var client = httpClientFactory.CreateClient("GitHubUpdate");
-            var rid = GetCurrentRid();
             var appDir = AppContext.BaseDirectory;
-            var localFiles = EnumerateManagedLocalFiles(appDir, preserveCustomLlamaFiles: true);
+            var localFiles = UpdateManifestFileSet.EnumerateManagedLocalFiles(
+                appDir,
+                preserveCustomLlamaFiles: true,
+                hasBundledLlama: EditionInfo.HasBundledLlama);
             var totalBytes = _lastCheckResult.DownloadSize;
             long downloadedBytes = 0;
 
@@ -505,6 +441,9 @@ public sealed class UpdateService(
                         if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories
 
                         var entryRelativePath = entry.FullName.Replace('\\', '/');
+                        if (!UpdateManifestFileSet.ShouldManageForManifest(entryRelativePath))
+                            continue;
+
                         // For wwwroot.zip and bundled.zip, the zip may contain the directory name
                         // Normalize path
                         if (!_remoteManifest.Files.TryGetValue(entryRelativePath, out var manifestEntry))
@@ -512,7 +451,7 @@ public sealed class UpdateService(
 
                         // Check if this file actually changed
                         localFiles.TryGetValue(entryRelativePath, out var localFile);
-                        if (!IsManifestFileChanged(localFile, manifestEntry))
+                        if (!UpdateManifestFileSet.IsManifestFileChanged(localFile, manifestEntry))
                             continue;
 
                         // Extract to staging (with path traversal protection)
@@ -528,10 +467,13 @@ public sealed class UpdateService(
 
             // Build delete list
             var deleteList = new List<string>();
+            var remoteManagedPaths = _remoteManifest.Files.Keys
+                .Where(UpdateManifestFileSet.ShouldManageForManifest)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var relative in localFiles.Keys)
             {
-                if (!_remoteManifest.Files.ContainsKey(relative))
+                if (!remoteManagedPaths.Contains(relative))
                     deleteList.Add(relative);
             }
 
@@ -545,9 +487,12 @@ public sealed class UpdateService(
             foreach (var filePath in Directory.EnumerateFiles(filesDir, "*", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(filesDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
+                if (!UpdateManifestFileSet.ShouldManageForManifest(relative))
+                    continue;
+
                 if (_remoteManifest.Files.TryGetValue(relative, out var expected))
                 {
-                    var actualHash = ComputeFileHash(filePath);
+                    var actualHash = UpdateManifestFileSet.ComputeFileHash(filePath);
                     if (actualHash != expected.Hash)
                         throw new InvalidOperationException($"文件校验失败: {relative} (预期: {expected.Hash}, 实际: {actualHash})");
                 }
