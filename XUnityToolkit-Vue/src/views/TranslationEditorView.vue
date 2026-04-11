@@ -25,6 +25,7 @@ import {
   FolderOutlined,
   RefreshOutlined,
   SaveOutlined,
+  SearchOutlined,
   TranslateOutlined,
 } from '@vicons/material'
 import { filesystemApi } from '@/api/filesystem'
@@ -70,6 +71,7 @@ const entries = ref<TranslationRow[]>([])
 const regexRules = ref<RegexTranslationRule[]>([])
 const newOriginal = ref('')
 const newTranslation = ref('')
+const searchKeyword = ref('')
 const loadError = ref('')
 
 let savedTextSnapshot = '[]'
@@ -79,6 +81,24 @@ let loadingKey = ''
 
 const isRegexMode = computed(() => currentSource.value === 'pretranslated-regex')
 const entryCount = computed(() => (isRegexMode.value ? regexRules.value.length : entries.value.length))
+const normalizedSearchKeyword = computed(() => searchKeyword.value.trim().toLowerCase())
+const filteredEntries = computed(() => {
+  const keyword = normalizedSearchKeyword.value
+  if (!keyword) return entries.value
+
+  return entries.value.filter(row =>
+    row.original.toLowerCase().includes(keyword)
+    || row.translation.toLowerCase().includes(keyword),
+  )
+})
+const filteredCount = computed(() => {
+  const keyword = normalizedSearchKeyword.value
+  if (!keyword) return entryCount.value
+
+  return isRegexMode.value
+    ? regexRules.value.filter(rule => matchesRegexRule(rule, keyword)).length
+    : filteredEntries.value.length
+})
 const isDirty = computed(() =>
   isRegexMode.value
     ? serializeRegexRules(regexRules.value) !== savedRegexSnapshot
@@ -231,6 +251,14 @@ function serializeRegexRules(items: RegexTranslationRule[]) {
     pattern: item.pattern,
     replacement: item.replacement,
   })))
+}
+
+function matchesRegexRule(rule: RegexTranslationRule, keyword: string) {
+  if (!keyword) return true
+
+  return rule.pattern.toLowerCase().includes(keyword)
+    || rule.replacement.toLowerCase().includes(keyword)
+    || rule.kind.toLowerCase().includes(keyword)
 }
 
 function captureSnapshots() {
@@ -651,13 +679,24 @@ onBeforeRouteLeave(async () => {
             </span>
             {{ isRegexMode ? '正则规则' : '翻译条目' }}
             <NTag size="small" :bordered="false" style="margin-left: 8px">
-              {{ entryCount }}
+              {{ normalizedSearchKeyword ? `${filteredCount} / ${entryCount}` : entryCount }}
             </NTag>
           </h2>
+          <div class="header-actions translation-search">
+            <NInput
+              v-model:value="searchKeyword"
+              :placeholder="isRegexMode ? '搜索正则、替换内容或 kind...' : '搜索原文或译文...'"
+              clearable
+              size="small"
+              class="search-input"
+            >
+              <template #prefix><NIcon :size="16"><SearchOutlined /></NIcon></template>
+            </NInput>
+          </div>
         </div>
 
         <template v-if="isRegexMode">
-          <RegexRuleEditor v-model:rules="regexRules" />
+          <RegexRuleEditor v-model:rules="regexRules" :search-keyword="searchKeyword" />
         </template>
 
         <template v-else>
@@ -682,10 +721,10 @@ onBeforeRouteLeave(async () => {
             </NButton>
           </div>
 
-          <div v-if="entries.length > 0" class="table-container">
+          <div v-if="filteredEntries.length > 0" class="table-container">
             <NDataTable
               :columns="tableColumns"
-              :data="entries"
+              :data="filteredEntries"
               :row-key="(row: TranslationRow) => row._id"
               :max-height="640"
               virtual-scroll
@@ -693,6 +732,11 @@ onBeforeRouteLeave(async () => {
               size="small"
             />
           </div>
+          <NEmpty
+            v-else-if="entries.length > 0"
+            description="没有匹配的翻译条目"
+            style="padding: 40px 0"
+          />
           <NEmpty v-else description="暂无翻译条目" style="padding: 40px 0" />
         </template>
       </div>
@@ -762,11 +806,29 @@ onBeforeRouteLeave(async () => {
   margin-bottom: 16px;
 }
 
+.translation-search {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.search-input {
+  width: min(320px, 100%);
+}
+
 .table-container {
   overflow: hidden;
 }
 
 @media (max-width: 960px) {
+  .translation-search {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
   .add-entry-row {
     grid-template-columns: 1fr;
   }
