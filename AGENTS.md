@@ -336,8 +336,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - Phase 1：自然翻译
 - Phase 2：术语/DNT 占位符替换
 - Phase 3：强制修正
-- 在 Phase 1 / Phase 2 进入 LLM 之前，运行时 `SPECIAL_*` 占位符会先替换成内部 `{{XU_RT_n}}` 占位符；LLM 返回后会做宽松恢复，但最终必须逐字回到源文本中的原始 token
-- `SPECIAL_*` 运行时占位符同时覆盖半角 `[SPECIAL_01]` 与全角 `【SPECIAL_01】`；括号样式、大小写、数量和位置都必须与输入完全一致。任一环节校验失败时，整段安全回退原文
+- 在 Phase 1 / Phase 2 进入 LLM 之前，运行时占位符会先替换成内部 `{{XU_RT_n}}` 占位符；LLM 返回后会做宽松恢复，但最终必须逐字回到源文本中的原始 token
+- 运行时占位符当前同时覆盖半角/全角 `SPECIAL_*`（如 `[SPECIAL_01]`、`【SPECIAL_01】`）以及安全白名单内的花括号模板变量（如 `{PLAYER}`、`{PC}`、`{Quest_Id}`）；括号样式、大小写、数量和位置都必须与输入完全一致。任一环节校验失败时，整段安全回退原文
 - Phase 0 的 TM 命中也必须经过同样的运行时占位符 round-trip 校验；历史坏缓存命中要视为 miss，不能继续复用
 
 翻译记忆：
@@ -509,7 +509,7 @@ CI：
   - AI 翻译页
   - 设置页默认值
   - 后端 `Math.Clamp`
-  - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` 按输入原样保留
+  - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` / `{PLAYER}` 这类占位符按输入原样保留
 - `LocalLlmSettings`
   需要同步：
   - C# 模型

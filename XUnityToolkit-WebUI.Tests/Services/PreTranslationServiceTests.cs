@@ -43,4 +43,28 @@ public sealed class PreTranslationServiceTests
             await writer;
         }
     }
+
+    [Fact]
+    public void FilterPersistableTranslations_ShouldKeepCurlyTemplatePlaceholderEntries()
+    {
+        var filtered = PreTranslationService.FilterPersistableTranslations(
+        [
+            KeyValuePair.Create("Hello {PLAYER}", "Hi {PLAYER}")
+        ]);
+
+        var entry = Assert.Single(filtered);
+        Assert.Equal("Hello {PLAYER}", entry.Key);
+        Assert.Equal("Hi {PLAYER}", entry.Value);
+    }
+
+    [Fact]
+    public void FilterPersistableTranslations_ShouldRejectBrokenCurlyTemplatePlaceholderEntries()
+    {
+        var filtered = PreTranslationService.FilterPersistableTranslations(
+        [
+            KeyValuePair.Create("Hello {PLAYER}", "Hi {USER}")
+        ]);
+
+        Assert.Empty(filtered);
+    }
 }

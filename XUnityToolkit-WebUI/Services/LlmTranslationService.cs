@@ -527,7 +527,7 @@ public sealed class LlmTranslationService(
                     {
                         var p1RuntimeProtection = RuntimePlaceholderProtector.Protect(p1SourceTexts);
                         var phase1Hint = p1RuntimeProtection.HasProtectedTokens
-                            ? "\n\n附加硬性规则：文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始的 [SPECIAL_*] 或 【SPECIAL_*】 形式，括号样式不得转换。"
+                            ? "\n\n附加硬性规则：文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始占位符（如 [SPECIAL_01]、【SPECIAL_01】、{PLAYER}），括号样式、大小写和位置都不得改变。"
                             : null;
                         var naturalPrompt = BuildSystemPromptWithTerms(
                             ai.SystemPrompt, from, to, matchedTerms!, gameDescription, memoryContext, phase1Hint);
@@ -626,7 +626,7 @@ public sealed class LlmTranslationService(
                 var runtimeProtection = RuntimePlaceholderProtector.Protect(phase2SourceTexts);
                 IList<string> textsToTranslate = runtimeProtection.Texts;
                 string? dntHint = runtimeProtection.HasProtectedTokens
-                    ? "\n\n文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始的 [SPECIAL_*] 或 【SPECIAL_*】 形式，括号样式不得转换。"
+                    ? "\n\n文本中的 {{XU_RT_x}} 是运行时占位符，输出时必须原样保留；后续会还原成原始占位符（如 [SPECIAL_01]、【SPECIAL_01】、{PLAYER}），括号样式、大小写和位置都不得改变。"
                     : null;
 
                 // Apply glossary placeholder substitution for non-regex entries
@@ -1961,7 +1961,7 @@ public sealed class LlmTranslationService(
     private static void AppendExactPlaceholderRule(StringBuilder sb)
     {
         sb.Append("\n\n附加硬性规则：所有运行时占位符都必须按输入逐字保留。");
-        sb.Append("例如 [SPECIAL_01] 或 【SPECIAL_01】 必须保持完全一致，括号样式、大小写和位置都不得改变。");
+        sb.Append("例如 [SPECIAL_01]、【SPECIAL_01】、{PLAYER} 或 {Quest_Id} 都必须保持完全一致，括号样式、大小写、数量和位置都不得改变。");
     }
 
     private static void AppendGameDescription(StringBuilder sb, string? gameDescription)

@@ -2,6 +2,14 @@ using System.Text.RegularExpressions;
 
 namespace XUnityToolkit_WebUI.Infrastructure;
 
+internal static class RuntimePlaceholderPatterns
+{
+    internal const string TemplateVariablePattern = @"\{[A-Za-z_]\w{0,15}\}";
+
+    internal const string SourcePlaceholderPattern =
+        @"(?:\[SPECIAL_[A-Za-z0-9_]+\]|\u3010SPECIAL_[A-Za-z0-9_]+\u3011|\{[A-Za-z_]\w{0,15}\})";
+}
+
 internal sealed record RuntimePlaceholderProtectionResult(
     IList<string> Texts,
     IReadOnlyDictionary<string, string> Mapping)
@@ -12,7 +20,7 @@ internal sealed record RuntimePlaceholderProtectionResult(
 internal static class RuntimePlaceholderProtector
 {
     private static readonly Regex SourcePlaceholderRegex = new(
-        @"(?:\[SPECIAL_[A-Za-z0-9_]+\]|\u3010SPECIAL_[A-Za-z0-9_]+\u3011)",
+        RuntimePlaceholderPatterns.SourcePlaceholderPattern,
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex RestorePlaceholderRegex = new(

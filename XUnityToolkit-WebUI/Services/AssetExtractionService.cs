@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
@@ -246,7 +247,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         logger.LogInformation("提取完成: {Total} 条文本 (去重后 {Unique} 条), 来自 {Files} 个文件",
             allTexts.Count, uniqueTexts.Count, totalFilesScanned);
 
-        // Detect template variables (e.g. {PC}, {M}, {D}) — log for user to configure DNT terms
+        // Detect template variables (e.g. {PC}, {M}, {D}) for placeholder protection diagnostics.
         DetectAndLogTemplateVariables(uniqueTexts);
 
         progressData.Phase = "detecting";
@@ -1310,7 +1311,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
     [GeneratedRegex(@"^[A-Za-z0-9+/=]{40,}$")]
     private static partial Regex Base64LikePattern();
 
-    [GeneratedRegex(@"\{[A-Za-z_]\w{0,15}\}")]
+    [GeneratedRegex(RuntimePlaceholderPatterns.TemplateVariablePattern)]
     private static partial Regex TemplateVariablePattern();
 
     [GeneratedRegex(@"^pd_\d+_com_\d+text$")]
@@ -1324,7 +1325,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
 
     /// <summary>
     /// Detect template variable patterns (e.g., {PC}, {M}, {D}) in extracted texts
-    /// and log them so the user knows to configure DoNotTranslate terms.
+    /// and log them for diagnostics. Common cases are auto-protected during translation.
     /// </summary>
     private void DetectAndLogTemplateVariables(List<ExtractedText> texts)
     {
@@ -1339,7 +1340,7 @@ public sealed partial class AssetExtractionService(ILogger<AssetExtractionServic
         if (variables.Count > 0)
         {
             logger.LogInformation(
-                "检测到 {Count} 个模板变量: {Variables}。建议为这些变量添加「不翻译」术语以在翻译中保留原文",
+                "检测到 {Count} 个模板变量: {Variables}。系统会自动保护常见的 {{PLAYER}}/{{PC}} 这类变量；若遇到更复杂的格式，仍建议补充「不翻译」术语。",
                 variables.Count, string.Join(", ", variables.Order()));
         }
     }

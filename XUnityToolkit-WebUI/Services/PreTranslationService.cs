@@ -673,7 +673,7 @@ public sealed partial class PreTranslationService(
             $"《{game.Name}》已翻译 {translations.Count}/{textList.Count} 条文本");
     }
 
-    private static Dictionary<string, string> FilterPersistableTranslations(
+    internal static Dictionary<string, string> FilterPersistableTranslations(
         IEnumerable<KeyValuePair<string, string>> source)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
