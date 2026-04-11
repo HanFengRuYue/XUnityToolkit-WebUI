@@ -105,6 +105,10 @@ npx vue-tsc --build
 dotnet test
 ```
 
+补充约束：
+
+- `dotnet build XUnityToolkit-WebUI/...` 与 `dotnet test XUnityToolkit-WebUI.Tests/...` 不要并行执行；`StaticWebAssets` 会竞争 `obj/.../rpswa.dswa.cache.json`，应串行验证
+
 翻译端点：
 
 ```bash
@@ -713,6 +717,8 @@ CI：
 
 - `gameId`、语言代码、用户上传文件名、可执行文件名、导入 ZIP 内部路径都必须做路径穿越和格式校验
 - `PathSecurity.SafeJoin` 与 `PathSecurity.ValidateExternalUrl` 是路径安全和 SSRF 防护的统一入口；不要自行复制一套近似实现
+- 外部 URL 的 SSRF 校验不能只看原始主机名；若输入是域名，还必须检查 DNS 解析后的 IP 是否落到回环、链路本地或私网网段
+- 用户提供或本地选择的 ZIP 导入（设置导入、插件 ZIP、汉化包导入等）必须同时限制压缩包原始大小、单文件解压大小与总解压大小，并统一走 `PathSecurity.PrepareZipExtractionPath(...)` / `ExtractZipEntryAsync(...)`
 - `POST /api/settings/reset`、`POST /api/settings/import` 会引发跨服务缓存失效，相关服务新增缓存后必须并入这两条路径
 - JSON 数据文件统一走 `FileHelper.WriteJsonAtomicAsync`；非 JSON 关键文件也应采用 `.tmp + move` 的原子落盘模式
 
