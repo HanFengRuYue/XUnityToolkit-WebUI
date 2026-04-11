@@ -127,7 +127,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `XUnityToolkit-WebUI.csproj` 默认会在构建前自动执行前端 `npm install` + `npm run build`。
 - 前端开发代理到 `http://127.0.0.1:51821`，不要改成 `localhost`。
 - 完整 UI 预览优先看后端端口 `51821`，因为它同时承载静态前端和 API。
-- 发布产物首页可用性现在由 `build.ps1` 与 `.github/workflows/build.yml` 中的 `Test-FrontendSmoke` 双重守卫；它们会从错误工作目录启动 EXE，并要求 `/` 与 `/api/settings/version` 同时返回 `200`。
+- 发布流程当前不会在构建脚本或 GitHub Actions 中自动启动 EXE 做首页 smoke check；若需要运行态验收，请单独执行。
 
 ## 6. 运行时架构
 
@@ -456,7 +456,7 @@ CI：
 - CI 逻辑与 `build.ps1` 是两份并行维护的实现，改构建流程时必须双改
 - CI 不直接调用 `build.ps1`
 - 更新器是增量更新的关键组件，含备份、替换、删除、回滚逻辑
-- 首页静态资源可用性 smoke check 现在也是双维护实现；若调整启动端口解析、静态资源目录、启动方式或首页健康检查，必须同时更新 `build.ps1` 与 `.github/workflows/build.yml` 中的 `Test-FrontendSmoke`
+- 若调整启动端口解析、静态资源目录或启动方式，注意分别评估本地构建脚本与 GitHub Actions 的发布行为，但当前没有内置 smoke check 守卫
 - MSI 由 WiX 生成，且不同 edition 构建时必须注意清理 `Installer/obj/...`
 
 ## 14. 关键约束与不变量
@@ -656,7 +656,7 @@ CI：
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
 - `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
-- 若变更首页可用性、静态资源目录、启动端口或启动方式，还要同步更新两处 `Test-FrontendSmoke`，确保“错误工作目录启动时 `/` 与 `/api/settings/version` 都返回 `200`”这个回归守卫不失效
+- 若变更首页可用性、静态资源目录、启动端口或启动方式，需要分别核对 `build.ps1` 与 `.github/workflows/build.yml` 的发布流程，但当前不再维护 `Test-FrontendSmoke` 回归守卫
 - Git 提交标题规范、`.github/workflows/build.yml` 中 `### Changelog` 的生成逻辑，以及 `XUnityToolkit-Vue/src/views/SettingsView.vue` 的 `typeLabels` / 正则解析属于联动点；若调整提交格式、更新内容展示样式或 changelog 生成方式，必须同时核对这三处，且注意 `--no-merges` 会让 merge commit 不进入工具箱更新列表
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
 

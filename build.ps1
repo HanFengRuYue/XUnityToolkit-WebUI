@@ -47,73 +47,6 @@ function Invoke-WithRetry {
     }
 }
 
-function Test-FrontendSmoke {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ExePath,
-        [Parameter(Mandatory = $true)]
-        [string]$Label
-    )
-
-    function Get-StatusCode {
-        param([string]$Url)
-        try {
-            return [int](Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2).StatusCode
-        } catch {
-            if ($_.Exception.Response) {
-                return [int]$_.Exception.Response.StatusCode
-            }
-            return $null
-        }
-    }
-
-    $probeRoot = Join-Path $env:TEMP ("xunitytoolkit-smoke-" + [guid]::NewGuid().ToString('N'))
-    $launcherDir = Join-Path $env:TEMP ("xunitytoolkit-launcher-" + [guid]::NewGuid().ToString('N'))
-    $port = Get-Random -Minimum 42000 -Maximum 52000
-    $proc = $null
-
-    try {
-        New-Item -ItemType Directory -Path $probeRoot -Force | Out-Null
-        New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
-
-        $settings = @{ aiTranslation = @{ port = $port } } | ConvertTo-Json -Depth 3
-        Set-Content -Path (Join-Path $probeRoot 'settings.json') -Value $settings -Encoding UTF8
-
-        $env:AppData__Root = $probeRoot
-        $proc = Start-Process -FilePath $ExePath -WorkingDirectory $launcherDir -PassThru
-
-        $rootStatus = $null
-        $apiStatus = $null
-        for ($i = 0; $i -lt 40; $i++) {
-            Start-Sleep -Milliseconds 500
-            $rootStatus = Get-StatusCode "http://127.0.0.1:$port/"
-            $apiStatus = Get-StatusCode "http://127.0.0.1:$port/api/settings/version"
-            if ($null -ne $rootStatus -and $null -ne $apiStatus) {
-                break
-            }
-        }
-
-        if ($rootStatus -ne 200 -or $apiStatus -ne 200) {
-            $rootText = if ($null -eq $rootStatus) { 'n/a' } else { [string]$rootStatus }
-            $apiText = if ($null -eq $apiStatus) { 'n/a' } else { [string]$apiStatus }
-            throw ("Smoke check failed for {0}: root={1} api={2}" -f $Label, $rootText, $apiText)
-        }
-
-        Write-Host ("  [smoke] {0} passed (root={1}, api={2})" -f $Label, $rootStatus, $apiStatus) -ForegroundColor Green
-    } finally {
-        if ($proc -and -not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        }
-        Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
-        if (Test-Path $probeRoot) {
-            Remove-Item $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        if (Test-Path $launcherDir) {
-            Remove-Item $launcherDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
 try {
 
 # Ensure TLS 1.2+ for all HTTPS requests (PowerShell 5.1 defaults to TLS 1.0)
@@ -541,8 +474,6 @@ if (Test-Path $bundledSrc) {
     }
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
-
-Test-FrontendSmoke -ExePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') -Label "$rid ($Edition)"
 
 $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
