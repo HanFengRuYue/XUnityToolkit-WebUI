@@ -421,6 +421,28 @@ async function handleClearCache() {
   }
 }
 
+function openPretranslatedTextEditor() {
+  router.push({
+    name: 'translation-editor',
+    params: { id: gameId },
+    query: {
+      source: 'pretranslated',
+      lang: toLang.value,
+    },
+  })
+}
+
+function openPretranslatedRegexEditor() {
+  router.push({
+    name: 'translation-editor',
+    params: { id: gameId },
+    query: {
+      source: 'pretranslated-regex',
+      lang: toLang.value,
+    },
+  })
+}
+
 async function loadTermCandidates() {
   try {
     const result = await termCandidatesApi.get(gameId)
@@ -866,6 +888,26 @@ function langLabel(code: string): string {
             预翻译完成！翻译结果已写入游戏翻译缓存，启动游戏即可使用。
           </NAlert>
           <NAlert
+            v-if="false"
+            type="info"
+            style="margin-top: 12px"
+          >
+            <template #default>
+              检测到未完成的预翻译检查点。你可以继续按上次进度恢复，或重新开始覆盖旧检查点。
+            </template>
+          </NAlert>
+          <div
+            v-if="store.preTranslationStatus.state === 'Completed'"
+            class="completed-editor-actions"
+          >
+            <NButton size="small" secondary @click="openPretranslatedTextEditor">
+              编辑预翻译文本
+            </NButton>
+            <NButton size="small" secondary @click="openPretranslatedRegexEditor">
+              编辑预翻译正则
+            </NButton>
+          </div>
+          <NAlert
             v-if="hasResumableCheckpoint"
             type="info"
             style="margin-top: 12px"
@@ -1095,6 +1137,13 @@ function langLabel(code: string): string {
 
 .checkpoint-action-button {
   min-width: 132px;
+}
+
+.completed-editor-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
 
 .progress-section {

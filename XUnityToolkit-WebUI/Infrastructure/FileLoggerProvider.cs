@@ -133,17 +133,43 @@ internal sealed class FileLoggerProvider : ILoggerProvider
     }
 
     /// <summary>
-    /// Export all in-memory ring buffer entries as formatted log text.
+    /// Export the current session log file as an immutable memory snapshot.
+    /// The snapshot is taken under the logger lock so it includes everything
+    /// written before the export request reached this provider.
     /// </summary>
-    internal string ExportSessionLog()
+    internal MemoryStream ExportSessionLog()
     {
-        var entries = _recentEntries.ToArray();
-        var sb = new StringBuilder();
-        foreach (var entry in entries)
+        lock (_lock)
         {
-            sb.AppendLine($"{entry.Timestamp} [{entry.Level}] [{entry.Category}] {entry.Message}");
+            try
+            {
+                _writer.Flush();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Best effort: continue reading any bytes already written.
+            }
+
+            var snapshot = new MemoryStream();
+            if (!File.Exists(_filePath))
+            {
+                snapshot.Position = 0;
+                return snapshot;
+            }
+
+            try
+            {
+                using var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                fs.CopyTo(snapshot);
+                snapshot.Position = 0;
+                return snapshot;
+            }
+            catch
+            {
+                snapshot.Dispose();
+                return new MemoryStream(Array.Empty<byte>(), writable: false);
+            }
         }
-        return sb.ToString();
     }
 
     private void CleanupOldLogFiles()

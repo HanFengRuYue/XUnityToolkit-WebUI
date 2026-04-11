@@ -9,6 +9,7 @@ namespace XUnityToolkit_WebUI.Endpoints;
 public static class AssetEndpoints
 {
 
+
     public static void MapAssetEndpoints(this WebApplication app)
     {
         // Extract game assets (MonoBehaviour strings + TextAsset)
@@ -200,10 +201,31 @@ public static class AssetEndpoints
         // Get custom regex patterns for pre-translation
         app.MapGet("/api/games/{id}/pre-translate/regex", async (
             string id,
-            AppDataPaths paths) =>
+            AppDataPaths paths,
+            GameLibraryService library,
+            ConfigurationService configService,
+            CancellationToken ct) =>
         {
             if (!Guid.TryParse(id, out _))
                 return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var config = await configService.GetAsync(game.GamePath, ct);
+            var lang = TranslationEditorPathResolver.ResolvePreTranslationLanguage(
+                game.GamePath,
+                requestedLang: null,
+                config.TargetLanguage,
+                "_PreTranslated_Regex.txt");
+            var finalFile = TranslationEditorPathResolver.ResolvePreTranslatedRegexFilePath(game.GamePath, lang);
+            if (File.Exists(finalFile))
+            {
+                var managedContent = await File.ReadAllTextAsync(finalFile, ct);
+                return Results.Ok(ApiResult<string>.Ok(PreTranslationRegexFormat.ExtractCustomContent(managedContent)));
+            }
+
             var file = paths.PreTranslationRegexFile(id);
             if (!File.Exists(file))
                 return Results.Ok(ApiResult<string>.Ok(""));
@@ -215,10 +237,61 @@ public static class AssetEndpoints
         app.MapPut("/api/games/{id}/pre-translate/regex", async (
             string id,
             RegexPatternsRequest request,
-            AppDataPaths paths) =>
+            AppDataPaths paths,
+            GameLibraryService library,
+            ConfigurationService configService,
+            CancellationToken ct) =>
         {
+            // Legacy compatibility endpoint: only custom rules are editable here.
             if (!Guid.TryParse(id, out _))
                 return Results.BadRequest(ApiResult.Fail("Invalid game ID"));
+            var patternContent = request.Patterns ?? string.Empty;
+            if (patternContent.Length > 512 * 1024)
+                return Results.BadRequest(ApiResult.Fail("Regex pattern content cannot exceed 512 KB."));
+
+            List<PreTranslationRegexRule> customRules;
+            try
+            {
+                customRules = PreTranslationRegexFormat.ParseRulesStrict(
+                    patternContent,
+                    PreTranslationRegexFormat.CustomSection);
+                foreach (var rule in customRules)
+                    _ = new Regex(rule.Pattern, RegexOptions.None, TimeSpan.FromSeconds(1));
+            }
+            catch (FormatException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (RegexParseException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail($"Invalid regex pattern: {ex.Message}"));
+            }
+
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            var config = await configService.GetAsync(game.GamePath, ct);
+            var lang = TranslationEditorPathResolver.ResolvePreTranslationLanguage(
+                game.GamePath,
+                requestedLang: null,
+                config.TargetLanguage,
+                "_PreTranslated_Regex.txt");
+            var finalFile = TranslationEditorPathResolver.ResolvePreTranslatedRegexFilePath(game.GamePath, lang);
+            var existingManagedContent = File.Exists(finalFile)
+                ? await File.ReadAllTextAsync(finalFile, ct)
+                : null;
+            var mergedRules = PreTranslationRegexFormat.Parse(existingManagedContent).Rules
+                .Where(static rule => !string.Equals(rule.Section, PreTranslationRegexFormat.CustomSection, StringComparison.Ordinal))
+                .Concat(customRules)
+                .ToList();
+
+            await WriteTextAtomicAsync(finalFile, PreTranslationRegexFormat.SerializeManaged(mergedRules), ct);
+            await WriteTextAtomicAsync(
+                paths.PreTranslationRegexFile(id),
+                PreTranslationRegexFormat.SerializeRules(customRules),
+                ct);
+            return Results.Ok(ApiResult.Ok());
             if ((request.Patterns ?? "").Length > 512 * 1024)
                 return Results.BadRequest(ApiResult.Fail("正则模式内容不能超过 512 KB"));
 
@@ -248,6 +321,14 @@ public static class AssetEndpoints
             File.Move(tmpFile, file, overwrite: true);
             return Results.Ok(ApiResult.Ok());
         });
+    }
+
+    private static async Task WriteTextAtomicAsync(string filePath, string content, CancellationToken ct)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+        var tmpFile = filePath + ".tmp";
+        await File.WriteAllTextAsync(tmpFile, content, ct);
+        File.Move(tmpFile, filePath, overwrite: true);
     }
 }
 

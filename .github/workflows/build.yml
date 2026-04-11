@@ -221,7 +221,7 @@ jobs:
           }
 
           # ── llama.cpp (pinned version) ──
-          $llamaTag = "b8580"
+          $llamaTag = "b8756"
           Write-Host "Fetching llama.cpp $llamaTag..."
           $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30

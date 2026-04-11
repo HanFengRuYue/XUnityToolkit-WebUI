@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin, TranslationEditorTextSource, TranslationRegexEditorData, RegexTranslationRule } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -224,14 +224,30 @@ export const translateApi = {
 }
 
 export const translationEditorApi = {
-  getEntries: (id: string) =>
-    api.get<TranslationEditorData>(`/api/games/${id}/translation-editor`),
-  saveEntries: (id: string, entries: TranslationEntry[]) =>
-    api.put<void>(`/api/games/${id}/translation-editor`, { entries }),
+  getEntries: (id: string, options?: { source?: TranslationEditorTextSource; lang?: string }) =>
+    api.get<TranslationEditorData>(`/api/games/${id}/translation-editor${buildTranslationEditorQuery(options)}`),
+  saveEntries: (id: string, entries: TranslationEntry[], options?: { source?: TranslationEditorTextSource; lang?: string }) =>
+    api.put<void>(`/api/games/${id}/translation-editor${buildTranslationEditorQuery(options)}`, { entries }),
   parseImport: (id: string, content: string) =>
     api.post<TranslationEntry[]>(`/api/games/${id}/translation-editor/import`, { content }),
-  getExportUrl: (id: string) =>
-    `/api/games/${id}/translation-editor/export`,
+  getExportUrl: (id: string, options?: { source?: TranslationEditorTextSource; lang?: string }) =>
+    `/api/games/${id}/translation-editor/export${buildTranslationEditorQuery(options)}`,
+  getRegex: (id: string, lang?: string) =>
+    api.get<TranslationRegexEditorData>(`/api/games/${id}/translation-editor/regex${buildTranslationEditorQuery({ lang })}`),
+  saveRegex: (id: string, rules: RegexTranslationRule[], lang?: string) =>
+    api.put<void>(`/api/games/${id}/translation-editor/regex${buildTranslationEditorQuery({ lang })}`, { rules }),
+  importRegex: (id: string, content: string, lang?: string) =>
+    api.post<RegexTranslationRule[]>(`/api/games/${id}/translation-editor/regex/import${buildTranslationEditorQuery({ lang })}`, { content }),
+  getRegexExportUrl: (id: string, lang?: string) =>
+    `/api/games/${id}/translation-editor/regex/export${buildTranslationEditorQuery({ lang })}`,
+}
+
+function buildTranslationEditorQuery(options?: { source?: TranslationEditorTextSource; lang?: string }) {
+  const params = new URLSearchParams()
+  if (options?.source) params.set('source', options.source)
+  if (options?.lang) params.set('lang', options.lang)
+  const query = params.toString()
+  return query ? `?${query}` : ''
 }
 
 export const pluginPackageApi = {

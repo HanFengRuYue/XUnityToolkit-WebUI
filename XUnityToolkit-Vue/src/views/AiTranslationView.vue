@@ -221,6 +221,30 @@ async function handleToggle(enabled: boolean) {
   }
 }
 
+const isPipelineOverflowing = ref(false)
+
+function trimCompactDecimal(value: number): string {
+  return value.toFixed(1).replace(/\.0$/, '')
+}
+
+function formatCompactChineseCount(value: number): string {
+  const abs = Math.abs(value)
+  if (abs < 10_000) return String(value)
+  if (abs < 100_000_000) {
+    const wanValue = Number((value / 10_000).toFixed(1))
+    if (Math.abs(wanValue) >= 10_000) {
+      return `${trimCompactDecimal(value / 100_000_000)}亿`
+    }
+    return `${trimCompactDecimal(wanValue)}万`
+  }
+  return `${trimCompactDecimal(value / 100_000_000)}亿`
+}
+
+function formatPipelineCount(value: number | null | undefined): string {
+  const resolved = value ?? 0
+  return isPipelineOverflowing.value ? formatCompactChineseCount(resolved) : String(resolved)
+}
+
 async function loadSettings() {
   disableAutoSave()
   try {
@@ -245,7 +269,7 @@ onMounted(async () => {
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
   await nextTick()
-  computeConnections()
+  await syncPipelineLayout()
   setupPipelineObserver()
 })
 
@@ -253,7 +277,7 @@ onActivated(async () => {
   await aiStore.connect()
   await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats(), loadSettings()])
   await nextTick()
-  computeConnections()
+  await syncPipelineLayout()
   setupPipelineObserver()
 })
 
@@ -288,6 +312,8 @@ interface PipelineConnection {
 
 const connections = ref<PipelineConnection[]>([])
 
+let pipelineLayoutFrame: number | null = null
+
 function getRelPos(el: HTMLElement | null, container: DOMRect) {
   if (!el) return null
   const r = el.getBoundingClientRect()
@@ -308,6 +334,62 @@ function particleParams(volume: number) {
   const count = Math.min(6, Math.max(1, Math.ceil(volume / 5)))
   const duration = Math.max(1.5, 5 - Math.log2(volume + 1) * 0.8)
   return { count, duration }
+}
+
+function isDesktopPipelineLayout() {
+  return typeof window !== 'undefined' && window.innerWidth > 768
+}
+
+function restoreMeasuredPipelineTexts(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>('[data-full-value]').forEach((el) => {
+    el.textContent = el.dataset.fullValue ?? ''
+  })
+
+  root.querySelectorAll<HTMLElement>('[data-full-current]').forEach((el) => {
+    const current = el.dataset.fullCurrent ?? ''
+    const max = el.dataset.fullMax ?? ''
+
+    let leadingTextNode = Array.from(el.childNodes).find((node) => node.nodeType === Node.TEXT_NODE) ?? null
+    if (!leadingTextNode) {
+      leadingTextNode = document.createTextNode('')
+      el.insertBefore(leadingTextNode, el.firstChild)
+    }
+
+    leadingTextNode.textContent = current
+
+    const small = el.querySelector('small')
+    if (small) {
+      small.textContent = max ? `/${max}` : ''
+    }
+  })
+}
+
+function measurePipelineOverflow() {
+  if (!pipelineRef.value || !isDesktopPipelineLayout()) return false
+
+  const source = pipelineRef.value.querySelector<HTMLElement>('.pipeline-hbox')
+  if (!source) return false
+
+  const wrapper = document.createElement('div')
+  Object.assign(wrapper.style, {
+    position: 'absolute',
+    left: '-100000px',
+    top: '0',
+    width: `${pipelineRef.value.clientWidth}px`,
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    overflow: 'hidden',
+  })
+
+  const clone = source.cloneNode(true) as HTMLElement
+  restoreMeasuredPipelineTexts(clone)
+  wrapper.appendChild(clone)
+  document.body.appendChild(wrapper)
+
+  const overflowing = clone.scrollWidth > wrapper.clientWidth + 1
+  wrapper.remove()
+
+  return overflowing
 }
 
 function computeConnections() {
@@ -384,12 +466,33 @@ function computeConnections() {
   connections.value = result
 }
 
+async function syncPipelineLayout() {
+  const nextOverflowState = measurePipelineOverflow()
+  if (nextOverflowState !== isPipelineOverflowing.value) {
+    isPipelineOverflowing.value = nextOverflowState
+    await nextTick()
+  }
+
+  computeConnections()
+}
+
+function schedulePipelineLayout() {
+  if (pipelineLayoutFrame !== null) {
+    cancelAnimationFrame(pipelineLayoutFrame)
+  }
+
+  pipelineLayoutFrame = requestAnimationFrame(() => {
+    pipelineLayoutFrame = null
+    void syncPipelineLayout()
+  })
+}
+
 let pipelineResizeObserver: ResizeObserver | null = null
 
 function setupPipelineObserver() {
   if (!pipelineRef.value || pipelineResizeObserver) return
   pipelineResizeObserver = new ResizeObserver(() => {
-    requestAnimationFrame(computeConnections)
+    schedulePipelineLayout()
   })
   pipelineResizeObserver.observe(pipelineRef.value)
 }
@@ -397,15 +500,30 @@ function setupPipelineObserver() {
 function cleanupPipeline() {
   pipelineResizeObserver?.disconnect()
   pipelineResizeObserver = null
+  if (pipelineLayoutFrame !== null) {
+    cancelAnimationFrame(pipelineLayoutFrame)
+    pipelineLayoutFrame = null
+  }
 }
 
-watch([hasTmActivity, showExtraction], () => {
-  nextTick(computeConnections)
-})
-
-// Recompute when stats change (for particle density updates)
-watch(() => aiStore.stats?.translating, () => {
-  nextTick(computeConnections)
+watch(() => [
+  hasTmActivity.value ? 1 : 0,
+  showExtraction.value ? 1 : 0,
+  aiStore.stats?.totalReceived ?? 0,
+  aiStore.stats?.queued ?? 0,
+  aiStore.stats?.translating ?? 0,
+  aiStore.stats?.maxConcurrency ?? 0,
+  llmCompleted.value,
+  tmTotalHits.value,
+  aiStore.stats?.translationMemoryHits ?? 0,
+  aiStore.stats?.translationMemoryFuzzyHits ?? 0,
+  aiStore.stats?.translationMemoryPatternHits ?? 0,
+  extractionStats.value?.totalExtracted ?? 0,
+  extractionStats.value?.totalExtractionCalls ?? 0,
+  extractionStats.value?.activeExtractions ?? 0,
+  extractionStats.value?.totalErrors ?? 0,
+], () => {
+  nextTick(schedulePipelineLayout)
 })
 </script>
 
@@ -538,7 +656,7 @@ watch(() => aiStore.stats?.translating, () => {
                         <NIcon :size="20"><MoveToInboxOutlined /></NIcon>
                       </div>
                       <div class="node-data">
-                        <span class="node-value root-value">{{ aiStore.stats?.totalReceived ?? 0 }}</span>
+                        <span class="node-value root-value" :data-full-value="String(aiStore.stats?.totalReceived ?? 0)">{{ formatPipelineCount(aiStore.stats?.totalReceived ?? 0) }}</span>
                         <span class="node-label">已接收</span>
                       </div>
                     </div>
@@ -550,69 +668,78 @@ watch(() => aiStore.stats?.translating, () => {
               <!-- Fork Branches -->
               <div class="pipeline-branches">
                 <!-- LLM Branch -->
-                <div class="pipeline-branch">
+                <div class="pipeline-branch llm-branch">
                   <div class="branch-header">
                     <NIcon :size="13"><SmartToyOutlined /></NIcon>
                     <span>LLM 翻译</span>
                   </div>
-                  <div class="branch-nodes">
-                    <NPopover trigger="hover" placement="top">
-                      <template #trigger>
-                        <div ref="queueNodeRef" class="pipeline-node" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
-                          <div class="node-icon"><NIcon :size="14"><HourglassEmptyOutlined /></NIcon></div>
-                          <div class="node-data">
-                            <span class="node-value">{{ aiStore.stats?.queued ?? 0 }}</span>
-                            <span class="node-label">排队</span>
+                  <div class="branch-nodes branch-nodes-llm" :class="{ 'has-extraction': showExtraction }">
+                    <div class="llm-node-slot queue-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="queueNodeRef" class="pipeline-node stage-node queue-node" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
+                            <div class="node-icon"><NIcon :size="14"><HourglassEmptyOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value" :data-full-value="String(aiStore.stats?.queued ?? 0)">{{ formatPipelineCount(aiStore.stats?.queued ?? 0) }}</span>
+                              <span class="node-label">排队</span>
+                            </div>
                           </div>
-                        </div>
-                      </template>
-                      <div class="pipeline-tooltip">等待 LLM 处理的翻译请求队列</div>
-                    </NPopover>
+                        </template>
+                        <div class="pipeline-tooltip">等待 LLM 处理的翻译请求队列</div>
+                      </NPopover>
+                    </div>
 
-                    <NPopover trigger="hover" placement="top">
-                      <template #trigger>
-                        <div ref="translatingNodeRef" class="pipeline-node" :class="{ 'is-active': isActivelyTranslating }">
-                          <div class="node-icon translating-icon"><NIcon :size="14"><SyncOutlined /></NIcon></div>
-                          <div class="node-data">
-                            <span class="node-value">{{ aiStore.stats?.translating ?? 0 }}<small v-if="aiStore.stats?.maxConcurrency">/{{ aiStore.stats.maxConcurrency }}</small></span>
-                            <span class="node-label">翻译中</span>
+                    <div class="llm-node-slot translating-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="translatingNodeRef" class="pipeline-node stage-node translating-node" :class="{ 'is-active': isActivelyTranslating }">
+                            <div class="node-icon translating-icon"><NIcon :size="14"><SyncOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span
+                                class="node-value"
+                                :data-full-current="String(aiStore.stats?.translating ?? 0)"
+                                :data-full-max="aiStore.stats?.maxConcurrency ? String(aiStore.stats.maxConcurrency) : ''"
+                              >
+                                {{ formatPipelineCount(aiStore.stats?.translating ?? 0) }}<small v-if="aiStore.stats?.maxConcurrency">/{{ formatPipelineCount(aiStore.stats.maxConcurrency) }}</small>
+                              </span>
+                              <span class="node-label">翻译中</span>
+                            </div>
                           </div>
-                        </div>
-                      </template>
-                      <div class="pipeline-tooltip">正在由大语言模型处理的翻译请求</div>
-                    </NPopover>
+                        </template>
+                        <div class="pipeline-tooltip">正在由大语言模型处理的翻译请求</div>
+                      </NPopover>
+                    </div>
 
-                    <NPopover trigger="hover" placement="top">
-                      <template #trigger>
-                        <div ref="doneNodeRef" class="pipeline-node done-node">
-                          <div class="node-icon done-icon"><NIcon :size="14"><TranslateOutlined /></NIcon></div>
-                          <div class="node-data">
-                            <span class="node-value">{{ llmCompleted }}</span>
-                            <span class="node-label">已完成</span>
+                    <div class="llm-node-slot done-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="doneNodeRef" class="pipeline-node stage-node done-node">
+                            <div class="node-icon done-icon"><NIcon :size="14"><TranslateOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value" :data-full-value="String(llmCompleted)">{{ formatPipelineCount(llmCompleted) }}</span>
+                              <span class="node-label">已完成</span>
+                            </div>
                           </div>
-                        </div>
-                      </template>
-                      <div class="pipeline-tooltip">LLM 成功翻译的文本数（不含翻译记忆命中）</div>
-                    </NPopover>
+                        </template>
+                        <div class="pipeline-tooltip">LLM 成功翻译的文本数（不含翻译记忆命中）</div>
+                      </NPopover>
+                    </div>
 
                     <!-- Term Extraction (inline after 已完成) -->
-                    <NPopover v-if="showExtraction" trigger="hover" placement="top">
-                      <template #trigger>
-                        <div ref="extractionNodeRef" class="pipeline-node extraction-node">
-                          <div class="node-icon extraction-icon"><NIcon :size="14"><AutoFixHighOutlined /></NIcon></div>
-                          <div class="node-data">
-                            <span class="node-value">{{ extractionStats!.totalExtracted }}</span>
-                            <span class="node-label">术语提取</span>
+                    <div v-if="showExtraction" class="llm-node-slot extraction-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="extractionNodeRef" class="pipeline-node stage-node extraction-node">
+                            <div class="node-icon extraction-icon"><NIcon :size="14"><AutoFixHighOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value" :data-full-value="String(extractionStats!.totalExtracted)">{{ formatPipelineCount(extractionStats!.totalExtracted) }}</span>
+                              <span class="node-label">术语提取</span>
+                            </div>
                           </div>
-                          <div class="extraction-details">
-                            <span class="sub-stat">{{ extractionStats!.totalExtractionCalls }} 调用</span>
-                            <span v-if="extractionStats!.activeExtractions > 0" class="sub-stat active">{{ extractionStats!.activeExtractions }} 提取中</span>
-                            <span v-if="extractionStats!.totalErrors > 0" class="sub-stat error">{{ extractionStats!.totalErrors }} 错误</span>
-                          </div>
-                        </div>
-                      </template>
-                      <div class="pipeline-tooltip">翻译完成后自动提取专有名词、角色名等术语，用于后续翻译</div>
-                    </NPopover>
+                        </template>
+                        <div class="pipeline-tooltip">翻译完成后自动提取专有名词、角色名等术语，用于后续翻译</div>
+                      </NPopover>
+                    </div>
                   </div>
                 </div>
 
@@ -622,15 +749,15 @@ watch(() => aiStore.stats?.translating, () => {
                     <NIcon :size="13"><StorageOutlined /></NIcon>
                     <span>翻译记忆</span>
                   </div>
-                  <div class="branch-nodes">
+                  <div class="branch-nodes branch-nodes-tm">
                     <NPopover trigger="hover" placement="top">
                       <template #trigger>
                         <div ref="tmChipsRef" class="pipeline-node tm-node">
                           <div class="node-icon tm-icon"><NIcon :size="14"><StorageOutlined /></NIcon></div>
                           <div class="tm-chips-inline">
-                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryHits ?? 0 }}</strong> 精确</span>
-                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryFuzzyHits ?? 0 }}</strong> 模糊</span>
-                            <span class="tm-inline-chip"><strong>{{ aiStore.stats?.translationMemoryPatternHits ?? 0 }}</strong> 模式</span>
+                            <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryHits ?? 0) }}</strong> 精确</span>
+                            <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryFuzzyHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryFuzzyHits ?? 0) }}</strong> 模糊</span>
+                            <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryPatternHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryPatternHits ?? 0) }}</strong> 模式</span>
                           </div>
                         </div>
                       </template>
@@ -642,7 +769,7 @@ watch(() => aiStore.stats?.translating, () => {
                         <div ref="tmDoneRef" class="pipeline-node tm-done-node">
                           <div class="node-icon tm-icon"><NIcon :size="14"><StorageOutlined /></NIcon></div>
                           <div class="node-data">
-                            <span class="node-value">{{ tmTotalHits }}</span>
+                            <span class="node-value" :data-full-value="String(tmTotalHits)">{{ formatPipelineCount(tmTotalHits) }}</span>
                             <span class="node-label">已命中</span>
                           </div>
                         </div>
@@ -1342,6 +1469,7 @@ watch(() => aiStore.stats?.translating, () => {
   position: relative;
   margin-bottom: 16px;
   padding: 4px 0;
+  overflow: visible;
 }
 
 /* SVG Connection Overlay */
@@ -1424,15 +1552,16 @@ watch(() => aiStore.stats?.translating, () => {
 .pipeline-node {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 10px 12px;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   transition: all 0.3s ease;
   position: relative;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-width: 0;
+  max-width: 100%;
 }
 
 .pipeline-node:hover {
@@ -1442,14 +1571,16 @@ watch(() => aiStore.stats?.translating, () => {
 
 .root-node {
   border-left: 3px solid var(--accent);
-  padding: 14px 18px;
+  padding: 12px 16px;
   flex: 0 0 auto;
+  min-inline-size: 152px;
+  max-inline-size: 176px;
   background: color-mix(in srgb, var(--accent) 3%, var(--bg-subtle));
 }
 
 .node-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1460,8 +1591,8 @@ watch(() => aiStore.stats?.translating, () => {
 }
 
 .root-icon {
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
 }
 
@@ -1469,26 +1600,31 @@ watch(() => aiStore.stats?.translating, () => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  align-items: flex-start;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 .node-value {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-1);
   letter-spacing: -0.02em;
   line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .node-value.root-value {
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .node-value small {
   font-size: 12px;
   font-weight: 400;
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 .node-label {
@@ -1504,12 +1640,15 @@ watch(() => aiStore.stats?.translating, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-left: 16px;
+  gap: 10px;
+  padding-left: 28px;
   min-width: 0;
 }
 
 .pipeline-branch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1522,7 +1661,7 @@ watch(() => aiStore.stats?.translating, () => {
   color: var(--accent);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   padding-top: 2px;
 }
 
@@ -1532,8 +1671,62 @@ watch(() => aiStore.stats?.translating, () => {
 
 .branch-nodes {
   display: flex;
+  align-items: flex-start;
+  gap: clamp(18px, 2.4vw, 34px);
+  width: 100%;
+  min-width: 0;
+}
+
+.branch-nodes-llm {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  justify-content: normal;
+  gap: clamp(12px, 1.6vw, 24px);
+}
+
+.branch-nodes-llm.has-extraction {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.llm-node-slot {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+}
+
+.queue-slot {
+  justify-content: flex-start;
+}
+
+.translating-slot,
+.done-slot {
+  justify-content: center;
+}
+
+.branch-nodes-llm:not(.has-extraction) .done-slot,
+.extraction-slot {
+  justify-content: flex-end;
+}
+
+.branch-nodes-tm {
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
+}
+
+.stage-node {
+  min-inline-size: 136px;
+  max-inline-size: 160px;
+}
+
+.translating-node {
+  min-inline-size: 152px;
+  max-inline-size: 176px;
+}
+
+.tm-node {
+  min-inline-size: 252px;
+  max-inline-size: 340px;
 }
 
 /* Pipeline node states */
@@ -1579,6 +1772,8 @@ watch(() => aiStore.stats?.translating, () => {
 .tm-done-node {
   background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
   border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
+  min-inline-size: 160px;
+  max-inline-size: 188px;
 }
 
 /* TM node with inline chips */
@@ -1591,25 +1786,30 @@ watch(() => aiStore.stats?.translating, () => {
 .tm-chips-inline {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .tm-inline-chip {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
 }
 
 .tm-inline-chip strong {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: color-mix(in srgb, var(--accent) 65%, var(--text-2));
   margin-right: 2px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Extraction Node (inline in LLM flow) */
 .extraction-node {
+  min-inline-size: 136px;
+  max-inline-size: 160px;
   border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
   background: color-mix(in srgb, var(--accent) 2%, var(--bg-subtle));
 }
@@ -1617,35 +1817,6 @@ watch(() => aiStore.stats?.translating, () => {
 .extraction-icon {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--accent);
-}
-
-.extraction-details {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-wrap: wrap;
-}
-
-.sub-stat {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-2);
-  background: var(--bg-muted);
-  padding: 2px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.sub-stat.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.sub-stat.error {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 /* Tooltip */
@@ -2254,7 +2425,32 @@ watch(() => aiStore.stats?.translating, () => {
 
   .branch-nodes {
     flex-wrap: wrap;
+    justify-content: flex-start;
     gap: 6px;
+  }
+
+  .branch-nodes-llm {
+    display: flex;
+    grid-template-columns: none;
+  }
+
+  .llm-node-slot,
+  .queue-slot,
+  .translating-slot,
+  .done-slot,
+  .extraction-slot {
+    justify-content: flex-start;
+  }
+
+  .pipeline-node,
+  .root-node,
+  .stage-node,
+  .translating-node,
+  .tm-node,
+  .tm-done-node,
+  .extraction-node {
+    min-inline-size: 0;
+    max-inline-size: 100%;
   }
 
   .tm-chips-inline {
@@ -2356,14 +2552,6 @@ watch(() => aiStore.stats?.translating, () => {
 
   .node-value.root-value {
     font-size: 18px;
-  }
-
-  .extraction-details {
-    gap: 4px;
-  }
-
-  .sub-stat {
-    font-size: 10px;
   }
 
   .recent-texts {

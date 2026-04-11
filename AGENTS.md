@@ -194,8 +194,13 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `cache/backgrounds`
 - `cache/extracted-texts`
 - `cache/pre-translation-regex`
+  当前 `cache/pre-translation-regex/<gameId>.txt` 只镜像 legacy compatibility 所需的 custom 正则区块；完整托管文件位于游戏目录 `BepInEx/Translation/<lang>/Text/_PreTranslated_Regex.txt`
+- `cache/pre-translation-sessions`
 - `models/`
 - `llama/`
+- `llama/launch-cache`
+- `font-generation/uploads`
+- `font-generation/temp`
 - `generated-fonts/`
 - `font-backups/`
 - `custom-fonts/`
@@ -253,6 +258,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `GameEndpoints.cs`
 - `SettingsEndpoints.cs`
 - `TranslateEndpoints.cs`
+- `TranslationEditorEndpoints.cs`
 - `FontGenerationEndpoints.cs`
 - `FontReplacementEndpoints.cs`
 - `ImageEndpoints.cs`
@@ -287,6 +293,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `src/components/settings/AiTranslationCard.vue`
 - `src/components/config/ConfigPanel.vue`
 - `src/components/common/FileExplorerModal.vue`
+- `src/components/translation/RegexRuleEditor.vue`
 
 核心 store：
 
@@ -294,6 +301,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `src/stores/theme.ts`
 - `src/stores/sidebar.ts`
 - `src/stores/install.ts`
+- `src/stores/assetExtraction.ts`
 - `src/stores/update.ts`
 
 核心 composable：
@@ -351,6 +359,20 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `ScriptTagService` 负责清理与缓存归一化
 - 与预翻译缓存、术语和翻译记忆关系紧密，修改时要注意 `NormalizeForCache` 调用点一致性
 
+预翻译检查点：
+
+- `PreTranslationService` 会把每游戏恢复检查点写到 `cache/pre-translation-sessions/<gameId>.json`
+- 恢复资格取决于提取文本经过 `ScriptTagService.FilterAndCleanAsync(...)` 后得到的文本签名；提取缓存或脚本标签规则变化时必须阻止 resume，并要求重新开始
+- `GET /api/games/{id}/pre-translate/status` 是非运行态 checkpoint 解析后的权威状态；取消或失败后，`CanResume` / `ResumeBlockedReason` 必须以它重新校验后的结果为准，而不是直接复用终态广播里的原始字段
+- 删除 `extracted-texts` 缓存或删除游戏时，必须同时清理对应的预翻译检查点
+
+预翻译文本与正则文件：
+
+- `TranslationEditorPathResolver` 是普通译文、预翻译文本与预翻译正则文件路径的唯一权威入口；普通译文沿用 `config.OutputFile`/`TargetLanguage`，预翻译文本与正则固定落到 `BepInEx/Translation/<lang>/Text/_PreTranslated.txt` 与 `_PreTranslated_Regex.txt`
+- `lang` 解析顺序固定为：显式请求语言 → `TargetLanguage` → 游戏目录里已存在的预翻译文件扫描结果 → `zh`；语言代码与最终路径都必须经过 resolver 校验，不能绕开 `BepInEx` 根目录
+- `PreTranslationRegexFormat` 统一管理 `_PreTranslated_Regex.txt` 的 `base` / `custom` / `dynamic` 三个区块；再次执行预翻译时只保留 `custom`，`base` 与 `dynamic` 都会被系统重建
+- `GET/PUT /api/games/{id}/pre-translate/regex` 与 `cache/pre-translation-regex/<gameId>.txt` 现在只承担 custom 区块兼容层；改动托管格式时必须同时维护兼容层的读写
+
 ## 11. 本地 LLM 速记
 
 主服务：
@@ -362,8 +384,9 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - GPU 检测优先 DXGI，WMI 兜底
 - 后端选择逻辑：NVIDIA→CUDA，AMD/Intel→Vulkan，无显卡→CPU
 - 本地模式强制更保守的并发与批处理
-- llama.cpp 版本当前固定为 `b8580`
+- llama.cpp 版本当前固定为 `b8756`
 - 下载模型支持 HuggingFace 与 ModelScope
+- 模型启动路径必须走 `LocalLlmLaunchPathResolver`：先尝试相对路径，再尝试 Windows 8.3 短路径，最后才在 `llama/launch-cache/` 创建 ASCII hard link / symbolic link 别名；不要绕开这条兜底链路
 - llama 二进制和模型是两个概念：
   - llama 运行时二进制：`bundled/llama/` 或用户下载
   - 模型文件：`%AppData%\XUnityToolkit\models`
@@ -493,6 +516,16 @@ CI：
   - `LocalLlmEndpoints`
   - TS 类型
   - `LocalAiPanel.vue`
+- `TranslationEditor`
+  需要同步：
+  - `TranslationEditorEndpoints.cs`
+  - `TranslationEditorPathResolver.cs`
+  - `PreTranslationRegexFormat.cs`
+  - `src/api/types.ts`
+  - `src/api/games.ts`
+  - `TranslationEditorView.vue`
+  - `RegexRuleEditor.vue`
+  - `AssetExtractionView.vue` 里的跳转入口与 query 参数
 - 新 per-game 缓存/目录
   需要同步：
   - `AppDataPaths.cs`
@@ -515,9 +548,12 @@ CI：
 在线翻译与预翻译：
 
 - `XUnityToolkit-WebUI/Endpoints/TranslateEndpoints.cs`
+- `XUnityToolkit-WebUI/Endpoints/TranslationEditorEndpoints.cs`
 - `XUnityToolkit-WebUI/Services/LlmTranslationService.cs`
 - `XUnityToolkit-WebUI/Services/TranslationMemoryService.cs`
 - `XUnityToolkit-WebUI/Services/PreTranslationService.cs`
+- `XUnityToolkit-WebUI/Services/TranslationEditorPathResolver.cs`
+- `XUnityToolkit-WebUI/Services/PreTranslationRegexFormat.cs`
 - `XUnityToolkit-WebUI/Services/TermService.cs`
 
 本地模型：
@@ -586,15 +622,16 @@ CI：
 - 兼容层：`/api/games/{id}/glossary`、`/api/games/{id}/do-not-translate` 保留兼容旧调用，但底层统一走 `TermService`
 - 翻译记忆与动态模式：`/api/games/{id}/translation-memory`、`/api/games/{id}/dynamic-patterns`、`/api/games/{id}/term-candidates`
 - 脚本标签：`GET /api/script-tag-presets`、`GET/PUT /api/games/{id}/script-tags`
-- 资源提取与预翻译：`POST /api/games/{id}/extract-assets`、`GET/DELETE /api/games/{id}/extracted-texts`、`POST /api/games/{id}/pre-translate`、`GET /api/games/{id}/pre-translate/status`、`POST /api/games/{id}/pre-translate/cancel`、`GET/PUT /api/games/{id}/pre-translate/regex`
-- 翻译编辑器：`GET/PUT /api/games/{id}/translation-editor`、`POST /api/games/{id}/translation-editor/import`、`GET /api/games/{id}/translation-editor/export`
+- 资源提取与预翻译：`POST /api/games/{id}/extract-assets`、`GET/DELETE /api/games/{id}/extracted-texts`、`POST /api/games/{id}/pre-translate`、`POST /api/games/{id}/pre-translate/resume`、`GET /api/games/{id}/pre-translate/status`、`POST /api/games/{id}/pre-translate/cancel`、`GET/PUT /api/games/{id}/pre-translate/regex`
+- `GET/PUT /api/games/{id}/pre-translate/regex` 当前是 legacy compatibility 端点，只读写 custom 正则区块；完整多区块编辑统一走 `translation-editor/regex`
+- 翻译编辑器：`GET/PUT /api/games/{id}/translation-editor?source={default|pretranslated}&lang={lang}`、`POST /api/games/{id}/translation-editor/import`、`GET /api/games/{id}/translation-editor/export`、`GET/PUT /api/games/{id}/translation-editor/regex?lang={lang}`、`POST /api/games/{id}/translation-editor/regex/import`、`GET /api/games/{id}/translation-editor/regex/export`
 - 字体替换：`POST /api/games/{id}/font-replacement/scan`、`POST /api/games/{id}/font-replacement/replace`、`POST /api/games/{id}/font-replacement/restore`、`GET /api/games/{id}/font-replacement/status`、`POST /api/games/{id}/font-replacement/upload`、`POST /api/games/{id}/font-replacement/upload-from-path`、`POST /api/games/{id}/font-replacement/cancel`、`DELETE /api/games/{id}/font-replacement/custom-fonts/{sourceId}`
 - 字体替换上传端点现在要求显式区分 `kind={ttf|tmp}`；状态端点会返回默认源/自定义源列表与已使用源摘要；替换请求中的 `fonts[]` 需要携带逐字体 `sourceId`
 - `POST /api/games/{id}/font-replacement/scan` 是字体当前资源状态的权威来源；`GET /api/games/{id}/font-replacement/status` 主要基于 `manifest.json` 汇总替换状态，不返回实时重扫后的 `ttfMode` / `fontDataSize`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
 - BepInEx 日志与健康：`/api/games/{id}/bepinex-log`、`/api/games/{id}/health-check`
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
-- 日志与更新：`/api/logs*`、`/api/update/*`
+- 日志与更新：`GET /api/logs`、`GET /api/logs/history`、`GET /api/logs/download`、`/api/update/*`
 - 所有 `multipart/form-data` 上传端点都必须显式 `.DisableAntiforgery()`
 - 所有 `*-from-path` 端点都必须与对应 multipart 端点保持相同业务校验与副作用，不允许只做“简化版实现”
 - `POST /api/translate` 直接服务于 `LLMTranslate.dll`，不是 `ApiResult<T>`，前端若直接调用必须使用原始 `fetch` 处理响应
@@ -608,6 +645,9 @@ CI：
 - `SettingsView.vue` 的默认 `AppSettings`、`AiTranslationView.vue` 的 `DEFAULT_AI_TRANSLATION`、后端 `AppSettings`/`AiTranslationSettings` 默认值必须保持一致
 - 数值型设置新增字段时，要同步后端的 `Math.Clamp` 逻辑，否则前端与后端会出现边界不一致
 - `TermEntry` 的 `Type`/`Category`/`Source`、`ScriptTagRule`/`ScriptTagConfig`、`TranslationStats`/`RecentTranslation`/`TranslationError`、`PreTranslationStatus`/`PreTranslationCacheStats` 都属于容易漏同步的高频模型
+- `PreTranslationStatus` 的 `CanResume` / `CheckpointUpdatedAt` / `ResumeBlockedReason` 与 `POST /api/games/{id}/pre-translate/resume` 属于一组联动点；改动时要同时核对 `Models/AssetExtraction.cs`、`src/api/types.ts`、`src/api/games.ts`、`src/stores/assetExtraction.ts`、`AssetExtractionView.vue`，并确认运行中始终 `CanResume=false`，取消/失败后会基于 checkpoint 重新解析恢复资格
+- `TranslationEditorData.Source` / `Language` / `AvailablePreTranslationLanguages`、`TranslationRegexEditorData`、`RegexTranslationRule`、`TranslationEditorSource` / `TranslationEditorTextSource` 属于一组联动点；改动时要同时核对 `TranslationEditorEndpoints.cs`、`TranslationEditorPathResolver.cs`、`src/api/types.ts`、`src/api/games.ts`、`TranslationEditorView.vue`、`RegexRuleEditor.vue`
+- `PreTranslationRegexFormat` 的 `base` / `custom` / `dynamic` 分区、`AssetEndpoints.cs` 的兼容接口、`PreTranslationService.cs` 的托管文件重建、`AppDataPaths.PreTranslationRegexFile(...)` 的 legacy 镜像属于另一组联动点；`custom` 必须保留，`base` 与 `dynamic` 可以重建
 - 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
@@ -644,6 +684,8 @@ CI：
 - `ScriptTagService.NormalizeForCache` 是缓存归一化的唯一入口；涉及预翻译缓存、动态模式或脚本标签的变更都要核对调用点
 - `TranslationStats.Queued` 是推导值，不等于内部 `_queued`；TM 命中和失败文本统计也有各自独立含义，不能混用
 - `RecentTranslation.EndpointName` 在 TM 命中场景下需要显式写成“翻译记忆”，否则前端最近翻译列表会出现空白端点名
+- `PreTranslationRegexFormat` 负责托管 `_PreTranslated_Regex.txt` 的 `base` / `custom` / `dynamic` 区块；`PreTranslationService` 重建托管文件时必须保留 `custom`，并同步回写 `AppDataPaths.PreTranslationRegexFile(gameId)` 兼容镜像
+- `TranslationEditorPathResolver` 是 `translation-editor`、`translation-editor/regex` 与 legacy `/pre-translate/regex` 共用的唯一路径解析入口；语言选择、目录扫描和路径防穿越都不要散落重写
 
 ### 21.4 性能、并发与 SignalR
 
@@ -651,6 +693,7 @@ CI：
 - `SemaphoreSlim` 相关逻辑要区分“是否成功获取信号量”再释放，避免超时后误 `Release()`
 - `BroadcastStats` 的节流与 `force: true` 语义是前端实时流水线显示的前提，不能随意删减
 - KeepAlive 或触发即忘的后台任务，如果依赖 SignalR 结束事件来复位前端状态，那么失败、取消路径也必须广播完成/错误事件
+- `FileLoggerProvider` 的内存 ring buffer 只用于运行中日志页展示；`GET /api/logs/download` 必须导出当前 session 的磁盘日志快照，不能退化成只导出 ring buffer 截断结果
 - 向前端返回的错误消息要避免泄露内部绝对路径、异常堆栈或敏感配置；详细信息只写服务器日志
 
 ### 21.5 资源、字体、WebView2 与周边服务
@@ -701,6 +744,8 @@ CI：
 - `onBeforeUnmount` 是默认清理钩子，不要改成 `onUnmounted`
 - 自动保存页面在加载外部数据时统一采用 `disable -> load/assign -> nextTick -> enable`
 - `AiTranslationView`、`SettingsView` 这类共享 `AppSettings` 的 KeepAlive 页面，重新激活时必须重新从后端加载，避免旧副本覆盖新改动
+- `AssetExtractionView` 的预翻译按钮显示依赖 `src/stores/assetExtraction.ts` 中的状态兜底：收到带 `CheckpointUpdatedAt` 的终态 `preTranslationUpdate`，或“开始预翻译”因旧 checkpoint 被拒绝时，都必须主动刷新 `GET /api/games/{id}/pre-translate/status`，不要只依赖一次 SignalR 终态包
+- `TranslationEditorView` 通过 `route.query.source` / `route.query.lang` 切换普通译文、预翻译文本与预翻译正则；从 `AssetExtractionView` 跳转进入预翻译编辑时必须带上这些 query，不要再派生一套页面内来源状态
 
 ### 22.4 Naive UI 与常见实现陷阱
 

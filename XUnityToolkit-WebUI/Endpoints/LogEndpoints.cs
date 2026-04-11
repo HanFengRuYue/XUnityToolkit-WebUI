@@ -17,12 +17,10 @@ public static class LogEndpoints
             return Results.Ok(ApiResult<LogEntry[]>.Ok(entries));
         });
 
-        // Download current session log (in-memory ring buffer)
+        // Download the complete current session log from the on-disk session file.
         group.MapGet("/download", (FileLoggerProvider provider) =>
         {
-            var content = provider.ExportSessionLog();
-            var bytes = Encoding.UTF8.GetBytes(content);
-            var stream = new MemoryStream(bytes);
+            var stream = provider.ExportSessionLog();
             var fileName = $"XUnityToolkit_{provider.SessionTimestamp}.log";
             return Results.File(stream, "text/plain", fileName);
         });

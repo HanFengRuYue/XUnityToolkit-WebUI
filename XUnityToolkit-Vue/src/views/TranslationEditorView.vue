@@ -1,688 +1,419 @@
 <script setup lang="ts">
-import { ref, computed, h, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import {
+  NAlert,
   NButton,
+  NDataTable,
+  NEmpty,
   NIcon,
   NInput,
-  NDataTable,
-  NTag,
+  NSelect,
   NSpin,
-  NEmpty,
-  NAlert,
-  NRadioGroup,
-  NRadio,
-  NCheckboxGroup,
-  NCheckbox,
-  NSwitch,
-  NBadge,
-  NTooltip,
-  NPopselect,
-  useMessage,
+  NTag,
   useDialog,
+  useMessage,
 } from 'naive-ui'
-import type { DataTableColumns, DataTableSortState } from 'naive-ui'
+import type { DataTableColumns } from 'naive-ui'
 import {
-  ArrowBackOutlined,
-  SaveOutlined,
-  FileUploadOutlined,
-  FileDownloadOutlined,
   AddOutlined,
+  ArrowBackOutlined,
   DeleteOutlined,
-  DeleteSweepOutlined,
-  BookmarkAddOutlined,
   DriveFileRenameOutlineOutlined,
+  FileDownloadOutlined,
+  FileUploadOutlined,
   FolderOutlined,
-  FilterAltOutlined,
-  FindReplaceOutlined,
-  RestartAltOutlined,
-  SwapVertOutlined,
+  RefreshOutlined,
+  SaveOutlined,
+  TranslateOutlined,
 } from '@vicons/material'
-import { gamesApi, translationEditorApi } from '@/api/games'
 import { filesystemApi } from '@/api/filesystem'
+import { gamesApi, translationEditorApi } from '@/api/games'
 import { useFileExplorer } from '@/composables/useFileExplorer'
-import type { Game, TranslationEntry, TermEntry } from '@/api/types'
+import RegexRuleEditor from '@/components/translation/RegexRuleEditor.vue'
+import type {
+  Game,
+  RegexTranslationRule,
+  TranslationEditorSource,
+  TranslationEditorTextSource,
+  TranslationEntry,
+} from '@/api/types'
 
 interface TranslationRow extends TranslationEntry {
   _id: number
-  _originalLower: string
-  _translationLower: string
 }
+
+const SOURCE_OPTIONS = [
+  { label: '普通译文', value: 'default' },
+  { label: '预翻译文本', value: 'pretranslated' },
+  { label: '预翻译正则', value: 'pretranslated-regex' },
+]
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
+const { selectFile } = useFileExplorer()
 
 const gameId = route.params['id'] as string
+
 const game = ref<Game | null>(null)
 const loading = ref(true)
 const saving = ref(false)
+const importing = ref(false)
 const filePath = ref('')
 const fileExists = ref(false)
-
-// Editor state
+const currentSource = ref<TranslationEditorSource>('default')
+const currentLanguage = ref('')
+const availableLanguages = ref<string[]>([])
 const entries = ref<TranslationRow[]>([])
-const dirtyRowIds = ref<Set<number>>(new Set())
-const removedSnapshotIds = ref<Set<number>>(new Set())
-let savedSnapshotById = new Map<number, { original: string; translation: string }>()
-let nextId = 1
-
-// Import
-const { selectFile } = useFileExplorer()
-const importing = ref(false)
-
-// Add entry form
+const regexRules = ref<RegexTranslationRule[]>([])
 const newOriginal = ref('')
 const newTranslation = ref('')
+const loadError = ref('')
 
-// Filter & sort state
-const showFilterPanel = ref(false)
-const showReplacePanel = ref(false)
-const panelSortMode = ref<string>('default')
-const filterKeyword = ref('')
-const filterStatus = ref<string>('all')
-const filterFeatures = ref<string[]>([])
-const filterRegexPattern = ref('')
-const filterRegexTarget = ref<string>('both')
-const debouncedRegexPattern = ref('')
-let regexDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let savedTextSnapshot = '[]'
+let savedRegexSnapshot = '[]'
+let nextRowId = 1
+let loadingKey = ''
 
-// Column sort state (controlled mode)
-const columnSortKey = ref<string | null>(null)
-const columnSortOrder = ref<'ascend' | 'descend' | false>(false)
-
-// Intl.Collator for performant string sorting
-const collator = new Intl.Collator(undefined, { sensitivity: 'base' })
-
-// Replace state
-const replaceFindText = ref('')
-const replaceWithText = ref('')
-const replaceIsRegex = ref(false)
-const debouncedReplaceFindText = ref('')
-let replaceFindDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
+const isRegexMode = computed(() => currentSource.value === 'pretranslated-regex')
+const entryCount = computed(() => (isRegexMode.value ? regexRules.value.length : entries.value.length))
 const isDirty = computed(() =>
-  dirtyRowIds.value.size > 0 || removedSnapshotIds.value.size > 0
+  isRegexMode.value
+    ? serializeRegexRules(regexRules.value) !== savedRegexSnapshot
+    : serializeTextEntries(entries.value) !== savedTextSnapshot,
 )
 
-function takeSnapshot() {
-  savedSnapshotById = new Map(
-    entries.value.map(row => [row._id, { original: row.original, translation: row.translation }]),
+const languageOptions = computed(() => {
+  const values = new Set(
+    availableLanguages.value
+      .map(value => value.trim())
+      .filter(Boolean),
   )
-  dirtyRowIds.value = new Set()
-  removedSnapshotIds.value = new Set()
-}
 
-function toRows(items: TranslationEntry[]): TranslationRow[] {
-  return items.map(createRow)
-}
-
-function createRow(entry: TranslationEntry): TranslationRow {
-  return {
-    ...entry,
-    _id: nextId++,
-    _originalLower: entry.original.toLowerCase(),
-    _translationLower: entry.translation.toLowerCase(),
-  }
-}
-
-function addDirtyRowId(id: number) {
-  if (dirtyRowIds.value.has(id)) return
-  const next = new Set(dirtyRowIds.value)
-  next.add(id)
-  dirtyRowIds.value = next
-}
-
-function removeDirtyRowId(id: number) {
-  if (!dirtyRowIds.value.has(id)) return
-  const next = new Set(dirtyRowIds.value)
-  next.delete(id)
-  dirtyRowIds.value = next
-}
-
-function addRemovedSnapshotId(id: number) {
-  if (removedSnapshotIds.value.has(id)) return
-  const next = new Set(removedSnapshotIds.value)
-  next.add(id)
-  removedSnapshotIds.value = next
-}
-
-function removeRemovedSnapshotId(id: number) {
-  if (!removedSnapshotIds.value.has(id)) return
-  const next = new Set(removedSnapshotIds.value)
-  next.delete(id)
-  removedSnapshotIds.value = next
-}
-
-function syncDirtyState(row: TranslationRow) {
-  const snapshot = savedSnapshotById.get(row._id)
-  if (!snapshot) {
-    addDirtyRowId(row._id)
-    return
+  if (currentLanguage.value.trim()) {
+    values.add(currentLanguage.value.trim())
   }
 
-  const isChanged =
-    snapshot.original !== row.original ||
-    snapshot.translation !== row.translation
-
-  if (isChanged) addDirtyRowId(row._id)
-  else removeDirtyRowId(row._id)
-
-  removeRemovedSnapshotId(row._id)
-}
-
-function updateRowOriginal(row: TranslationRow, value: string) {
-  row.original = value
-  row._originalLower = value.toLowerCase()
-  syncDirtyState(row)
-  bumpEntriesVersion()
-}
-
-function updateRowTranslation(row: TranslationRow, value: string) {
-  row.translation = value
-  row._translationLower = value.toLowerCase()
-  syncDirtyState(row)
-  bumpEntriesVersion()
-}
-
-function handleRowRemoved(row: TranslationRow) {
-  if (savedSnapshotById.has(row._id)) addRemovedSnapshotId(row._id)
-  else removeDirtyRowId(row._id)
-}
-
-const FEATURE_PATTERNS: Record<string, RegExp> = {
-  placeholder: /\{\{.*?\}\}|\{[0-9]+\}|<[^>]+>/,
-  newline: /[\n\r]/,
-  special: /[^\w\s\p{P}\p{sc=Han}\p{sc=Katakana}\p{sc=Hiragana}]/u,
-}
-
-const SORT_OPTIONS = [
-  { label: '默认顺序', value: 'default' },
-  { label: '原文首字母（A→Z）', value: 'alpha-asc' },
-  { label: '原文首字母（Z→A）', value: 'alpha-desc' },
-  { label: '原文长度（升序）', value: 'length-asc' },
-  { label: '原文长度（降序）', value: 'length-desc' },
-  { label: '未翻译优先', value: 'untranslated-first' },
-]
-
-const FEATURE_OPTIONS = [
-  { label: '包含占位符', value: 'placeholder' },
-  { label: '包含换行符', value: 'newline' },
-  { label: '包含特殊字符', value: 'special' },
-]
-
-const compiledFilterRegex = computed<RegExp | null>(() => {
-  if (!debouncedRegexPattern.value) return null
-  try {
-    return new RegExp(debouncedRegexPattern.value)
-  } catch {
-    return null
-  }
+  return [...values]
+    .sort((left, right) => left.localeCompare(right))
+    .map(value => ({
+      label: value.toUpperCase(),
+      value,
+    }))
 })
-
-const compiledReplaceRegex = computed<RegExp | null>(() => {
-  if (!replaceIsRegex.value || !debouncedReplaceFindText.value) return null
-  try {
-    return new RegExp(debouncedReplaceFindText.value, 'g')
-  } catch {
-    return null
-  }
-})
-
-const filteredAndSortedEntries = ref<TranslationRow[]>([])
-
-function recomputeFilteredEntries() {
-  let result: TranslationRow[] = entries.value
-
-  const kw = filterKeyword.value.trim().toLowerCase()
-  if (kw) {
-    result = result.filter(
-      e => e._originalLower.includes(kw) || e._translationLower.includes(kw)
-    )
-  }
-
-  if (filterStatus.value === 'translated') {
-    result = result.filter(e => e.translation !== '')
-  } else if (filterStatus.value === 'untranslated') {
-    result = result.filter(e => e.translation === '')
-  }
-
-  if (filterFeatures.value.length > 0) {
-    result = result.filter(e => {
-      return filterFeatures.value.some(feat => {
-        const re = FEATURE_PATTERNS[feat]
-        if (!re) return false
-        return re.test(e.original) || re.test(e.translation)
-      })
-    })
-  }
-
-  const regex = compiledFilterRegex.value
-  if (regex) {
-    try {
-      const re = regex
-      result = result.filter(e => {
-        const target = filterRegexTarget.value
-        if (target === 'original') return re.test(e.original)
-        if (target === 'translation') return re.test(e.translation)
-        return re.test(e.original) || re.test(e.translation)
-      })
-    } catch {
-      // Invalid regex — skip filter
-    }
-  }
-
-  if (columnSortKey.value && columnSortOrder.value) {
-    const key = columnSortKey.value as keyof TranslationRow
-    const dir = columnSortOrder.value === 'ascend' ? 1 : -1
-    result = [...result].sort((a, b) => dir * collator.compare(String(a[key]), String(b[key])))
-  } else if (panelSortMode.value !== 'default') {
-    result = [...result]
-    switch (panelSortMode.value) {
-      case 'alpha-asc':
-        result.sort((a, b) => collator.compare(a._originalLower, b._originalLower))
-        break
-      case 'alpha-desc':
-        result.sort((a, b) => collator.compare(b._originalLower, a._originalLower))
-        break
-      case 'length-asc':
-        result.sort((a, b) => a.original.length - b.original.length)
-        break
-      case 'length-desc':
-        result.sort((a, b) => b.original.length - a.original.length)
-        break
-      case 'untranslated-first':
-        result.sort((a, b) => {
-          const aEmpty = a.translation === '' ? 0 : 1
-          const bEmpty = b.translation === '' ? 0 : 1
-          return aEmpty - bEmpty
-        })
-        break
-    }
-  }
-
-  filteredAndSortedEntries.value = result
-}
-
-watch(
-  [filterKeyword, filterStatus, filterFeatures, debouncedRegexPattern, filterRegexTarget,
-   panelSortMode, columnSortKey, columnSortOrder],
-  recomputeFilteredEntries,
-  { deep: true }
-)
-
-const entriesVersion = ref(0)
-watch(entriesVersion, recomputeFilteredEntries)
-
-function bumpEntriesVersion() {
-  entriesVersion.value++
-}
-
-watch(filterRegexPattern, (val) => {
-  if (regexDebounceTimer) clearTimeout(regexDebounceTimer)
-  regexDebounceTimer = setTimeout(() => {
-    debouncedRegexPattern.value = val
-  }, 300)
-})
-
-watch(replaceFindText, (val) => {
-  if (replaceFindDebounceTimer) clearTimeout(replaceFindDebounceTimer)
-  replaceFindDebounceTimer = setTimeout(() => {
-    debouncedReplaceFindText.value = val
-  }, 300)
-})
-
-watch(panelSortMode, (val) => {
-  if (val !== 'default') {
-    columnSortKey.value = null
-    columnSortOrder.value = false
-  }
-})
-
-const hasActiveFilters = computed(() => {
-  return filterKeyword.value !== ''
-    || filterStatus.value !== 'all'
-    || filterFeatures.value.length > 0
-    || filterRegexPattern.value !== ''
-})
-
-const regexError = computed(() => {
-  if (!debouncedRegexPattern.value) return ''
-  try {
-    new RegExp(debouncedRegexPattern.value)
-    return ''
-  } catch (e) {
-    return (e as Error).message
-  }
-})
-
-const replaceFindRegexError = computed(() => {
-  if (!replaceIsRegex.value || !debouncedReplaceFindText.value) return ''
-  try {
-    new RegExp(debouncedReplaceFindText.value)
-    return ''
-  } catch (e) {
-    return (e as Error).message
-  }
-})
-
-const replaceMatchCount = computed(() => {
-  const findText = debouncedReplaceFindText.value
-  if (!findText) return 0
-  if (replaceIsRegex.value) {
-    const re = compiledReplaceRegex.value
-    if (!re) {
-      return 0
-    }
-    let count = 0
-    for (const entry of filteredAndSortedEntries.value) {
-      if (re.test(entry.translation)) count++
-      re.lastIndex = 0
-    }
-    return count
-  } else {
-    const lower = findText.toLowerCase()
-    return filteredAndSortedEntries.value.filter(e =>
-      e._translationLower.includes(lower)
-    ).length
-  }
-})
-
-function resetFilters() {
-  filterKeyword.value = ''
-  filterStatus.value = 'all'
-  filterFeatures.value = []
-  filterRegexPattern.value = ''
-  debouncedRegexPattern.value = ''
-  filterRegexTarget.value = 'both'
-  columnSortKey.value = null
-  columnSortOrder.value = false
-}
-
-function handleReplaceAll() {
-  const findText = debouncedReplaceFindText.value
-  if (!findText || replaceMatchCount.value === 0) return
-
-  dialog.warning({
-    title: '全部替换',
-    content: `将替换 ${replaceMatchCount.value} 条匹配，是否继续？`,
-    positiveText: '替换',
-    negativeText: '取消',
-    onPositiveClick: () => {
-      let replaced = 0
-      const visibleIds = new Set(filteredAndSortedEntries.value.map(e => e._id))
-
-      for (const entry of entries.value) {
-        if (!visibleIds.has(entry._id)) continue
-
-        let replacedText: string
-        if (replaceIsRegex.value) {
-          const re = compiledReplaceRegex.value
-          if (!re) {
-            continue
-          }
-          replacedText = entry.translation.replace(re, replaceWithText.value)
-          re.lastIndex = 0
-        } else {
-          const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          const re = new RegExp(escaped, 'gi')
-          replacedText = entry.translation.replace(re, replaceWithText.value)
-        }
-
-        if (replacedText !== entry.translation) {
-          updateRowTranslation(entry, replacedText)
-          replaced++
-        }
-      }
-
-      bumpEntriesVersion()
-      message.success(`已替换 ${replaced} 条`)
-    },
-  })
-}
-
-function handleSortersChange(sorters: DataTableSortState | DataTableSortState[] | null) {
-  const sorter = Array.isArray(sorters) ? sorters[0] : sorters
-  if (!sorter || sorter.order === false) {
-    columnSortKey.value = null
-    columnSortOrder.value = false
-  } else {
-    columnSortKey.value = sorter.columnKey as string
-    columnSortOrder.value = sorter.order
-    panelSortMode.value = 'default'
-  }
-}
-
-const addingToGlossary = ref(false)
-
-async function handleAddToGlossary(row: TranslationRow) {
-  if (!row.original.trim() || !row.translation.trim()) return
-  addingToGlossary.value = true
-  try {
-    const terms = await gamesApi.getTerms(gameId)
-    if (terms.some((e: TermEntry) => e.original === row.original)) {
-      message.warning('该原文在术语库中已存在')
-      return
-    }
-    terms.unshift({
-      type: 'translate',
-      original: row.original,
-      translation: row.translation,
-      isRegex: false,
-      caseSensitive: true,
-      exactMatch: false,
-      priority: 0,
-    })
-    await gamesApi.saveTerms(gameId, terms)
-    message.success('已添加到术语库')
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : '添加失败')
-  } finally {
-    addingToGlossary.value = false
-  }
-}
-
-function handleClearAll() {
-  if (entries.value.length === 0) return
-  dialog.warning({
-    title: '清空全部',
-    content: `确定要清空全部 ${entries.value.length} 条翻译条目吗？此操作不可撤销。`,
-    positiveText: '清空',
-    negativeText: '取消',
-    onPositiveClick: () => {
-      for (const row of entries.value) handleRowRemoved(row)
-      entries.value = []
-      bumpEntriesVersion()
-      message.success('已清空全部条目')
-    },
-  })
-}
 
 const tableColumns = computed<DataTableColumns<TranslationRow>>(() => [
   {
     title: '原文',
     key: 'original',
+    minWidth: 320,
     resizable: true,
-    minWidth: 200,
-    sorter: true,
-    sortOrder: columnSortKey.value === 'original' ? columnSortOrder.value : false,
     render(row) {
       return h(NInput, {
         value: row.original,
         size: 'small',
-        type: 'text',
-        'onUpdate:value': (v: string) => updateRowOriginal(row, v),
+        type: 'textarea',
+        autosize: { minRows: 1, maxRows: 4 },
+        'onUpdate:value': (value: string) => {
+          row.original = value
+        },
       })
     },
   },
   {
     title: '译文',
     key: 'translation',
+    minWidth: 360,
     resizable: true,
-    minWidth: 200,
-    sorter: true,
-    sortOrder: columnSortKey.value === 'translation' ? columnSortOrder.value : false,
     render(row) {
       return h(NInput, {
         value: row.translation,
         size: 'small',
-        type: 'text',
-        'onUpdate:value': (v: string) => updateRowTranslation(row, v),
+        type: 'textarea',
+        autosize: { minRows: 1, maxRows: 4 },
+        'onUpdate:value': (value: string) => {
+          row.translation = value
+        },
       })
+    },
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 92,
+    render(row) {
+      return h(
+        NTag,
+        {
+          size: 'small',
+          bordered: false,
+          type: row.translation.trim() ? 'success' : 'warning',
+        },
+        {
+          default: () => (row.translation.trim() ? '已翻译' : '未翻译'),
+        },
+      )
     },
   },
   {
     title: '',
     key: 'actions',
-    width: 80,
+    width: 72,
     render(row) {
-      return h('div', { style: 'display: flex; gap: 2px' }, [
-        h(NTooltip, null, {
-          trigger: () => h(NButton, {
-            size: 'tiny',
-            quaternary: true,
-            type: 'primary',
-            disabled: !row.translation.trim() || addingToGlossary.value,
-            onClick: () => handleAddToGlossary(row),
-          }, {
-            icon: () => h(NIcon, { size: 16 }, () => h(BookmarkAddOutlined)),
-          }),
-          default: () => '添加到术语库',
-        }),
-        h(NButton, {
+      return h(
+        NButton,
+        {
           size: 'tiny',
           quaternary: true,
           type: 'error',
           onClick: () => {
-            const idx = entries.value.findIndex(e => e._id === row._id)
-            if (idx >= 0) {
-              handleRowRemoved(row)
-              entries.value.splice(idx, 1)
-              bumpEntriesVersion()
-            }
+            entries.value = entries.value.filter(item => item._id !== row._id)
           },
-        }, {
+        },
+        {
           icon: () => h(NIcon, { size: 16 }, () => h(DeleteOutlined)),
-        }),
-      ])
+        },
+      )
     },
   },
 ])
 
-// ── Lifecycle ──
+function normalizeSource(value: unknown): TranslationEditorSource {
+  return value === 'pretranslated' || value === 'pretranslated-regex' ? value : 'default'
+}
 
-function handleBeforeUnload(e: BeforeUnloadEvent) {
-  if (isDirty.value) {
-    e.preventDefault()
-    e.returnValue = ''
+function normalizeLang(value: unknown): string | undefined {
+  const text = Array.isArray(value) ? value[0] : value
+  return typeof text === 'string' && text.trim() ? text : undefined
+}
+
+function getRouteSource() {
+  return normalizeSource(route.query.source)
+}
+
+function getRouteLang() {
+  return normalizeLang(route.query.lang)
+}
+
+function buildRouteQuery(source: TranslationEditorSource, lang?: string) {
+  const query = { ...route.query } as Record<string, string>
+  if (source === 'default') {
+    delete query.source
+    delete query.lang
+  } else {
+    query.source = source
+    if (lang) query.lang = lang
+    else delete query.lang
+  }
+  return query
+}
+
+function createRow(entry: TranslationEntry): TranslationRow {
+  return {
+    ...entry,
+    _id: nextRowId++,
   }
 }
 
-onMounted(async () => {
-  window.addEventListener('beforeunload', handleBeforeUnload)
+function serializeTextEntries(items: TranslationEntry[]) {
+  return JSON.stringify(items.map(item => ({
+    original: item.original,
+    translation: item.translation,
+  })))
+}
+
+function serializeRegexRules(items: RegexTranslationRule[]) {
+  return JSON.stringify(items.map(item => ({
+    section: item.section,
+    kind: item.kind,
+    pattern: item.pattern,
+    replacement: item.replacement,
+  })))
+}
+
+function captureSnapshots() {
+  savedTextSnapshot = serializeTextEntries(entries.value)
+  savedRegexSnapshot = serializeRegexRules(regexRules.value)
+}
+
+function buildTextOptions(source = currentSource.value, lang = currentLanguage.value) {
+  const textSource: TranslationEditorTextSource = source === 'pretranslated' ? 'pretranslated' : 'default'
+  if (textSource === 'pretranslated') {
+    return {
+      source: textSource,
+      ...(lang ? { lang } : {}),
+    }
+  }
+
+  return { source: textSource }
+}
+
+async function loadEditorForRoute() {
+  const source = getRouteSource()
+  const lang = getRouteLang()
+  const key = `${source}|${lang ?? ''}`
+  loadingKey = key
+  loading.value = true
+
   try {
-    const [gameData, editorData] = await Promise.all([
-      gamesApi.get(gameId),
-      translationEditorApi.getEntries(gameId),
-    ])
-    game.value = gameData
+    currentSource.value = source
+
+    if (source === 'pretranslated-regex') {
+      const editorData = await translationEditorApi.getRegex(gameId, lang)
+      if (loadingKey !== key) return
+
+      currentLanguage.value = editorData.language
+      availableLanguages.value = editorData.availablePreTranslationLanguages
+      filePath.value = editorData.filePath
+      fileExists.value = editorData.fileExists
+      regexRules.value = editorData.rules
+      entries.value = []
+      captureSnapshots()
+      loadError.value = ''
+      return
+    }
+
+    const editorData = await translationEditorApi.getEntries(gameId, buildTextOptions(source, lang))
+    if (loadingKey !== key) return
+
+    currentSource.value = editorData.source
+    currentLanguage.value = editorData.language
+    availableLanguages.value = editorData.availablePreTranslationLanguages
     filePath.value = editorData.filePath
     fileExists.value = editorData.fileExists
-    entries.value = toRows(editorData.entries)
-    takeSnapshot()
-    bumpEntriesVersion()
-  } catch {
-    message.error('加载失败')
+    entries.value = editorData.entries.map(createRow)
+    regexRules.value = []
+    captureSnapshots()
+    loadError.value = ''
+  } finally {
+    if (loadingKey === key) {
+      loading.value = false
+    }
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
+}
+
+async function loadPage() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    game.value = await gamesApi.get(gameId)
+    await loadEditorForRoute()
+  } catch (error) {
+    const errorMessage = getErrorMessage(error, '加载译文编辑器失败')
+    loadError.value = errorMessage
+    message.error(errorMessage)
   } finally {
     loading.value = false
   }
-})
+}
 
-onBeforeUnmount(() => {
-  window.removeEventListener('beforeunload', handleBeforeUnload)
-  if (regexDebounceTimer) clearTimeout(regexDebounceTimer)
-  if (replaceFindDebounceTimer) clearTimeout(replaceFindDebounceTimer)
-})
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!isDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
 
-onBeforeRouteLeave(() => {
+async function confirmDiscardChanges(content: string) {
   if (!isDirty.value) return true
-  return new Promise<boolean>((resolve) => {
+
+  return await new Promise<boolean>((resolve) => {
     dialog.warning({
-      title: '有未保存的更改',
-      content: '离开页面将丢失所有未保存的修改，是否继续？',
-      positiveText: '离开',
+      title: '存在未保存修改',
+      content,
+      positiveText: '继续',
       negativeText: '取消',
       onPositiveClick: () => resolve(true),
       onNegativeClick: () => resolve(false),
       onClose: () => resolve(false),
     })
   })
-})
-
-// ── Actions ──
+}
 
 async function handleSave() {
-  // Validate
-  const seen = new Set<string>()
-  for (const row of entries.value) {
-    if (!row.original.trim()) {
-      message.error('存在空白的原文条目，请填写或删除')
-      return
-    }
-    if (seen.has(row.original)) {
-      message.error(`重复的原文: "${row.original.slice(0, 50)}"`)
-      return
-    }
-    seen.add(row.original)
-  }
-
   saving.value = true
   try {
-    await translationEditorApi.saveEntries(gameId, entries.value.map(e => ({
-      original: e.original,
-      translation: e.translation,
-    })))
+    if (isRegexMode.value) {
+      for (const rule of regexRules.value) {
+        if (!rule.pattern.trim()) {
+          message.error('存在空的正则表达式，请填写或删除')
+          return
+        }
+      }
+
+      await translationEditorApi.saveRegex(gameId, regexRules.value, currentLanguage.value)
+      fileExists.value = true
+      captureSnapshots()
+      message.success('预翻译正则已保存')
+      return
+    }
+
+    const seen = new Set<string>()
+
+    for (const row of entries.value) {
+      const original = row.original.trim()
+      if (!original) {
+        message.error('存在空白原文，请填写或删除后再保存')
+        return
+      }
+
+      if (seen.has(original)) {
+        message.error(`存在重复原文: ${original.slice(0, 60)}`)
+        return
+      }
+
+      seen.add(original)
+    }
+
+    await translationEditorApi.saveEntries(
+      gameId,
+      entries.value.map(row => ({
+        original: row.original,
+        translation: row.translation,
+      })),
+      buildTextOptions(),
+    )
     fileExists.value = true
-    takeSnapshot()
-    bumpEntriesVersion()
-    message.success('保存成功')
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : '保存失败')
+    captureSnapshots()
+    message.success(currentSource.value === 'pretranslated' ? '预翻译文本已保存' : '译文已保存')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '保存失败')
   } finally {
     saving.value = false
   }
 }
 
 function handleAddEntry() {
-  if (!newOriginal.value.trim()) {
+  const original = newOriginal.value.trim()
+  if (!original) {
     message.warning('请输入原文')
     return
   }
-  // Check duplicate
-  if (entries.value.some(e => e.original === newOriginal.value)) {
+
+  if (entries.value.some(row => row.original === original)) {
     message.warning('该原文已存在')
     return
   }
-  const newEntry = createRow({
-    original: newOriginal.value,
-    translation: newTranslation.value,
-  })
-  entries.value.unshift(newEntry)
-  syncDirtyState(newEntry)
-  bumpEntriesVersion()
+
+  entries.value = [
+    createRow({
+      original,
+      translation: newTranslation.value,
+    }),
+    ...entries.value,
+  ]
   newOriginal.value = ''
   newTranslation.value = ''
-
-  // Check if the new entry is hidden by active filters
-  if (hasActiveFilters.value && !filteredAndSortedEntries.value.some(e => e._id === newEntry._id)) {
-    message.info('条目已添加（被当前筛选条件隐藏）')
-  }
 }
 
-async function handleImportClick() {
+async function handleImport() {
   const path = await selectFile({
-    title: '导入翻译文件',
+    title: isRegexMode.value ? '导入预翻译正则文件' : '导入翻译文件',
     filters: [{ label: '文本文件', extensions: ['.txt'] }],
   })
   if (!path) return
@@ -690,32 +421,107 @@ async function handleImportClick() {
   importing.value = true
   try {
     const { content } = await filesystemApi.readText(path)
-    const importedEntries = await translationEditorApi.parseImport(gameId, content)
 
-    // Merge: add only entries whose original text doesn't already exist
-    const existingOriginals = new Set(entries.value.map(e => e.original))
+    if (isRegexMode.value) {
+      regexRules.value = await translationEditorApi.importRegex(gameId, content, currentLanguage.value)
+      message.success(`导入完成，共 ${regexRules.value.length} 条规则`)
+      return
+    }
+
+    const importedEntries = await translationEditorApi.parseImport(gameId, content)
+    const existingOriginals = new Set(entries.value.map(row => row.original))
+
     let added = 0
     for (const entry of importedEntries) {
-      if (!existingOriginals.has(entry.original)) {
-        const row = createRow(entry)
-        entries.value.push(row)
-        syncDirtyState(row)
-        existingOriginals.add(entry.original)
-        added++
-      }
+      if (existingOriginals.has(entry.original)) continue
+      entries.value = [...entries.value, createRow(entry)]
+      existingOriginals.add(entry.original)
+      added++
     }
-    bumpEntriesVersion()
-    message.success(`导入完成: 新增 ${added} 条，跳过 ${importedEntries.length - added} 条重复`)
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : '导入失败')
+
+    message.success(`导入完成，新增 ${added} 条`)
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '导入失败')
   } finally {
     importing.value = false
   }
 }
 
 function handleExport() {
-  window.open(translationEditorApi.getExportUrl(gameId), '_blank')
+  const url = isRegexMode.value
+    ? translationEditorApi.getRegexExportUrl(gameId, currentLanguage.value)
+    : translationEditorApi.getExportUrl(gameId, buildTextOptions())
+
+  window.open(url, '_blank', 'noopener')
 }
+
+async function handleReload() {
+  const confirmed = await confirmDiscardChanges('重新加载将丢失当前未保存修改，是否继续？')
+  if (!confirmed) return
+
+  try {
+    await loadEditorForRoute()
+    message.success('已重新加载文件内容')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '重新加载失败')
+  }
+}
+
+async function handleSourceChange(value: string) {
+  const nextSource = normalizeSource(value)
+  if (nextSource === currentSource.value) return
+
+  const nextLanguage = nextSource === 'default'
+    ? undefined
+    : currentLanguage.value || availableLanguages.value[0]
+
+  await router.replace({
+    query: buildRouteQuery(nextSource, nextLanguage),
+  })
+}
+
+async function handleLanguageChange(value: string | null) {
+  const nextLanguage = value ?? ''
+  if (!nextLanguage || nextLanguage === currentLanguage.value) return
+
+  await router.replace({
+    query: buildRouteQuery(currentSource.value, nextLanguage),
+  })
+}
+
+onMounted(async () => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  await loadPage()
+})
+
+watch(
+  () => `${getRouteSource()}|${getRouteLang() ?? ''}`,
+  async () => {
+    if (!game.value) return
+    try {
+      await loadEditorForRoute()
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, '加载译文编辑器失败')
+      loadError.value = errorMessage
+      message.error(errorMessage)
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeRouteUpdate(async (to, from) => {
+  const nextKey = `${normalizeSource(to.query.source)}|${normalizeLang(to.query.lang) ?? ''}`
+  const currentKey = `${normalizeSource(from.query.source)}|${normalizeLang(from.query.lang) ?? ''}`
+  if (nextKey === currentKey) return true
+  return await confirmDiscardChanges('切换来源或语言会丢失当前未保存修改，是否继续？')
+})
+
+onBeforeRouteLeave(async () => {
+  return await confirmDiscardChanges('离开页面会丢失未保存修改，是否继续？')
+})
 </script>
 
 <template>
@@ -723,12 +529,11 @@ function handleExport() {
     <NSpin size="large" />
   </div>
 
-  <div v-else-if="game" class="sub-page">
-    <!-- Header -->
+  <div v-else-if="game || loadError" class="sub-page">
     <div class="sub-page-header" style="animation-delay: 0s">
-      <button class="back-button" @click="router.push(`/games/${gameId}`)">
+      <button class="back-button" @click="router.push(game ? `/games/${gameId}` : '/')">
         <NIcon :size="20"><ArrowBackOutlined /></NIcon>
-        <span>{{ game.name }}</span>
+        <span>{{ game?.name ?? '返回游戏库' }}</span>
       </button>
     </div>
 
@@ -737,11 +542,23 @@ function handleExport() {
         <NIcon :size="24"><DriveFileRenameOutlineOutlined /></NIcon>
       </span>
       译文编辑器
-      <span v-if="isDirty" class="unsaved-badge">未保存</span>
+      <span v-if="game && isDirty" class="unsaved-badge">未保存</span>
     </h1>
 
-    <!-- File Info Card -->
-    <div class="section-card" style="animation-delay: 0.1s">
+    <div v-if="loadError" class="section-card" style="animation-delay: 0.1s">
+      <NAlert type="error" title="加载失败">
+        {{ loadError }}
+      </NAlert>
+      <div class="header-actions" style="margin-top: 16px">
+        <NButton size="small" @click="loadPage">
+          <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
+          重新加载
+        </NButton>
+      </div>
+    </div>
+
+    <template v-else>
+      <div class="section-card" style="animation-delay: 0.1s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -750,349 +567,168 @@ function handleExport() {
           文件信息
         </h2>
         <div class="header-actions">
-          <NButton
-            size="small"
-            :loading="importing"
-            @click="handleImportClick"
-          >
+          <NButton size="small" :loading="importing" @click="handleImport">
             <template #icon><NIcon :size="16"><FileUploadOutlined /></NIcon></template>
             导入
           </NButton>
-          <NButton
-            size="small"
-            :disabled="!fileExists"
-            @click="handleExport"
-          >
+          <NButton size="small" :disabled="!fileExists" @click="handleExport">
             <template #icon><NIcon :size="16"><FileDownloadOutlined /></NIcon></template>
             导出
           </NButton>
-          <NButton
-            size="small"
-            type="primary"
-            :loading="saving"
-            :disabled="!isDirty"
-            @click="handleSave"
-          >
+          <NButton size="small" :disabled="saving" @click="handleReload">
+            <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
+            重新加载
+          </NButton>
+          <NButton size="small" type="primary" :loading="saving" :disabled="!isDirty" @click="handleSave">
             <template #icon><NIcon :size="16"><SaveOutlined /></NIcon></template>
             保存
           </NButton>
         </div>
       </div>
 
+      <div class="toolbar-grid">
+        <label class="toolbar-field">
+          <span class="toolbar-label">译文来源</span>
+          <NSelect :value="currentSource" :options="SOURCE_OPTIONS" size="small" @update:value="handleSourceChange" />
+        </label>
+        <label v-if="currentSource !== 'default'" class="toolbar-field">
+          <span class="toolbar-label">语言</span>
+          <NSelect
+            :value="currentLanguage"
+            :options="languageOptions"
+            size="small"
+            :disabled="languageOptions.length === 0"
+            @update:value="handleLanguageChange"
+          />
+        </label>
+      </div>
+
       <div class="file-info">
-        <div class="info-item">
-          <span class="info-label">文件路径</span>
-          <code class="info-value file-path">{{ filePath }}</code>
+        <div class="info-row">
+          <div class="info-item">
+            <span class="info-label">文件路径</span>
+            <code class="info-value file-path">{{ filePath }}</code>
+          </div>
         </div>
         <div class="info-row">
           <div class="info-item">
             <span class="info-label">条目数量</span>
-            <span class="info-value">{{ entries.length }}</span>
+            <span class="info-value">{{ entryCount }}</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">当前语言</span>
+            <NTag size="small" :bordered="false">{{ currentLanguage.toUpperCase() }}</NTag>
           </div>
           <div class="info-item">
             <span class="info-label">文件状态</span>
-            <NTag :type="fileExists ? 'success' : 'warning'" size="small" :bordered="false">
+            <NTag size="small" :bordered="false" :type="fileExists ? 'success' : 'warning'">
               {{ fileExists ? '已存在' : '保存时创建' }}
             </NTag>
           </div>
         </div>
       </div>
 
+      <NAlert v-if="currentSource === 'pretranslated'" type="info" style="margin-top: 12px">
+        当前正在编辑预翻译文本。切换来源或语言前，请先保存当前修改。
+      </NAlert>
       <NAlert
-        v-if="!fileExists && entries.length === 0"
+        v-if="currentSource !== 'default' && languageOptions.length === 0"
         type="info"
         style="margin-top: 12px"
       >
-        翻译文件尚不存在。添加条目并保存后将自动创建。
+        当前还没有可用的预翻译缓存，将使用目标语言路径创建新文件。
       </NAlert>
-    </div>
-
-    <!-- Editor Card -->
-    <div class="section-card" style="animation-delay: 0.15s">
-      <div class="section-header">
-        <h2 class="section-title">
-          <span class="section-icon">
-            <NIcon :size="16"><DriveFileRenameOutlineOutlined /></NIcon>
-          </span>
-          翻译条目
-          <NTag size="small" :bordered="false" style="margin-left: 8px">
-            {{ filteredAndSortedEntries.length }} / {{ entries.length }}
-          </NTag>
-        </h2>
-        <div class="header-actions">
-          <NButton
-            size="small"
-            type="error"
-            secondary
-            :disabled="entries.length === 0"
-            @click="handleClearAll"
-          >
-            <template #icon><NIcon :size="16"><DeleteSweepOutlined /></NIcon></template>
-            清空
-          </NButton>
-          <NBadge :show="panelSortMode !== 'default'" dot :offset="[-2, 2]">
-            <NPopselect
-              v-model:value="panelSortMode"
-              :options="SORT_OPTIONS"
-              trigger="click"
-              scrollable
-            >
-              <NButton
-                size="small"
-                :type="panelSortMode !== 'default' ? 'primary' : 'default'"
-                secondary
-              >
-                <template #icon><NIcon :size="16"><SwapVertOutlined /></NIcon></template>
-                排序
-              </NButton>
-            </NPopselect>
-          </NBadge>
-          <NBadge :show="hasActiveFilters" dot :offset="[-2, 2]">
-            <NButton
-              size="small"
-              :type="showFilterPanel ? 'primary' : 'default'"
-              secondary
-              @click="showFilterPanel = !showFilterPanel"
-            >
-              <template #icon><NIcon :size="16"><FilterAltOutlined /></NIcon></template>
-              筛选
-            </NButton>
-          </NBadge>
-          <NButton
-            size="small"
-            :type="showReplacePanel ? 'primary' : 'default'"
-            secondary
-            @click="showReplacePanel = !showReplacePanel"
-          >
-            <template #icon><NIcon :size="16"><FindReplaceOutlined /></NIcon></template>
-            替换
-          </NButton>
-        </div>
+      <NAlert v-if="currentSource === 'pretranslated-regex'" type="warning" style="margin-top: 12px">
+        当前正在编辑预翻译正则。再次执行预翻译时，基础规则与动态规则会被覆盖，自定义规则会保留。
+      </NAlert>
       </div>
 
-      <!-- Add Entry Form -->
-      <div class="add-entry-row">
-        <NInput
-          v-model:value="newOriginal"
-          placeholder="原文"
-          size="small"
-          style="flex: 1"
-          @keyup.enter="handleAddEntry"
-        />
-        <NInput
-          v-model:value="newTranslation"
-          placeholder="译文（可选）"
-          size="small"
-          style="flex: 1"
-          @keyup.enter="handleAddEntry"
-        />
-        <NButton
-          size="small"
-          type="primary"
-          :disabled="!newOriginal.trim()"
-          @click="handleAddEntry"
-        >
-          <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
-          添加
-        </NButton>
-      </div>
-
-      <!-- Filter Panel -->
-      <div v-if="showFilterPanel" class="filter-panel">
-        <div class="filter-row">
-          <span class="filter-label">关键词</span>
-          <NInput
-            v-model:value="filterKeyword"
-            placeholder="搜索关键词…"
-            clearable
-            size="small"
-            style="flex: 1"
-          />
-        </div>
-
-        <div class="filter-row">
-          <span class="filter-label">翻译状态</span>
-          <NRadioGroup v-model:value="filterStatus" size="small">
-            <NRadio value="all">全部</NRadio>
-            <NRadio value="translated">已翻译</NRadio>
-            <NRadio value="untranslated">未翻译</NRadio>
-          </NRadioGroup>
-        </div>
-
-        <div class="filter-row">
-          <span class="filter-label">特征筛选</span>
-          <NCheckboxGroup v-model:value="filterFeatures" size="small">
-            <NCheckbox v-for="opt in FEATURE_OPTIONS" :key="opt.value" :value="opt.value" :label="opt.label" />
-          </NCheckboxGroup>
-        </div>
-
-        <div class="filter-row">
-          <span class="filter-label">正则表达式</span>
-          <div style="display: flex; flex-direction: column; gap: 6px; flex: 1">
-            <NInput
-              v-model:value="filterRegexPattern"
-              placeholder="正则表达式…"
-              clearable
-              size="small"
-              :status="regexError ? 'error' : undefined"
-            />
-            <NTooltip v-if="regexError" trigger="hover">
-              <template #trigger>
-                <span class="regex-error">{{ regexError }}</span>
-              </template>
-              {{ regexError }}
-            </NTooltip>
-            <NRadioGroup v-model:value="filterRegexTarget" size="small">
-              <NRadio value="original">原文</NRadio>
-              <NRadio value="translation">译文</NRadio>
-              <NRadio value="both">两者</NRadio>
-            </NRadioGroup>
-          </div>
-        </div>
-
-        <div class="filter-row" style="justify-content: flex-end">
-          <NButton size="small" @click="resetFilters">
-            <template #icon><NIcon :size="14"><RestartAltOutlined /></NIcon></template>
-            重置筛选
-          </NButton>
-        </div>
-      </div>
-
-      <!-- Replace Panel -->
-      <div v-if="showReplacePanel" class="filter-panel">
-        <div class="filter-row">
-          <span class="filter-label">查找</span>
-          <div style="display: flex; gap: 8px; flex: 1; align-items: center">
-            <NInput
-              v-model:value="replaceFindText"
-              placeholder="查找…"
-              clearable
-              size="small"
-              :status="replaceFindRegexError ? 'error' : undefined"
-              style="flex: 1"
-            />
-            <NTag v-if="debouncedReplaceFindText && !replaceFindRegexError" size="small" :bordered="false">
-              {{ replaceMatchCount }} 条匹配
+      <div class="section-card" style="animation-delay: 0.15s">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="section-icon">
+              <NIcon :size="16"><TranslateOutlined /></NIcon>
+            </span>
+            {{ isRegexMode ? '正则规则' : '翻译条目' }}
+            <NTag size="small" :bordered="false" style="margin-left: 8px">
+              {{ entryCount }}
             </NTag>
+          </h2>
+        </div>
+
+        <template v-if="isRegexMode">
+          <RegexRuleEditor v-model:rules="regexRules" />
+        </template>
+
+        <template v-else>
+          <div class="add-entry-row">
+            <NInput
+              v-model:value="newOriginal"
+              placeholder="原文"
+              size="small"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 3 }"
+            />
+            <NInput
+              v-model:value="newTranslation"
+              placeholder="译文（可选）"
+              size="small"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 3 }"
+            />
+            <NButton size="small" type="primary" @click="handleAddEntry">
+              <template #icon><NIcon :size="16"><AddOutlined /></NIcon></template>
+              添加
+            </NButton>
           </div>
-        </div>
 
-        <NTooltip v-if="replaceFindRegexError" trigger="hover">
-          <template #trigger>
-            <div class="filter-row" style="padding-left: 82px">
-              <span class="regex-error">{{ replaceFindRegexError }}</span>
-            </div>
-          </template>
-          {{ replaceFindRegexError }}
-        </NTooltip>
-
-        <div class="filter-row">
-          <span class="filter-label">替换为</span>
-          <NInput
-            v-model:value="replaceWithText"
-            placeholder="替换为…"
-            clearable
-            size="small"
-            style="flex: 1"
-          />
-        </div>
-
-        <div class="filter-row">
-          <span class="filter-label">模式</span>
-          <div style="display: flex; align-items: center; gap: 8px">
-            <span style="font-size: 12px; color: var(--text-3)">普通文本</span>
-            <NSwitch v-model:value="replaceIsRegex" size="small" />
-            <span style="font-size: 12px; color: var(--text-3)">正则表达式</span>
+          <div v-if="entries.length > 0" class="table-container">
+            <NDataTable
+              :columns="tableColumns"
+              :data="entries"
+              :row-key="(row: TranslationRow) => row._id"
+              :max-height="640"
+              virtual-scroll
+              striped
+              size="small"
+            />
           </div>
-        </div>
-
-        <div class="filter-row" style="justify-content: flex-end">
-          <NButton
-            size="small"
-            type="warning"
-            :disabled="replaceMatchCount === 0"
-            @click="handleReplaceAll"
-          >
-            全部替换
-          </NButton>
-        </div>
+          <NEmpty v-else description="暂无翻译条目" style="padding: 40px 0" />
+        </template>
       </div>
-
-      <!-- Table -->
-      <div v-if="entries.length > 0" class="table-container">
-        <NDataTable
-          :columns="tableColumns"
-          :data="filteredAndSortedEntries"
-          :max-height="560"
-          :item-size="40"
-          :row-key="(row: TranslationRow) => row._id"
-          virtual-scroll
-          size="small"
-          striped
-          @update:sorters="handleSortersChange"
-        />
-      </div>
-      <NEmpty v-else description="暂无翻译条目" style="padding: 40px 0" />
-    </div>
-
+    </template>
   </div>
 </template>
 
 <style scoped>
-.filter-panel {
+.toolbar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 320px));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toolbar-field {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: var(--bg-subtle);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  gap: 6px;
 }
 
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.filter-label {
+.toolbar-label {
   font-size: 12px;
   color: var(--text-3);
-  white-space: nowrap;
-  min-width: 70px;
-}
-
-.regex-error {
-  font-size: 11px;
-  color: var(--error, #e88080);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 300px;
-}
-
-@media (max-width: 768px) {
-  .filter-row {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-  }
-
-  .filter-label {
-    min-width: unset;
-  }
 }
 
 .file-info {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .info-row {
   display: flex;
-  gap: 24px;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .info-item {
@@ -1104,7 +740,6 @@ function handleExport() {
 .info-label {
   font-size: 12px;
   color: var(--text-3);
-  white-space: nowrap;
 }
 
 .info-value {
@@ -1114,28 +749,26 @@ function handleExport() {
 }
 
 .file-path {
-  font-size: 12px;
-  color: var(--text-2);
   background: var(--bg-subtle);
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   word-break: break-all;
 }
 
-@media (max-width: 768px) {
-  .info-row {
-    flex-direction: column;
-    gap: 8px;
-  }
+.add-entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
-@media (max-width: 480px) {
-  .filter-panel {
-    padding: 10px;
-  }
+.table-container {
+  overflow: hidden;
+}
 
-  .regex-error {
-    max-width: 200px;
+@media (max-width: 960px) {
+  .add-entry-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

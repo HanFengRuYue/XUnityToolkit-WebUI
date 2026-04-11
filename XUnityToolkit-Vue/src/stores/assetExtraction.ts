@@ -13,6 +13,30 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
 
   let connection: signalR.HubConnection | null = null
   let activeGameId: string | null = null
+  let checkpointStatusRefreshPromise: Promise<void> | null = null
+
+  function shouldRefreshCheckpointStatus(status: PreTranslationStatus) {
+    return Boolean(status.checkpointUpdatedAt)
+      && !status.canResume
+      && status.state !== 'Running'
+      && status.state !== 'AwaitingTermReview'
+  }
+
+  async function syncPreTranslationStatus(gameId: string) {
+    preTranslationStatus.value = await assetApi.getPreTranslationStatus(gameId)
+  }
+
+  async function refreshCheckpointStatus(gameId: string) {
+    if (checkpointStatusRefreshPromise)
+      return checkpointStatusRefreshPromise
+
+    checkpointStatusRefreshPromise = syncPreTranslationStatus(gameId)
+      .finally(() => {
+        checkpointStatusRefreshPromise = null
+      })
+
+    return checkpointStatusRefreshPromise
+  }
 
   async function connect(gameId: string) {
     if (connection && connection.state !== signalR.HubConnectionState.Disconnected && activeGameId === gameId)
@@ -28,6 +52,8 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
 
     connection.on('preTranslationUpdate', (update: PreTranslationStatus) => {
       preTranslationStatus.value = update
+      if (activeGameId === update.gameId && shouldRefreshCheckpointStatus(update))
+        void refreshCheckpointStatus(update.gameId)
     })
 
     // These events send partial objects (not full PreTranslationStatus).
@@ -48,9 +74,8 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
       try {
         await connection?.invoke('JoinPreTranslationGroup', activeGameId)
         // Re-fetch current status to recover any missed updates
-        if (activeGameId) {
-          preTranslationStatus.value = await assetApi.getPreTranslationStatus(activeGameId)
-        }
+        if (activeGameId)
+          await syncPreTranslationStatus(activeGameId)
       } catch { /* ignore */ }
     })
 
@@ -69,6 +94,7 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
       connection = null
     }
     activeGameId = null
+    checkpointStatusRefreshPromise = null
   }
 
   async function loadCachedResult(gameId: string) {
@@ -90,7 +116,16 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
 
   async function startPreTranslation(gameId: string, fromLang?: string, toLang?: string, restart = false) {
     await connect(gameId)
-    preTranslationStatus.value = await assetApi.startPreTranslation(gameId, fromLang, toLang, restart)
+    try {
+      preTranslationStatus.value = await assetApi.startPreTranslation(gameId, fromLang, toLang, restart)
+    } catch (e) {
+      try {
+        await refreshCheckpointStatus(gameId)
+      } catch {
+        // Ignore status refresh failures and preserve the original error.
+      }
+      throw e
+    }
   }
 
   async function resumePreTranslation(gameId: string) {
@@ -103,13 +138,13 @@ export const useAssetExtractionStore = defineStore('assetExtraction', () => {
   }
 
   async function fetchPreTranslationStatus(gameId: string) {
-    preTranslationStatus.value = await assetApi.getPreTranslationStatus(gameId)
+    await syncPreTranslationStatus(gameId)
   }
 
   async function clearCache(gameId: string) {
     await assetApi.deleteExtractedTexts(gameId)
     extractionResult.value = null
-    preTranslationStatus.value = await assetApi.getPreTranslationStatus(gameId)
+    await syncPreTranslationStatus(gameId)
   }
 
   function resetTermExtractionComplete() {

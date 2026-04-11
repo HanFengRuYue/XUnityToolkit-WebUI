@@ -56,7 +56,7 @@ public sealed class LocalLlmService(
 
     // ── llama.cpp binary constants ──
 
-    public const string LlamaVersion = "b8580";
+    public const string LlamaVersion = "b8756";
 
     // ── Settings persistence ──
 
@@ -209,7 +209,7 @@ public sealed class LocalLlmService(
             catch { /* ignore read errors */ }
         }
 
-        // Fallback: parse version from ZIP filename (e.g., llama-b8580-bin-win-cuda-13.1-x64.zip)
+        // Fallback: parse version from ZIP filename (e.g., llama-b8756-bin-win-cuda-13.1-x64.zip)
         try
         {
             var llamaDir = bundledPaths.LlamaDirectory;

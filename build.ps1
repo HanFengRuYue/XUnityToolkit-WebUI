@@ -352,7 +352,7 @@ if (-not $SkipDownload) {
     if ($Edition -ne 'full') {
         Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
     } else {
-    $llamaTag = "b8580"
+    $llamaTag = "b8756"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30

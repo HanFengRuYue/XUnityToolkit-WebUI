@@ -524,11 +524,35 @@ export interface TranslationEntry {
   translation: string
 }
 
+export type TranslationEditorTextSource = 'default' | 'pretranslated'
+export type TranslationEditorSource = TranslationEditorTextSource | 'pretranslated-regex'
+export type RegexRuleKind = 'sr' | 'r'
+export type RegexRuleSection = 'base' | 'dynamic' | 'custom'
+
+export interface RegexTranslationRule {
+  id: string
+  section: RegexRuleSection
+  kind: RegexRuleKind
+  pattern: string
+  replacement: string
+}
+
 export interface TranslationEditorData {
+  source: TranslationEditorTextSource
+  language: string
   filePath: string
   fileExists: boolean
   entryCount: number
+  availablePreTranslationLanguages: string[]
   entries: TranslationEntry[]
+}
+
+export interface TranslationRegexEditorData {
+  language: string
+  filePath: string
+  fileExists: boolean
+  availablePreTranslationLanguages: string[]
+  rules: RegexTranslationRule[]
 }
 
 // ── Local LLM ──

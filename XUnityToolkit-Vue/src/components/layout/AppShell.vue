@@ -63,19 +63,28 @@ function isActive(key: string): boolean {
   return route.path.startsWith(key)
 }
 
-// Direction-aware page transitions
-const transitionName = ref('page')
+// Render the initial route without Transition; enable route animations only after the first real navigation.
+const transitionDirection = ref('page')
+const routeTransitionsStarted = ref(false)
 
 const removeGuard = router.beforeEach((to, from) => {
+  if (from.matched.length === 0) {
+    return
+  }
+
+  if (!routeTransitionsStarted.value) {
+    routeTransitionsStarted.value = true
+  }
+
   const toDepth = to.meta.depth ?? 1
   const fromDepth = from.meta.depth ?? 1
 
   if (toDepth > fromDepth) {
-    transitionName.value = 'page-slide-left'
+    transitionDirection.value = 'page-slide-left'
   } else if (toDepth < fromDepth) {
-    transitionName.value = 'page-slide-right'
+    transitionDirection.value = 'page-slide-right'
   } else {
-    transitionName.value = 'page'
+    transitionDirection.value = 'page'
   }
 })
 
@@ -285,7 +294,10 @@ function onResizeDoubleClick() {
 
     <main class="main-content">
       <RouterView v-slot="{ Component }">
-        <Transition :name="transitionName" mode="out-in">
+        <KeepAlive v-if="!routeTransitionsStarted" :include="cachedPages">
+          <component :is="Component" :key="route.path" />
+        </KeepAlive>
+        <Transition v-else :name="transitionDirection" mode="out-in">
           <KeepAlive :include="cachedPages">
             <component :is="Component" :key="route.path" />
           </KeepAlive>
