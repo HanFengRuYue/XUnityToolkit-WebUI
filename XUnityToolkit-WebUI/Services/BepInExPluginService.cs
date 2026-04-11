@@ -8,6 +8,10 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
 {
+    private const long MaxPluginPackageBytes = 50L * 1024 * 1024;
+    private const long MaxPluginArchiveEntryBytes = 64L * 1024 * 1024;
+    private const long MaxPluginArchiveTotalBytes = 256L * 1024 * 1024;
+
     private static readonly HashSet<string> ToolkitManagedPatterns = new(StringComparer.OrdinalIgnoreCase)
     {
         "XUnity.AutoTranslator",
@@ -77,28 +81,24 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         return Task.FromResult(plugins);
     }
 
-    public Task InstallPluginAsync(Game game, string filePath)
+    public async Task InstallPluginAsync(Game game, string filePath)
     {
         var pluginsDir = Path.Combine(game.GamePath, "BepInEx", "plugins");
         Directory.CreateDirectory(pluginsDir);
 
         if (filePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
+            EnsurePackageSizeWithinLimit(new FileInfo(filePath).Length);
+
             var zipName = Path.GetFileNameWithoutExtension(filePath);
             var targetDir = Path.Combine(pluginsDir, zipName);
             Directory.CreateDirectory(targetDir);
 
             using var archive = ZipFile.OpenRead(filePath);
-            foreach (var entry in archive.Entries)
-            {
-                if (string.IsNullOrEmpty(entry.Name)) continue;
-                var destPath = PathSecurity.SafeJoin(targetDir, entry.FullName);
-                Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                entry.ExtractToFile(destPath, overwrite: true);
-            }
+            var extractedCount = await ExtractPluginArchiveAsync(archive, targetDir);
 
             logger.LogInformation("已从 ZIP 安装插件到 {Dir}，共 {Count} 个文件",
-                targetDir, archive.Entries.Count(e => !string.IsNullOrEmpty(e.Name)));
+                targetDir, extractedCount);
         }
         else if (filePath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
         {
@@ -113,10 +113,9 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
             throw new InvalidOperationException("仅支持 .dll 和 .zip 格式");
         }
 
-        return Task.CompletedTask;
     }
 
-    public Task UploadPluginAsync(Game game, Stream fileStream, string fileName, long fileSize)
+    public async Task UploadPluginAsync(Game game, Stream fileStream, string fileName, long fileSize)
     {
         var pluginsDir = Path.Combine(game.GamePath, "BepInEx", "plugins");
         Directory.CreateDirectory(pluginsDir);
@@ -125,25 +124,21 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
 
         if (safeFileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
         {
+            EnsurePackageSizeWithinLimit(fileSize);
+
             // Save to temp, then extract
             var tempPath = Path.Combine(Path.GetTempPath(), $"bepinex_upload_{Guid.NewGuid():N}.zip");
             try
             {
-                using (var fs = File.Create(tempPath))
-                    fileStream.CopyTo(fs);
+                await using (var fs = File.Create(tempPath))
+                    await fileStream.CopyToAsync(fs);
 
                 var zipName = Path.GetFileNameWithoutExtension(safeFileName);
                 var targetDir = Path.Combine(pluginsDir, zipName);
                 Directory.CreateDirectory(targetDir);
 
                 using var archive = ZipFile.OpenRead(tempPath);
-                foreach (var entry in archive.Entries)
-                {
-                    if (string.IsNullOrEmpty(entry.Name)) continue;
-                    var destPath = PathSecurity.SafeJoin(targetDir, entry.FullName);
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-                    entry.ExtractToFile(destPath, overwrite: true);
-                }
+                await ExtractPluginArchiveAsync(archive, targetDir);
 
                 logger.LogInformation("已从上传 ZIP 安装插件到 {Dir}", targetDir);
             }
@@ -155,8 +150,8 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         else if (safeFileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
         {
             var destPath = Path.Combine(pluginsDir, safeFileName);
-            using var fs = File.Create(destPath);
-            fileStream.CopyTo(fs);
+            await using var fs = File.Create(destPath);
+            await fileStream.CopyToAsync(fs);
 
             logger.LogInformation("已上传安装插件: {FileName}", safeFileName);
         }
@@ -165,7 +160,35 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
             throw new InvalidOperationException("仅支持 .dll 和 .zip 格式");
         }
 
-        return Task.CompletedTask;
+    }
+
+    private static void EnsurePackageSizeWithinLimit(long fileSize)
+    {
+        if (fileSize > MaxPluginPackageBytes)
+            throw new InvalidOperationException("插件包大小不能超过 50MB");
+    }
+
+    private static async Task<int> ExtractPluginArchiveAsync(ZipArchive archive, string targetDir)
+    {
+        long totalExtractedBytes = 0;
+        var extractedCount = 0;
+
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.Name))
+                continue;
+
+            var destinationPath = PathSecurity.PrepareZipExtractionPath(
+                targetDir,
+                entry,
+                ref totalExtractedBytes,
+                MaxPluginArchiveEntryBytes,
+                MaxPluginArchiveTotalBytes);
+            await PathSecurity.ExtractZipEntryAsync(entry, destinationPath);
+            extractedCount++;
+        }
+
+        return extractedCount;
     }
 
     public Task UninstallPluginAsync(Game game, string relativePath)

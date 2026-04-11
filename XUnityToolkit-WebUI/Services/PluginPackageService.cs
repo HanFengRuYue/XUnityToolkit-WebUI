@@ -7,6 +7,9 @@ namespace XUnityToolkit_WebUI.Services;
 public sealed class PluginPackageService(ILogger<PluginPackageService> logger, AppDataPaths appDataPaths)
 {
     private const string ConfigRelativePath = "BepInEx/config/AutoTranslatorConfig.ini";
+    private const long MaxImportPackageBytes = 100L * 1024 * 1024;
+    private const long MaxImportEntryBytes = 128L * 1024 * 1024;
+    private const long MaxImportTotalBytes = 512L * 1024 * 1024;
 
     private static readonly HashSet<string> SensitiveSections = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -129,9 +132,13 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
     /// <summary>
     /// Import a ZIP package into the game directory, extracting all files with overwrite.
     /// </summary>
-    public Task ImportAsync(Game game, string zipFilePath, CancellationToken ct = default)
+    public async Task ImportAsync(Game game, string zipFilePath, CancellationToken ct = default)
     {
         logger.LogInformation("正在导入汉化包: {ZipPath} → {GamePath}", zipFilePath, game.GamePath);
+
+        var zipInfo = new FileInfo(zipFilePath);
+        if (zipInfo.Length > MaxImportPackageBytes)
+            throw new InvalidOperationException("汉化包大小不能超过 100MB");
 
         using var archive = ZipFile.OpenRead(zipFilePath);
 
@@ -236,21 +243,24 @@ public sealed class PluginPackageService(ILogger<PluginPackageService> logger, A
 
         // Phase 2: Extract all files
         var fileCount = 0;
+        long totalExtractedBytes = 0;
         foreach (var entry in archive.Entries)
         {
             ct.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(entry.Name)) continue;
             if (entry.FullName == "_font_replacement_manifest.json") continue;
 
-            var destPath = PathSecurity.SafeJoin(game.GamePath, entry.FullName);
-            var destDir = Path.GetDirectoryName(destPath)!;
-            Directory.CreateDirectory(destDir);
-            entry.ExtractToFile(destPath, overwrite: true);
+            var destPath = PathSecurity.PrepareZipExtractionPath(
+                game.GamePath,
+                entry,
+                ref totalExtractedBytes,
+                MaxImportEntryBytes,
+                MaxImportTotalBytes);
+            await PathSecurity.ExtractZipEntryAsync(entry, destPath, ct);
             fileCount++;
         }
 
         logger.LogInformation("汉化包导入完成，共 {Count} 个文件", fileCount);
-        return Task.CompletedTask;
     }
 
     private void AddFileToZip(ZipArchive archive, string gamePath, string relativePath)

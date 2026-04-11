@@ -67,6 +67,10 @@ public static class PluginPackageEndpoints
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (Exception)
             {
                 return Results.Json(ApiResult.Fail("导入汉化包失败"), statusCode: 500);

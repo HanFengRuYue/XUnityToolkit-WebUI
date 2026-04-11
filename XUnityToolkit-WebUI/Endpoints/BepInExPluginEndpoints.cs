@@ -66,6 +66,10 @@ public static class BepInExPluginEndpoints
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
             catch (Exception)
             {
                 return Results.Json(ApiResult.Fail("安装插件失败"), statusCode: 500);
@@ -102,6 +106,10 @@ public static class BepInExPluginEndpoints
                 return Results.Ok(ApiResult.Ok());
             }
             catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (InvalidDataException ex)
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }

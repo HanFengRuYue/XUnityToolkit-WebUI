@@ -292,34 +292,6 @@ public static class AssetEndpoints
                 PreTranslationRegexFormat.SerializeRules(customRules),
                 ct);
             return Results.Ok(ApiResult.Ok());
-            if ((request.Patterns ?? "").Length > 512 * 1024)
-                return Results.BadRequest(ApiResult.Fail("正则模式内容不能超过 512 KB"));
-
-            foreach (var line in (request.Patterns ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries))
-            {
-                var trimmed = line.Trim();
-                if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("//")) continue;
-                if (!trimmed.StartsWith("sr:") && !trimmed.StartsWith("r:"))
-                    return Results.BadRequest(ApiResult.Fail("每行必须以 sr: 或 r: 开头，或为 // 注释"));
-                if (!trimmed.Contains('='))
-                    return Results.BadRequest(ApiResult.Fail($"模式缺少 = 分隔符: {trimmed}"));
-
-                var patternStart = trimmed.IndexOf('"') + 1;
-                var patternEnd = trimmed.IndexOf('"', patternStart);
-                if (patternStart > 0 && patternEnd > patternStart)
-                {
-                    var pattern = trimmed[patternStart..patternEnd];
-                    try { _ = new System.Text.RegularExpressions.Regex(pattern, default, TimeSpan.FromSeconds(1)); }
-                    catch (System.Text.RegularExpressions.RegexParseException ex) { return Results.BadRequest(ApiResult.Fail($"无效的正则表达式: {ex.Message}")); }
-                }
-            }
-
-            var file = paths.PreTranslationRegexFile(id);
-            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var tmpFile = file + ".tmp";
-            await File.WriteAllTextAsync(tmpFile, request.Patterns ?? "");
-            File.Move(tmpFile, file, overwrite: true);
-            return Results.Ok(ApiResult.Ok());
         });
     }
 

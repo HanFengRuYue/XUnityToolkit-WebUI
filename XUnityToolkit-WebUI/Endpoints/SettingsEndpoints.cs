@@ -9,6 +9,10 @@ namespace XUnityToolkit_WebUI.Endpoints;
 
 public static class SettingsEndpoints
 {
+    private const long ImportArchiveMaxBytes = 100L * 1024 * 1024;
+    private const long ImportArchiveMaxEntryBytes = 128L * 1024 * 1024;
+    private const long ImportArchiveMaxTotalBytes = 512L * 1024 * 1024;
+
     public static void MapSettingsEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/settings");
@@ -206,100 +210,14 @@ public static class SettingsEndpoints
             if (file is null || file.Length == 0)
                 return Results.BadRequest(ApiResult.Fail("未找到上传的文件"));
 
-            if (file.Length > 100 * 1024 * 1024)
+            if (file.Length > ImportArchiveMaxBytes)
                 return Results.BadRequest(ApiResult.Fail("文件大小不能超过 100MB"));
 
-            var rootPath = Path.GetFullPath(paths.Root);
             try
             {
                 await using var stream = file.OpenReadStream();
                 using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-                foreach (var entry in archive.Entries)
-                {
-                    // Skip directories
-                    if (string.IsNullOrEmpty(entry.Name))
-                        continue;
-
-                    var destPath = PathSecurity.SafeJoin(rootPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-
-                    await using var entryStream = entry.Open();
-                    await using var destStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                    await entryStream.CopyToAsync(destStream);
-                }
-
-                // Migrate old do-not-translate/ entries into glossaries/ (unified term format)
-                var dntDir = Path.Combine(rootPath, "do-not-translate");
-                if (Directory.Exists(dntDir))
-                {
-                    var glossariesDir = Path.Combine(rootPath, "glossaries");
-                    Directory.CreateDirectory(glossariesDir);
-
-                    foreach (var dntFile in Directory.EnumerateFiles(dntDir, "*.json"))
-                    {
-                        try
-                        {
-                            var gameId = Path.GetFileNameWithoutExtension(dntFile);
-                            var dntJson = await File.ReadAllTextAsync(dntFile);
-                            using var dntDoc = JsonDocument.Parse(dntJson);
-
-                            var dntTerms = new List<TermEntry>();
-                            foreach (var element in dntDoc.RootElement.EnumerateArray())
-                            {
-                                var original = element.GetProperty("original").GetString();
-                                if (string.IsNullOrEmpty(original)) continue;
-
-                                var caseSensitive = element.TryGetProperty("caseSensitive", out var csProp)
-                                    && csProp.GetBoolean();
-
-                                dntTerms.Add(new TermEntry
-                                {
-                                    Type = TermType.DoNotTranslate,
-                                    Original = original,
-                                    CaseSensitive = caseSensitive,
-                                });
-                            }
-
-                            if (dntTerms.Count == 0)
-                            {
-                                File.Delete(dntFile);
-                                continue;
-                            }
-
-                            // Merge with existing glossary if present
-                            var glossaryFile = Path.Combine(glossariesDir, $"{gameId}.json");
-                            var existingTerms = new List<TermEntry>();
-                            if (File.Exists(glossaryFile))
-                            {
-                                var glossaryJson = await File.ReadAllTextAsync(glossaryFile);
-                                existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson, FileHelper.DataJsonOptions) ?? [];
-                            }
-
-                            // Dedup by Original
-                            var existingOriginals = new HashSet<string>(
-                                existingTerms.Select(t => t.Original),
-                                StringComparer.Ordinal);
-
-                            foreach (var term in dntTerms)
-                            {
-                                if (existingOriginals.Add(term.Original))
-                                    existingTerms.Add(term);
-                            }
-
-                            var mergedJson = JsonSerializer.Serialize(existingTerms, FileHelper.DataJsonOptions);
-                            await File.WriteAllTextAsync(glossaryFile, mergedJson);
-                            File.Delete(dntFile);
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.LogWarning(ex, "迁移 do-not-translate 文件失败: {File}", Path.GetFileName(dntFile));
-                        }
-                    }
-
-                    // Remove directory if empty
-                    if (!Directory.EnumerateFileSystemEntries(dntDir).Any())
-                        Directory.Delete(dntDir);
-                }
+                await ImportSettingsArchiveAsync(archive, paths.Root, logger, ct);
 
                 await RefreshApplicationRuntimeStateAsync(
                     settingsService,
@@ -351,103 +269,18 @@ public static class SettingsEndpoints
                 return Results.BadRequest(ApiResult.Fail("文件不存在"));
 
             var info = new FileInfo(request.FilePath);
-            if (info.Length > 100 * 1024 * 1024)
+            if (info.Length > ImportArchiveMaxBytes)
                 return Results.BadRequest(ApiResult.Fail("文件大小不能超过 100MB"));
 
             var ext = Path.GetExtension(request.FilePath).ToLowerInvariant();
             if (ext != ".zip")
                 return Results.BadRequest(ApiResult.Fail("仅支持 .zip 格式"));
 
-            var rootPath = Path.GetFullPath(paths.Root);
             try
             {
                 await using var stream = File.OpenRead(request.FilePath);
                 using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
-                foreach (var entry in archive.Entries)
-                {
-                    if (string.IsNullOrEmpty(entry.Name))
-                        continue;
-
-                    var destPath = PathSecurity.SafeJoin(rootPath, entry.FullName.Replace('/', Path.DirectorySeparatorChar));
-                    Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-
-                    await using var entryStream = entry.Open();
-                    await using var destStream = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                    await entryStream.CopyToAsync(destStream);
-                }
-
-                // Migrate old do-not-translate/ entries into glossaries/ (unified term format)
-                var dntDir = Path.Combine(rootPath, "do-not-translate");
-                if (Directory.Exists(dntDir))
-                {
-                    var glossariesDir = Path.Combine(rootPath, "glossaries");
-                    Directory.CreateDirectory(glossariesDir);
-
-                    foreach (var dntFile in Directory.EnumerateFiles(dntDir, "*.json"))
-                    {
-                        try
-                        {
-                            var gameId = Path.GetFileNameWithoutExtension(dntFile);
-                            var dntJson = await File.ReadAllTextAsync(dntFile);
-                            using var dntDoc = JsonDocument.Parse(dntJson);
-
-                            var dntTerms = new List<TermEntry>();
-                            foreach (var element in dntDoc.RootElement.EnumerateArray())
-                            {
-                                var original = element.GetProperty("original").GetString();
-                                if (string.IsNullOrEmpty(original)) continue;
-
-                                var caseSensitive = element.TryGetProperty("caseSensitive", out var csProp)
-                                    && csProp.GetBoolean();
-
-                                dntTerms.Add(new TermEntry
-                                {
-                                    Type = TermType.DoNotTranslate,
-                                    Original = original,
-                                    CaseSensitive = caseSensitive,
-                                });
-                            }
-
-                            if (dntTerms.Count == 0)
-                            {
-                                File.Delete(dntFile);
-                                continue;
-                            }
-
-                            // Merge with existing glossary if present
-                            var glossaryFile = Path.Combine(glossariesDir, $"{gameId}.json");
-                            var existingTerms = new List<TermEntry>();
-                            if (File.Exists(glossaryFile))
-                            {
-                                var glossaryJson = await File.ReadAllTextAsync(glossaryFile);
-                                existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson, FileHelper.DataJsonOptions) ?? [];
-                            }
-
-                            // Dedup by Original
-                            var existingOriginals = new HashSet<string>(
-                                existingTerms.Select(t => t.Original),
-                                StringComparer.Ordinal);
-
-                            foreach (var term in dntTerms)
-                            {
-                                if (existingOriginals.Add(term.Original))
-                                    existingTerms.Add(term);
-                            }
-
-                            var mergedJson = JsonSerializer.Serialize(existingTerms, FileHelper.DataJsonOptions);
-                            await File.WriteAllTextAsync(glossaryFile, mergedJson);
-                            File.Delete(dntFile);
-                        }
-                        catch (Exception ex)
-                        {
-                            logger.LogWarning(ex, "迁移 do-not-translate 文件失败: {File}", Path.GetFileName(dntFile));
-                        }
-                    }
-
-                    // Remove directory if empty
-                    if (!Directory.EnumerateFileSystemEntries(dntDir).Any())
-                        Directory.Delete(dntDir);
-                }
+                await ImportSettingsArchiveAsync(archive, paths.Root, logger, ct);
 
                 await RefreshApplicationRuntimeStateAsync(
                     settingsService,
@@ -477,6 +310,109 @@ public static class SettingsEndpoints
             }
         });
     }
+
+    private static async Task ImportSettingsArchiveAsync(
+        ZipArchive archive,
+        string rootPath,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var normalizedRoot = Path.GetFullPath(rootPath);
+        long totalExtractedBytes = 0;
+
+        foreach (var entry in archive.Entries)
+        {
+            if (string.IsNullOrEmpty(entry.Name))
+                continue;
+
+            var destinationPath = PathSecurity.PrepareZipExtractionPath(
+                normalizedRoot,
+                entry,
+                ref totalExtractedBytes,
+                ImportArchiveMaxEntryBytes,
+                ImportArchiveMaxTotalBytes);
+            await PathSecurity.ExtractZipEntryAsync(entry, destinationPath, ct);
+        }
+
+        await MigrateLegacyDoNotTranslateAsync(normalizedRoot, logger, ct);
+    }
+
+    private static async Task MigrateLegacyDoNotTranslateAsync(
+        string rootPath,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var dntDir = Path.Combine(rootPath, "do-not-translate");
+        if (!Directory.Exists(dntDir))
+            return;
+
+        var glossariesDir = Path.Combine(rootPath, "glossaries");
+        Directory.CreateDirectory(glossariesDir);
+
+        foreach (var dntFile in Directory.EnumerateFiles(dntDir, "*.json"))
+        {
+            try
+            {
+                var gameId = Path.GetFileNameWithoutExtension(dntFile);
+                var dntJson = await File.ReadAllTextAsync(dntFile, ct);
+                using var dntDoc = JsonDocument.Parse(dntJson);
+
+                var dntTerms = new List<TermEntry>();
+                foreach (var element in dntDoc.RootElement.EnumerateArray())
+                {
+                    var original = element.GetProperty("original").GetString();
+                    if (string.IsNullOrEmpty(original))
+                        continue;
+
+                    var caseSensitive = element.TryGetProperty("caseSensitive", out var csProp)
+                        && csProp.GetBoolean();
+
+                    dntTerms.Add(new TermEntry
+                    {
+                        Type = TermType.DoNotTranslate,
+                        Original = original,
+                        CaseSensitive = caseSensitive,
+                    });
+                }
+
+                if (dntTerms.Count == 0)
+                {
+                    File.Delete(dntFile);
+                    continue;
+                }
+
+                var glossaryFile = Path.Combine(glossariesDir, $"{gameId}.json");
+                var existingTerms = new List<TermEntry>();
+                if (File.Exists(glossaryFile))
+                {
+                    var glossaryJson = await File.ReadAllTextAsync(glossaryFile, ct);
+                    existingTerms = JsonSerializer.Deserialize<List<TermEntry>>(glossaryJson, FileHelper.DataJsonOptions) ?? [];
+                }
+
+                var existingOriginals = new HashSet<string>(
+                    existingTerms.Select(static term => term.Original),
+                    StringComparer.Ordinal);
+
+                foreach (var term in dntTerms)
+                {
+                    if (existingOriginals.Add(term.Original))
+                        existingTerms.Add(term);
+                }
+
+                var mergedJson = JsonSerializer.Serialize(existingTerms, FileHelper.DataJsonOptions);
+                await File.WriteAllTextAsync(glossaryFile, mergedJson, ct);
+                File.Delete(dntFile);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "迁移 do-not-translate 文件失败: {File}", Path.GetFileName(dntFile));
+            }
+        }
+
+        if (!Directory.EnumerateFileSystemEntries(dntDir).Any())
+            Directory.Delete(dntDir);
+    }
+
     private static async Task RefreshApplicationRuntimeStateAsync(
         AppSettingsService settingsService,
         GameLibraryService gameLibraryService,
