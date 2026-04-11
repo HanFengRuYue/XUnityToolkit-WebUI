@@ -328,11 +328,15 @@ watch(() => store.preTranslationStatus?.state, (newState) => {
   }
 })
 
-watch(() => store.termExtractionComplete, (val) => {
-  if (val) {
-    loadTermCandidates()
-    store.resetTermExtractionComplete()
+watch(() => store.termExtractionComplete, async (val) => {
+  if (!val) return
+
+  const status = store.preTranslationStatus
+  if (status?.state === 'AwaitingTermReview' && !status.canResume) {
+    await loadTermCandidates()
   }
+
+  store.resetTermExtractionComplete()
 })
 
 onBeforeUnmount(async () => {
@@ -738,15 +742,25 @@ function langLabel(code: string): string {
             <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
             开始预翻译 ({{ store.extractionResult.totalTextsExtracted }} 条)
           </NButton>
-          <template v-if="hasResumableCheckpoint">
-            <NButton type="primary" :disabled="!hasAiProvider" @click="handleResumePreTranslation">
+          <div v-if="hasResumableCheckpoint" class="checkpoint-actions">
+            <NButton
+              type="primary"
+              :disabled="!hasAiProvider"
+              class="checkpoint-action-button"
+              @click="handleResumePreTranslation"
+            >
               <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
               继续预翻译
             </NButton>
-            <NButton :disabled="!hasAiProvider" @click="handleRestartPreTranslation">
+            <NButton
+              :disabled="!hasAiProvider"
+              class="checkpoint-action-button"
+              @click="handleRestartPreTranslation"
+            >
+              <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
               重新开始
             </NButton>
-          </template>
+          </div>
           <template v-if="false">
             <NButton type="primary" @click="handleResumePreTranslation">
               <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
@@ -1066,7 +1080,21 @@ function langLabel(code: string): string {
 }
 
 .action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.checkpoint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.checkpoint-action-button {
+  min-width: 132px;
 }
 
 .progress-section {
@@ -1348,6 +1376,12 @@ function langLabel(code: string): string {
   }
   .rule-action {
     min-width: unset;
+  }
+  .checkpoint-actions {
+    width: 100%;
+  }
+  .checkpoint-action-button {
+    flex: 1 1 0;
   }
 }
 </style>

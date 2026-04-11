@@ -38,13 +38,19 @@ public sealed partial class PreTranslationService(
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = [];
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _termReviewCompletions = [];
     private readonly ConcurrentDictionary<string, long> _lastBroadcastTicks = [];
+    private readonly ConcurrentDictionary<string, long> _lastCheckpointPersistTicks = [];
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _checkpointLocks = [];
+    private static readonly long CheckpointPersistIntervalTicks = TimeSpan.FromSeconds(1).Ticks;
 
     private sealed class ProgressCounters
     {
         public int Translated;
         public int Failed;
     }
+
+    private sealed record ResilientBatchResult(
+        IReadOnlyList<(string Text, string Translation, bool Persistable)> Successes,
+        int FailedCount);
 
     private sealed record ResumeValidationResult(
         List<string>? TextList,
@@ -164,6 +170,8 @@ public sealed partial class PreTranslationService(
         {
             checkpointLock.Release();
         }
+
+        _lastCheckpointPersistTicks.TryRemove(gameId, out _);
 
         if (_statuses.TryGetValue(gameId, out var status))
         {
@@ -370,27 +378,27 @@ public sealed partial class PreTranslationService(
                     try
                     {
                         var batchList = batch.ToList();
-                        var result = await translationService.TranslateDetailedAsync(
-                            batchList, fromLang, toLang, gameId, token);
-                        var results = result.Translations;
+                        var batchResult = await TranslatePreTranslationBatchResilientAsync(
+                            gameId, batchList, fromLang, toLang, token);
 
-                        for (var i = 0; i < batchList.Count; i++)
+                        foreach (var (text, translation, persistable) in batchResult.Successes)
                         {
-                            round1Translations[batchList[i]] = results[i];
-                            translations[batchList[i]] = results[i];
-                            if (result.Persistable[i])
+                            round1Translations[text] = translation;
+                            translations[text] = translation;
+                            if (persistable)
                             {
-                                round1PersistableTranslations[batchList[i]] = results[i];
-                                finalPersistableTranslations[batchList[i]] = results[i];
+                                round1PersistableTranslations[text] = translation;
+                                finalPersistableTranslations[text] = translation;
                             }
                             else
                             {
-                                round1PersistableTranslations.TryRemove(batchList[i], out _);
-                                finalPersistableTranslations.TryRemove(batchList[i], out _);
+                                round1PersistableTranslations.TryRemove(text, out _);
+                                finalPersistableTranslations.TryRemove(text, out _);
                             }
                         }
 
-                        Interlocked.Add(ref round1Counters.Translated, batchList.Count);
+                        Interlocked.Add(ref round1Counters.Translated, batchResult.Successes.Count);
+                        Interlocked.Add(ref round1Counters.Failed, batchResult.FailedCount);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
@@ -573,21 +581,21 @@ public sealed partial class PreTranslationService(
                     try
                     {
                         var batchList = batch.ToList();
-                        var result = await translationService.TranslateDetailedAsync(
-                            batchList, fromLang, toLang, gameId, token);
-                        var results = result.Translations;
+                        var batchResult = await TranslatePreTranslationBatchResilientAsync(
+                            gameId, batchList, fromLang, toLang, token);
 
-                        for (var i = 0; i < batchList.Count; i++)
+                        foreach (var (text, translation, persistable) in batchResult.Successes)
                         {
-                            round2Translations[batchList[i]] = results[i];
-                            translations[batchList[i]] = results[i];
-                            if (result.Persistable[i])
-                                finalPersistableTranslations[batchList[i]] = results[i];
+                            round2Translations[text] = translation;
+                            translations[text] = translation;
+                            if (persistable)
+                                finalPersistableTranslations[text] = translation;
                             else
-                                finalPersistableTranslations.TryRemove(batchList[i], out _);
+                                finalPersistableTranslations.TryRemove(text, out _);
                         }
 
-                        Interlocked.Add(ref round2Counters.Translated, batchList.Count);
+                        Interlocked.Add(ref round2Counters.Translated, batchResult.Successes.Count);
+                        Interlocked.Add(ref round2Counters.Failed, batchResult.FailedCount);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
@@ -752,7 +760,7 @@ public sealed partial class PreTranslationService(
     {
         status.TranslatedTexts = Volatile.Read(ref counters.Translated);
         status.FailedTexts = Volatile.Read(ref counters.Failed);
-        await PersistCheckpointAsync(gameId, status, fromLang, toLang, textSignature,
+        await ThrottledPersistCheckpointAsync(gameId, status, fromLang, toLang, textSignature,
             round1Translations, round2Translations);
     }
 
@@ -767,7 +775,37 @@ public sealed partial class PreTranslationService(
     {
         await PersistCheckpointAsync(gameId, status, fromLang, toLang, textSignature,
             round1Translations, round2Translations);
+        MarkCheckpointPersisted(gameId);
         await BroadcastStatus(gameId, status);
+    }
+
+    private async Task ThrottledPersistCheckpointAsync(
+        string gameId,
+        PreTranslationStatus status,
+        string fromLang,
+        string toLang,
+        string textSignature,
+        ConcurrentDictionary<string, string> round1Translations,
+        ConcurrentDictionary<string, string> round2Translations)
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = _lastCheckpointPersistTicks.GetOrAdd(gameId, 0L);
+        if (now - last < CheckpointPersistIntervalTicks)
+            return;
+        if (!_lastCheckpointPersistTicks.TryUpdate(gameId, now, last))
+            return;
+
+        try
+        {
+            await PersistCheckpointAsync(gameId, status, fromLang, toLang, textSignature,
+                round1Translations, round2Translations);
+            MarkCheckpointPersisted(gameId);
+        }
+        catch
+        {
+            _lastCheckpointPersistTicks.TryUpdate(gameId, last, now);
+            throw;
+        }
     }
 
     private async Task PersistCheckpointAsync(
@@ -830,6 +868,7 @@ public sealed partial class PreTranslationService(
         checkpoint.UpdatedAt = DateTime.UtcNow;
 
         await SaveCheckpointAsync(gameId, checkpoint, CancellationToken.None);
+        MarkCheckpointPersisted(gameId);
         status.CheckpointUpdatedAt = checkpoint.UpdatedAt;
     }
 
@@ -987,10 +1026,67 @@ public sealed partial class PreTranslationService(
         status.ResumeBlockedReason = blockedReason;
     }
 
-    private static Dictionary<string, string> SnapshotTranslations(
-        ConcurrentDictionary<string, string> source) =>
-        source.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+    internal static Dictionary<string, string> SnapshotTranslations(
+        ConcurrentDictionary<string, string> source)
+    {
+        var snapshot = source.ToArray();
+        Array.Sort(snapshot, static (left, right) => StringComparer.Ordinal.Compare(left.Key, right.Key));
+
+        var ordered = new Dictionary<string, string>(snapshot.Length, StringComparer.Ordinal);
+        foreach (var (key, value) in snapshot)
+            ordered[key] = value;
+
+        return ordered;
+    }
+
+    private async Task<ResilientBatchResult> TranslatePreTranslationBatchResilientAsync(
+        string gameId,
+        IList<string> batch,
+        string fromLang,
+        string toLang,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await translationService.TranslateDetailedAsync(batch, fromLang, toLang, gameId, ct);
+            var successes = new List<(string Text, string Translation, bool Persistable)>(batch.Count);
+            for (var i = 0; i < batch.Count; i++)
+                successes.Add((batch[i], result.Translations[i], result.Persistable[i]));
+            return new ResilientBatchResult(successes, FailedCount: 0);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (batch.Count > 1 && IsRecoverableBatchError(ex))
+        {
+            logger.LogWarning(ex, "预翻译批次失败({Count} 条文本)，拆分重试, 游戏 {GameId}", batch.Count, gameId);
+
+            var midpoint = batch.Count / 2;
+            var left = await TranslatePreTranslationBatchResilientAsync(
+                gameId, batch.Take(midpoint).ToArray(), fromLang, toLang, ct);
+            var right = await TranslatePreTranslationBatchResilientAsync(
+                gameId, batch.Skip(midpoint).ToArray(), fromLang, toLang, ct);
+
+            return new ResilientBatchResult(
+                left.Successes.Concat(right.Successes).ToArray(),
+                left.FailedCount + right.FailedCount);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "预翻译批次失败({Count} 条文本), 游戏 {GameId}", batch.Count, gameId);
+            return new ResilientBatchResult([], batch.Count);
+        }
+    }
+
+    private static bool IsRecoverableBatchError(Exception ex) =>
+        ex is TaskCanceledException or HttpRequestException or TimeoutException;
+
+    private void MarkCheckpointPersisted(string gameId)
+    {
+        var now = DateTime.UtcNow.Ticks;
+        _lastCheckpointPersistTicks[gameId] = now;
+    }
 
     private List<(string Pattern, string Replacement)> GenerateDynamicRegexEntries(
         List<string> textList,
