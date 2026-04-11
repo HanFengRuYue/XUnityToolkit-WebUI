@@ -16,6 +16,7 @@ internal sealed record TranslationBatchResult(IList<string> Translations, IReadO
 public sealed class LlmTranslationService(
     IHttpClientFactory httpClientFactory,
     AppSettingsService settingsService,
+    LocalLlmService localLlmService,
     TermService termService,
     TermMatchingService termMatchingService,
     TermAuditService termAuditService,
@@ -250,8 +251,13 @@ public sealed class LlmTranslationService(
 
             // Local mode restrictions
             var isLocalMode = string.Equals(ai.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
+            var runtimeLocalEndpoint = isLocalMode
+                ? await localLlmService.GetRuntimeEndpointAsync(ct)
+                : null;
+            var enabledEndpoints = LlmEndpointResolver.BuildEffectiveEndpoints(ai, runtimeLocalEndpoint);
+            if (isLocalMode && runtimeLocalEndpoint is null)
+                throw new InvalidOperationException("本地模型未启动，请先在本地 AI 页面启动模型");
 
-            var enabledEndpoints = ai.Endpoints.Where(e => e.Enabled && !string.IsNullOrWhiteSpace(e.ApiKey)).ToList();
             if (enabledEndpoints.Count == 0)
             {
                 logger.LogWarning("没有可用的 AI 提供商: 总端点数={Total}, 各端点状态=[{Details}]",

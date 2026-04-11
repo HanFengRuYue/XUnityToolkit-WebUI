@@ -684,13 +684,13 @@ public sealed partial class PluginHealthCheckService(
     [GeneratedRegex(@"LLMTranslate.*(?:数量不匹配|count mismatch)", RegexOptions.IgnoreCase)]
     private static partial Regex EndpointCountMismatchRegex();
 
-    [GeneratedRegex(@"LLMTranslate.*503|(?:本地模型未启动|本地模型未运行)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"LLMTranslate.*(?:\b503\b|本地模型未启动|本地模型未运行)", RegexOptions.IgnoreCase)]
     private static partial Regex EndpointLocalLlmRegex();
 
     [GeneratedRegex(@"consecutive.*error.*LLMTranslate|endpoint.*disabled.*LLMTranslate|Disabl.*LLMTranslate|LLMTranslate.*Disabl", RegexOptions.IgnoreCase)]
     private static partial Regex EndpointDisabledRegex();
 
-    [GeneratedRegex(@"LLMTranslate.*(?:50[0-9]|Failed|失败|Timeout|超时)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"LLMTranslate.*(?:\b50[0-9]\b|Failed|失败|Timeout|超时)", RegexOptions.IgnoreCase)]
     private static partial Regex EndpointApiFailRegex();
 
     [GeneratedRegex(@"^\[[\w\s]+\s*:\s*[\w\.\s]+\]\s*")]

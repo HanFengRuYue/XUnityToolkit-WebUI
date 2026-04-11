@@ -38,6 +38,7 @@ public sealed class LocalLlmService(
     private readonly ConcurrentDictionary<string, bool> _pauseRequests = new();
     private readonly ConcurrentDictionary<string, bool> _downloadMirrorState = new();
     private readonly ConcurrentDictionary<string, bool> _downloadModelScopeState = new();
+    private readonly ConcurrentDictionary<string, LocalLlmDownloadProgress> _downloadProgressSnapshots = new();
 
     // LLAMA binary download
     private CancellationTokenSource? _llamaDownloadCts;
@@ -73,6 +74,15 @@ public sealed class LocalLlmService(
         var json = await File.ReadAllTextAsync(paths.LocalLlmSettingsFile, ct);
         _settingsCache = JsonSerializer.Deserialize<LocalLlmSettings>(json, LoadJsonOptions) ?? new LocalLlmSettings();
         return _settingsCache;
+    }
+
+    public async Task<ApiEndpointConfig?> GetRuntimeEndpointAsync(CancellationToken ct = default)
+    {
+        if (!IsRunning || _internalPort <= 0)
+            return null;
+
+        var localSettings = await LoadSettingsAsync(ct);
+        return BuildRuntimeEndpoint(localSettings);
     }
 
     public async Task SaveSettingsAsync(LocalLlmSettings settings, CancellationToken ct = default)
@@ -750,6 +760,7 @@ public sealed class LocalLlmService(
     private async Task RegisterEndpointAsync(CancellationToken ct)
     {
         var localSettings = await LoadSettingsAsync(ct);
+        var runtimeEndpoint = BuildRuntimeEndpoint(localSettings);
 
         await settingsService.UpdateAsync(appSettings =>
         {
@@ -757,23 +768,17 @@ public sealed class LocalLlmService(
             var existing = ai.Endpoints.FirstOrDefault(e => e.Id == localSettings.EndpointId);
             if (existing is not null)
             {
-                existing.ApiBaseUrl = $"http://127.0.0.1:{_internalPort}/v1";
-                existing.ApiKey = "local";
-                existing.Enabled = true;
+                existing.Name = runtimeEndpoint.Name;
+                existing.Provider = runtimeEndpoint.Provider;
+                existing.ApiBaseUrl = runtimeEndpoint.ApiBaseUrl;
+                existing.ApiKey = runtimeEndpoint.ApiKey;
+                existing.ModelName = runtimeEndpoint.ModelName;
+                existing.Priority = runtimeEndpoint.Priority;
+                existing.Enabled = runtimeEndpoint.Enabled;
             }
             else
             {
-                ai.Endpoints.Add(new ApiEndpointConfig
-                {
-                    Id = localSettings.EndpointId,
-                    Name = "本地模型",
-                    Provider = LlmProvider.Custom,
-                    ApiBaseUrl = $"http://127.0.0.1:{_internalPort}/v1",
-                    ApiKey = "local",
-                    ModelName = "",
-                    Priority = 8,
-                    Enabled = true
-                });
+                ai.Endpoints.Add(runtimeEndpoint);
             }
         }, ct);
 
@@ -790,6 +795,25 @@ public sealed class LocalLlmService(
             if (existing is not null)
                 existing.Enabled = false;
         }, ct);
+    }
+
+    private ApiEndpointConfig BuildRuntimeEndpoint(LocalLlmSettings localSettings)
+    {
+        var modelName = "";
+        if (!string.IsNullOrWhiteSpace(localSettings.LoadedModelPath))
+            modelName = Path.GetFileName(localSettings.LoadedModelPath);
+
+        return new ApiEndpointConfig
+        {
+            Id = localSettings.EndpointId,
+            Name = "本地模型",
+            Provider = LlmProvider.Custom,
+            ApiBaseUrl = $"http://127.0.0.1:{_internalPort}/v1",
+            ApiKey = "local",
+            ModelName = modelName,
+            Priority = 8,
+            Enabled = true
+        };
     }
 
     // ── Model Download ──
@@ -844,6 +868,7 @@ public sealed class LocalLlmService(
             _downloads.TryRemove(catalogId, out _);
             _downloadMirrorState.TryRemove(catalogId, out _);
             _downloadModelScopeState.TryRemove(catalogId, out _);
+            _downloadProgressSnapshots.TryRemove(catalogId, out _);
             cts.Dispose();
         }
     }
@@ -1072,6 +1097,34 @@ public sealed class LocalLlmService(
         await CleanupModelDownloadAsync(catalogId);
     }
 
+    public IReadOnlyList<LocalLlmDownloadProgress> GetActiveDownloads()
+    {
+        return _downloads.Keys
+            .Select(catalogId =>
+            {
+                if (_downloadProgressSnapshots.TryGetValue(catalogId, out var progress))
+                    return progress.Done || progress.Paused || !string.IsNullOrEmpty(progress.Error)
+                        ? null
+                        : progress;
+
+                var entry = BuiltInModelCatalog.Models.FirstOrDefault(m => m.Id == catalogId);
+                _downloadMirrorState.TryGetValue(catalogId, out var useMirror);
+                _downloadModelScopeState.TryGetValue(catalogId, out var useModelScope);
+                return new LocalLlmDownloadProgress(
+                    catalogId,
+                    0,
+                    entry?.FileSizeBytes ?? 0,
+                    0,
+                    false,
+                    null,
+                    UseMirror: useMirror,
+                    UseModelScope: useModelScope);
+            })
+            .Where(progress => progress is not null)
+            .Select(progress => progress!)
+            .ToList();
+    }
+
     // ── Model Inventory ──
 
     public async Task<LocalModelEntry> AddModelAsync(string filePath, string name, CancellationToken ct)
@@ -1133,6 +1186,8 @@ public sealed class LocalLlmService(
 
     private async Task BroadcastDownloadProgress(LocalLlmDownloadProgress progress)
     {
+        _downloadProgressSnapshots[progress.CatalogId] = progress;
+
         try
         {
             await hubContext.Clients.Group("local-llm")

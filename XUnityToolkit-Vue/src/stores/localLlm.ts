@@ -19,6 +19,52 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
     status.value?.state === 'Starting' || status.value?.state === 'Stopping')
 
   let connection: signalR.HubConnection | null = null
+  let downloadSyncTimer: ReturnType<typeof setInterval> | null = null
+  let isSyncingDownloads = false
+
+  function replaceDownloads(items: LocalLlmDownloadProgress[]) {
+    downloads.value = new Map(items.map(item => [item.catalogId, item]))
+  }
+
+  function stopDownloadSync() {
+    if (downloadSyncTimer !== null) {
+      clearInterval(downloadSyncTimer)
+      downloadSyncTimer = null
+    }
+  }
+
+  function ensureDownloadSync() {
+    if (downloadSyncTimer !== null) return
+
+    downloadSyncTimer = setInterval(() => {
+      void syncDownloadState()
+    }, 3000)
+  }
+
+  async function syncDownloadState() {
+    if (isSyncingDownloads) return
+    isSyncingDownloads = true
+
+    try {
+      const [currentSettings, activeDownloads] = await Promise.all([
+        localLlmApi.getSettings(),
+        localLlmApi.getActiveDownloads(),
+      ])
+
+      settings.value = currentSettings
+      replaceDownloads(activeDownloads)
+
+      if (activeDownloads.length > 0) {
+        ensureDownloadSync()
+      } else {
+        stopDownloadSync()
+      }
+    } catch {
+      // Keep the last known UI state if reconciliation fails temporarily.
+    } finally {
+      isSyncingDownloads = false
+    }
+  }
 
   async function connect() {
     if (connection && connection.state !== signalR.HubConnectionState.Disconnected) return
@@ -36,16 +82,15 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
       if (progress.done || progress.error) {
         downloads.value.delete(progress.catalogId)
         downloads.value = new Map(downloads.value)
-        if (progress.done && !progress.error) {
-          fetchModels()
-        }
+        void syncDownloadState()
       } else if (progress.paused) {
         downloads.value.delete(progress.catalogId)
         downloads.value = new Map(downloads.value)
-        fetchSettings()
+        void syncDownloadState()
       } else {
         downloads.value.set(progress.catalogId, progress)
         downloads.value = new Map(downloads.value)
+        ensureDownloadSync()
       }
     })
 
@@ -62,10 +107,12 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
 
     connection.onreconnected(async () => {
       try { await connection?.invoke('JoinLocalLlmGroup') } catch { /* ignore */ }
+      void syncDownloadState()
     })
 
     await connection.start()
     await connection.invoke('JoinLocalLlmGroup')
+    await syncDownloadState()
   }
 
   async function disconnect() {
@@ -74,6 +121,7 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
       await connection.stop()
       connection = null
     }
+    stopDownloadSync()
   }
 
   async function fetchStatus() {
@@ -117,6 +165,15 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
 
   async function downloadModel(catalogId: string) {
     await localLlmApi.downloadModel(catalogId)
+    downloads.value.set(catalogId, {
+      catalogId,
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      speedBytesPerSec: 0,
+      done: false,
+    })
+    downloads.value = new Map(downloads.value)
+    ensureDownloadSync()
   }
 
   async function pauseDownload(catalogId: string) {
@@ -127,7 +184,7 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
     await localLlmApi.cancelDownload(catalogId)
     downloads.value.delete(catalogId)
     downloads.value = new Map(downloads.value)
-    await fetchSettings()
+    await syncDownloadState()
   }
 
   async function downloadLlama() {
@@ -148,7 +205,7 @@ export const useLocalLlmStore = defineStore('localLlm', () => {
     status, settings, gpus, catalog, downloads, llamaStatus, llamaDownload,
     isRunning, isStarting, isBusy,
     connect, disconnect,
-    fetchStatus, fetchSettings, fetchGpus, refreshGpus, fetchCatalog, fetchLlamaStatus, fetchModels,
+    fetchStatus, fetchSettings, fetchGpus, refreshGpus, fetchCatalog, fetchLlamaStatus, fetchModels, syncDownloadState,
     startServer, stopServer, downloadModel, pauseDownload, cancelDownload,
     downloadLlama, cancelLlamaDownload, retryLlamaDownload,
   }

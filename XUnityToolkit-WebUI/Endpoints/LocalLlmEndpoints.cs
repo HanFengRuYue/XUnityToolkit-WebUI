@@ -33,6 +33,9 @@ public static class LocalLlmEndpoints
         group.MapGet("/catalog", () =>
             Results.Ok(ApiResult<IReadOnlyList<BuiltInModelInfo>>.Ok(BuiltInModelCatalog.Models)));
 
+        group.MapGet("/downloads", (LocalLlmService svc) =>
+            Results.Ok(ApiResult<IReadOnlyList<LocalLlmDownloadProgress>>.Ok(svc.GetActiveDownloads())));
+
         // ── llama.cpp binary status ──
 
         group.MapGet("/llama-status", async (LocalLlmService svc, CancellationToken ct) =>
@@ -51,11 +54,9 @@ public static class LocalLlmEndpoints
             if (status.State != LocalLlmServerState.Running)
                 return Results.BadRequest(ApiResult.Fail("本地 AI 未运行"));
 
-            // Find the auto-registered local endpoint in AiTranslationSettings
-            var llmSettings = await localSvc.LoadSettingsAsync(ct);
+            // Always test against the running server's current runtime endpoint.
             var appSettings = await settingsSvc.GetAsync(ct);
-            var localEndpoint = appSettings.AiTranslation.Endpoints
-                .FirstOrDefault(e => e.Id == llmSettings.EndpointId);
+            var localEndpoint = await localSvc.GetRuntimeEndpointAsync(ct);
             if (localEndpoint is null)
                 return Results.BadRequest(ApiResult.Fail("未找到本地 AI 端点配置"));
 
