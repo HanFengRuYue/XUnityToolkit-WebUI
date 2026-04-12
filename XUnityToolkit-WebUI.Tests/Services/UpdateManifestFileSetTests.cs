@@ -135,7 +135,7 @@ public sealed class UpdateManifestFileSetTests : IDisposable
 
         return new UpdateManifest
         {
-            Version = "4.8.0",
+            Version = "4.9.0",
             Rid = "win-x64",
             Files = manifestFiles
         };

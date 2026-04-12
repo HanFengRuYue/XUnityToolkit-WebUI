@@ -91,7 +91,7 @@ jobs:
 
           FORCE="${{ inputs.force_build }}"
           if [ -n "$CHANGED" ] || [ "$FORCE" = "true" ]; then
-            BUILD_VER="4.7.$(date -u +%Y%m%d%H%M)"
+            BUILD_VER="4.9.$(date -u +%Y%m%d%H%M)"
             VER_PREFIX="v$(echo "$BUILD_VER" | cut -d. -f1,2)"
             RELEASE_TAG="auto-${BUILD_VER}"
 
