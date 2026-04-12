@@ -1,177 +1,173 @@
-<div align="center">
+﻿<div align="center">
 
-<img src="XUnityToolkit-Vue/public/logo.png" alt="XUnityToolkit-WebUI" width="128" height="128">
+<img src="UnityLocalizationToolkit-Vue/public/logo.png" alt="UnityLocalizationToolkit-WebUI" width="128" height="128">
 
-# XUnityToolkit-WebUI
+# UnityLocalizationToolkit-WebUI
 
-**面向 Unity 游戏汉化 / 翻译工作流的 Windows 桌面工具**
+**闈㈠悜 Unity 娓告垙姹夊寲 / 缈昏瘧宸ヤ綔娴佺殑 Windows 妗岄潰宸ュ叿**
 
-一键安装 BepInEx 与 XUnity.AutoTranslator，集成云端大模型、本地 llama.cpp、资产提取、预翻译、字体替换、术语管理与插件包导入导出。
+涓€閿畨瑁?BepInEx 涓?XUnity.AutoTranslator锛岄泦鎴愪簯绔ぇ妯″瀷銆佹湰鍦?llama.cpp銆佽祫浜ф彁鍙栥€侀缈昏瘧銆佸瓧浣撴浛鎹€佹湳璇鐞嗕笌鎻掍欢鍖呭鍏ュ鍑恒€?
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![GitHub Release](https://img.shields.io/github/v/release/HanFengRuYue/XUnityToolkit-WebUI?color=brightgreen&logo=github)](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/HanFengRuYue/XUnityToolkit-WebUI?style=social)](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/stargazers)
+[![GitHub Release](https://img.shields.io/github/v/release/HanFengRuYue/UnityLocalizationToolkit-WebUI?color=brightgreen&logo=github)](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/HanFengRuYue/UnityLocalizationToolkit-WebUI?style=social)](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/stargazers)
 
-[下载发布版](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases) · [报告问题](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/issues) · [功能建议](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/issues)
+[涓嬭浇鍙戝竷鐗圿(https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases) 路 [鎶ュ憡闂](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/issues) 路 [鍔熻兘寤鸿](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/issues)
 
 </div>
 
-## 项目简介
+## 椤圭洰绠€浠?
 
-XUnityToolkit-WebUI 适合需要给 Unity 游戏做机翻增强、术语约束、预翻译缓存、字体修复和插件分发的用户。发布版面向 Windows 10 / 11 x64，开箱即可运行；当你需要从源码开发时，也保留了完整的前后端项目结构。
+UnityLocalizationToolkit-WebUI 閫傚悎闇€瑕佺粰 Unity 娓告垙鍋氭満缈诲寮恒€佹湳璇害鏉熴€侀缈昏瘧缂撳瓨銆佸瓧浣撲慨澶嶅拰鎻掍欢鍒嗗彂鐨勭敤鎴枫€傚彂甯冪増闈㈠悜 Windows 10 / 11 x64锛屽紑绠卞嵆鍙繍琛岋紱褰撲綘闇€瑕佷粠婧愮爜寮€鍙戞椂锛屼篃淇濈暀浜嗗畬鏁寸殑鍓嶅悗绔」鐩粨鏋勩€?
 
-## 下载与版本选择
+## 涓嬭浇涓庣増鏈€夋嫨
 
 <!-- DOWNLOAD_LINKS_START -->
-| 版本 | ZIP 便携版 | MSI 安装包 |
+| 鐗堟湰 | ZIP 渚挎惡鐗?| MSI 瀹夎鍖?|
 |------|-----------|-----------|
-| **Full（完整版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64.msi) |
-| **No-LLAMA** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64-no-llama.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64-no-llama.msi) |
-| **Lite（精简版）** | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64-lite.zip) | [下载](https://github.com/HanFengRuYue/XUnityToolkit-WebUI/releases/download/v4.9/XUnityToolkit-WebUI-v4.9-win-x64-lite.msi) |
+| **Full锛堝畬鏁寸増锛?* | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64.zip) | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64.msi) |
+| **No-LLAMA** | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64-no-llama.zip) | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64-no-llama.msi) |
+| **Lite锛堢簿绠€鐗堬級** | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64-lite.zip) | [涓嬭浇](https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI/releases/download/v5.0/UnityLocalizationToolkit-WebUI-v5.0-win-x64-lite.msi) |
 <!-- DOWNLOAD_LINKS_END -->
 
-- **Full**：自包含，附带本地 AI 运行时与常用资源，适合大多数用户。
-- **No-LLAMA**：自包含，只使用云端 API，不附带本地模型运行时。
-- **Lite**：体积最小，需要先安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)。
-- **本地 AI 适用环境**：NVIDIA 推荐 CUDA，AMD / Intel 推荐 Vulkan；没有独显也可走 CPU。
+- **Full**锛氳嚜鍖呭惈锛岄檮甯︽湰鍦?AI 杩愯鏃朵笌甯哥敤璧勬簮锛岄€傚悎澶у鏁扮敤鎴枫€?
+- **No-LLAMA**锛氳嚜鍖呭惈锛屽彧浣跨敤浜戠 API锛屼笉闄勫甫鏈湴妯″瀷杩愯鏃躲€?
+- **Lite**锛氫綋绉渶灏忥紝闇€瑕佸厛瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)銆?
+- **鏈湴 AI 閫傜敤鐜**锛歂VIDIA 鎺ㄨ崘 CUDA锛孉MD / Intel 鎺ㄨ崘 Vulkan锛涙病鏈夌嫭鏄句篃鍙蛋 CPU銆?
 
-## 三分钟快速上手
+## 涓夊垎閽熷揩閫熶笂鎵?
 
-1. 在 **游戏库** 中添加游戏目录，工具会检测 Unity 版本、Mono / IL2CPP、架构与可执行文件。
-2. 打开 **游戏详情页**，使用 **一键安装** 自动部署 BepInEx、XUnity.AutoTranslator、AI 端点与推荐配置。
-3. 进入 **AI 翻译** 页面，配置云端端点，或切换到 **本地 AI** 使用 llama.cpp 和本地 GGUF 模型。
-4. 直接启动游戏开始实时翻译；文本量大的游戏建议先做 **资产提取 / 预翻译**，出现缺字时再做 **字体替换 / 字体生成**。
+1. 鍦?**娓告垙搴?* 涓坊鍔犳父鎴忕洰褰曪紝宸ュ叿浼氭娴?Unity 鐗堟湰銆丮ono / IL2CPP銆佹灦鏋勪笌鍙墽琛屾枃浠躲€?
+2. 鎵撳紑 **娓告垙璇︽儏椤?*锛屼娇鐢?**涓€閿畨瑁?* 鑷姩閮ㄧ讲 BepInEx銆乆Unity.AutoTranslator銆丄I 绔偣涓庢帹鑽愰厤缃€?
+3. 杩涘叆 **AI 缈昏瘧** 椤甸潰锛岄厤缃簯绔鐐癸紝鎴栧垏鎹㈠埌 **鏈湴 AI** 浣跨敤 llama.cpp 鍜屾湰鍦?GGUF 妯″瀷銆?
+4. 鐩存帴鍚姩娓告垙寮€濮嬪疄鏃剁炕璇戯紱鏂囨湰閲忓ぇ鐨勬父鎴忓缓璁厛鍋?**璧勪骇鎻愬彇 / 棰勭炕璇?*锛屽嚭鐜扮己瀛楁椂鍐嶅仛 **瀛椾綋鏇挎崲 / 瀛椾綋鐢熸垚**銆?
 
-## 核心能力
+## 鏍稿績鑳藉姏
 
-- **一键接入翻译框架**：自动检测 Unity 游戏，安装 BepInEx 与 XUnity.AutoTranslator，并回写 AI 端点配置。
-- **云端 AI 翻译**：支持 OpenAI、Claude、Gemini、DeepSeek、Qwen、GLM、Kimi 与自定义 OpenAI 兼容接口。
-- **本地 AI 模式**：内置 llama.cpp，支持 HuggingFace / ModelScope 下载模型，也支持导入自有 GGUF。
-- **资产提取与预翻译**：提取 `.assets` / AssetBundle 文本，写入预翻译缓存，适合 RPG、视觉小说等大文本游戏。
-- **统一术语与翻译记忆**：支持术语候选、翻译记忆、动态模式、多轮翻译与术语审查。
-- **字体与插件工具链**：支持 TMP + Legacy `Font` 替换、SDF 字体生成、插件健康检查、BepInEx 日志分析、插件包导入导出与在线更新。
+- **涓€閿帴鍏ョ炕璇戞鏋?*锛氳嚜鍔ㄦ娴?Unity 娓告垙锛屽畨瑁?BepInEx 涓?XUnity.AutoTranslator锛屽苟鍥炲啓 AI 绔偣閰嶇疆銆?
+- **浜戠 AI 缈昏瘧**锛氭敮鎸?OpenAI銆丆laude銆丟emini銆丏eepSeek銆丵wen銆丟LM銆並imi 涓庤嚜瀹氫箟 OpenAI 鍏煎鎺ュ彛銆?
+- **鏈湴 AI 妯″紡**锛氬唴缃?llama.cpp锛屾敮鎸?HuggingFace / ModelScope 涓嬭浇妯″瀷锛屼篃鏀寔瀵煎叆鑷湁 GGUF銆?
+- **璧勪骇鎻愬彇涓庨缈昏瘧**锛氭彁鍙?`.assets` / AssetBundle 鏂囨湰锛屽啓鍏ラ缈昏瘧缂撳瓨锛岄€傚悎 RPG銆佽瑙夊皬璇寸瓑澶ф枃鏈父鎴忋€?
+- **缁熶竴鏈涓庣炕璇戣蹇?*锛氭敮鎸佹湳璇€欓€夈€佺炕璇戣蹇嗐€佸姩鎬佹ā寮忋€佸杞炕璇戜笌鏈瀹℃煡銆?
+- **瀛椾綋涓庢彃浠跺伐鍏烽摼**锛氭敮鎸?TMP + Legacy `Font` 鏇挎崲銆丼DF 瀛椾綋鐢熸垚銆佹彃浠跺仴搴锋鏌ャ€丅epInEx 鏃ュ織鍒嗘瀽銆佹彃浠跺寘瀵煎叆瀵煎嚭涓庡湪绾挎洿鏂般€?
 
 <details>
-<summary><strong>完整教程（点击展开）</strong></summary>
+<summary><strong>瀹屾暣鏁欑▼锛堢偣鍑诲睍寮€锛?/strong></summary>
 
-### 1. 添加游戏与安装翻译插件
+### 1. 娣诲姞娓告垙涓庡畨瑁呯炕璇戞彃浠?
+- 娓告垙搴撴敮鎸佸崟涓坊鍔狅紝涔熸敮鎸佹壒閲忔壂鎻忕洰褰曚腑鐨?Unity 娓告垙銆?- 娓告垙璇︽儏椤典細灞曠ず Unity 鐗堟湰銆佽剼鏈悗绔€佹灦鏋勩€佹彃浠剁姸鎬佸拰蹇嵎鎿嶄綔銆?- **涓€閿畨瑁?* 浼氭寜椤哄簭澶勭悊缈昏瘧妗嗘灦閮ㄧ讲銆丄I 绔偣鍐欏叆銆佹帹鑽愰厤缃簲鐢紝浠ュ強鍙€夌殑璧勪骇鎻愬彇涓庡仴搴锋鏌ャ€?
+<img src="docs/readme/library-overview.png" alt="娓告垙搴撻椤? width="100%">
 
-- 游戏库支持单个添加，也支持批量扫描目录中的 Unity 游戏。
-- 游戏详情页会展示 Unity 版本、脚本后端、架构、插件状态和快捷操作。
-- **一键安装** 会按顺序处理翻译框架部署、AI 端点写入、推荐配置应用，以及可选的资产提取与健康检查。
+<img src="docs/readme/game-detail-install.png" alt="娓告垙璇︽儏涓庡畨瑁呮祦绋? width="100%">
 
-<img src="docs/readme/library-overview.png" alt="游戏库首页" width="100%">
+### 2. 閰嶇疆 AI 缈昏瘧
 
-<img src="docs/readme/game-detail-install.png" alt="游戏详情与安装流程" width="100%">
+- **浜戠妯″紡**锛氬湪 **AI 缈昏瘧** 椤甸潰娣诲姞绔偣锛屾敮鎸佷紭鍏堢骇銆佸惎鍋溿€佹ā鍨嬪悕鍜屾祴璇曘€?
+- **鏈湴妯″紡**锛氬垏鎹㈠埌鏈湴 AI 鍚庯紝鍙牴鎹樉鍗℃儏鍐甸€夋嫨妯″瀷銆佷笅杞借繍琛屾椂銆佸惎鍔?llama.cpp 鏈嶅姟銆?
+- 濡傛灉浣犲彧鎯崇敤鑷缓鍏煎鎺ュ彛锛屽彲浠ョ洿鎺ヤ娇鐢?**Custom锛圤penAI 鍏煎锛?*銆?
 
-### 2. 配置 AI 翻译
+<img src="docs/readme/ai-translation.png" alt="AI 缈昏瘧閰嶇疆" width="100%">
 
-- **云端模式**：在 **AI 翻译** 页面添加端点，支持优先级、启停、模型名和测试。
-- **本地模式**：切换到本地 AI 后，可根据显卡情况选择模型、下载运行时、启动 llama.cpp 服务。
-- 如果你只想用自建兼容接口，可以直接使用 **Custom（OpenAI 兼容）**。
+### 3. 璧勪骇鎻愬彇涓庨缈昏瘧
 
-<img src="docs/readme/ai-translation.png" alt="AI 翻译配置" width="100%">
+- 宸ュ叿浼氱紦瀛樻彁鍙栫粨鏋滐紝鏂逛究閲嶅杩涘叆椤甸潰缁х画澶勭悊銆?
+- 棰勭炕璇戞敮鎸佹娴嬭瑷€銆佺紦瀛樹紭鍖栥€丩LM 鍔ㄦ€佹ā寮忓垎鏋愩€佸杞炕璇戝拰鑷姩鏈鎻愬彇銆?
+- 瀹屾垚鍚庣粨鏋滀細鍐欏叆 XUnity.AutoTranslator 缂撳瓨锛岄€傚悎闇€瑕佲€滃惎鍔ㄥ嵆鍑轰腑鏂団€濈殑鍦烘櫙銆?
 
-### 3. 资产提取与预翻译
+<img src="docs/readme/asset-pretranslation.png" alt="璧勪骇鎻愬彇涓庨缈昏瘧娴佺▼" width="100%">
 
-- 工具会缓存提取结果，方便重复进入页面继续处理。
-- 预翻译支持检测语言、缓存优化、LLM 动态模式分析、多轮翻译和自动术语提取。
-- 完成后结果会写入 XUnity.AutoTranslator 缓存，适合需要“启动即出中文”的场景。
+### 4. 瀛椾綋鏇挎崲涓庡瓧浣撶敓鎴?
 
-<img src="docs/readme/asset-pretranslation.png" alt="资产提取与预翻译流程" width="100%">
+- 瀛椾綋鏇挎崲鏀寔 TMP 涓?Legacy `Font` 涓ょ被璧勬簮銆?
+- 鍙洿鎺ヤ娇鐢ㄥ唴缃浛鎹㈡簮锛屼篃鍙互涓婁紶鑷畾涔?TMP / TTF / OTF 璧勬簮銆?
+- 瀛椾綋鐢熸垚椤靛彲鍩轰簬 TTF / OTF 鐢熸垚 TMP SDF 瀛椾綋锛屽苟鎸夊瓧绗﹂泦杈撳嚭缁撴灉銆?
 
-### 4. 字体替换与字体生成
+<img src="docs/readme/font-replacement.png" alt="瀛椾綋鏇挎崲娴佺▼" width="100%">
 
-- 字体替换支持 TMP 与 Legacy `Font` 两类资源。
-- 可直接使用内置替换源，也可以上传自定义 TMP / TTF / OTF 资源。
-- 字体生成页可基于 TTF / OTF 生成 TMP SDF 字体，并按字符集输出结果。
+### 5. 鏈銆佺炕璇戠紪杈戜笌鎻掍欢鍖?
 
-<img src="docs/readme/font-replacement.png" alt="字体替换流程" width="100%">
-
-### 5. 术语、翻译编辑与插件包
-
-- **术语编辑器**：管理翻译术语、禁翻词、分类、优先级、正则匹配与自动提取候选。
-- **翻译编辑器**：对 AI 输出做人工校对，并支持导入 / 导出。
-- **插件包导入导出**：打包当前游戏的翻译插件、缓存与配置，便于分发给其他玩家。
-- **运行日志 / 健康检查**：排查 BepInEx 插件冲突、缺依赖、异常堆栈和兼容性问题。
+- **鏈缂栬緫鍣?*锛氱鐞嗙炕璇戞湳璇€佺缈昏瘝銆佸垎绫汇€佷紭鍏堢骇銆佹鍒欏尮閰嶄笌鑷姩鎻愬彇鍊欓€夈€?
+- **缈昏瘧缂栬緫鍣?*锛氬 AI 杈撳嚭鍋氫汉宸ユ牎瀵癸紝骞舵敮鎸佸鍏?/ 瀵煎嚭銆?
+- **鎻掍欢鍖呭鍏ュ鍑?*锛氭墦鍖呭綋鍓嶆父鎴忕殑缈昏瘧鎻掍欢銆佺紦瀛樹笌閰嶇疆锛屼究浜庡垎鍙戠粰鍏朵粬鐜╁銆?
+- **杩愯鏃ュ織 / 鍋ュ悍妫€鏌?*锛氭帓鏌?BepInEx 鎻掍欢鍐茬獊銆佺己渚濊禆銆佸紓甯稿爢鏍堝拰鍏煎鎬ч棶棰樸€?
 
 </details>
 
-## 常见问题
+## 甯歌闂
 
 <details>
-<summary><strong>我应该下载哪个版本？</strong></summary>
+<summary><strong>鎴戝簲璇ヤ笅杞藉摢涓増鏈紵</strong></summary>
 
-- 想省心，优先用 **Full**。
-- 只打算使用云端 API，用 **No-LLAMA**。
-- 追求最小体积且已经安装 .NET 10 运行时，用 **Lite**。
+- 鎯崇渷蹇冿紝浼樺厛鐢?**Full**銆?
+- 鍙墦绠椾娇鐢ㄤ簯绔?API锛岀敤 **No-LLAMA**銆?
+- 杩芥眰鏈€灏忎綋绉笖宸茬粡瀹夎 .NET 10 杩愯鏃讹紝鐢?**Lite**銆?
 
 </details>
 
 <details>
-<summary><strong>云端 AI 和本地 AI 怎么选？</strong></summary>
+<summary><strong>浜戠 AI 鍜屾湰鍦?AI 鎬庝箞閫夛紵</strong></summary>
 
-- 云端模式配置简单、更新快，适合大多数用户。
-- 本地模式更适合离线环境、长时间批量翻译，或不希望把文本发送到第三方接口的场景。
-- 本地模式对显卡、显存和磁盘空间要求更高。
-
-</details>
-
-<details>
-<summary><strong>翻译后出现方块字或缺字怎么办？</strong></summary>
-
-- 先进入 **字体替换** 页面扫描当前字体资源。
-- 如果游戏依赖的 TMP / Legacy `Font` 不包含中文字符，可直接替换为内置字体或上传自定义字体。
-- 需要完全自定义时，再进入 **字体生成** 生成 TMP SDF 字体。
+- 浜戠妯″紡閰嶇疆绠€鍗曘€佹洿鏂板揩锛岄€傚悎澶у鏁扮敤鎴枫€?
+- 鏈湴妯″紡鏇撮€傚悎绂荤嚎鐜銆侀暱鏃堕棿鎵归噺缈昏瘧锛屾垨涓嶅笇鏈涙妸鏂囨湰鍙戦€佸埌绗笁鏂规帴鍙ｇ殑鍦烘櫙銆?
+- 鏈湴妯″紡瀵规樉鍗°€佹樉瀛樺拰纾佺洏绌洪棿瑕佹眰鏇撮珮銆?
 
 </details>
 
 <details>
-<summary><strong>什么时候应该使用预翻译？</strong></summary>
+<summary><strong>缈昏瘧鍚庡嚭鐜版柟鍧楀瓧鎴栫己瀛楁€庝箞鍔烇紵</strong></summary>
 
-- 文本量大、重复文本多、首次进入游戏不希望等待实时机翻时，优先使用预翻译。
-- 视觉小说、JRPG、带大量剧情文本的游戏最适合。
-- 短流程游戏或只想快速试用时，可以先直接实时翻译。
-
-</details>
-
-<details>
-<summary><strong>配置和缓存存在哪里？</strong></summary>
-
-- 默认目录是 `%AppData%\\XUnityToolkit`。
-- 可通过应用内的 **导出配置 / 导入配置** 做迁移或备份。
-- 开发与维护层面的完整数据布局，请查看 [AGENTS.md](AGENTS.md)。
+- 鍏堣繘鍏?**瀛椾綋鏇挎崲** 椤甸潰鎵弿褰撳墠瀛椾綋璧勬簮銆?
+- 濡傛灉娓告垙渚濊禆鐨?TMP / Legacy `Font` 涓嶅寘鍚腑鏂囧瓧绗︼紝鍙洿鎺ユ浛鎹负鍐呯疆瀛椾綋鎴栦笂浼犺嚜瀹氫箟瀛椾綋銆?
+- 闇€瑕佸畬鍏ㄨ嚜瀹氫箟鏃讹紝鍐嶈繘鍏?**瀛椾綋鐢熸垚** 鐢熸垚 TMP SDF 瀛椾綋銆?
 
 </details>
 
 <details>
-<summary><strong>可以把翻译成果发给别人吗？</strong></summary>
+<summary><strong>浠€涔堟椂鍊欏簲璇ヤ娇鐢ㄩ缈昏瘧锛?/strong></summary>
 
-- 可以，优先使用 **插件包导出**。
-- 它会把当前游戏的翻译插件、术语、缓存和部分相关配置打包出来，其他人可直接导入。
+- 鏂囨湰閲忓ぇ銆侀噸澶嶆枃鏈銆侀娆¤繘鍏ユ父鎴忎笉甯屾湜绛夊緟瀹炴椂鏈虹炕鏃讹紝浼樺厛浣跨敤棰勭炕璇戙€?
+- 瑙嗚灏忚銆丣RPG銆佸甫澶ч噺鍓ф儏鏂囨湰鐨勬父鎴忔渶閫傚悎銆?
+- 鐭祦绋嬫父鎴忔垨鍙兂蹇€熻瘯鐢ㄦ椂锛屽彲浠ュ厛鐩存帴瀹炴椂缈昏瘧銆?
 
 </details>
 
 <details>
-<summary><strong>开发者说明（点击展开）</strong></summary>
+<summary><strong>閰嶇疆鍜岀紦瀛樺瓨鍦ㄥ摢閲岋紵</strong></summary>
 
-### 环境要求
+- 榛樿鐩綍鏄?`%AppData%\\UnityLocalizationToolkit`銆?
+- 鍙€氳繃搴旂敤鍐呯殑 **瀵煎嚭閰嶇疆 / 瀵煎叆閰嶇疆** 鍋氳縼绉绘垨澶囦唤銆?
+- 寮€鍙戜笌缁存姢灞傞潰鐨勫畬鏁存暟鎹竷灞€锛岃鏌ョ湅 [AGENTS.md](AGENTS.md)銆?
+
+</details>
+
+<details>
+<summary><strong>鍙互鎶婄炕璇戞垚鏋滃彂缁欏埆浜哄悧锛?/strong></summary>
+
+- 鍙互锛屼紭鍏堜娇鐢?**鎻掍欢鍖呭鍑?*銆?
+- 瀹冧細鎶婂綋鍓嶆父鎴忕殑缈昏瘧鎻掍欢銆佹湳璇€佺紦瀛樺拰閮ㄥ垎鐩稿叧閰嶇疆鎵撳寘鍑烘潵锛屽叾浠栦汉鍙洿鎺ュ鍏ャ€?
+
+</details>
+
+<details>
+<summary><strong>寮€鍙戣€呰鏄庯紙鐐瑰嚮灞曞紑锛?/strong></summary>
+
+### 鐜瑕佹眰
 
 - Windows 10 / 11 x64
 - .NET 10 SDK
-- Node.js 20.19+ 或 22.12+
+- Node.js 20.19+ 鎴?22.12+
 
-### 常用命令
+### 甯哥敤鍛戒护
 
 ```bash
-dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
-dotnet build XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj -p:SkipFrontendBuild=true
-dotnet run --project XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj
+dotnet build UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj
+dotnet build UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj -p:SkipFrontendBuild=true
+dotnet run --project UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj
 
-cd XUnityToolkit-Vue
+cd UnityLocalizationToolkit-Vue
 npm run dev
 npm run build
 npx vue-tsc --build
@@ -181,28 +177,28 @@ cd ..
 .\build.ps1 -SkipDownload
 ```
 
-### 开发模式
+### 寮€鍙戞ā寮?
 
-- 后端默认监听 `http://127.0.0.1:51821`。
-- 前端开发时也应代理到 `127.0.0.1`，不要改成 `localhost`。
-- `XUnityToolkit-WebUI.csproj` 默认会在构建前自动执行前端安装与构建。
+- 鍚庣榛樿鐩戝惉 `http://127.0.0.1:51821`銆?
+- 鍓嶇寮€鍙戞椂涔熷簲浠ｇ悊鍒?`127.0.0.1`锛屼笉瑕佹敼鎴?`localhost`銆?
+- `UnityLocalizationToolkit-WebUI.csproj` 榛樿浼氬湪鏋勫缓鍓嶈嚜鍔ㄦ墽琛屽墠绔畨瑁呬笌鏋勫缓銆?
 
-### 关键子项目
+### 鍏抽敭瀛愰」鐩?
 
-- `XUnityToolkit-WebUI/`：ASP.NET Core Minimal API + WinForms / WebView2 宿主
-- `XUnityToolkit-Vue/`：Vue 3 + TypeScript + Naive UI 前端
-- `TranslatorEndpoint/`：提供给 XUnity.AutoTranslator 调用的 `LLMTranslate.dll`
-- `Updater/`：AOT 更新器
-- `Installer/`：WiX 安装器
+- `UnityLocalizationToolkit-WebUI/`锛欰SP.NET Core Minimal API + WinForms / WebView2 瀹夸富
+- `UnityLocalizationToolkit-Vue/`锛歏ue 3 + TypeScript + Naive UI 鍓嶇
+- `TranslatorEndpoint/`锛氭彁渚涚粰 XUnity.AutoTranslator 璋冪敤鐨?`LLMTranslate.dll`
+- `Updater/`锛欰OT 鏇存柊鍣?
+- `Installer/`锛歐iX 瀹夎鍣?
 
-### 维护说明
+### 缁存姢璇存槑
 
-- README 现在主要面向用户。
-- 仓库维护、运行时数据布局、同步点和不变量统一记录在 [AGENTS.md](AGENTS.md)。
-- 构建与发版流程调整时，需要同时检查 `build.ps1` 和 `.github/workflows/build.yml`。
+- README 鐜板湪涓昏闈㈠悜鐢ㄦ埛銆?
+- 浠撳簱缁存姢銆佽繍琛屾椂鏁版嵁甯冨眬銆佸悓姝ョ偣鍜屼笉鍙橀噺缁熶竴璁板綍鍦?[AGENTS.md](AGENTS.md)銆?
+- 鏋勫缓涓庡彂鐗堟祦绋嬭皟鏁存椂锛岄渶瑕佸悓鏃舵鏌?`build.ps1` 鍜?`.github/workflows/build.yml`銆?
 
 </details>
 
-## 许可证
+## 璁稿彲璇?
 
-本项目基于 [MIT License](LICENSE) 开源。
+鏈」鐩熀浜?[MIT License](LICENSE) 寮€婧愩€?

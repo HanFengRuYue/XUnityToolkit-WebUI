@@ -1,8 +1,8 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 // Show visible window title so antivirus heuristics recognize this as a user-facing updater
-try { Console.Title = "XUnityToolkit Updater"; } catch { /* no console */ }
-Console.WriteLine("XUnityToolkit 正在更新，请勿关闭此窗口...");
+try { Console.Title = "UnityLocalizationToolkit-WebUI Updater"; } catch { /* no console */ }
+Console.WriteLine("UnityLocalizationToolkit 正在更新，请勿关闭此窗口...");
 Console.WriteLine();
 
 // Parse CLI arguments
@@ -32,9 +32,9 @@ if (appDir is null || stagingDir is null || exeName is null)
     return 1;
 }
 
-// Default data directory: --data-dir or %AppData%\XUnityToolkit\
+// Default data directory: --data-dir or %AppData%\UnityLocalizationToolkit\
 var effectiveDataDir = dataDir ?? Path.Combine(
-    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
+    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "UnityLocalizationToolkit");
 
 // Ensure log directory exists and open log file
 string logDir = Path.Combine(effectiveDataDir, "update-temp");
@@ -76,7 +76,7 @@ if (pidArg is not null && int.TryParse(pidArg, out int pid))
         }
         catch (ArgumentException)
         {
-            // Process no longer exists — it has exited
+            // Process no longer exists 鈥?it has exited
             exited = true;
             break;
         }
@@ -109,7 +109,7 @@ Log($"Staging contains {stagingFiles.Count} file(s).");
 string backupDir = Path.Combine(effectiveDataDir, "update-backup");
 string normalizedAppDir = Path.GetFullPath(appDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
-// ── Phase 1: BACKUP ALL ──────────────────────────────────────────────────────
+// 鈹€鈹€ Phase 1: BACKUP ALL 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 Log("Phase 1: Backing up existing files...");
 foreach (string rel in stagingFiles)
 {
@@ -134,13 +134,13 @@ foreach (string rel in stagingFiles)
     catch (Exception ex)
     {
         Log($"  [ERROR] Backup failed for {rel}: {ex.Message}");
-        Log("Aborting — no files have been modified.");
+        Log("Aborting 鈥?no files have been modified.");
         return 3;
     }
 }
 Log("Phase 1 complete.");
 
-// ── Phase 2: REPLACE ALL ─────────────────────────────────────────────────────
+// 鈹€鈹€ Phase 2: REPLACE ALL 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 Log("Phase 2: Replacing files...");
 int replaced = 0;
 string? replaceError = null;
@@ -170,13 +170,13 @@ foreach (string rel in stagingFiles)
 
 if (replaceError is not null)
 {
-    Log("Phase 2 failed — initiating rollback.");
+    Log("Phase 2 failed 鈥?initiating rollback.");
     Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, replaceError, "replace", replaced, stagingFiles.Count - replaced, exeName, log);
     return 4;
 }
 Log("Phase 2 complete.");
 
-// ── Phase 3: DELETE ──────────────────────────────────────────────────────────
+// 鈹€鈹€ Phase 3: DELETE 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 Log("Phase 3: Processing delete list...");
 if (deleteListPath is not null && File.Exists(deleteListPath))
 {
@@ -217,7 +217,7 @@ if (deleteListPath is not null && File.Exists(deleteListPath))
 
     if (deleteError is not null)
     {
-        Log("Phase 3 failed — initiating rollback.");
+        Log("Phase 3 failed 鈥?initiating rollback.");
         Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, deleteError, "delete", replaced, 0, exeName, log);
         return 5;
     }
@@ -228,7 +228,7 @@ else
 }
 Log("Phase 3 complete.");
 
-// ── MSI Registry Sync ────────────────────────────────────────────────────────
+// 鈹€鈹€ MSI Registry Sync 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 Log("Syncing MSI registry info...");
 try
 {
@@ -239,13 +239,13 @@ catch (Exception ex)
     Log($"Warning: MSI registry sync failed (non-critical): {ex.Message}");
 }
 
-// ── Cleanup ───────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Cleanup 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 Log("Cleanup: removing staging, backup, and temp directories...");
 TryDeleteDirectory(Path.Combine(effectiveDataDir, "update-staging"), log);
 TryDeleteDirectory(backupDir, log);
 TryDeleteDirectory(logDir, log);  // This also removes the log dir; log writes after this are best-effort
 
-// ── Launch ────────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Launch 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 string exePath = Path.Combine(appDir, exeName);
 Log($"Launching: {exePath}");
 try
@@ -264,7 +264,7 @@ catch (Exception ex)
 Log("Update complete. Exiting with code 0.");
 return 0;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 static void Rollback(
     string appDir,
@@ -292,7 +292,7 @@ static void Rollback(
         string appDst = Path.Combine(appDir, rel);
         if (!File.Exists(backupSrc))
         {
-            Log($"  [ROLLBACK SKIP] {rel} (no backup exists — was new file)");
+            Log($"  [ROLLBACK SKIP] {rel} (no backup exists 鈥?was new file)");
             continue;
         }
         try
@@ -307,7 +307,7 @@ static void Rollback(
         }
     }
 
-    // Write error JSON (manual string — AOT safe, no reflection)
+    // Write error JSON (manual string 鈥?AOT safe, no reflection)
     string timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
     string safeError = EscapeJsonString(errorMessage);
     string errorJson =
@@ -365,19 +365,32 @@ static void TryDeleteDirectory(string path, StreamWriter log)
     }
 }
 
-// ── Win32 Registry P/Invoke (AOT-safe) ──────────────────────────────────────
+// 鈹€鈹€ Win32 Registry P/Invoke (AOT-safe) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 partial class Program
 {
+    private const string RegistryKeyPath = @"Software\UnityLocalizationToolkit";
+    private const string LegacyRegistryKeyPath = @"Software\XUnityToolkit";
+
     static void SyncMsiRegistryVersion(Action<string> log)
     {
         nint hKey;
         int result = RegOpenKeyEx(
             HKEY_CURRENT_USER,
-            @"Software\XUnityToolkit",
+            RegistryKeyPath,
             0,
             KEY_READ,
             out hKey);
+
+        if (result != 0)
+        {
+            result = RegOpenKeyEx(
+                HKEY_CURRENT_USER,
+                LegacyRegistryKeyPath,
+                0,
+                KEY_READ,
+                out hKey);
+        }
 
         if (result != 0)
         {
@@ -401,7 +414,7 @@ partial class Program
                 return;
             }
 
-            string exePath = Path.Combine(installDir, "XUnityToolkit-WebUI.exe");
+            string exePath = Path.Combine(installDir, "UnityLocalizationToolkit-WebUI.exe");
             string? newVersion = null;
             if (File.Exists(exePath))
             {

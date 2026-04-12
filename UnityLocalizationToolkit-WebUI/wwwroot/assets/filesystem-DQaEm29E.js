@@ -1,0 +1,1 @@
+import{n as e}from"./_plugin-vue_export-helper-C2BpRsui.js";var t={getDrives:()=>e.get(`/api/filesystem/drives`),getQuickAccess:()=>e.get(`/api/filesystem/quick-access`),listDirectory:t=>e.post(`/api/filesystem/list`,{path:t}),readText:t=>e.post(`/api/filesystem/read-text`,{path:t})};export{t};

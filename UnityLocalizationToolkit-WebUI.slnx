@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj" />
+  <Project Path="UnityLocalizationToolkit-WebUI.Tests/UnityLocalizationToolkit-WebUI.Tests.csproj" />
+  <Project Path="TranslatorEndpoint/TranslatorEndpoint.csproj" />
+  <Project Path="Updater/Updater.csproj" />
+</Solution>

@@ -1,5 +1,5 @@
-# build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload] [-Edition full|no-llama|lite]
+﻿# build.ps1 - UnityLocalizationToolkit-WebUI 鏈湴鏋勫缓鑴氭湰锛堜究鎼虹増锛?
+# 鐢ㄦ硶: .\build.ps1 [-SkipDownload] [-Edition full|no-llama|lite]
 
 param(
     [switch]$SkipDownload,
@@ -56,8 +56,8 @@ try {
 $ProgressPreference = 'SilentlyContinue'
 
 $ProjectRoot = $PSScriptRoot
-$ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
-$FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
+$ProjectFile = Join-Path $ProjectRoot 'UnityLocalizationToolkit-WebUI\UnityLocalizationToolkit-WebUI.csproj'
+$FrontendDir = Join-Path $ProjectRoot 'UnityLocalizationToolkit-Vue'
 $ReleaseRoot = Join-Path $ProjectRoot 'Release'
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
@@ -67,10 +67,10 @@ $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 $hasUpdater = Test-Path $UpdaterProject
 
-# Generate version: 4.9.{YYYYMMDDHHmm}
-$BuildVersion = "4.9.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 5.0.{YYYYMMDDHHmm}
+$BuildVersion = "5.0.$(Get-Date -Format 'yyyyMMddHHmm')"
 
-# ── GitHub repo owners ──
+# 鈹€鈹€ GitHub repo owners 鈹€鈹€
 $BepInEx5Owner = "BepInEx"
 $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
@@ -79,7 +79,7 @@ $XUnityRepo = "XUnity.AutoTranslator"
 $stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
 
 Write-Host ""
-Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
+Write-Host "=== UnityLocalizationToolkit-WebUI Build ===" -ForegroundColor Cyan
 Write-Host "    Version: $BuildVersion" -ForegroundColor DarkGray
 Write-Host "    Target: $rid" -ForegroundColor DarkGray
 Write-Host "    Edition: $Edition" -ForegroundColor DarkGray
@@ -87,8 +87,8 @@ Write-Host ""
 
 $currentStep = 0
 
-# ── Resolve GitHub auth token for API rate limits (60/h unauthenticated → 5000/h authenticated) ──
-$GitHubHeaders = @{ 'User-Agent' = 'XUnityToolkit-Build/1.0' }
+# 鈹€鈹€ Resolve GitHub auth token for API rate limits (60/h unauthenticated 鈫?5000/h authenticated) 鈹€鈹€
+$GitHubHeaders = @{ 'User-Agent' = 'UnityLocalizationToolkit-Build/1.0' }
 if ($env:GITHUB_TOKEN) {
     $GitHubHeaders['Authorization'] = "Bearer $env:GITHUB_TOKEN"
     Write-Host "  GitHub auth: using GITHUB_TOKEN env var" -ForegroundColor DarkGray
@@ -102,7 +102,7 @@ if ($env:GITHUB_TOKEN) {
     } catch { }
 }
 
-# ── Step: Download bundled assets ──
+# 鈹€鈹€ Step: Download bundled assets 鈹€鈹€
 if (-not $SkipDownload) {
     $currentStep++
     Write-Host "[$currentStep/$stepCount] Downloading bundled assets..." -ForegroundColor Yellow
@@ -155,7 +155,7 @@ if (-not $SkipDownload) {
         }
     }
 
-    # ── BepInEx 5 (Mono) from GitHub Releases ──
+    # 鈹€鈹€ BepInEx 5 (Mono) from GitHub Releases 鈹€鈹€
     Write-Host "  Fetching BepInEx 5 latest stable release..." -ForegroundColor DarkGray
     $bepinex5Releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers $GitHubHeaders -TimeoutSec 30
@@ -176,7 +176,7 @@ if (-not $SkipDownload) {
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'bepinex5') -ExpectedFiles $expectedBepInEx5
 
-    # ── BepInEx 6 BE (IL2CPP) from builds.bepinex.dev ──
+    # 鈹€鈹€ BepInEx 6 BE (IL2CPP) from builds.bepinex.dev 鈹€鈹€
     Write-Host "  Fetching BepInEx 6 BE latest build..." -ForegroundColor DarkGray
     $buildsPage = Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
         Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
@@ -201,7 +201,7 @@ if (-not $SkipDownload) {
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'bepinex6') -ExpectedFiles $expectedBepInEx6
 
-    # ── XUnity.AutoTranslator from GitHub Releases ──
+    # 鈹€鈹€ XUnity.AutoTranslator from GitHub Releases 鈹€鈹€
     Write-Host "  Fetching XUnity.AutoTranslator latest release..." -ForegroundColor DarkGray
     $xunityReleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers $GitHubHeaders -TimeoutSec 30
@@ -219,7 +219,7 @@ if (-not $SkipDownload) {
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'xunity') -ExpectedFiles $expectedXUnity
 
-    # ── Extract XUnity reference DLLs for TranslatorEndpoint ──
+    # 鈹€鈹€ Extract XUnity reference DLLs for TranslatorEndpoint 鈹€鈹€
     $xunityZip = Get-ChildItem -Path (Join-Path $BundledRoot 'xunity') -Filter '*.zip' |
         Where-Object { $_.Name -notlike '*IL2CPP*' } |
         Select-Object -First 1
@@ -281,7 +281,7 @@ if (-not $SkipDownload) {
         Write-Host "  [skip] XUnity ZIP not found, using committed DLLs" -ForegroundColor DarkGray
     }
 
-    # ── llama.cpp binaries from GitHub Releases (pinned version) ──
+    # 鈹€鈹€ llama.cpp binaries from GitHub Releases (pinned version) 鈹€鈹€
     if ($Edition -ne 'full') {
         Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
     } else {
@@ -316,7 +316,7 @@ if (-not $SkipDownload) {
     Set-Content -Path (Join-Path $llamaDir 'version.txt') -Value $llamaTag -NoNewline
     } # end if ($Edition -eq 'full')
 
-    # ── Update classdata.tpk from AssetRipper/Tpk CI ──
+    # 鈹€鈹€ Update classdata.tpk from AssetRipper/Tpk CI 鈹€鈹€
     if (Get-Command gh -ErrorAction SilentlyContinue) {
         Write-Host "  Fetching latest classdata.tpk from AssetRipper/Tpk..." -ForegroundColor DarkGray
         $tpkTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "tpk_$(Get-Random)"
@@ -325,7 +325,7 @@ if (-not $SkipDownload) {
             if ($LASTEXITCODE -ne 0) { throw "gh run download failed: $ghOutput" }
             $downloadedTpk = Join-Path $tpkTempDir 'lz4.tpk'
             if (-not (Test-Path $downloadedTpk)) { throw "lz4.tpk not found in downloaded artifact" }
-            $targetTpk = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\Resources\classdata.tpk'
+            $targetTpk = Join-Path $ProjectRoot 'UnityLocalizationToolkit-WebUI\Resources\classdata.tpk'
             $newHash = (Get-FileHash -Path $downloadedTpk -Algorithm SHA256).Hash
             $changed = $true
             if (Test-Path $targetTpk) {
@@ -351,7 +351,7 @@ if (-not $SkipDownload) {
     Write-Host "  Bundled assets ready." -ForegroundColor Green
 }
 
-# ── Step: Build frontend ──
+# 鈹€鈹€ Step: Build frontend 鈹€鈹€
 $currentStep++
 Write-Host ""
 Write-Host "[$currentStep/$stepCount] Building frontend..." -ForegroundColor Yellow
@@ -367,7 +367,7 @@ try {
 }
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
-# ── Step: Build TranslatorEndpoint (LLMTranslate.dll) ──
+# 鈹€鈹€ Step: Build TranslatorEndpoint (LLMTranslate.dll) 鈹€鈹€
 if ($hasEndpoint) {
     $currentStep++
     Write-Host ""
@@ -388,25 +388,25 @@ if ($hasEndpoint) {
     }
 }
 
-# ── Step: Build Updater (AOT) ──
+# 鈹€鈹€ Step: Build Updater (AOT) 鈹€鈹€
 if ($hasUpdater) {
     $currentStep++
     Write-Host ""
     Write-Host "[$currentStep/$stepCount] Building Updater (AOT)..." -ForegroundColor Yellow
 
-    # AOT publish requires its own restore phase — do NOT use --no-restore
+    # AOT publish requires its own restore phase 鈥?do NOT use --no-restore
     & dotnet publish $UpdaterProject -c Release -r $rid --nologo -v quiet
     if ($LASTEXITCODE -ne 0) { throw "Updater build failed" }
     Write-Host "  Updater.exe build complete." -ForegroundColor Green
 }
 
-# ── Step: Prepare Release folder ──
+# 鈹€鈹€ Step: Prepare Release folder 鈹€鈹€
 $currentStep++
 Write-Host ""
 Write-Host "[$currentStep/$stepCount] Preparing Release folder..." -ForegroundColor Yellow
 
 # Stop processes that may lock files in Release folder
-$processesToStop = @('XUnityToolkit-WebUI', 'llama-server')
+$processesToStop = @('UnityLocalizationToolkit-WebUI', 'llama-server')
 foreach ($procName in $processesToStop) {
     $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
     if ($procs) {
@@ -421,7 +421,7 @@ if (Test-Path $ReleaseRoot) {
 }
 New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
 
-# ── Step: Publish win-x64 ──
+# 鈹€鈹€ Step: Publish win-x64 鈹€鈹€
 $currentStep++
 $editionSuffix = if ($Edition -eq 'full') { '' } else { "-$Edition" }
 $OutputDir = Join-Path $ReleaseRoot "$rid$editionSuffix"
@@ -458,7 +458,7 @@ if ($hasUpdater) {
     }
 }
 
-# Copy bundled assets (bypass MSBuild — PublishSingleFile drops files with '+' in names)
+# Copy bundled assets (bypass MSBuild 鈥?PublishSingleFile drops files with '+' in names)
 $bundledSrc = Join-Path $ProjectRoot 'bundled'
 if (Test-Path $bundledSrc) {
     $bundledDest = Join-Path $OutputDir 'bundled'
@@ -475,11 +475,11 @@ if (Test-Path $bundledSrc) {
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
 
-$exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
+$exeFile = Get-Item (Join-Path $OutputDir 'UnityLocalizationToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
 Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
 
-# ── Summary ──
+# 鈹€鈹€ Summary 鈹€鈹€
 Write-Host ""
 Write-Host "=== Build Complete ===" -ForegroundColor Cyan
 Write-Host ""

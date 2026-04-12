@@ -3,9 +3,9 @@
   <Fragment>
     <ComponentGroup Id="CleanupComponents" Directory="INSTALLDIR">
       <Component Id="CleanupAppData" Guid="D4E5F6A7-B8C9-0123-DEF0-456789ABCDEF">
-        <RegistryValue Root="HKCU" Key="Software\XUnityToolkit"
+        <RegistryValue Root="HKCU" Key="Software\UnityLocalizationToolkit"
                        Name="CleanupMarker" Type="integer" Value="1" KeyPath="yes" />
-        <!-- RemoveFolderEx intentionally removed: user data in %AppData%\XUnityToolkit\
+        <!-- RemoveFolderEx intentionally removed: user data in %AppData%\UnityLocalizationToolkit\
              is preserved on uninstall (industry standard). Component shell with same GUID
              is kept for MSI reference counting during MajorUpgrade from older versions. -->
       </Component>

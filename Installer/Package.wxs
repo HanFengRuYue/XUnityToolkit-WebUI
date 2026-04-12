@@ -1,27 +1,27 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <Package Name="XUnityToolkit-WebUI"
-           Manufacturer="XUnityToolkit"
+  <Package Name="UnityLocalizationToolkit-WebUI"
+           Manufacturer="UnityLocalizationToolkit"
            Version="$(var.MsiVersion)"
            UpgradeCode="E8A3F4B2-7C1D-4E5A-9B6F-2D8C4A1E3F7B"
            Compressed="yes"
            InstallerVersion="500"
            Scope="perUser">
 
-    <SummaryInformation Description="XUnityToolkit-WebUI Installer" />
+    <SummaryInformation Description="UnityLocalizationToolkit-WebUI Installer" />
 
     <MajorUpgrade AllowSameVersionUpgrades="yes"
                   Schedule="afterInstallExecute"
-                  DowngradeErrorMessage="A newer version of XUnityToolkit-WebUI is already installed. Downgrade is not supported." />
+                  DowngradeErrorMessage="A newer version of UnityLocalizationToolkit-WebUI is already installed. Downgrade is not supported." />
 
     <MediaTemplate EmbedCab="yes" CompressionLevel="medium" />
 
-    <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\XUnityToolkit-WebUI.exe" />
+    <Icon Id="AppIcon" SourceFile="$(var.PublishDir)\UnityLocalizationToolkit-WebUI.exe" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/XUnityToolkit/XUnityToolkit-WebUI" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/HanFengRuYue/UnityLocalizationToolkit-WebUI" />
 
-    <Feature Id="ProductFeature" Title="XUnityToolkit-WebUI" Level="1">
+    <Feature Id="ProductFeature" Title="UnityLocalizationToolkit-WebUI" Level="1">
       <ComponentGroupRef Id="CoreComponents" />
       <ComponentGroupRef Id="ShortcutComponents" />
       <ComponentGroupRef Id="HarvestedFiles" />
@@ -41,7 +41,7 @@
     <!-- Chinese text via !(loc.) to avoid MSI codepage 1252 WIX0311 error -->
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchCheckboxText)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-    <Property Id="WixShellExecTarget" Value="[INSTALLDIR]XUnityToolkit-WebUI.exe" />
+    <Property Id="WixShellExecTarget" Value="[INSTALLDIR]UnityLocalizationToolkit-WebUI.exe" />
     <CustomAction Id="LaunchApplication"
                   DllEntry="WixShellExec"
                   Impersonate="yes"
@@ -53,13 +53,13 @@
                Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
 
       <!-- Override MaintenanceTypeDlg RemoveButton: redirect to UninstallConfirmDlg.
-           Built-in WixUI_InstallDir has NewDialog → VerifyReadyDlg without explicit Order.
+           Built-in WixUI_InstallDir has NewDialog 鈫?VerifyReadyDlg without explicit Order.
            Use Order="99" to ensure this runs last, making UninstallConfirmDlg the final target. -->
       <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton"
                Event="NewDialog" Value="UninstallConfirmDlg"
                Order="99" />
 
-      <!-- Override VerifyReadyDlg Back button: built-in has NewDialog → MaintenanceTypeDlg
+      <!-- Override VerifyReadyDlg Back button: built-in has NewDialog 鈫?MaintenanceTypeDlg
            at Order="2" with Condition="Installed AND NOT PATCH". Use Order="3" so when
            WIXUI_REMOVING=1, this runs after and overrides the built-in target. -->
       <Publish Dialog="VerifyReadyDlg" Control="Back"

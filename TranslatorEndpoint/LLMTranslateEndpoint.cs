@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
@@ -33,7 +33,7 @@ namespace LLMTranslate
 
         public override string FriendlyName
         {
-            get { return "AI Translation (LLM via XUnity Toolkit)"; }
+            get { return "AI Translation (LLM via UnityLocalizationToolkit)"; }
         }
 
         public override int MaxConcurrency
@@ -65,10 +65,10 @@ namespace LLMTranslate
 
             _translateUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate";
 
-            // XUnity 的 HttpEndpoint 通过 ConnectionTrackingWebClient → WebClient → HttpWebRequest 发送请求。
-            // Mono 的 ServicePointManager.DefaultConnectionLimit 默认为 2，严重限制并发连接数。
-            // 重要：DefaultConnectionLimit 只影响之后新创建的 ServicePoint，
-            // 必须用 FindServicePoint 直接设置目标主机的 ConnectionLimit。
+            // XUnity 鐨?HttpEndpoint 閫氳繃 ConnectionTrackingWebClient 鈫?WebClient 鈫?HttpWebRequest 鍙戦€佽姹傘€?
+            // Mono 鐨?ServicePointManager.DefaultConnectionLimit 榛樿涓?2锛屼弗閲嶉檺鍒跺苟鍙戣繛鎺ユ暟銆?
+            // 閲嶈锛欴efaultConnectionLimit 鍙奖鍝嶄箣鍚庢柊鍒涘缓鐨?ServicePoint锛?
+            // 蹇呴』鐢?FindServicePoint 鐩存帴璁剧疆鐩爣涓绘満鐨?ConnectionLimit銆?
             ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, _maxConcurrency + 10);
             ServicePointManager.Expect100Continue = false;
 
@@ -77,12 +77,12 @@ namespace LLMTranslate
                 var targetUri = new Uri(_translateUrl);
                 var servicePoint = ServicePointManager.FindServicePoint(targetUri);
                 servicePoint.ConnectionLimit = _maxConcurrency + 10;
-                servicePoint.MaxIdleTime = 120000; // 120 秒空闲后关闭连接
-                DebugLog("  ServicePoint 连接限制: " + servicePoint.ConnectionLimit);
+                servicePoint.MaxIdleTime = 120000; // 120 绉掔┖闂插悗鍏抽棴杩炴帴
+                DebugLog("  ServicePoint 杩炴帴闄愬埗: " + servicePoint.ConnectionLimit);
             }
             catch (Exception ex)
             {
-                DebugLog("  设置 ServicePoint 失败: " + ex.Message);
+                DebugLog("  璁剧疆 ServicePoint 澶辫触: " + ex.Message);
             }
 
             var disableSpamChecks = context.GetOrCreateSetting<bool>(ConfigSection, ConfigDisableSpamChecksKey, true);
@@ -93,18 +93,18 @@ namespace LLMTranslate
             if (translationDelay >= 0.1f)
                 context.SetTranslationDelay(translationDelay);
 
-            Log("=== LLMTranslate 插件初始化 ===");
-            Log("  工具箱地址: " + _translateUrl);
-            Log("  并发连接数: " + _maxConcurrency);
-            Log("  每请求文本数: " + _maxTranslationsPerRequest);
-            Log("  最大同时翻译: " + (_maxConcurrency * _maxTranslationsPerRequest));
-            DebugLog("  全局连接池默认: " + ServicePointManager.DefaultConnectionLimit);
-            Log("  游戏 ID: " + (string.IsNullOrEmpty(_gameId) ? "(未设置)" : _gameId));
-            Log("  禁用防刷检查: " + (disableSpamChecks ? "是" : "否"));
-            Log("  翻译延迟: " + translationDelay + " 秒");
-            Log("  调试模式: " + (_debugMode ? "开启" : "关闭"));
+            Log("=== LLMTranslate 鎻掍欢鍒濆鍖?===");
+            Log("  宸ュ叿绠卞湴鍧€: " + _translateUrl);
+            Log("  骞跺彂杩炴帴鏁? " + _maxConcurrency);
+            Log("  姣忚姹傛枃鏈暟: " + _maxTranslationsPerRequest);
+            Log("  鏈€澶у悓鏃剁炕璇? " + (_maxConcurrency * _maxTranslationsPerRequest));
+            DebugLog("  鍏ㄥ眬杩炴帴姹犻粯璁? " + ServicePointManager.DefaultConnectionLimit);
+            Log("  娓告垙 ID: " + (string.IsNullOrEmpty(_gameId) ? "(鏈缃?" : _gameId));
+            Log("  绂佺敤闃插埛妫€鏌? " + (disableSpamChecks ? "鏄? : "鍚?));
+            Log("  缈昏瘧寤惰繜: " + translationDelay + " 绉?);
+            Log("  璋冭瘯妯″紡: " + (_debugMode ? "寮€鍚? : "鍏抽棴"));
 
-            // Connectivity ping — notify toolbox that the plugin has loaded
+            // Connectivity ping 鈥?notify toolbox that the plugin has loaded
             try
             {
                 var pingUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate/ping";
@@ -114,11 +114,11 @@ namespace LLMTranslate
                 pingClient.DownloadStringCompleted += (s, e) => ((WebClient)s).Dispose();
                 try { pingClient.DownloadStringAsync(new Uri(pingUrl)); }
                 catch { pingClient.Dispose(); throw; }
-                Log("  连通性测试已发送: " + pingUrl);
+                Log("  杩為€氭€ф祴璇曞凡鍙戦€? " + pingUrl);
             }
             catch (Exception ex)
             {
-                Log("  连通性测试发送失败: " + ex.Message);
+                Log("  杩為€氭€ф祴璇曞彂閫佸け璐? " + ex.Message);
             }
         }
 
@@ -130,7 +130,7 @@ namespace LLMTranslate
                 context.DestinationLanguage,
                 _gameId);
 
-            Log(string.Format("[请求] 发送 {0} 条文本到工具箱: {1} → {2}",
+            Log(string.Format("[璇锋眰] 鍙戦€?{0} 鏉℃枃鏈埌宸ュ叿绠? {1} 鈫?{2}",
                 context.UntranslatedTexts.Length,
                 context.SourceLanguage,
                 context.DestinationLanguage));
@@ -144,14 +144,14 @@ namespace LLMTranslate
                     DebugLog("  [" + i + "] " + text);
                 }
                 if (context.UntranslatedTexts.Length > 3)
-                    DebugLog("  ... 还有 " + (context.UntranslatedTexts.Length - 3) + " 条");
+                    DebugLog("  ... 杩樻湁 " + (context.UntranslatedTexts.Length - 3) + " 鏉?);
             }
 
             var request = new XUnityWebRequest("POST", _translateUrl, body);
             request.Headers[HttpRequestHeader.ContentType] = "application/json";
             request.Headers[HttpRequestHeader.Accept] = "application/json";
-            // 不设置 Connection: close — keep-alive 连接复用更高效。
-            // Mono 的 close 实现有 CLOSE_WAIT 泄漏问题，会永久占用连接槽。
+            // 涓嶈缃?Connection: close 鈥?keep-alive 杩炴帴澶嶇敤鏇撮珮鏁堛€?
+            // Mono 鐨?close 瀹炵幇鏈?CLOSE_WAIT 娉勬紡闂锛屼細姘镐箙鍗犵敤杩炴帴妲姐€?
 
             context.Complete(request);
         }
@@ -161,25 +161,25 @@ namespace LLMTranslate
             var raw = context.Response.Data;
             if (string.IsNullOrEmpty(raw))
             {
-                Log("[错误] 工具箱返回空响应");
+                Log("[閿欒] 宸ュ叿绠辫繑鍥炵┖鍝嶅簲");
                 context.Fail("Empty response from toolkit backend.");
                 return;
             }
 
-            DebugLog("[响应] 收到工具箱响应: " + (raw.Length > 200 ? raw.Substring(0, 200) + "..." : raw));
+            DebugLog("[鍝嶅簲] 鏀跺埌宸ュ叿绠卞搷搴? " + (raw.Length > 200 ? raw.Substring(0, 200) + "..." : raw));
 
             var translations = ParseTranslationsArray(raw);
 
             if (translations == null || translations.Length != context.UntranslatedTexts.Length)
             {
-                Log(string.Format("[错误] 翻译数量不匹配: 期望 {0}, 实际 {1}",
+                Log(string.Format("[閿欒] 缈昏瘧鏁伴噺涓嶅尮閰? 鏈熸湜 {0}, 瀹為檯 {1}",
                     context.UntranslatedTexts.Length,
                     translations != null ? translations.Length.ToString() : "null"));
                 context.Fail("Translation count mismatch.");
                 return;
             }
 
-            Log(string.Format("[完成] 成功翻译 {0} 条文本", translations.Length));
+            Log(string.Format("[瀹屾垚] 鎴愬姛缈昏瘧 {0} 鏉℃枃鏈?, translations.Length));
             if (_debugMode && translations.Length > 0)
             {
                 for (int i = 0; i < translations.Length && i < 3; i++)

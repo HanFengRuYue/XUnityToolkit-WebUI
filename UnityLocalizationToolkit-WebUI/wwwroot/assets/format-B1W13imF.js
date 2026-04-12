@@ -1,0 +1,1 @@
+function e(e){return e>=1024*1024*1024?(e/(1024*1024*1024)).toFixed(1)+` GB`:e>=1024*1024?(e/(1024*1024)).toFixed(1)+` MB`:e>=1024?(e/1024).toFixed(1)+` KB`:`${e} B`}function t(e){return e>=1024*1024?(e/(1024*1024)).toFixed(1)+` MB/s`:(e/1024).toFixed(0)+` KB/s`}export{t as n,e as t};

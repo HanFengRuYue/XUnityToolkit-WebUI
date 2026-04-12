@@ -1,4 +1,4 @@
-# Triggered when a v* tag is pushed.
+﻿# Triggered when a v* tag is pushed.
 # Delegates all build work to build.yml.
 name: Release
 
@@ -11,35 +11,35 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       release_tag: ${{ github.ref_name }}
-      release_name: "XUnityToolkit-WebUI ${{ github.ref_name }}"
+      release_name: "UnityLocalizationToolkit-WebUI ${{ github.ref_name }}"
       release_body: |
-        ## XUnityToolkit-WebUI ${{ github.ref_name }}
+        ## UnityLocalizationToolkit-WebUI ${{ github.ref_name }}
 
-        ### 版本说明
-        - **Full（完整版）**：自包含 + 内置本地大模型（推荐）
-        - **No-LLAMA**：自包含，仅云端 API 翻译
-        - **Lite（精简版）**：需安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)，最小体积
+        ### 鐗堟湰璇存槑
+        - **Full锛堝畬鏁寸増锛?*锛氳嚜鍖呭惈 + 鍐呯疆鏈湴澶фā鍨嬶紙鎺ㄨ崘锛?
+        - **No-LLAMA**锛氳嚜鍖呭惈锛屼粎浜戠 API 缈昏瘧
+        - **Lite锛堢簿绠€鐗堬級**锛氶渶瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)锛屾渶灏忎綋绉?
 
-        ### 下载
+        ### 涓嬭浇
 
-        #### ZIP 便携版（解压即用）
-        | 文件 | 版本 |
+        #### ZIP 渚挎惡鐗堬紙瑙ｅ帇鍗崇敤锛?
+        | 鏂囦欢 | 鐗堟湰 |
         |------|------|
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Full 完整版 |
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.zip` | No-LLAMA |
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.zip` | Lite 精简版 |
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Full 瀹屾暣鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.zip` | No-LLAMA |
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.zip` | Lite 绮剧畝鐗?|
 
-        #### MSI 安装包（双击安装）
-        | 文件 | 版本 |
+        #### MSI 瀹夎鍖咃紙鍙屽嚮瀹夎锛?
+        | 鏂囦欢 | 鐗堟湰 |
         |------|------|
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | Full 完整版 |
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.msi` | No-LLAMA |
-        | `XUnityToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.msi` | Lite 精简版 |
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | Full 瀹屾暣鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.msi` | No-LLAMA |
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.msi` | Lite 绮剧畝鐗?|
 
-        ### 安装方式
-        - **便携版：** 下载 ZIP，解压后运行 `XUnityToolkit-WebUI.exe`
-        - **安装包：** 下载 MSI，双击安装即可
-        - **Lite 版：** 需要先安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)
+        ### 瀹夎鏂瑰紡
+        - **渚挎惡鐗堬細** 涓嬭浇 ZIP锛岃В鍘嬪悗杩愯 `UnityLocalizationToolkit-WebUI.exe`
+        - **瀹夎鍖咃細** 涓嬭浇 MSI锛屽弻鍑诲畨瑁呭嵆鍙?
+        - **Lite 鐗堬細** 闇€瑕佸厛瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)
       prerelease: false
     permissions:
       contents: write

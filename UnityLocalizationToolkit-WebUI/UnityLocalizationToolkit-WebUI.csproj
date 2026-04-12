@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>UnityLocalizationToolkit_WebUI</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <SpaRoot>..\UnityLocalizationToolkit-Vue\</SpaRoot>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <NoWarn>$(NoWarn);MSB3277;NU1900</NoWarn>
+    <Edition Condition="'$(Edition)' == ''">full</Edition>
+  </PropertyGroup>
+
+  <!-- Inject edition as assembly metadata for runtime detection -->
+  <ItemGroup>
+    <AssemblyMetadata Include="Edition" Value="$(Edition)" />
+  </ItemGroup>
+
+  <!-- Embed LLMTranslate.dll if it has been built -->
+  <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll')">
+    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll" LogicalName="LLMTranslate.dll" />
+  </ItemGroup>
+
+  <!-- Embed classdata.tpk for Unity asset type deserialization -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\classdata.tpk" LogicalName="classdata.tpk" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AssetsTools.NET" Version="3.0.4" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3856.49" />
+    <PackageReference Include="AssetsTools.NET.Cpp2IL" Version="3.0.4" />
+    <PackageReference Include="AssetsTools.NET.MonoCecil" Version="3.0.4" />
+    <PackageReference Include="AssetsTools.NET.Texture" Version="3.0.2" />
+    <PackageReference Include="dnlib" Version="4.5.0" />
+    <PackageReference Include="FreeTypeSharp" Version="3.1.0" />
+    <PackageReference Include="RectpackSharp" Version="1.2.0" />
+    <PackageReference Include="System.Management" Version="10.0.5" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.5" />
+  </ItemGroup>
+
+  <!-- Copy TMP fonts to output directory during build -->
+  <ItemGroup Condition="Exists('..\bundled\fonts')">
+    <Content Include="..\bundled\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\fonts\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- Copy script tag presets to output directory during build -->
+  <ItemGroup Condition="Exists('..\bundled\script-tag-presets.json')">
+    <Content Include="..\bundled\script-tag-presets.json" CopyToOutputDirectory="PreserveNewest" Link="bundled\script-tag-presets.json" />
+  </ItemGroup>
+
+  <!-- Bundled plugin ZIPs and llama.cpp binaries are copied by build.ps1 after publish -->
+
+  <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->
+  <Target Name="BuildFrontend" BeforeTargets="Build" Condition="'$(SkipFrontendBuild)' != 'true'">
+    <Message Importance="high" Text="Installing frontend dependencies..." />
+    <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" />
+    <Message Importance="high" Text="Building frontend..." />
+    <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+  </Target>
+
+</Project>

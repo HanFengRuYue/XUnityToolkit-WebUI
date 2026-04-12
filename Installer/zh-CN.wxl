@@ -1,14 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <WixLocalization Culture="zh-CN" xmlns="http://wixtoolset.org/schemas/v4/wxl">
   <!-- Custom string for launch-after-install checkbox on ExitDialog -->
-  <String Id="LaunchCheckboxText" Overridable="yes" Value="安装完成后启动 XUnityToolkit-WebUI" />
+  <String Id="LaunchCheckboxText" Overridable="yes" Value="瀹夎瀹屾垚鍚庡惎鍔?UnityLocalizationToolkit-WebUI" />
 
   <!-- Uninstall confirm dialog -->
-  <String Id="UninstallConfirmTitle" Value="确认卸载" />
-  <String Id="UninstallConfirmSubtitle" Value="将从计算机中删除 XUnityToolkit-WebUI。" />
-  <String Id="UninstallConfirmBody" Value="此操作将卸载 XUnityToolkit-WebUI 及其所有组件。您的翻译数据和配置文件默认会保留，也可以选择一并删除。" />
-  <String Id="UninstallConfirmDeleteCheckbox" Value="同时删除用户数据和配置（包含翻译记录、术语表等）" />
-  <String Id="UninstallConfirmDataPathHint" Value="数据目录：%AppData%\XUnityToolkit\" />
-  <String Id="UninstallConfirmWarning" Value="警告：删除后数据将无法恢复，包括游戏翻译设置、术语表和本地模型文件。" />
-  <String Id="UninstallConfirmRemoveButton" Value="卸载" />
+  <String Id="UninstallConfirmTitle" Value="纭鍗歌浇" />
+  <String Id="UninstallConfirmSubtitle" Value="灏嗕粠璁＄畻鏈轰腑鍒犻櫎 UnityLocalizationToolkit-WebUI銆? />
+  <String Id="UninstallConfirmBody" Value="姝ゆ搷浣滃皢鍗歌浇 UnityLocalizationToolkit-WebUI 鍙婂叾鎵€鏈夌粍浠躲€傛偍鐨勭炕璇戞暟鎹拰閰嶇疆鏂囦欢榛樿浼氫繚鐣欙紝涔熷彲浠ラ€夋嫨涓€骞跺垹闄ゃ€? />
+  <String Id="UninstallConfirmDeleteCheckbox" Value="鍚屾椂鍒犻櫎鐢ㄦ埛鏁版嵁鍜岄厤缃紙鍖呭惈缈昏瘧璁板綍銆佹湳璇〃绛夛級" />
+  <String Id="UninstallConfirmDataPathHint" Value="鏁版嵁鐩綍锛?AppData%\UnityLocalizationToolkit\" />
+  <String Id="UninstallConfirmWarning" Value="璀﹀憡锛氬垹闄ゅ悗鏁版嵁灏嗘棤娉曟仮澶嶏紝鍖呮嫭娓告垙缈昏瘧璁剧疆銆佹湳璇〃鍜屾湰鍦版ā鍨嬫枃浠躲€? />
+  <String Id="UninstallConfirmRemoveButton" Value="鍗歌浇" />
 </WixLocalization>

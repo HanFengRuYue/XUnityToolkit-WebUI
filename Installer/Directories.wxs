@@ -1,16 +1,16 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
-    <!-- Per-user install: %LocalAppData%\Programs\XUnityToolkit-WebUI\ -->
+    <!-- Per-user install: %LocalAppData%\Programs\UnityLocalizationToolkit-WebUI\ -->
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">
-        <Directory Id="INSTALLDIR" Name="XUnityToolkit-WebUI" />
+        <Directory Id="INSTALLDIR" Name="UnityLocalizationToolkit-WebUI" />
       </Directory>
     </StandardDirectory>
 
     <!-- Start menu: per-user program group -->
     <StandardDirectory Id="ProgramMenuFolder">
-      <Directory Id="ProgramMenuDir" Name="XUnityToolkit-WebUI" />
+      <Directory Id="ProgramMenuDir" Name="UnityLocalizationToolkit-WebUI" />
     </StandardDirectory>
 
     <!-- Desktop: per-user -->

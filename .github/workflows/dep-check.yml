@@ -1,4 +1,4 @@
-# Daily dependency check for BepInEx 5, BepInEx 6 BE, and XUnity.AutoTranslator.
+﻿# Daily dependency check for BepInEx 5, BepInEx 6 BE, and XUnity.AutoTranslator.
 # If any dependency has a new version, triggers a build and release,
 # then commits updated deps.json.
 name: Dependency Check
@@ -37,13 +37,13 @@ jobs:
           # BepInEx 5 (GitHub Releases)
           B5=$(curl -sSf \
             -H "Authorization: Bearer $GH_TOKEN" \
-            -H "User-Agent: XUnityToolkit-CI/1.0" \
+            -H "User-Agent: UnityLocalizationToolkit-CI/1.0" \
             "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" \
             | jq -r '[.[] | select(.prerelease == false and (.tag_name | startswith("v5")))] | .[0].tag_name')
           echo "bepinex5=$B5" >> "$GITHUB_OUTPUT"
           echo "BepInEx 5: $B5"
 
-          # BepInEx 6 BE (HTML scrape — extract build number from IL2CPP x64 link)
+          # BepInEx 6 BE (HTML scrape 鈥?extract build number from IL2CPP x64 link)
           B6=$(curl -sSf "https://builds.bepinex.dev/projects/bepinex_be" \
             | grep -oE '[0-9]+/BepInEx-Unity\.IL2CPP-win-x64' | cut -d/ -f1 | sort -rn | head -1)
           if [ -z "$B6" ]; then
@@ -56,7 +56,7 @@ jobs:
           # XUnity.AutoTranslator (GitHub Releases)
           XU=$(curl -sSf \
             -H "Authorization: Bearer $GH_TOKEN" \
-            -H "User-Agent: XUnityToolkit-CI/1.0" \
+            -H "User-Agent: UnityLocalizationToolkit-CI/1.0" \
             "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" \
             | jq -r '.[0].tag_name')
           echo "xunity=$XU" >> "$GITHUB_OUTPUT"
@@ -78,20 +78,20 @@ jobs:
 
           if [ "$NEW_B5" != "$STORED_B5" ] && [ -n "$NEW_B5" ] && [ "$NEW_B5" != "null" ]; then
             CHANGED="true"
-            NOTES="${NOTES}- **BepInEx 5 (Mono):** \`${STORED_B5}\` → \`${NEW_B5}\`\n"
+            NOTES="${NOTES}- **BepInEx 5 (Mono):** \`${STORED_B5}\` 鈫?\`${NEW_B5}\`\n"
           fi
           if [ "$NEW_B6" != "$STORED_B6" ] && [ -n "$NEW_B6" ]; then
             CHANGED="true"
-            NOTES="${NOTES}- **BepInEx 6 BE (IL2CPP):** build \`${STORED_B6}\` → build \`${NEW_B6}\`\n"
+            NOTES="${NOTES}- **BepInEx 6 BE (IL2CPP):** build \`${STORED_B6}\` 鈫?build \`${NEW_B6}\`\n"
           fi
           if [ "$NEW_XU" != "$STORED_XU" ] && [ -n "$NEW_XU" ] && [ "$NEW_XU" != "null" ]; then
             CHANGED="true"
-            NOTES="${NOTES}- **XUnity.AutoTranslator:** \`${STORED_XU}\` → \`${NEW_XU}\`\n"
+            NOTES="${NOTES}- **XUnity.AutoTranslator:** \`${STORED_XU}\` 鈫?\`${NEW_XU}\`\n"
           fi
 
           FORCE="${{ inputs.force_build }}"
           if [ -n "$CHANGED" ] || [ "$FORCE" = "true" ]; then
-            BUILD_VER="4.9.$(date -u +%Y%m%d%H%M)"
+            BUILD_VER="5.0.$(date -u +%Y%m%d%H%M)"
             VER_PREFIX="v$(echo "$BUILD_VER" | cut -d. -f1,2)"
             RELEASE_TAG="auto-${BUILD_VER}"
 
@@ -113,7 +113,7 @@ jobs:
             # Multi-line release notes
             {
               echo 'release_notes<<RELEASE_EOF'
-              echo "## XUnityToolkit-WebUI ${BUILD_VER}"
+              echo "## UnityLocalizationToolkit-WebUI ${BUILD_VER}"
               echo ""
               echo "Automated dependency update build."
               echo ""
@@ -124,26 +124,26 @@ jobs:
                 echo "- Force build (no dependency changes)"
               fi
               echo ""
-              echo "### 版本说明"
-              echo "- **Full（完整版）**：自包含 + 内置本地大模型（推荐）"
-              echo "- **No-LLAMA**：自包含，仅云端 API 翻译"
-              echo "- **Lite（精简版）**：需安装 [.NET 10 运行时](https://dotnet.microsoft.com/download/dotnet/10.0)，最小体积"
+              echo "### 鐗堟湰璇存槑"
+              echo "- **Full锛堝畬鏁寸増锛?*锛氳嚜鍖呭惈 + 鍐呯疆鏈湴澶фā鍨嬶紙鎺ㄨ崘锛?
+              echo "- **No-LLAMA**锛氳嚜鍖呭惈锛屼粎浜戠 API 缈昏瘧"
+              echo "- **Lite锛堢簿绠€鐗堬級**锛氶渶瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)锛屾渶灏忎綋绉?
               echo ""
-              echo "### 下载"
+              echo "### 涓嬭浇"
               echo ""
-              echo "#### ZIP 便携版（解压即用）"
-              echo "| 文件 | 版本 |"
+              echo "#### ZIP 渚挎惡鐗堬紙瑙ｅ帇鍗崇敤锛?
+              echo "| 鏂囦欢 | 鐗堟湰 |"
               echo "|------|------|"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64.zip\` | Full 完整版 |"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.zip\` | No-LLAMA |"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64-lite.zip\` | Lite 精简版 |"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.zip\` | Full 瀹屾暣鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.zip\` | No-LLAMA |"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.zip\` | Lite 绮剧畝鐗?|"
               echo ""
-              echo "#### MSI 安装包（双击安装）"
-              echo "| 文件 | 版本 |"
+              echo "#### MSI 瀹夎鍖咃紙鍙屽嚮瀹夎锛?
+              echo "| 鏂囦欢 | 鐗堟湰 |"
               echo "|------|------|"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64.msi\` | Full 完整版 |"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.msi\` | No-LLAMA |"
-              echo "| \`XUnityToolkit-WebUI-${VER_PREFIX}-win-x64-lite.msi\` | Lite 精简版 |"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.msi\` | Full 瀹屾暣鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.msi\` | No-LLAMA |"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.msi\` | Lite 绮剧畝鐗?|"
               echo 'RELEASE_EOF'
             } >> "$GITHUB_OUTPUT"
 
@@ -160,7 +160,7 @@ jobs:
     with:
       build_version: ${{ needs.check.outputs.build_version }}
       release_tag: ${{ needs.check.outputs.release_tag }}
-      release_name: "XUnityToolkit-WebUI ${{ needs.check.outputs.build_version }}"
+      release_name: "UnityLocalizationToolkit-WebUI ${{ needs.check.outputs.build_version }}"
       release_body: ${{ needs.check.outputs.release_notes }}
       prerelease: true
     permissions:
@@ -188,7 +188,7 @@ jobs:
           trap 'rm -rf "$TPK_DIR"' EXIT
           if gh run download -R AssetRipper/Tpk -n lz4_file -D "$TPK_DIR"; then
             DOWNLOADED="$TPK_DIR/lz4.tpk"
-            TARGET="XUnityToolkit-WebUI/Resources/classdata.tpk"
+            TARGET="UnityLocalizationToolkit-WebUI/Resources/classdata.tpk"
             if [ ! -f "$DOWNLOADED" ]; then
               echo "::warning::lz4.tpk not found in artifact"
               exit 0
@@ -212,7 +212,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .github/deps.json XUnityToolkit-WebUI/Resources/classdata.tpk
+          git add .github/deps.json UnityLocalizationToolkit-WebUI/Resources/classdata.tpk
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else

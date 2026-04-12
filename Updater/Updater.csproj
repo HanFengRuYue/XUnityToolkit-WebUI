@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -8,12 +8,12 @@
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
 
-    <!-- PE metadata — helps antivirus heuristic engines recognize this as legitimate software -->
-    <Company>XUnityToolkit</Company>
-    <Product>XUnityToolkit Updater</Product>
-    <Description>Delta updater for XUnityToolkit-WebUI. Downloads and applies incremental updates.</Description>
-    <AssemblyTitle>XUnityToolkit Updater</AssemblyTitle>
-    <FileDescription>XUnityToolkit Updater</FileDescription>
-    <ApplicationIcon>..\XUnityToolkit-WebUI\app.ico</ApplicationIcon>
+    <!-- PE metadata 鈥?helps antivirus heuristic engines recognize this as legitimate software -->
+    <Company>UnityLocalizationToolkit</Company>
+    <Product>UnityLocalizationToolkit-WebUI Updater</Product>
+    <Description>Delta updater for UnityLocalizationToolkit-WebUI. Downloads and applies incremental updates.</Description>
+    <AssemblyTitle>UnityLocalizationToolkit-WebUI Updater</AssemblyTitle>
+    <FileDescription>UnityLocalizationToolkit-WebUI Updater</FileDescription>
+    <ApplicationIcon>..\UnityLocalizationToolkit-WebUI\app.ico</ApplicationIcon>
   </PropertyGroup>
 </Project>
