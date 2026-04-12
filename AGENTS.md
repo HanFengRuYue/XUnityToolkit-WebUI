@@ -475,6 +475,7 @@ CI：
 - 工具箱内更新内容当前由 `.github/workflows/build.yml` 通过 `git log --pretty=format:"- %s (\`%h\`)" --no-merges` 生成，再由 `XUnityToolkit-Vue/src/views/SettingsView.vue` 按 `- type: description (hash)` 解析；想让更新面板正确显示类型徽标和文本时，提交标题必须遵循上述格式，且不要把关键变更信息只写进提交正文或 merge commit 标题
 - Git 提交正文用于补充背景、约束、风险与验证结论，统一中文书写；正文应围绕“为什么改 / 改了什么 / 需要注意什么”展开，不要套英文模板、AI 套话或与实际改动不符的泛化总结
 - 版本相关提交沿用仓库既有风格：正式发布使用 `feat: 发布 vX.Y`，纯版本号抬升使用 `chore: 版本号提升至 vX.Y`
+- 若提交包含 `.github/workflows/*`，用于 `git push` / `gh` 的 GitHub 凭据必须具备 `workflow` scope；只有 `repo`/`read:org`/`gist` 时，本地提交会成功，但远端会拒绝更新 workflow 文件
 
 后端：
 
@@ -658,7 +659,7 @@ CI：
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
 - `TranslationOuterWrapperGuard` 属于翻译链路新的全局守卫；凡是新增 TM 命中复用、预翻译缓存写入、动态正则生成或其他持久化出口，都要核对是否同步做了“原文无外层包裹时禁止译文新增整句外层包裹”的归一化/拦截
-- `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
+- `build.ps1`、`.github/workflows/build.yml` 与 `.github/workflows/dep-check.yml` 都包含版本前缀/发版假设；流程、版本号、资源来源、构建 edition 或自动依赖构建版本策略发生变化时必须一起核对
 - 若变更首页可用性、静态资源目录、启动端口或启动方式，需要分别核对 `build.ps1` 与 `.github/workflows/build.yml` 的发布流程，但当前不再维护 `Test-FrontendSmoke` 回归守卫
 - Git 提交标题规范、`.github/workflows/build.yml` 中 `### Changelog` 的生成逻辑，以及 `XUnityToolkit-Vue/src/views/SettingsView.vue` 的 `typeLabels` / 正则解析属于联动点；若调整提交格式、更新内容展示样式或 changelog 生成方式，必须同时核对这三处，且注意 `--no-merges` 会让 merge commit 不进入工具箱更新列表
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
