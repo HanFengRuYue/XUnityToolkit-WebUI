@@ -416,7 +416,21 @@ public sealed class LlmTranslationService(
                         continue;
                     }
 
-                    if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[i], tmMatch.Translation))
+                    var tmNormalization = NormalizeOuterWrapperCandidate(texts[i], tmMatch.Translation, "TM", i);
+                    if (!tmNormalization.IsValid)
+                    {
+                        logger.LogDebug(
+                            "TM 命中结果检测到外层包裹污染且清理后无有效内容，已丢弃: game={GameId}, index={Index}, wrapper={Wrapper}",
+                            gameId,
+                            i,
+                            tmNormalization.RemovedWrapperTrail ?? "(unknown)");
+                        Interlocked.Increment(ref _tmMisses);
+                        continue;
+                    }
+
+                    var tmTranslation = tmNormalization.Text;
+
+                    if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[i], tmTranslation))
                     {
                         logger.LogDebug("TM 命中结果包含无效的运行时占位符，已忽略: game={GameId}, index={Index}", gameId, i);
                         Interlocked.Increment(ref _tmMisses);
@@ -429,7 +443,7 @@ public sealed class LlmTranslationService(
                         var termsForText = perTextTerms[i];
                         if (termsForText is { Count: > 0 })
                         {
-                            var auditResult = termAuditService.AuditTranslation(tmMatch.Translation, termsForText);
+                            var auditResult = termAuditService.AuditTranslation(tmTranslation, termsForText);
                             if (!auditResult.Passed)
                             {
                                 Interlocked.Increment(ref _tmMisses);
@@ -438,7 +452,17 @@ public sealed class LlmTranslationService(
                         }
                     }
 
-                    tmResults[i] = (tmMatch.Translation, tmMatch.MatchType);
+                    tmResults[i] = (tmTranslation, tmMatch.MatchType);
+
+                    if (tmNormalization.WasNormalized)
+                    {
+                        translationMemoryService.Add(gameId, [texts[i]], [tmTranslation], round: 1, isFinal: true);
+                        logger.LogDebug(
+                            "TM 命中结果检测到外层包裹污染，已自愈写回: game={GameId}, index={Index}, wrapper={Wrapper}",
+                            gameId,
+                            i,
+                            tmNormalization.RemovedWrapperTrail ?? "(unknown)");
+                    }
 
                     // Track stats
                     switch (tmMatch.MatchType)
@@ -559,6 +583,13 @@ public sealed class LlmTranslationService(
                                 logger.LogDebug("Phase 1 运行时占位符校验失败，转入 Phase 2: index={Index}", i);
                                 continue;
                             }
+
+                            var phase1Normalization = NormalizeOuterWrapperCandidate(
+                                p1SourceTexts[j], translated, "Phase 1", i);
+                            if (!phase1Normalization.IsValid)
+                                continue;
+
+                            translated = phase1Normalization.Text;
 
                             if (ai.TermAuditEnabled && matchedTerms is { Count: > 0 })
                             {
@@ -864,6 +895,23 @@ public sealed class LlmTranslationService(
                         continue;
                     }
 
+                    var phase2Normalization = NormalizeOuterWrapperCandidate(
+                        texts[originalIdx], translated, "Phase 2", originalIdx);
+                    if (!phase2Normalization.IsValid)
+                    {
+                        translations[originalIdx] = texts[originalIdx];
+                        if (!phase2Resolved[originalIdx])
+                        {
+                            phase2Resolved[originalIdx] = true;
+                            phase2ResolvedCount++;
+                        }
+
+                        perTextCanPersist[originalIdx] = false;
+                        continue;
+                    }
+
+                    translated = phase2Normalization.Text;
+
                     if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[originalIdx], translated))
                     {
                         logger.LogDebug("Phase 2 运行时占位符校验失败，已安全回退原文: index={Index}", originalIdx);
@@ -1005,6 +1053,16 @@ public sealed class LlmTranslationService(
                                 break;
                         }
                     }
+
+                    var phase3Normalization = NormalizeOuterWrapperCandidate(texts[i], translated, "Phase 3", i);
+                    if (!phase3Normalization.IsValid)
+                    {
+                        translations[i] = texts[i];
+                        perTextCanPersist[i] = false;
+                        continue;
+                    }
+
+                    translated = phase3Normalization.Text;
 
                     if (!RuntimePlaceholderProtector.HasExactRoundTrip(texts[i], translated))
                     {
@@ -1968,6 +2026,7 @@ public sealed class LlmTranslationService(
     {
         sb.Append("\n\n附加硬性规则：所有运行时占位符都必须按输入逐字保留。");
         sb.Append("例如 [SPECIAL_01]、【SPECIAL_01】、{PLAYER} 或 {Quest_Id} 都必须保持完全一致，括号样式、大小写、数量和位置都不得改变。");
+        sb.Append("若输入本身没有整句外层引号或括号，输出也不得擅自添加。");
     }
 
     private static void AppendGameDescription(StringBuilder sb, string? gameDescription)
@@ -2160,10 +2219,53 @@ public sealed class LlmTranslationService(
             if (!persistableFlags[i])
                 continue;
 
+            var normalization = TranslationOuterWrapperGuard.Normalize(originals[i], translations[i]);
+            if (!normalization.IsValid)
+                continue;
+
             persistableOriginals.Add(originals[i]);
-            persistableTranslations.Add(translations[i]);
+            persistableTranslations.Add(normalization.Text);
         }
         return (persistableOriginals, persistableTranslations);
+    }
+
+    private OuterWrapperNormalizationResult NormalizeOuterWrapperCandidate(
+        string sourceText,
+        string candidateText,
+        string stage,
+        int index)
+    {
+        var result = TranslationOuterWrapperGuard.Normalize(sourceText, candidateText);
+        if (!result.WasNormalized)
+            return result;
+
+        if (!result.IsValid)
+        {
+            logger.LogDebug(
+                "{Stage} 检测到译文新增外层包裹，去除后结果为空，已视为无效: index={Index}, wrapper={Wrapper}, source=\"{Source}\", candidate=\"{Candidate}\"",
+                stage,
+                index,
+                result.RemovedWrapperTrail ?? "(unknown)",
+                BuildLogPreview(sourceText),
+                BuildLogPreview(candidateText));
+            return result;
+        }
+
+        logger.LogDebug(
+            "{Stage} 检测到译文新增外层包裹，已自动去除: index={Index}, wrapper={Wrapper}, source=\"{Source}\", before=\"{Before}\", after=\"{After}\"",
+            stage,
+            index,
+            result.RemovedWrapperTrail ?? "(unknown)",
+            BuildLogPreview(sourceText),
+            BuildLogPreview(candidateText),
+            BuildLogPreview(result.Text));
+        return result;
+    }
+
+    private static string BuildLogPreview(string text)
+    {
+        var preview = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return preview.Length > 120 ? preview[..120] + "..." : preview;
     }
 
     // ── Concurrency ──

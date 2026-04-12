@@ -67,4 +67,41 @@ public sealed class PreTranslationServiceTests
 
         Assert.Empty(filtered);
     }
+
+    [Fact]
+    public void FilterPersistableTranslations_ShouldNormalizeAddedOuterWrapper()
+    {
+        var filtered = PreTranslationService.FilterPersistableTranslations(
+        [
+            KeyValuePair.Create("Walk home later.", "“晚点回家。”")
+        ]);
+
+        var entry = Assert.Single(filtered);
+        Assert.Equal("Walk home later.", entry.Key);
+        Assert.Equal("晚点回家。", entry.Value);
+    }
+
+    [Fact]
+    public void FilterPersistableTranslations_ShouldKeepPlaceholderAfterNormalizingAddedOuterWrapper()
+    {
+        var filtered = PreTranslationService.FilterPersistableTranslations(
+        [
+            KeyValuePair.Create("Value: [SPECIAL_01]", "“值：[SPECIAL_01]”")
+        ]);
+
+        var entry = Assert.Single(filtered);
+        Assert.Equal("Value: [SPECIAL_01]", entry.Key);
+        Assert.Equal("值：[SPECIAL_01]", entry.Value);
+    }
+
+    [Fact]
+    public void FilterPersistableTranslations_ShouldRejectWrapperOnlyTranslation()
+    {
+        var filtered = PreTranslationService.FilterPersistableTranslations(
+        [
+            KeyValuePair.Create("What?", "[]")
+        ]);
+
+        Assert.Empty(filtered);
+    }
 }

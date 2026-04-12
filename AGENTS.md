@@ -332,6 +332,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `Program.cs` 必须使用 `127.0.0.1`，不要使用 `localhost`
 - `LlmTranslationService.TranslateDetailedAsync(...)` 是翻译主链路的权威实现；`TranslateAsync(...)` 只是返回 `Translations` 的轻包装。凡是需要决定“是否允许写入 TM / 术语提取 / 运行时上下文缓存”的调用点，都必须使用详细结果而不是只拿字符串数组
 - LLM 返回解析顺序当前固定为：剥离 `<think>` / 代码块包装 → JSON 数组 → 单条 JSON 字符串（仅单条场景）→ 单条纯文本候选（仅单条场景）；批量场景不再接受非结构化原始输出作为译文
+- 单条纯文本候选模式会继续保留给本地 LLM 兼容使用，但所有被接受的译文现在都必须额外经过 `TranslationOuterWrapperGuard` 检查；若原文没有整句外层引号/括号，而候选文本新增了 `“”`、`「」`、`『』`、`【】`、`[]`、`""`、`''` 这类整句包裹，则会自动去壳
 - `POST /api/translate` 与 `PreTranslationService` 现在都会过滤 `Persistable == false` 的结果：这些结果可以回显给调用方，但不能进入自动术语提取、运行时上下文缓存或翻译记忆
 
 多阶段翻译：
@@ -343,6 +344,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - 在 Phase 1 / Phase 2 进入 LLM 之前，运行时占位符会先替换成内部 `{{XU_RT_n}}` 占位符；LLM 返回后会做宽松恢复，但最终必须逐字回到源文本中的原始 token
 - 运行时占位符当前同时覆盖半角/全角 `SPECIAL_*`（如 `[SPECIAL_01]`、`【SPECIAL_01】`）以及安全白名单内的花括号模板变量（如 `{PLAYER}`、`{PC}`、`{Quest_Id}`）；括号样式、大小写、数量和位置都必须与输入完全一致。任一环节校验失败时，整段安全回退原文
 - Phase 0 的 TM 命中也必须经过同样的运行时占位符 round-trip 校验；历史坏缓存命中要视为 miss，不能继续复用
+- Phase 0 / Phase 1 / Phase 2 / Phase 3、TM 可持久化过滤、预翻译动态正则生成与 `_PreTranslated.txt` 写回，现在都必须复用同一套“外层包裹守卫”；去壳后若为空或全空白，要视为无效结果并阻止写入缓存/TM
 
 翻译记忆：
 
@@ -513,7 +515,7 @@ CI：
   - AI 翻译页
   - 设置页默认值
   - 后端 `Math.Clamp`
-  - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` / `{PLAYER}` 这类占位符按输入原样保留
+  - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` / `{PLAYER}` 这类占位符按输入原样保留，并明确禁止模型擅自新增整句外层引号/括号、说话人前缀、解释性文本
 - `LocalLlmSettings`
   需要同步：
   - C# 模型
@@ -655,6 +657,7 @@ CI：
 - 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
+- `TranslationOuterWrapperGuard` 属于翻译链路新的全局守卫；凡是新增 TM 命中复用、预翻译缓存写入、动态正则生成或其他持久化出口，都要核对是否同步做了“原文无外层包裹时禁止译文新增整句外层包裹”的归一化/拦截
 - `build.ps1` 与 `.github/workflows/build.yml` 不是同一实现的不同入口，而是两份并行维护脚本；流程、版本号、资源来源、构建 edition 发生变化时必须双改
 - 若变更首页可用性、静态资源目录、启动端口或启动方式，需要分别核对 `build.ps1` 与 `.github/workflows/build.yml` 的发布流程，但当前不再维护 `Test-FrontendSmoke` 回归守卫
 - Git 提交标题规范、`.github/workflows/build.yml` 中 `### Changelog` 的生成逻辑，以及 `XUnityToolkit-Vue/src/views/SettingsView.vue` 的 `typeLabels` / 正则解析属于联动点；若调整提交格式、更新内容展示样式或 changelog 生成方式，必须同时核对这三处，且注意 `--no-merges` 会让 merge commit 不进入工具箱更新列表

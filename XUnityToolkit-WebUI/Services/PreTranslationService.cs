@@ -680,10 +680,14 @@ public sealed partial class PreTranslationService(
 
         foreach (var (original, translation) in source)
         {
-            if (!RuntimePlaceholderProtector.HasExactRoundTrip(original, translation))
+            var normalization = TranslationOuterWrapperGuard.Normalize(original, translation);
+            if (!normalization.IsValid)
                 continue;
 
-            result[original] = translation;
+            if (!RuntimePlaceholderProtector.HasExactRoundTrip(original, normalization.Text))
+                continue;
+
+            result[original] = normalization.Text;
         }
 
         return result;
@@ -1102,7 +1106,11 @@ public sealed partial class PreTranslationService(
         foreach (var (index, text, variables) in templateVars)
         {
             if (index >= 0 && index < textList.Count && translations.TryGetValue(text, out var translation))
-                entries.Add((text, translation, variables));
+            {
+                var normalization = TranslationOuterWrapperGuard.Normalize(text, translation);
+                if (normalization.IsValid)
+                    entries.Add((text, normalization.Text, variables));
+            }
         }
 
         if (entries.Count == 0)
@@ -1152,11 +1160,33 @@ public sealed partial class PreTranslationService(
             if (string.IsNullOrEmpty(originalKey))
                 continue;
 
+            var normalization = TranslationOuterWrapperGuard.Normalize(original, translation);
+            if (!normalization.IsValid)
+            {
+                logger.LogDebug(
+                    "预翻译写缓存时检测到新增外层包裹且清理后无有效内容，已跳过: game={GameId}, source=\"{Source}\", candidate=\"{Candidate}\"",
+                    gameId,
+                    original.Length > 120 ? original[..120] + "..." : original,
+                    translation.Length > 120 ? translation[..120] + "..." : translation);
+                continue;
+            }
+
+            if (normalization.WasNormalized)
+            {
+                logger.LogDebug(
+                    "预翻译写缓存时检测到新增外层包裹，已自动去除: game={GameId}, wrapper={Wrapper}, source=\"{Source}\", before=\"{Before}\", after=\"{After}\"",
+                    gameId,
+                    normalization.RemovedWrapperTrail ?? "(unknown)",
+                    original.Length > 120 ? original[..120] + "..." : original,
+                    translation.Length > 120 ? translation[..120] + "..." : translation,
+                    normalization.Text.Length > 120 ? normalization.Text[..120] + "..." : normalization.Text);
+            }
+
             var encodedOriginal = EncodeForXUnity(originalKey);
             if (existing.Contains(encodedOriginal))
                 continue;
 
-            var encodedTranslation = EncodeForXUnity(translation);
+            var encodedTranslation = EncodeForXUnity(normalization.Text);
             sb.AppendLine($"{encodedOriginal}={encodedTranslation}");
         }
 
