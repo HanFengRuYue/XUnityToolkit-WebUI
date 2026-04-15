@@ -35,10 +35,39 @@ const router = createRouter({
       meta: { depth: 3 },
     },
     {
-      path: '/games/:id/manual-translation',
-      name: 'manual-translation',
+      path: '/manual-translation',
+      name: 'manual-translation-hub',
+      component: () => import('@/views/ManualTranslationHubView.vue'),
+      meta: { depth: 1 },
+    },
+    {
+      path: '/manual-translation/:id',
+      name: 'manual-translation-game',
+      component: () => import('@/views/ManualTranslationGameView.vue'),
+      meta: { depth: 2 },
+    },
+    {
+      path: '/manual-translation/:id/assets',
+      name: 'manual-translation-explorer',
       component: () => import('@/views/ManualTranslationWorkspaceView.vue'),
       meta: { depth: 3 },
+    },
+    {
+      path: '/games/:id/manual-translation',
+      redirect: (to: any) => {
+        const query = new URLSearchParams()
+        for (const [key, value] of Object.entries(to.query ?? {})) {
+          if (Array.isArray(value)) {
+            value.forEach(item => query.append(key, String(item)))
+          }
+          else if (value != null) {
+            query.set(key, String(value))
+          }
+        }
+
+        const suffix = query.toString()
+        return `/manual-translation/${to.params.id}${suffix ? `?${suffix}` : ''}`
+      },
     },
     {
       path: '/games/:id/term-editor',

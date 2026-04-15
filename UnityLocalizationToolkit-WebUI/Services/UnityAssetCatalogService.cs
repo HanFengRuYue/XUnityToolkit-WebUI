@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
+using AssetsTools.NET.Texture;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 using UnityLocalizationToolkit_WebUI.Models;
@@ -223,7 +224,7 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
                     relativePath: null,
                     editable: false,
                     originalText: null,
-                    editHint: "Font assets are listed for export and should be edited through the font replacement workflow."));
+                    editHint: "Use the dedicated font replacement panel to swap or restore this font."));
             }
             catch (Exception ex)
             {
@@ -240,6 +241,13 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
                     continue;
 
                 var name = SafeString(texBase["m_Name"].AsString, "(unnamed Texture2D)");
+                var texture = TextureFile.ReadTextureFile(texBase);
+                int? width = texture.m_Width > 0
+                    ? texture.m_Width
+                    : (texBase["m_Width"].IsDummy ? null : texBase["m_Width"].AsInt);
+                int? height = texture.m_Height > 0
+                    ? texture.m_Height
+                    : (texBase["m_Height"].IsDummy ? null : texBase["m_Height"].AsInt);
                 assets.Add(CreateAssetEntry(
                     storageKind,
                     ManualTranslationAssetValueKind.Image,
@@ -252,7 +260,9 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
                     relativePath: null,
                     editable: false,
                     originalText: null,
-                    editHint: "Texture assets are listed for export; binary replacement will be added in a later iteration."));
+                    editHint: "Preview this texture and upload a replacement image in the manual translation workspace.",
+                    width: width,
+                    height: height));
             }
             catch (Exception ex)
             {
@@ -686,11 +696,18 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
         bool editable,
         string? originalText,
         string? codeLocation = null,
-        string? editHint = null)
+        string? editHint = null,
+        int? width = null,
+        int? height = null)
     {
         var preview = string.IsNullOrWhiteSpace(originalText)
             ? displayName
             : BuildPreview(originalText);
+        var normalizedAssetFile = assetFile.Replace('\\', '/');
+        var normalizedRelativePath = relativePath?.Replace('\\', '/');
+        var listTitle = BuildListTitle(valueKind, preview, displayName, objectType);
+        var listSubtitle = BuildListSubtitle(valueKind, displayName, fieldPath, codeLocation, objectType, editHint, width, height);
+        var listMeta = BuildListMeta(normalizedAssetFile, bundleEntryName, normalizedRelativePath, pathId);
 
         return new ManualTranslationAssetEntry
         {
@@ -698,15 +715,21 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
             StorageKind = storageKind,
             ValueKind = valueKind,
             ObjectType = objectType,
-            AssetFile = assetFile.Replace('\\', '/'),
+            AssetFile = normalizedAssetFile,
             BundleEntry = bundleEntryName,
-            RelativePath = relativePath?.Replace('\\', '/'),
+            RelativePath = normalizedRelativePath,
             PathId = pathId,
             DisplayName = displayName,
             FieldPath = fieldPath,
             CodeLocation = codeLocation,
             Preview = preview,
             OriginalText = originalText,
+            ListTitle = listTitle,
+            ListSubtitle = listSubtitle,
+            ListMeta = listMeta,
+            IconKey = GetIconKey(valueKind),
+            Width = width,
+            Height = height,
             Editable = editable,
             EditHint = editHint
         };
@@ -735,6 +758,97 @@ public sealed class UnityAssetCatalogService(ILogger<UnityAssetCatalogService> l
     {
         var singleLine = text.Replace("\r", " ").Replace("\n", " ").Trim();
         return singleLine.Length <= 96 ? singleLine : singleLine[..96] + "...";
+    }
+
+    private static string BuildListTitle(
+        ManualTranslationAssetValueKind valueKind,
+        string? preview,
+        string? displayName,
+        string objectType)
+    {
+        if (valueKind is ManualTranslationAssetValueKind.Text or ManualTranslationAssetValueKind.Code)
+            return FirstNonEmpty(preview, displayName, objectType);
+
+        return FirstNonEmpty(displayName, preview, objectType);
+    }
+
+    private static string? BuildListSubtitle(
+        ManualTranslationAssetValueKind valueKind,
+        string? displayName,
+        string? fieldPath,
+        string? codeLocation,
+        string objectType,
+        string? editHint,
+        int? width,
+        int? height)
+    {
+        return valueKind switch
+        {
+            ManualTranslationAssetValueKind.Text => JoinDisplayParts(
+                fieldPath,
+                GetMeaningfulDisplayName(displayName, objectType)),
+            ManualTranslationAssetValueKind.Code => JoinDisplayParts(
+                fieldPath,
+                GetMeaningfulDisplayName(displayName, objectType),
+                codeLocation),
+            ManualTranslationAssetValueKind.Image => width > 0 && height > 0
+                ? $"{width} × {height}"
+                : objectType,
+            ManualTranslationAssetValueKind.Font => FirstNonEmpty(GetMeaningfulDisplayName(displayName, objectType), BuildPreview(editHint ?? string.Empty), objectType),
+            ManualTranslationAssetValueKind.Binary => FirstNonEmpty(BuildPreview(editHint ?? string.Empty), GetMeaningfulDisplayName(displayName, objectType), objectType),
+            _ => objectType
+        };
+    }
+
+    private static string BuildListMeta(string assetFile, string? bundleEntryName, string? relativePath, long? pathId)
+    {
+        return JoinDisplayParts(
+            assetFile,
+            bundleEntryName,
+            relativePath,
+            pathId.HasValue ? $"PathID {pathId.Value}" : null) ?? assetFile;
+    }
+
+    private static string GetIconKey(ManualTranslationAssetValueKind valueKind)
+    {
+        return valueKind switch
+        {
+            ManualTranslationAssetValueKind.Text => "text",
+            ManualTranslationAssetValueKind.Code => "code",
+            ManualTranslationAssetValueKind.Image => "image",
+            ManualTranslationAssetValueKind.Font => "font",
+            ManualTranslationAssetValueKind.Binary => "binary",
+            _ => "asset"
+        };
+    }
+
+    private static string? GetMeaningfulDisplayName(string? displayName, string objectType)
+    {
+        if (string.IsNullOrWhiteSpace(displayName))
+            return null;
+
+        if (displayName.Equals(objectType, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        if (displayName.StartsWith("(unnamed", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return displayName;
+    }
+
+    private static string FirstNonEmpty(params string?[] values)
+    {
+        return values.First(value => !string.IsNullOrWhiteSpace(value))!;
+    }
+
+    private static string? JoinDisplayParts(params string?[] values)
+    {
+        var parts = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return parts.Length == 0 ? null : string.Join(" · ", parts);
     }
 
     private static string SafeString(string? value, string fallback)

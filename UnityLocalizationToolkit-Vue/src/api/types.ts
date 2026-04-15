@@ -308,6 +308,18 @@ export type ManualTranslationAssetStorageKind =
   | 'NativeBinary'
 
 export type ManualTranslationAssetValueKind = 'Text' | 'Image' | 'Font' | 'Binary' | 'Code'
+export type ManualTranslationAssetFilterValueKind = 'All' | ManualTranslationAssetValueKind
+export type ManualTranslationImagePreviewSource = 'Original' | 'Override'
+export type ManualTranslationImagePreviewSize = 'Thumb' | 'Full'
+
+export interface ManualTranslationKindCounts {
+  all: number
+  text: number
+  code: number
+  image: number
+  font: number
+  binary: number
+}
 
 export interface ManualTranslationAssetEntry {
   assetId: string
@@ -323,6 +335,12 @@ export interface ManualTranslationAssetEntry {
   codeLocation?: string
   preview?: string
   originalText?: string
+  listTitle?: string
+  listSubtitle?: string
+  listMeta?: string
+  iconKey?: string
+  width?: number
+  height?: number
   editable: boolean
   exportable: boolean
   overridden: boolean
@@ -347,11 +365,24 @@ export interface ManualTranslationStatus {
   scannedAt?: string
   appliedAt?: string
   lastPackagePath?: string
+  kindCounts: ManualTranslationKindCounts
 }
 
 export interface ManualTranslationAssetListResponse {
   gameId: string
+  total: number
+  page: number
+  pageSize: number
   assets: ManualTranslationAssetEntry[]
+}
+
+export interface ManualTranslationAssetListQuery {
+  search?: string
+  editableOnly?: boolean
+  overriddenOnly?: boolean
+  page?: number
+  pageSize?: number
+  valueKind?: ManualTranslationAssetFilterValueKind
 }
 
 export interface ManualTranslationAssetContent {

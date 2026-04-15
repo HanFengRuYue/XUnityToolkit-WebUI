@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon, NTooltip } from 'naive-ui'
-import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined, KeyboardDoubleArrowLeftOutlined, KeyboardDoubleArrowRightOutlined } from '@vicons/material'
+import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined, KeyboardDoubleArrowLeftOutlined, KeyboardDoubleArrowRightOutlined, TranslateOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
 import { settingsApi } from '@/api/games'
 import { useUpdateStore } from '@/stores/update'
@@ -46,6 +46,7 @@ const cachedPages = ['LibraryView', 'AiTranslationView', 'FontGeneratorView', 'L
 
 const mainNavItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
+  { label: '手动翻译', key: '/manual-translation', icon: TranslateOutlined },
   { label: 'XUnity AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
   { label: '字体生成', key: '/font-generator', icon: FontDownloadOutlined },
   { label: '运行日志', key: '/logs', icon: ArticleOutlined },
@@ -54,6 +55,13 @@ const mainNavItems = [
 const settingsNavItem = { label: '设置', key: '/settings', icon: SettingsOutlined }
 
 function navigateTo(key: string) {
+  if (key === '/manual-translation') {
+    const routeGameId = typeof route.params.id === 'string' ? route.params.id : ''
+    router.push(routeGameId ? `/manual-translation/${routeGameId}` : key)
+    sidebarOpen.value = false
+    return
+  }
+
   router.push(key)
   sidebarOpen.value = false
 }

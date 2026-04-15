@@ -159,8 +159,8 @@ const sortOptions = [
   { label: '添加时间', value: 'added' },
 ]
 
-const cardSizeMap = { small: 120, medium: 160, large: 200, xlarge: 240 }
-const gapMap = { compact: 8, normal: 16, spacious: 24 }
+const cardSizeMap = { small: 156, medium: 188, large: 224, xlarge: 268 }
+const gapMap = { compact: 10, normal: 18, spacious: 26 }
 
 const gridStyle = computed(() => {
   const minWidth = cardSizeMap[gamesStore.cardSize] || 160

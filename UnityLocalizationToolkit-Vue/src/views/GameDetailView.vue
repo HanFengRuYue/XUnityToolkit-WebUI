@@ -49,6 +49,7 @@ import { gamesApi, settingsApi, pluginPackageApi } from '@/api/games'
 import { useFileExplorer } from '@/composables/useFileExplorer'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
 import PluginHealthCard from '@/components/health/PluginHealthCard.vue'
+import WorkspaceModeSwitch from '@/components/manual/WorkspaceModeSwitch.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
 import { defineAsyncComponent } from 'vue'
 
@@ -629,16 +630,13 @@ onBeforeUnmount(() => stopWatch())
               <span class="status-text" style="color: var(--text-3)">非 Unity</span>
             </template>
           </div>
-          <div v-if="game.isUnityGame" class="workspace-mode-row">
-            <span class="workspace-mode-chip active">
-              XUnity
-              <small>{{ game.xUnityStatus.state }}</small>
-            </span>
-            <button class="workspace-mode-chip" @click="router.push('/games/' + gameId + '/manual-translation')">
-              手动翻译
-              <small>{{ game.manualTranslationStatus.overrideCount }} 覆盖</small>
-            </button>
-          </div>
+          <WorkspaceModeSwitch
+            v-if="game.isUnityGame"
+            :game-id="gameId"
+            :x-unity-state="game.xUnityStatus.state"
+            :manual-state="game.manualTranslationStatus.state"
+            :manual-overrides="game.manualTranslationStatus.overrideCount"
+          />
         </div>
       </div>
     </div>
@@ -1400,42 +1398,6 @@ onBeforeUnmount(() => stopWatch())
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-}
-
-.workspace-mode-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.workspace-mode-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-2);
-  font-size: 13px;
-}
-
-button.workspace-mode-chip {
-  cursor: pointer;
-  transition: 160ms ease;
-}
-
-.workspace-mode-chip.active,
-button.workspace-mode-chip:hover {
-  border-color: rgba(255, 196, 110, 0.42);
-  background: rgba(255, 196, 110, 0.12);
-  color: #ffe7b2;
-}
-
-.workspace-mode-chip small {
-  font-size: 11px;
-  color: inherit;
-  opacity: 0.72;
 }
 
 .title-icon {

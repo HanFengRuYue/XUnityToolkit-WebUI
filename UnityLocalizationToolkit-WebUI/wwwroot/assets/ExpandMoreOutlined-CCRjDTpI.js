@@ -1,0 +1,1 @@
+import{St as e,Z as t,et as n,ot as r}from"./vendor-vue-BKOprIqz.js";var i={xmlns:`http://www.w3.org/2000/svg`,"xmlns:xlink":`http://www.w3.org/1999/xlink`,viewBox:`0 0 24 24`},a=r({name:`ExpandMoreOutlined`,render:function(r,a){return e(),n(`svg`,i,a[0]||=[t(`path`,{d:`M16.59 8.59L12 13.17L7.41 8.59L6 10l6 6l6-6l-1.41-1.41z`,fill:`currentColor`},null,-1)])}});export{a as t};

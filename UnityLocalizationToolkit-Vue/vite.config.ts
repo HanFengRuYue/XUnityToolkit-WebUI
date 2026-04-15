@@ -22,6 +22,8 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
+    // Prefer the authoritative TS sources when stale transpiled .js mirrors are present.
+    extensions: ['.mjs', '.mts', '.ts', '.tsx', '.jsx', '.js', '.json', '.vue'],
   },
   build: {
     outDir: '../UnityLocalizationToolkit-WebUI/wwwroot',

@@ -103,6 +103,9 @@ public sealed class AppDataPaths(IConfiguration config)
     public string ManualTranslationOverridesDirectory(string gameId) =>
         Path.Combine(ManualTranslationProjectDirectory(gameId), "overrides");
 
+    public string ManualTranslationOverrideMediaDirectory(string gameId) =>
+        Path.Combine(ManualTranslationOverridesDirectory(gameId), "media");
+
     public string ManualTranslationExportsDirectory(string gameId) =>
         Path.Combine(ManualTranslationProjectDirectory(gameId), "exports");
 
@@ -117,6 +120,9 @@ public sealed class AppDataPaths(IConfiguration config)
 
     public string ManualTranslationOverrideFile(string gameId, string overrideFileName) =>
         Path.Combine(ManualTranslationOverridesDirectory(gameId), overrideFileName);
+
+    public string ManualTranslationOverrideMediaFile(string gameId, string fileName) =>
+        Path.Combine(ManualTranslationOverrideMediaDirectory(gameId), fileName);
 
     public string CoverFile(string gameId) =>
         Path.Combine(CoversDirectory, $"{gameId}.img");

@@ -110,7 +110,7 @@ const settings = ref<AppSettings>({
   libraryViewMode: 'grid',
   librarySortBy: 'name',
   accentColor: themeStore.accentColor,
-  libraryCardSize: 'medium',
+  libraryCardSize: 'large',
   libraryGap: 'normal',
   libraryShowLabels: true,
   pageZoom: 0,

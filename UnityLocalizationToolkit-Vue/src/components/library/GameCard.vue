@@ -159,14 +159,6 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
     <!-- Card Info -->
     <div v-if="showLabel" class="card-info">
       <h3 class="card-name" :title="game.name">{{ game.name }}</h3>
-      <div v-if="game.isUnityGame" class="workspace-strip">
-        <span class="workspace-pill workspace-pill-xunity">
-          XUnity · {{ game.xUnityStatus.state }}
-        </span>
-        <span class="workspace-pill workspace-pill-manual">
-          手动 · {{ game.manualTranslationStatus.overrideCount }}
-        </span>
-      </div>
     </div>
   </div>
 </template>
@@ -412,31 +404,6 @@ const hasExe = computed(() => !!(props.game.executableName || props.game.detecte
 /* ===== Card Info ===== */
 .card-info {
   padding: 10px 12px 12px;
-}
-
-.workspace-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.workspace-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  color: var(--text-2);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.workspace-pill-xunity {
-  border: 1px solid rgba(99, 179, 237, 0.28);
-}
-
-.workspace-pill-manual {
-  border: 1px solid rgba(255, 196, 110, 0.28);
 }
 
 .card-name {

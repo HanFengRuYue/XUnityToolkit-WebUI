@@ -100,9 +100,9 @@ namespace LLMTranslate
             Log("  鏈€澶у悓鏃剁炕璇? " + (_maxConcurrency * _maxTranslationsPerRequest));
             DebugLog("  鍏ㄥ眬杩炴帴姹犻粯璁? " + ServicePointManager.DefaultConnectionLimit);
             Log("  娓告垙 ID: " + (string.IsNullOrEmpty(_gameId) ? "(鏈缃?" : _gameId));
-            Log("  绂佺敤闃插埛妫€鏌? " + (disableSpamChecks ? "鏄? : "鍚?));
-            Log("  缈昏瘧寤惰繜: " + translationDelay + " 绉?);
-            Log("  璋冭瘯妯″紡: " + (_debugMode ? "寮€鍚? : "鍏抽棴"));
+            Log("  Disable spam checks: " + (disableSpamChecks ? "Yes" : "No"));
+            Log("  Translation delay: " + translationDelay + " s");
+            Log("  Debug mode: " + (_debugMode ? "Enabled" : "Disabled"));
 
             // Connectivity ping 鈥?notify toolbox that the plugin has loaded
             try
@@ -144,7 +144,7 @@ namespace LLMTranslate
                     DebugLog("  [" + i + "] " + text);
                 }
                 if (context.UntranslatedTexts.Length > 3)
-                    DebugLog("  ... 杩樻湁 " + (context.UntranslatedTexts.Length - 3) + " 鏉?);
+                    DebugLog("  ... " + (context.UntranslatedTexts.Length - 3) + " more");
             }
 
             var request = new XUnityWebRequest("POST", _translateUrl, body);
@@ -179,7 +179,7 @@ namespace LLMTranslate
                 return;
             }
 
-            Log(string.Format("[瀹屾垚] 鎴愬姛缈昏瘧 {0} 鏉℃枃鏈?, translations.Length));
+            Log(string.Format("[Complete] Successfully translated {0} text(s)", translations.Length));
             if (_debugMode && translations.Length > 0)
             {
                 for (int i = 0; i < translations.Length && i < 3; i++)

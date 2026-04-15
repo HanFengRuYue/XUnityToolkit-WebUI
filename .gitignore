@@ -17,6 +17,9 @@ XUnityToolkit-WebUI/wwwroot/
 XUnityToolkit-Vue/src/auto-imports.d.ts
 XUnityToolkit-Vue/src/components.d.ts
 
+# Stale transpiled frontend mirrors should never live under src/
+UnityLocalizationToolkit-Vue/src/**/*.js
+
 # Build output
 Release/
 

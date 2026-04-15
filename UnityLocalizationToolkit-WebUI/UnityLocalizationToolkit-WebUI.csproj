@@ -35,6 +35,7 @@
     <PackageReference Include="AssetsTools.NET.Cpp2IL" Version="3.0.4" />
     <PackageReference Include="AssetsTools.NET.MonoCecil" Version="3.0.4" />
     <PackageReference Include="AssetsTools.NET.Texture" Version="3.0.2" />
+    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
     <PackageReference Include="dnlib" Version="4.5.0" />
     <PackageReference Include="FreeTypeSharp" Version="3.1.0" />
     <PackageReference Include="RectpackSharp" Version="1.2.0" />

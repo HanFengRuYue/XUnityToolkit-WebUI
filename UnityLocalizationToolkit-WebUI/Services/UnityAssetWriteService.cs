@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
+using AssetsTools.NET.Texture;
 using dnlib.DotNet;
 using dnlib.DotNet.Emit;
 using UnityLocalizationToolkit_WebUI.Infrastructure;
@@ -12,7 +13,8 @@ using UnityLocalizationToolkit_WebUI.Models;
 namespace UnityLocalizationToolkit_WebUI.Services;
 
 public sealed class UnityAssetWriteService(
-    AddressablesCatalogService addressablesCatalogService)
+    AddressablesCatalogService addressablesCatalogService,
+    AppDataPaths paths)
 {
     private static readonly Lazy<byte[]> ClassDataTpk = new(() =>
     {
@@ -138,7 +140,7 @@ public sealed class UnityAssetWriteService(
                             continue;
                         }
 
-                        if (ApplyAssetFieldOverride(manager, afileInst, assetInfo, entry, overrideMap[entry.AssetId], result.Warnings))
+                        if (ApplyAssetOverride(game.Id, manager, afileInst, assetInfo, entry, overrideMap[entry.AssetId], result.Warnings))
                         {
                             modified = true;
                             result.AppliedOverrides++;
@@ -254,7 +256,7 @@ public sealed class UnityAssetWriteService(
                                     continue;
                                 }
 
-                                if (ApplyAssetFieldOverride(manager, afileInst, assetInfo, entry, overrideMap[entry.AssetId], result.Warnings))
+                                if (ApplyAssetOverride(game.Id, manager, afileInst, assetInfo, entry, overrideMap[entry.AssetId], result.Warnings))
                                 {
                                     modified = true;
                                     result.AppliedOverrides++;
@@ -340,7 +342,7 @@ public sealed class UnityAssetWriteService(
 
             foreach (var entry in group)
             {
-                if (ApplyManagedStringLiteral(module, entry, overrideMap[entry.AssetId].Value, result.Warnings))
+                if (ApplyManagedStringLiteral(module, entry, overrideMap[entry.AssetId].Value ?? string.Empty, result.Warnings))
                 {
                     modified = true;
                     result.AppliedOverrides++;
@@ -387,7 +389,7 @@ public sealed class UnityAssetWriteService(
 
             foreach (var entry in group)
             {
-                if (TryPatchBinaryString(bytes, entry, overrideMap[entry.AssetId].Value, result.Warnings))
+                if (TryPatchBinaryString(bytes, entry, overrideMap[entry.AssetId].Value ?? string.Empty, result.Warnings))
                 {
                     modified = true;
                     result.AppliedOverrides++;
@@ -404,7 +406,8 @@ public sealed class UnityAssetWriteService(
         }
     }
 
-    private static bool ApplyAssetFieldOverride(
+    private bool ApplyAssetOverride(
+        string gameId,
         AssetsManager manager,
         AssetsFileInstance afileInst,
         AssetFileInfo assetInfo,
@@ -419,6 +422,24 @@ public sealed class UnityAssetWriteService(
             return false;
         }
 
+        if (overrideEntry.Kind == ManualTranslationOverrideKind.Image)
+        {
+            if (entry.ObjectType != "Texture2D")
+            {
+                warnings.Add($"Unsupported image override target: {entry.ObjectType}");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(overrideEntry.ImageFileName))
+            {
+                warnings.Add($"Image override payload missing file: {entry.AssetId}");
+                return false;
+            }
+
+            var imagePath = paths.ManualTranslationOverrideMediaFile(gameId, overrideEntry.ImageFileName);
+            return ApplyTextureOverride(baseField, assetInfo, entry, imagePath, warnings);
+        }
+
         if (entry.ObjectType == "TextAsset")
         {
             var scriptField = baseField["m_Script"];
@@ -428,7 +449,7 @@ public sealed class UnityAssetWriteService(
                 return false;
             }
 
-            scriptField.AsString = overrideEntry.Value;
+            scriptField.AsString = overrideEntry.Value ?? string.Empty;
             assetInfo.SetNewData(baseField);
             return true;
         }
@@ -446,9 +467,37 @@ public sealed class UnityAssetWriteService(
             return false;
         }
 
-        targetField.AsString = overrideEntry.Value;
+        targetField.AsString = overrideEntry.Value ?? string.Empty;
         assetInfo.SetNewData(baseField);
         return true;
+    }
+
+    private static bool ApplyTextureOverride(
+        AssetTypeValueField baseField,
+        AssetFileInfo assetInfo,
+        ManualTranslationAssetEntry entry,
+        string imagePath,
+        List<string> warnings)
+    {
+        if (!File.Exists(imagePath))
+        {
+            warnings.Add($"Image override file missing for {entry.DisplayName ?? entry.AssetId}");
+            return false;
+        }
+
+        try
+        {
+            var texture = TextureFile.ReadTextureFile(baseField);
+            texture.EncodeTextureImage(imagePath);
+            texture.WriteTo(baseField);
+            assetInfo.SetNewData(baseField);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Failed to apply texture override for {entry.DisplayName ?? entry.AssetId}: {ex.Message}");
+            return false;
+        }
     }
 
     private static AssetTypeValueField ResolveFieldPath(AssetTypeValueField root, string fieldPath)
@@ -617,19 +666,24 @@ public sealed class UnityAssetWriteService(
         ManualTranslationBackupManifest manifest)
     {
         var relativePath = Path.GetRelativePath(gamePath, sourcePath).Replace('\\', '/');
-        if (manifest.BackedUpFiles.Any(entry => entry.OriginalRelativePath.Equals(relativePath, StringComparison.OrdinalIgnoreCase)))
-            return true;
-
         if (!File.Exists(sourcePath))
             return false;
 
-        var backupName = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(relativePath))) + Path.GetExtension(sourcePath);
+        var existingEntry = manifest.BackedUpFiles
+            .FirstOrDefault(entry => entry.OriginalRelativePath.Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+        var backupName = existingEntry?.BackupFileName
+            ?? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(relativePath))) + Path.GetExtension(sourcePath);
         File.Copy(sourcePath, Path.Combine(backupDirectory, backupName), overwrite: true);
-        manifest.BackedUpFiles.Add(new BackupEntry
+
+        if (existingEntry is null)
         {
-            OriginalRelativePath = relativePath,
-            BackupFileName = backupName
-        });
+            manifest.BackedUpFiles.Add(new BackupEntry
+            {
+                OriginalRelativePath = relativePath,
+                BackupFileName = backupName
+            });
+        }
+
         return true;
     }
 }

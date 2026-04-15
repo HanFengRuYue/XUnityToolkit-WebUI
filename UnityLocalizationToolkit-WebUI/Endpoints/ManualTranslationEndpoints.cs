@@ -68,6 +68,34 @@ public static class ManualTranslationEndpoints
                 : Results.Ok(ApiResult<ManualTranslationAssetContent>.Ok(content));
         });
 
+        group.MapGet("/image-preview", async (
+            string id,
+            string assetId,
+            ManualTranslationImagePreviewSource source,
+            ManualTranslationImagePreviewSize size,
+            GameLibraryService library,
+            ManualTranslationService manualTranslation,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("Game not found."));
+
+            try
+            {
+                var (stream, contentType, fileName) = await manualTranslation.GetImagePreviewAsync(game, assetId, source, size, ct);
+                return Results.File(stream, contentType, fileName);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.NotFound(ApiResult.Fail(ex.Message));
+            }
+            catch (FileNotFoundException ex)
+            {
+                return Results.NotFound(ApiResult.Fail(ex.Message));
+            }
+        });
+
         group.MapPut("/save-override", async (
             string id,
             ManualTranslationSaveOverridePayload payload,
@@ -79,6 +107,79 @@ public static class ManualTranslationEndpoints
         });
 
         group.MapDelete("/delete-override", async (
+            string id,
+            string assetId,
+            ManualTranslationService manualTranslation,
+            CancellationToken ct) =>
+        {
+            await manualTranslation.DeleteOverrideAsync(id, assetId, ct);
+            return Results.Ok(ApiResult.Ok());
+        });
+
+        group.MapPost("/image-override", async (
+            HttpRequest httpRequest,
+            string id,
+            ManualTranslationService manualTranslation,
+            CancellationToken ct) =>
+        {
+            var form = await httpRequest.ReadFormAsync(ct);
+            var assetId = form["assetId"].ToString();
+            var source = form["source"].ToString();
+            var file = form.Files.GetFile("image");
+            if (string.IsNullOrWhiteSpace(assetId))
+                return Results.BadRequest(ApiResult.Fail("AssetId is required."));
+            if (file is null || file.Length == 0)
+                return Results.BadRequest(ApiResult.Fail("Please choose an image file."));
+            if (file.Length > 10 * 1024 * 1024)
+                return Results.BadRequest(ApiResult.Fail("Image files must be 10 MB or smaller."));
+
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                await manualTranslation.SaveImageOverrideAsync(id, assetId, stream, source, ct);
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+        }).DisableAntiforgery();
+
+        group.MapPost("/image-override-from-path", async (
+            string id,
+            ManualTranslationImageOverrideFromPathRequest request,
+            ManualTranslationService manualTranslation,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.AssetId))
+                return Results.BadRequest(ApiResult.Fail("AssetId is required."));
+            if (string.IsNullOrWhiteSpace(request.FilePath))
+                return Results.BadRequest(ApiResult.Fail("File path is required."));
+
+            try
+            {
+                await manualTranslation.SaveImageOverrideFromPathAsync(id, request.AssetId, request.FilePath, request.Source, ct);
+                return Results.Ok(ApiResult.Ok());
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+            catch (FileNotFoundException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+        });
+
+        group.MapDelete("/image-override", async (
             string id,
             string assetId,
             ManualTranslationService manualTranslation,
@@ -158,3 +259,4 @@ public static class ManualTranslationEndpoints
 }
 
 public sealed record ManualTranslationSaveOverridePayload(string AssetId, string Value, string? Source);
+public sealed record ManualTranslationImageOverrideFromPathRequest(string AssetId, string FilePath, string? Source);

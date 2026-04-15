@@ -18,15 +18,18 @@ declare module 'vue' {
     CoverPickerModal: typeof import('./components/library/CoverPickerModal.vue')['default']
     FileExplorerModal: typeof import('./components/common/FileExplorerModal.vue')['default']
     GameCard: typeof import('./components/library/GameCard.vue')['default']
+    GameWorkspaceHero: typeof import('./components/manual/GameWorkspaceHero.vue')['default']
     IconPickerModal: typeof import('./components/library/IconPickerModal.vue')['default']
     InstallProgressDrawer: typeof import('./components/progress/InstallProgressDrawer.vue')['default']
     LibraryCustomizer: typeof import('./components/library/LibraryCustomizer.vue')['default']
     LocalAiPanel: typeof import('./components/settings/LocalAiPanel.vue')['default']
+    ManualTranslationFontPanel: typeof import('./components/manual/ManualTranslationFontPanel.vue')['default']
     NSelect: typeof import('naive-ui')['NSelect']
     PluginHealthCard: typeof import('./components/health/PluginHealthCard.vue')['default']
     RegexRuleEditor: typeof import('./components/translation/RegexRuleEditor.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     WebImageSearchTab: typeof import('./components/library/WebImageSearchTab.vue')['default']
+    WorkspaceModeSwitch: typeof import('./components/manual/WorkspaceModeSwitch.vue')['default']
   }
 }

@@ -9,7 +9,7 @@ export const useGamesStore = defineStore('games', () => {
   const loading = ref(false)
   const viewMode = ref<'grid' | 'list'>('grid')
   const sortBy = ref<'name' | 'recent' | 'added'>('name')
-  const cardSize = ref<'small' | 'medium' | 'large' | 'xlarge'>('medium')
+  const cardSize = ref<'small' | 'medium' | 'large' | 'xlarge'>('large')
   const gap = ref<'compact' | 'normal' | 'spacious'>('normal')
   const showLabels = ref(true)
 

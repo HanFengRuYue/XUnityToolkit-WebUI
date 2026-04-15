@@ -1,5 +1,6 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin, TranslationEditorTextSource, TranslationRegexEditorData, RegexTranslationRule, ManualTranslationProjectIndex, ManualTranslationStatus, ManualTranslationAssetListResponse, ManualTranslationAssetEntry, ManualTranslationAssetContent, ManualTranslationApplyResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin, TranslationEditorTextSource, TranslationRegexEditorData, RegexTranslationRule, ManualTranslationProjectIndex, ManualTranslationStatus, ManualTranslationAssetListResponse, ManualTranslationAssetEntry, ManualTranslationAssetContent, ManualTranslationApplyResult, ManualTranslationAssetListQuery } from './types'
+import type { FontInfo, FontReplacementRequest, FontReplacementResult, FontReplacementStatus, ManualTranslationImagePreviewSize, ManualTranslationImagePreviewSource, ReplacementSource } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -192,12 +193,14 @@ export const manualTranslationApi = {
     api.post<ManualTranslationProjectIndex>(`/api/games/${id}/manual-translation/scan`, {}),
   getStatus: (id: string) =>
     api.get<ManualTranslationStatus>(`/api/games/${id}/manual-translation/status`),
-  getAssets: (id: string, query?: { scope?: string; search?: string; editableOnly?: boolean; overriddenOnly?: boolean }) => {
+  getAssets: (id: string, query?: ManualTranslationAssetListQuery) => {
     const params = new URLSearchParams()
-    if (query?.scope) params.set('scope', query.scope)
     if (query?.search) params.set('search', query.search)
     if (query?.editableOnly) params.set('editableOnly', 'true')
     if (query?.overriddenOnly) params.set('overriddenOnly', 'true')
+    if (query?.page) params.set('page', String(query.page))
+    if (query?.pageSize) params.set('pageSize', String(query.pageSize))
+    if (query?.valueKind) params.set('valueKind', query.valueKind)
     const suffix = params.toString() ? `?${params.toString()}` : ''
     return api.get<ManualTranslationAssetListResponse>(`/api/games/${id}/manual-translation/assets${suffix}`)
   },
@@ -213,12 +216,77 @@ export const manualTranslationApi = {
     api.post<ManualTranslationApplyResult>(`/api/games/${id}/manual-translation/apply`, {}),
   restore: (id: string) =>
     api.post<void>(`/api/games/${id}/manual-translation/restore`, {}),
+  buildPackage: async (id: string): Promise<void> => {
+    const resp = await fetch(`/api/games/${id}/manual-translation/build-package`, {
+      method: 'POST',
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = parseDownloadFileName(
+      resp.headers.get('content-disposition'),
+      `manual-translation-${id}.zip`,
+    )
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  },
   buildPackageUrl: (id: string) =>
     `/api/games/${id}/manual-translation/build-package`,
   importPackage: (id: string, zipPath: string) =>
     api.post<void>(`/api/games/${id}/manual-translation/import-package`, { zipPath }),
   exportAssetUrl: (id: string, assetId: string) =>
     `/api/games/${id}/manual-translation/export-asset?assetId=${encodeURIComponent(assetId)}`,
+  getImagePreviewUrl: (
+    id: string,
+    assetId: string,
+    source: ManualTranslationImagePreviewSource,
+    size: ManualTranslationImagePreviewSize,
+  ) =>
+    `/api/games/${id}/manual-translation/image-preview?assetId=${encodeURIComponent(assetId)}&source=${encodeURIComponent(source)}&size=${encodeURIComponent(size)}`,
+  uploadImageOverrideFromPath: (id: string, assetId: string, filePath: string, source?: string) =>
+    api.post<void>(`/api/games/${id}/manual-translation/image-override-from-path`, { assetId, filePath, source }),
+  uploadImageOverride: async (id: string, assetId: string, file: File, source?: string) => {
+    const formData = new FormData()
+    formData.append('assetId', assetId)
+    if (source)
+      formData.append('source', source)
+    formData.append('image', file)
+    const resp = await fetch(`/api/games/${id}/manual-translation/image-override`, {
+      method: 'POST',
+      body: formData,
+    })
+    if (!resp.ok) {
+      const text = await resp.text()
+      let message = `HTTP ${resp.status}`
+      try { const json = JSON.parse(text); if (json.error) message = json.error } catch { /* ignore */ }
+      throw new Error(message)
+    }
+  },
+  deleteImageOverride: (id: string, assetId: string) =>
+    api.del<void>(`/api/games/${id}/manual-translation/image-override?assetId=${encodeURIComponent(assetId)}`),
+}
+
+export const fontReplacementApi = {
+  getStatus: (id: string) =>
+    api.get<FontReplacementStatus>(`/api/games/${id}/font-replacement/status`),
+  scan: (id: string) =>
+    api.post<FontInfo[]>(`/api/games/${id}/font-replacement/scan`, {}),
+  replace: (id: string, request: FontReplacementRequest) =>
+    api.post<FontReplacementResult>(`/api/games/${id}/font-replacement/replace`, request),
+  restore: (id: string) =>
+    api.post<void>(`/api/games/${id}/font-replacement/restore`, {}),
+  uploadSourceFromPath: (id: string, filePath: string, kind: ReplacementSource['kind']) =>
+    api.post<void>(`/api/games/${id}/font-replacement/upload-from-path`, { filePath, kind: kind.toLowerCase() }),
 }
 
 export const settingsApi = {
@@ -282,6 +350,24 @@ function buildTranslationEditorQuery(options?: { source?: TranslationEditorTextS
   if (options?.lang) params.set('lang', options.lang)
   const query = params.toString()
   return query ? `?${query}` : ''
+}
+
+function parseDownloadFileName(disposition: string | null, fallback: string) {
+  if (!disposition)
+    return fallback
+
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1])
+    }
+    catch {
+      return utf8Match[1]
+    }
+  }
+
+  const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return fileNameMatch?.[1] || fallback
 }
 
 export const pluginPackageApi = {

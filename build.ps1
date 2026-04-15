@@ -4,13 +4,38 @@
 param(
     [switch]$SkipDownload,
     [ValidateSet('full', 'no-llama', 'lite')]
-    [string]$Edition = 'full'
+    [string]$Edition = 'full',
+    [switch]$PauseOnExit
 )
 
 $ErrorActionPreference = 'Stop'
 
+function Test-ShouldPauseOnExit {
+    if ($PauseOnExit) {
+        return $true
+    }
+
+    try {
+        $currentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction Stop
+        $parentProcessId = $currentProcess.ParentProcessId
+        if (-not $parentProcessId) {
+            return $false
+        }
+
+        $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $parentProcessId" -ErrorAction Stop
+        return $parentProcess.Name -ieq 'explorer.exe'
+    } catch {
+        return $false
+    }
+}
+
 function Wait-Exit {
     param([int]$ExitCode = 0)
+
+    if (-not (Test-ShouldPauseOnExit)) {
+        exit $ExitCode
+    }
+
     Write-Host ""
     try {
         Write-Host "Press 0 to exit..." -ForegroundColor DarkGray

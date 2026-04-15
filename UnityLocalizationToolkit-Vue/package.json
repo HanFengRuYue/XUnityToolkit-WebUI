@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check-shadow-sources": "node ./scripts/check-shadow-sources.mjs",
+    "predev": "npm run check-shadow-sources",
+    "prebuild": "npm run check-shadow-sources",
+    "prebuild-only": "npm run check-shadow-sources",
+    "pretype-check": "npm run check-shadow-sources",
     "dev": "vite",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",

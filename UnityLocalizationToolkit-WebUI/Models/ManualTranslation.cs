@@ -19,6 +19,34 @@ public enum ManualTranslationAssetValueKind
     Code
 }
 
+public enum ManualTranslationAssetFilterValueKind
+{
+    All,
+    Text,
+    Code,
+    Image,
+    Font,
+    Binary
+}
+
+public enum ManualTranslationOverrideKind
+{
+    Text,
+    Image
+}
+
+public enum ManualTranslationImagePreviewSource
+{
+    Original,
+    Override
+}
+
+public enum ManualTranslationImagePreviewSize
+{
+    Thumb,
+    Full
+}
+
 public sealed class ManualTranslationProjectManifest
 {
     public required string GameId { get; init; }
@@ -53,6 +81,12 @@ public sealed class ManualTranslationAssetEntry
     public string? CodeLocation { get; init; }
     public string? Preview { get; set; }
     public string? OriginalText { get; set; }
+    public string? ListTitle { get; init; }
+    public string? ListSubtitle { get; init; }
+    public string? ListMeta { get; init; }
+    public string? IconKey { get; init; }
+    public int? Width { get; init; }
+    public int? Height { get; init; }
     public bool Editable { get; init; }
     public bool Exportable { get; init; } = true;
     public bool Overridden { get; set; }
@@ -72,12 +106,55 @@ public sealed class ManualTranslationStatus
     public DateTime? ScannedAt { get; set; }
     public DateTime? AppliedAt { get; set; }
     public string? LastPackagePath { get; set; }
+    public ManualTranslationKindCounts KindCounts { get; set; } = new();
 }
 
 public sealed class ManualTranslationAssetListResponse
 {
     public required string GameId { get; init; }
+    public int Total { get; init; }
+    public int Page { get; init; }
+    public int PageSize { get; init; }
     public List<ManualTranslationAssetEntry> Assets { get; init; } = [];
+}
+
+public sealed class ManualTranslationKindCounts
+{
+    public int All { get; set; }
+    public int Text { get; set; }
+    public int Code { get; set; }
+    public int Image { get; set; }
+    public int Font { get; set; }
+    public int Binary { get; set; }
+
+    public static ManualTranslationKindCounts FromAssets(IEnumerable<ManualTranslationAssetEntry> assets)
+    {
+        var counts = new ManualTranslationKindCounts();
+        foreach (var asset in assets)
+        {
+            counts.All++;
+            switch (asset.ValueKind)
+            {
+                case ManualTranslationAssetValueKind.Text:
+                    counts.Text++;
+                    break;
+                case ManualTranslationAssetValueKind.Code:
+                    counts.Code++;
+                    break;
+                case ManualTranslationAssetValueKind.Image:
+                    counts.Image++;
+                    break;
+                case ManualTranslationAssetValueKind.Font:
+                    counts.Font++;
+                    break;
+                case ManualTranslationAssetValueKind.Binary:
+                    counts.Binary++;
+                    break;
+            }
+        }
+
+        return counts;
+    }
 }
 
 public sealed class ManualTranslationAssetContent
@@ -92,7 +169,12 @@ public sealed class ManualTranslationAssetContent
 public sealed class ManualTranslationOverrideEntry
 {
     public required string AssetId { get; init; }
-    public required string Value { get; set; }
+    public ManualTranslationOverrideKind Kind { get; set; } = ManualTranslationOverrideKind.Text;
+    public string? Value { get; set; }
+    public string? ImageFileName { get; set; }
+    public string? ContentType { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
     public string Source { get; set; } = "manual";
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -121,4 +203,12 @@ public sealed class ManualTranslationPackageManifest
 
 public sealed record ManualTranslationSaveOverrideRequest(string Value, string? Source);
 public sealed record ManualTranslationImportPackageRequest(string ZipPath);
-public sealed record ManualTranslationAssetsQuery(string? Scope, string? Search, bool EditableOnly = false, bool OverriddenOnly = false);
+public sealed class ManualTranslationAssetsQuery
+{
+    public string? Search { get; init; }
+    public bool? EditableOnly { get; init; }
+    public bool? OverriddenOnly { get; init; }
+    public int? Page { get; init; }
+    public int? PageSize { get; init; }
+    public ManualTranslationAssetFilterValueKind? ValueKind { get; init; }
+}

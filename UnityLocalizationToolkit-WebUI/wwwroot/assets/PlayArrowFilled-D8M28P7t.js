@@ -1,0 +1,1 @@
+import{St as e,Z as t,et as n,ot as r}from"./vendor-vue-BKOprIqz.js";var i={xmlns:`http://www.w3.org/2000/svg`,"xmlns:xlink":`http://www.w3.org/1999/xlink`,viewBox:`0 0 24 24`},a=r({name:`PlayArrowFilled`,render:function(r,a){return e(),n(`svg`,i,a[0]||=[t(`path`,{d:`M8 5v14l11-7z`,fill:`currentColor`},null,-1)])}});export{a as t};
