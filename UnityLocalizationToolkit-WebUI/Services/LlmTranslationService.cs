@@ -12,6 +12,7 @@ using UnityLocalizationToolkit_WebUI.Models;
 namespace UnityLocalizationToolkit_WebUI.Services;
 
 internal sealed record TranslationBatchResult(IList<string> Translations, IReadOnlyList<bool> Persistable);
+internal sealed record JapaneseResidualTranslationIssue(int Index, string ResidualPreview);
 
 public sealed class LlmTranslationService(
     IHttpClientFactory httpClientFactory,
@@ -1105,6 +1106,29 @@ public sealed class LlmTranslationService(
                 }
             }
 
+            var japaneseResidualIssues = ApplyJapaneseResidualPersistenceGuard(
+                translations, from, to, perTextTerms, perTextCanPersist);
+            foreach (var issue in japaneseResidualIssues)
+            {
+                var effectiveEndpoint = perTextTranslationSource[issue.Index] is not null
+                    ? "翻译记忆"
+                    : endpointName;
+
+                logger.LogWarning(
+                    "检测到残留日文，已阻止持久化: game={GameId}, index={Index}, residual={Residual}, source=\"{Source}\", translated=\"{Translated}\", endpoint={Endpoint}",
+                    gameId ?? "(none)",
+                    issue.Index,
+                    issue.ResidualPreview,
+                    BuildLogPreview(texts[issue.Index]),
+                    BuildLogPreview(translations[issue.Index]),
+                    effectiveEndpoint);
+
+                RecordError(
+                    $"检测到残留日文，已阻止持久化（index={issue.Index}, 残留={issue.ResidualPreview}）",
+                    effectiveEndpoint,
+                    gameId);
+            }
+
             for (int i = 0; i < translations.Length; i++)
             {
                 // Record recent translation with term metadata
@@ -1945,6 +1969,7 @@ public sealed class LlmTranslationService(
 
         AppendGameDescription(sb, gameDescription);
         AppendExactPlaceholderRule(sb);
+        AppendJaToZhTranslationRule(sb, from, to);
 
         if (glossary is { Count: > 0 })
         {
@@ -1983,6 +2008,7 @@ public sealed class LlmTranslationService(
 
         AppendGameDescription(sb, gameDescription);
         AppendExactPlaceholderRule(sb);
+        AppendJaToZhTranslationRule(sb, from, to);
 
         var translateTerms = matchedTerms.Where(t => t.Type == TermType.Translate).ToList();
         var dntTerms = matchedTerms.Where(t => t.Type == TermType.DoNotTranslate).ToList();
@@ -2027,6 +2053,17 @@ public sealed class LlmTranslationService(
         sb.Append("\n\n附加硬性规则：所有运行时占位符都必须按输入逐字保留。");
         sb.Append("例如 [SPECIAL_01]、【SPECIAL_01】、{PLAYER} 或 {Quest_Id} 都必须保持完全一致，括号样式、大小写、数量和位置都不得改变。");
         sb.Append("若输入本身没有整句外层引号或括号，输出也不得擅自添加。");
+    }
+
+    private static void AppendJaToZhTranslationRule(StringBuilder sb, string from, string to)
+    {
+        if (!IsJapaneseToChineseTranslation(from, to))
+            return;
+
+        sb.Append("\n\n附加硬性规则（日文→中文专用）：");
+        sb.Append("片假名词语必须优先翻译为中文语义，不要仅做音译或直接保留日文。");
+        sb.Append("例如：プレイ→玩法/操作（按语境），スキル→技能，アイテム→道具。");
+        sb.Append("最终译文不得残留平假名、片假名或明显日文短语；只有占位符、程序变量和明确标记为禁止翻译的词可以原样保留。");
     }
 
     private static void AppendGameDescription(StringBuilder sb, string? gameDescription)
@@ -2205,7 +2242,7 @@ public sealed class LlmTranslationService(
 
     // ── Response parsing ──
 
-    private static (List<string> Originals, List<string> Translations) CollectPersistableTranslations(
+    internal static (List<string> Originals, List<string> Translations) CollectPersistableTranslations(
         IList<string> originals,
         IList<string> translations,
         IReadOnlyList<bool> persistableFlags)
@@ -2267,6 +2304,42 @@ public sealed class LlmTranslationService(
         var preview = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
         return preview.Length > 120 ? preview[..120] + "..." : preview;
     }
+
+    internal static List<JapaneseResidualTranslationIssue> ApplyJapaneseResidualPersistenceGuard(
+        IList<string> translations,
+        string from,
+        string to,
+        IReadOnlyList<List<TermEntry>?> perTextTerms,
+        IList<bool> persistableFlags)
+    {
+        var issues = new List<JapaneseResidualTranslationIssue>();
+        if (!IsJapaneseToChineseTranslation(from, to))
+            return issues;
+
+        var count = Math.Min(translations.Count, Math.Min(perTextTerms.Count, persistableFlags.Count));
+        for (int i = 0; i < count; i++)
+        {
+            if (!persistableFlags[i])
+                continue;
+
+            var allowedSegments = perTextTerms[i]?
+                .Where(static term => term.Type == TermType.DoNotTranslate && !string.IsNullOrWhiteSpace(term.Original))
+                .Select(static term => term.Original);
+
+            var inspection = TranslationJapaneseResidualGuard.Inspect(translations[i], allowedSegments);
+            if (!inspection.HasResidualJapanese)
+                continue;
+
+            persistableFlags[i] = false;
+            issues.Add(new JapaneseResidualTranslationIssue(i, inspection.ResidualPreview));
+        }
+
+        return issues;
+    }
+
+    internal static bool IsJapaneseToChineseTranslation(string from, string to) =>
+        from.StartsWith("ja", StringComparison.OrdinalIgnoreCase) &&
+        to.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
 
     // ── Concurrency ──
 

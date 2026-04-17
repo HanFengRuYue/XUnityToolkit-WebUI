@@ -25,6 +25,10 @@ public sealed class AiTranslationPromptTests
         Assert.Contains("每个数组项只包含译文本体", prompt);
         Assert.Contains("不得新增 “”、\"\"、''、「」、『』、【】、[]、()", prompt);
         Assert.Contains("不得补出“他说：”“旁白：”这类前缀", prompt);
+        Assert.Contains("片假名词语优先翻译为中文含义", prompt);
+        Assert.Contains("最终译文不得残留平假名、片假名或明显日文短语", prompt);
+        Assert.Contains("プレイ→玩法/操作", prompt);
+        Assert.Contains("私の得意プレイね", prompt);
     }
 
     private static string ReadFrontendPrompt()
