@@ -15,31 +15,31 @@ jobs:
       release_body: |
         ## UnityLocalizationToolkit-WebUI ${{ github.ref_name }}
 
-        ### 鐗堟湰璇存槑
-        - **Full锛堝畬鏁寸増锛?*锛氳嚜鍖呭惈 + 鍐呯疆鏈湴澶фā鍨嬶紙鎺ㄨ崘锛?
-        - **No-LLAMA**锛氳嚜鍖呭惈锛屼粎浜戠 API 缈昏瘧
-        - **Lite锛堢簿绠€鐗堬級**锛氶渶瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)锛屾渶灏忎綋绉?
+        ### 版本说明
+        - **Full（完整版）**：自带应用、本地 llama.cpp 运行时与常用资源，推荐大多数用户。
+        - **No-LLAMA**：自带应用和翻译链路所需依赖，但不包含本地大模型运行时。
+        - **Lite（精简版）**：体积最小，需要先安装 [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)。
 
-        ### 涓嬭浇
+        ### 下载
 
-        #### ZIP 渚挎惡鐗堬紙瑙ｅ帇鍗崇敤锛?
-        | 鏂囦欢 | 鐗堟湰 |
+        #### ZIP 便携版（解压即用）
+        | 文件 | 版本 |
         |------|------|
-        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Full 瀹屾暣鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.zip` | Full（完整版） |
         | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.zip` | No-LLAMA |
-        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.zip` | Lite 绮剧畝鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.zip` | Lite（精简版） |
 
-        #### MSI 瀹夎鍖咃紙鍙屽嚮瀹夎锛?
-        | 鏂囦欢 | 鐗堟湰 |
+        #### MSI 安装包（双击安装）
+        | 文件 | 版本 |
         |------|------|
-        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | Full 瀹屾暣鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64.msi` | Full（完整版） |
         | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-no-llama.msi` | No-LLAMA |
-        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.msi` | Lite 绮剧畝鐗?|
+        | `UnityLocalizationToolkit-WebUI-${{ github.ref_name }}-win-x64-lite.msi` | Lite（精简版） |
 
-        ### 瀹夎鏂瑰紡
-        - **渚挎惡鐗堬細** 涓嬭浇 ZIP锛岃В鍘嬪悗杩愯 `UnityLocalizationToolkit-WebUI.exe`
-        - **瀹夎鍖咃細** 涓嬭浇 MSI锛屽弻鍑诲畨瑁呭嵆鍙?
-        - **Lite 鐗堬細** 闇€瑕佸厛瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)
+        ### 安装方式
+        - **便携版**：下载 ZIP，解压后运行 `UnityLocalizationToolkit-WebUI.exe`。
+        - **安装包**：下载 MSI，按向导安装即可。
+        - **Lite 版**：安装前请先准备 [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)。
       prerelease: false
     permissions:
       contents: write

@@ -1,4 +1,4 @@
-﻿# Reusable build workflow 鈥?called by release.yml and dep-check.yml
+# Reusable build workflow - called by release.yml and dep-check.yml
 # Can also be triggered manually via workflow_dispatch for testing.
 #
 # Optimizations over naive sequential build:
@@ -64,7 +64,7 @@ jobs:
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           Write-Host "Build version: $v (prefix: $prefix)"
 
-      # 鈹€鈹€ SDK setup 鈹€鈹€
+      # -- SDK setup --
 
       - name: Setup .NET 10 preview
         uses: actions/setup-dotnet@v5
@@ -79,7 +79,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: UnityLocalizationToolkit-Vue/package-lock.json
 
-      # 鈹€鈹€ Caching 鈹€鈹€
+      # -- Caching --
 
       - name: Cache NuGet packages
         uses: actions/cache@v5
@@ -88,7 +88,7 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
-      # 鈹€鈹€ Parallel: npm ci + dotnet restore + download bundled assets 鈹€鈹€
+      # -- Parallel: npm ci + dotnet restore + download bundled assets --
       # npm ci (longest, ~54s) runs in background while dotnet restore and
       # asset downloads proceed in the foreground (~32s combined).
 
@@ -105,14 +105,14 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw "npm ci failed with exit code $LASTEXITCODE" }
           } -ArgumentList (Resolve-Path "UnityLocalizationToolkit-Vue").Path
 
-          # 鈹€鈹€ Restore .NET projects (populates NuGet cache) 鈹€鈹€
+          # -- Restore .NET projects (populates NuGet cache) --
           Write-Host "Restoring .NET projects..."
           dotnet restore UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj -r win-x64 -v quiet
           dotnet restore Updater/Updater.csproj -r win-x64 -v quiet
           dotnet restore TranslatorEndpoint/TranslatorEndpoint.csproj -v quiet
           Write-Host ".NET restore complete."
 
-          # 鈹€鈹€ Download bundled assets 鈹€鈹€
+          # -- Download bundled assets --
           $headers = @{
             'Authorization' = "Bearer $env:GH_TOKEN"
             'User-Agent'    = 'UnityLocalizationToolkit-CI/1.0'
@@ -171,7 +171,7 @@ jobs:
             New-Item -ItemType Directory -Path $d -Force | Out-Null
           }
 
-          # 鈹€鈹€ BepInEx 5 (Mono) 鈹€鈹€
+          # -- BepInEx 5 (Mono) --
           Write-Host "Fetching BepInEx 5..."
           $b5releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" -Headers $headers -TimeoutSec 30
@@ -190,7 +190,7 @@ jobs:
             }
           }
 
-          # 鈹€鈹€ BepInEx 6 BE (IL2CPP) 鈹€鈹€
+          # -- BepInEx 6 BE (IL2CPP) --
           Write-Host "Fetching BepInEx 6 BE..."
           $buildsHtml = (Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
             Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
@@ -208,7 +208,7 @@ jobs:
             throw "Failed to parse BepInEx 6 BE build info"
           }
 
-          # 鈹€鈹€ XUnity.AutoTranslator 鈹€鈹€
+          # -- XUnity.AutoTranslator --
           Write-Host "Fetching XUnity.AutoTranslator..."
           $xureleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" -Headers $headers -TimeoutSec 30
@@ -220,7 +220,7 @@ jobs:
             Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\xunity"
           }
 
-          # 鈹€鈹€ llama.cpp (pinned version) 鈹€鈹€
+          # -- llama.cpp (pinned version) --
           $llamaTag = "b8756"
           Write-Host "Fetching llama.cpp $llamaTag..."
           $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
@@ -246,7 +246,7 @@ jobs:
           # Write version marker for runtime version detection
           Set-Content -Path "$BundledRoot\llama\version.txt" -Value $llamaTag -NoNewline
 
-          # 鈹€鈹€ Extract XUnity reference DLLs for TranslatorEndpoint 鈹€鈹€
+          # -- Extract XUnity reference DLLs for TranslatorEndpoint --
           $xunityZip = Get-ChildItem -Path "$BundledRoot\xunity" -Filter '*.zip' |
               Where-Object { $_.Name -notlike '*IL2CPP*' } |
               Select-Object -First 1
@@ -307,7 +307,7 @@ jobs:
               Write-Host "  [skip] XUnity ZIP not found, using committed DLLs"
           }
 
-          # 鈹€鈹€ Update classdata.tpk from AssetRipper/Tpk CI 鈹€鈹€
+          # -- Update classdata.tpk from AssetRipper/Tpk CI --
           if (Get-Command gh -ErrorAction SilentlyContinue) {
               Write-Host "Fetching latest classdata.tpk from AssetRipper/Tpk..."
               $tpkTempDir = Join-Path $env:RUNNER_TEMP "tpk_$(Get-Random)"
@@ -341,7 +341,7 @@ jobs:
 
           Write-Host "Bundled assets ready."
 
-          # 鈹€鈹€ Wait for npm ci 鈹€鈹€
+          # -- Wait for npm ci --
           Write-Host "`n--- Waiting for npm ci ---"
           $npmCiJob | Wait-Job | Out-Null
           $npmCiOutput = Receive-Job $npmCiJob 2>&1
@@ -354,10 +354,10 @@ jobs:
           Remove-Job $npmCiJob
           Write-Host "npm ci complete."
 
-      # 鈹€鈹€ Build frontend & TranslatorEndpoint (parallel) 鈹€鈹€
+      # -- Build frontend & TranslatorEndpoint (parallel) --
       # Frontend runs in foreground (longest, shows progress live).
       # TranslatorEndpoint runs in background via Start-Job.
-      # Updater AOT is a separate step 鈥?AOT needs native toolchain
+      # Updater AOT is a separate step - AOT needs native toolchain
       # which is unreliable inside Start-Job child processes.
 
       - name: Build frontend & TranslatorEndpoint
@@ -415,7 +415,7 @@ jobs:
               Write-Host "::endgroup::"
           }
 
-      # 鈹€鈹€ Build Updater (AOT) 鈹€鈹€
+      # -- Build Updater (AOT) --
       # AOT publish requires its own restore phase to populate PrivateSdkAssemblies;
       # --no-restore breaks AOT. Runs as a dedicated step for clear error reporting.
 
@@ -425,7 +425,7 @@ jobs:
           dotnet publish Updater/Updater.csproj -c Release -r win-x64
           if ($LASTEXITCODE -ne 0) { throw "Updater AOT build failed" }
 
-      # 鈹€鈹€ Publish backend 鈹€鈹€
+      # -- Publish backend --
 
       - name: Publish all editions
         shell: pwsh
@@ -488,7 +488,7 @@ jobs:
             Write-Host "$($ed.Name) done (exe: $sizeMB MB)"
           }
 
-      # 鈹€鈹€ Generate manifest & create all packages 鈹€鈹€
+      # -- Generate manifest & create all packages --
       # Main release ZIP runs in a background job while component ZIPs are
       # created in the foreground. Component ZIPs use direct entry creation
       # (no temp directory copies) to reduce I/O.
@@ -521,7 +521,7 @@ jobs:
             } -ArgumentList $releaseDirAbs, $mainZipDst
           }
 
-          # 鈹€鈹€ Generate per-edition manifests and app ZIPs 鈹€鈹€
+          # -- Generate per-edition manifests and app ZIPs --
           foreach ($ed in $editions) {
             $releaseDir = "Release/$rid$($ed.Suffix)"
             $releaseDirAbs = (Resolve-Path $releaseDir).Path
@@ -561,7 +561,7 @@ jobs:
             }
           }
 
-          # 鈹€鈹€ Create shared component ZIPs (from full edition) 鈹€鈹€
+          # -- Create shared component ZIPs (from full edition) --
           $fullReleaseDir = "Release/$rid"
 
           # wwwroot ZIP
@@ -647,7 +647,7 @@ jobs:
             Write-Host "Created $zipFile ($zipSize MB)"
           }
 
-      # 鈹€鈹€ Build MSI installer 鈹€鈹€
+      # -- Build MSI installer --
 
       - name: Build MSI (all editions)
         if: inputs.release_tag != ''
@@ -685,7 +685,7 @@ jobs:
             Generate-InstallerWxs -ReleaseDir $ed.OutputDir -OutputFile "$generatedDir/HarvestedFiles.wxs"
 
             # Clean bin/ AND obj/ to force full WiX rebuild per edition.
-            # WiX SDK caches .wixobj, .cab, and MSI in obj/ 鈥?without cleaning,
+            # WiX SDK caches .wixobj, .cab, and MSI in obj/ - without cleaning,
             # incremental build reuses stale artifacts from the previous edition.
             $wixPlatform = 'x64'
             $wixBinDir = "Installer/bin/$wixPlatform/Release"
@@ -713,7 +713,7 @@ jobs:
             }
           }
 
-      # 鈹€鈹€ Upload artifacts 鈹€鈹€
+      # -- Upload artifacts --
 
       - name: Upload release ZIPs
         uses: actions/upload-artifact@v7
@@ -748,7 +748,7 @@ jobs:
             Release/UnityLocalizationToolkit-WebUI-v${{ steps.ver.outputs.version_prefix }}-win-x64-lite.msi
           retention-days: 3
 
-  # 鈹€鈹€ Create GitHub Release 鈹€鈹€
+  # -- Create GitHub Release --
   release:
     needs: build
     if: ${{ inputs.release_tag != '' }}
@@ -785,7 +785,7 @@ jobs:
               printf '\n\n### Changelog\n%s\n' "$CHANGELOG" >> release_notes.md
             fi
           else
-            # No previous tag 鈥?include all commits
+            # No previous tag - include all commits
             CHANGELOG=$(git log --pretty=format:"- %s (\`%h\`)" --no-merges -20)
             if [ -n "$CHANGELOG" ]; then
               printf '\n\n### Changelog\n%s\n' "$CHANGELOG" >> release_notes.md
@@ -904,11 +904,11 @@ jobs:
           BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
           # Generate new download links table
-          NEW_CONTENT="| 鐗堟湰 | ZIP 渚挎惡鐗?| MSI 瀹夎鍖?|
+          NEW_CONTENT="| 版本 | ZIP 便携版 | MSI 安装包 |
           |------|-----------|-----------|
-          | **Full锛堝畬鏁寸増锛?* | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64.zip) | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64.msi) |
-          | **No-LLAMA** | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.zip) | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.msi) |
-          | **Lite锛堢簿绠€鐗堬級** | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.zip) | [涓嬭浇](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.msi) |"
+          | **Full（完整版）** | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64.zip) | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64.msi) |
+          | **No-LLAMA** | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.zip) | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-no-llama.msi) |
+          | **Lite（精简版）** | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.zip) | [下载](${BASE}/UnityLocalizationToolkit-WebUI-v${VER_PREFIX}-win-x64-lite.msi) |"
 
           # Remove leading whitespace from heredoc indentation
           NEW_CONTENT=$(echo "$NEW_CONTENT" | sed 's/^          //')
@@ -929,6 +929,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
           if ! git diff --cached --quiet; then
-            git commit -m "ci: 鏇存柊 README 涓嬭浇閾炬帴鑷?${TAG}"
+            git commit -m "ci: 更新 README 下载链接至 ${TAG}"
             git push
           fi

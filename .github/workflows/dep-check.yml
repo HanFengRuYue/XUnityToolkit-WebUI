@@ -43,7 +43,7 @@ jobs:
           echo "bepinex5=$B5" >> "$GITHUB_OUTPUT"
           echo "BepInEx 5: $B5"
 
-          # BepInEx 6 BE (HTML scrape 鈥?extract build number from IL2CPP x64 link)
+          # BepInEx 6 BE (HTML scrape - extract build number from IL2CPP x64 link)
           B6=$(curl -sSf "https://builds.bepinex.dev/projects/bepinex_be" \
             | grep -oE '[0-9]+/BepInEx-Unity\.IL2CPP-win-x64' | cut -d/ -f1 | sort -rn | head -1)
           if [ -z "$B6" ]; then
@@ -124,26 +124,26 @@ jobs:
                 echo "- Force build (no dependency changes)"
               fi
               echo ""
-              echo "### 鐗堟湰璇存槑"
-              echo "- **Full锛堝畬鏁寸増锛?*锛氳嚜鍖呭惈 + 鍐呯疆鏈湴澶фā鍨嬶紙鎺ㄨ崘锛?
-              echo "- **No-LLAMA**锛氳嚜鍖呭惈锛屼粎浜戠 API 缈昏瘧"
-              echo "- **Lite锛堢簿绠€鐗堬級**锛氶渶瀹夎 [.NET 10 杩愯鏃禲(https://dotnet.microsoft.com/download/dotnet/10.0)锛屾渶灏忎綋绉?
+              echo "### 版本说明"
+              echo "- **Full（完整版）**：自带应用、本地 llama.cpp 运行时与常用资源，推荐大多数用户。"
+              echo "- **No-LLAMA**：自带应用和翻译链路所需依赖，但不包含本地大模型运行时。"
+              echo "- **Lite（精简版）**：体积最小，需要先安装 [.NET 10 Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)。"
               echo ""
-              echo "### 涓嬭浇"
+              echo "### 下载"
               echo ""
-              echo "#### ZIP 渚挎惡鐗堬紙瑙ｅ帇鍗崇敤锛?
-              echo "| 鏂囦欢 | 鐗堟湰 |"
+              echo "#### ZIP 便携版（解压即用）"
+              echo "| 文件 | 版本 |"
               echo "|------|------|"
-              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.zip\` | Full 瀹屾暣鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.zip\` | Full（完整版） |"
               echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.zip\` | No-LLAMA |"
-              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.zip\` | Lite 绮剧畝鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.zip\` | Lite（精简版） |"
               echo ""
-              echo "#### MSI 瀹夎鍖咃紙鍙屽嚮瀹夎锛?
-              echo "| 鏂囦欢 | 鐗堟湰 |"
+              echo "#### MSI 安装包（双击安装）"
+              echo "| 文件 | 版本 |"
               echo "|------|------|"
-              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.msi\` | Full 瀹屾暣鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64.msi\` | Full（完整版） |"
               echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-no-llama.msi\` | No-LLAMA |"
-              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.msi\` | Lite 绮剧畝鐗?|"
+              echo "| \`UnityLocalizationToolkit-WebUI-${VER_PREFIX}-win-x64-lite.msi\` | Lite（精简版） |"
               echo 'RELEASE_EOF'
             } >> "$GITHUB_OUTPUT"
 
