@@ -1,55 +1,60 @@
 # AGENTS.data.md
 
-<!-- agents-maintainer:auto:start -->
-## Read This When
-- Touching persisted data layout, config files, caches, schemas, models, or migration-sensitive paths.
+## Scope
+- Covers persisted data layout, configuration files, cache directories, JSON write patterns, protected secrets, and model or schema changes that affect storage or imports and exports.
+- Covers `AppDataPaths`, `FileHelper`, `DpapiProtector`, app settings, manual translation data layout, and shared DTO synchronization.
+- Does not own UI workflows or packaging logic except where they interact with persisted data.
 
-## Relevant Paths
-- Confirm the owning paths from the repository layout before adding new notes here.
+## Continue Reading When
+- Editing `UnityLocalizationToolkit-WebUI/Infrastructure/AppDataPaths.cs`, `FileHelper.cs`, `DpapiProtector.cs`, or data-bearing models.
+- Changing `settings.json`, `library.json`, app-data folder layout, import or export behavior, or any cache or per-game JSON file.
+- Adding a new stored field that must stay aligned across C#, TypeScript, persistence, and UI.
 
-## Commands / Constraints
-- Relevant command: `dotnet run --project UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj`
-- Relevant command: `dotnet build UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj`
-- Relevant command: `dotnet publish UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj`
-- Relevant command: `dotnet test UnityLocalizationToolkit-WebUI.Tests/UnityLocalizationToolkit-WebUI.Tests.csproj`
-- Keep notes specific to this topic and move path-local rules into closer directory AGENTS.md files when possible.
+## Current Structure
+- App-data root owner: `UnityLocalizationToolkit-WebUI/Infrastructure/AppDataPaths.cs`
+- Atomic JSON helper: `UnityLocalizationToolkit-WebUI/Infrastructure/FileHelper.cs`
+- Secret protection: `UnityLocalizationToolkit-WebUI/Infrastructure/DpapiProtector.cs`
+- Shared config and DTO models: `UnityLocalizationToolkit-WebUI/Models`
+- Import and export behavior: `UnityLocalizationToolkit-WebUI/Endpoints/SettingsEndpoints.cs`
 
-## Verification
-- Run `dotnet run --project UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj` when it is part of the touched workflow.
-- Run `dotnet build UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj` when it is part of the touched workflow.
-- Run `dotnet publish UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj` when it is part of the touched workflow.
-<!-- agents-maintainer:auto:end -->
+## Rules And Conventions
+- `[data:appdata-root]` Keep `%AppData%\\UnityLocalizationToolkit` as the default runtime data root.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: `AppData:Root` can override it, and `AppDataPaths` still carries a legacy migration path from `%AppData%\\XUnityToolkit`.
+- `[data:owned-layout]` Treat `AppDataPaths.cs` as the source of truth for runtime directories.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: Common top-level areas include `library.json`, `settings.json`, `local-llm-settings.json`, `glossaries`, `script-tags`, `translation-memory`, `dynamic-patterns`, `term-candidates`, `cache`, `models`, `llama`, `generated-fonts`, `font-backups`, `custom-fonts`, `logs`, `backups`, and `manual-translation`.
+- `[data:manual-translation-layout]` Keep manual translation data under the dedicated app-data subtree.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: Per-game data lives under `manual-translation/projects/<gameId>/` with `manifest.json`, `asset-index.json`, `overrides/`, `overrides/media/`, `exports/`, `builds/`, and `code-patches/`; backups live under `manual-translation/backups/<gameId>/`.
+- `[data:atomic-json]` Use the shared atomic JSON helper for persisted JSON writes.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: `FileHelper.WriteJsonAtomicAsync` writes through a `.tmp` file and should remain the default path for durable JSON changes.
+- `[data:protected-secrets]` Keep API keys and similar secrets on the DPAPI protector flow.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: `DpapiProtector` uses the `ENC:DPAPI:` prefix and `CurrentUser` scope; do not replace it with plaintext storage.
+- `[data:shared-field-sync]` Treat shared field changes as cross-layer changes.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: When changing `AppSettings`, `AiTranslationSettings`, `LocalLlmSettings`, manual translation DTOs, or similar shared models, update C# models, TypeScript API types, persistence code, and the matching UI together.
+- `[data:new-path-checklist]` Update the full ownership chain when adding a new persistent directory or file.
+  - Scope: data
+  - Last confirmed: 2026-04-17
+  - Notes: New stored paths usually require changes in `AppDataPaths.cs`, cleanup or delete flows, import and export behavior, and any rebuild or regeneration flow that should recreate the data.
 
-## Manual Notes
-<!-- agents-maintainer:manual:start -->
-- Runtime data defaults to `%AppData%\\UnityLocalizationToolkit`; `AppData:Root` can override it. Path ownership is centralized in `UnityLocalizationToolkit-WebUI/Infrastructure/AppDataPaths.cs`.
-- High-churn root files and directories include:
-  - `library.json`
-  - `settings.json`
-  - `local-llm-settings.json`
-  - `glossaries/`
-  - `script-tags/`
-  - `translation-memory/`
-  - `dynamic-patterns/`
-  - `term-candidates/`
-  - `cache/`
-  - `models/`
-  - `llama/`
-  - `generated-fonts/`
-  - `font-backups/`
-  - `custom-fonts/`
-  - `logs/`
-  - `update-staging/`
-- Manual translation data lives under `manual-translation/`, especially:
-  - `projects/<gameId>/manifest.json`
-  - `projects/<gameId>/asset-index.json`
-  - `projects/<gameId>/overrides/`
-  - `projects/<gameId>/exports/`
-  - `projects/<gameId>/builds/`
-  - `projects/<gameId>/code-patches/`
-  - `backups/<gameId>/`
-- When adding a new per-game cache, directory, or data file, update `AppDataPaths.cs`, game-removal cleanup, settings export or import behavior, and any rebuild flow that should recreate it.
-- `cache/pre-translation-regex/<gameId>.txt` is only a compatibility mirror for legacy custom-regex state. The authoritative runtime file remains `BepInEx/Translation/<lang>/Text/_PreTranslated_Regex.txt`.
-- Secrets such as API keys and the SteamGridDB key are DPAPI-protected. Keep using the existing protector flow, atomic JSON helpers such as `FileHelper.WriteJsonAtomicAsync`, and `PathSecurity` helpers for joins and external URL validation.
-- Shared field changes usually require coordinated updates across C# models, TypeScript API types, persistence code, and the matching UI. Watch `AppSettings`, `AiTranslationSettings`, `LocalLlmSettings`, and translation-editor related DTOs.
-<!-- agents-maintainer:manual:end -->
+## Commands And Checks
+- `dotnet run --project UnityLocalizationToolkit-WebUI/UnityLocalizationToolkit-WebUI.csproj`
+- `dotnet test UnityLocalizationToolkit-WebUI.Tests/UnityLocalizationToolkit-WebUI.Tests.csproj`
+- Use `GET /api/settings/data-path` and the import or export endpoints when validating data-path-sensitive changes through the running app.
+
+## Common Issues And Handling
+- If a persisted field appears in only one layer, assume a synchronization gap and inspect both backend models and `UnityLocalizationToolkit-Vue/src/api`.
+- If a JSON file is written directly without the shared helper, expect partial-write and directory-creation issues on failure paths.
+
+## Recent Relevant Changes
+- 2026-04-17: Data guidance was rewritten into the standard domain template while preserving the verified app-data root, manual translation layout, DPAPI, and atomic write rules.
