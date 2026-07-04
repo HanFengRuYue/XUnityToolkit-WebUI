@@ -1,27 +1,27 @@
-# AGENTS.md
+# CLAUDE.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-本文件用于给后续 Codex 代理提供可直接复用的仓库上下文。当前仓库已经统一改为由根目录 `AGENTS.md` 维护全部项目级、后端级、前端级说明；历史 `CLAUDE.md` 与子目录级说明已合并删除，不再作为维护入口。
+本文件用于给后续代理提供可直接复用的仓库上下文。当前仓库已经统一改为由根目录 `CLAUDE.md` 维护全部项目级、后端级、前端级说明；历史 `AGENTS.md` 已合并删除，不再作为维护入口。
 
 ## 1. 权威文档入口
 
 开始动手前，优先参考这些文件：
 
-- `AGENTS.md`
+- `CLAUDE.md`
 - `README.md`
 
 规则：
 
-- `AGENTS.md` 是当前唯一维护中的 Codex 仓库工作手册，历史 `CLAUDE.md` 与子目录级说明的内容都已并入本文件。
+- `CLAUDE.md` 是当前唯一维护中的仓库工作手册，所有原 `AGENTS.md` 与历史 `CLAUDE.md` 的内容都已并入本文件。
 - `README.md` 主要面向产品说明、构建入口和用户侧信息。
-- 仓库内不再保留子目录级 `AGENTS.md`；如发现重新出现，应视为需要回收进根目录 `AGENTS.md` 的重复文档。
-- 若文档与源码冲突，以源码为准，并在改动后同步更新 `AGENTS.md`。
+- 仓库内不再保留 `AGENTS.md`；如发现重新出现，应视为需要回收进 `CLAUDE.md` 的重复文档。
+- 若文档与源码冲突，以源码为准，并在改动后同步更新 `CLAUDE.md`。
 
 补充说明：
 
-- 仓库内 `.Codex/` 目录只有 `scheduled_tasks.lock`，没有额外项目记忆文件。
-- 后端与前端原先分散在历史 `CLAUDE.md`、`XUnityToolkit-WebUI/AGENTS.md`、`XUnityToolkit-Vue/AGENTS.md`、根目录 `AGENTS.md` 的内容，现已统一整理到本文件后半部分的专项章节中。
+- 仓库内 `.claude/` 目录只有 `scheduled_tasks.lock`，没有额外项目记忆文件。
+- 后端与前端原先分散在历史 `CLAUDE.md`、`XUnityToolkit-WebUI/CLAUDE.md`、`XUnityToolkit-Vue/CLAUDE.md`、根目录 `AGENTS.md` 的内容，现已统一整理到本文件后半部分的专项章节中。
 
 ## 2. 项目概览
 
@@ -599,8 +599,8 @@ CI：
 截至本次整理时，已确认：
 
 - 仓库当前存在完整的项目级说明文档，且与源码主干大体一致
-- 根目录 `AGENTS.md` 已成为统一维护入口，历史 `CLAUDE.md` 与子目录级说明的内容已完成合并并删除旧文件
-- `.Codex/` 中没有额外项目说明
+- 根目录 `CLAUDE.md` 已成为统一维护入口，原 `AGENTS.md` 与历史 `CLAUDE.md` 的内容已完成合并并删除旧文件
+- `.claude/` 中没有额外项目说明
 - 构建链路、前后端入口、运行时数据目录、更新器、翻译端点均已做过静态核对
 
 ## 18. 维护建议
@@ -615,7 +615,7 @@ CI：
 
 ## 19. 接口矩阵补充
 
-以下接口族原先分散记录在历史 `CLAUDE.md` 与子目录级说明中，现统一收敛到此：
+以下接口族原先分散记录在历史 `CLAUDE.md` 与 `AGENTS.md` 中，现统一收敛到此：
 
 - 游戏管理：`GET/POST /api/games`、`GET/DELETE /api/games/{id}`、`POST /api/games/add-with-detection`、`POST /api/games/batch-add`、`PUT /api/games/{id}`、`POST /api/games/{id}/detect`、`POST /api/games/{id}/open-folder`、`POST /api/games/{id}/launch`
 - TMP 字体：`GET/POST/DELETE /api/games/{id}/tmp-font`
@@ -793,9 +793,9 @@ CI：
 
 ## 24. 旧文档状态
 
-- 历史 `CLAUDE.md`、`XUnityToolkit-WebUI/AGENTS.md`、`XUnityToolkit-Vue/AGENTS.md` 已全部删除或合并
-- 历史 Claude 向说明已合并入本文件后删除
-- 后续若有人重新添加子目录级 `AGENTS.md` 或旧的 Claude 向说明，应默认视为重复文档并回收至本根目录 `AGENTS.md`
+- 历史 `CLAUDE.md`、`XUnityToolkit-WebUI/CLAUDE.md`、`XUnityToolkit-Vue/CLAUDE.md` 已全部删除
+- 历史 `AGENTS.md` 已合并入本文件后删除
+- 后续若有人重新添加 `AGENTS.md` 或子目录级 `CLAUDE.md`，应默认视为重复文档并回收至本根目录 `CLAUDE.md`
 
 ## 25. 插件健康状态补充
 

@@ -143,7 +143,7 @@ XUnityToolkit-WebUI 适合需要给 Unity 游戏做机翻增强、术语约束�
 
 - 默认目录是 `%AppData%\\XUnityToolkit`。
 - 可通过应用内的 **导出配置 / 导入配置** 做迁移或备份。
-- 开发与维护层面的完整数据布局，请查看 [AGENTS.md](AGENTS.md)。
+- 开发与维护层面的完整数据布局，请查看 [CLAUDE.md](CLAUDE.md)。
 
 </details>
 
@@ -198,7 +198,7 @@ cd ..
 ### 维护说明
 
 - README 现在主要面向用户。
-- 仓库维护、运行时数据布局、同步点和不变量统一记录在 [AGENTS.md](AGENTS.md)。
+- 仓库维护、运行时数据布局、同步点和不变量统一记录在 [CLAUDE.md](CLAUDE.md)。
 - 构建与发版流程调整时，需要同时检查 `build.ps1` 和 `.github/workflows/build.yml`。
 
 </details>

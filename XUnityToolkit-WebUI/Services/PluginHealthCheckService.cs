@@ -233,7 +233,7 @@ public sealed partial class PluginHealthCheckService(
     private static void CheckDoorstopProxy(List<HealthCheckItem> checks, string gamePath, bool isIL2CPP)
     {
         var winhttpExists = File.Exists(Path.Combine(gamePath, "winhttp.dll"));
-        var dobbyExists = File.Exists(Path.Combine(gamePath, "dobby.dll"));
+        var dobbyExists = DobbyDllExists(gamePath);
 
         if (isIL2CPP)
         {
@@ -244,7 +244,7 @@ public sealed partial class PluginHealthCheckService(
             else if (!winhttpExists && !dobbyExists)
             {
                 checks.Add(new("doorstopProxy", "BepInEx 代理 DLL", HealthStatus.Error,
-                    "winhttp.dll 和 dobby.dll 都不存在，可能被安全软件删除，请将游戏目录加入白名单后重新安装。"));
+                    "winhttp.dll 和 BepInEx/core/dobby.dll 都不存在，可能被安全软件删除，请将游戏目录加入白名单后重新安装。"));
             }
             else if (!winhttpExists)
             {
@@ -254,7 +254,7 @@ public sealed partial class PluginHealthCheckService(
             else
             {
                 checks.Add(new("doorstopProxy", "BepInEx 代理 DLL", HealthStatus.Error,
-                    "dobby.dll 不存在，BepInEx 6 IL2CPP 模式需要该文件，请重新安装。"));
+                    "BepInEx/core/dobby.dll 不存在，BepInEx 6 IL2CPP 模式需要该文件；旧版根目录 dobby.dll 也会被兼容识别。请重新安装。"));
             }
         }
         else
@@ -270,6 +270,10 @@ public sealed partial class PluginHealthCheckService(
             }
         }
     }
+
+    private static bool DobbyDllExists(string gamePath) =>
+        File.Exists(Path.Combine(gamePath, "BepInEx", "core", "dobby.dll")) ||
+        File.Exists(Path.Combine(gamePath, "dobby.dll"));
 
     private static void CheckDoorstopConfig(List<HealthCheckItem> checks, string gamePath)
     {
