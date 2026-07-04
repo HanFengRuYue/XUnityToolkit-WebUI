@@ -1351,7 +1351,7 @@ public sealed class LlmTranslationService(
 
             for (int i = 0; i < texts.Count; i++)
             {
-                var userContent = JsonSerializer.Serialize(new[] { texts[i] });
+                var userContent = JsonSerializer.Serialize(new[] { texts[i] }, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
                 TranslationCandidate? translatedText = null;
 
                 for (int attempt = 0; attempt <= maxRetries; attempt++)
@@ -1605,7 +1605,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = JsonSerializer.Serialize(texts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
 
         // Local endpoints get additional sampling parameters for faster/better inference
         var isLocal = ep.ApiKey == "local";
@@ -1674,7 +1674,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = JsonSerializer.Serialize(texts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
@@ -1733,7 +1733,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = JsonSerializer.Serialize(texts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
