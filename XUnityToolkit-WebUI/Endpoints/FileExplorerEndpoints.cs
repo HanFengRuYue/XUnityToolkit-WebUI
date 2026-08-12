@@ -5,6 +5,8 @@ namespace XUnityToolkit_WebUI.Endpoints;
 
 public static class FileExplorerEndpoints
 {
+    private const int MaxDirectoryEntries = 2000;
+
     public static void MapFileExplorerEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/filesystem");
@@ -106,6 +108,9 @@ public static class FileExplorerEndpoints
                 {
                     foreach (var dir in dirInfo.EnumerateDirectories())
                     {
+                        if (entries.Count >= MaxDirectoryEntries)
+                            break;
+
                         try
                         {
                             entries.Add(new FileSystemEntry(
@@ -132,6 +137,9 @@ public static class FileExplorerEndpoints
                 {
                     foreach (var file in dirInfo.EnumerateFiles())
                     {
+                        if (entries.Count >= MaxDirectoryEntries)
+                            break;
+
                         try
                         {
                             entries.Add(new FileSystemEntry(
