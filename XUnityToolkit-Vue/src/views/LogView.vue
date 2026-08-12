@@ -25,6 +25,7 @@ const autoScroll = ref(true)
 const loading = ref(false)
 const historyLoading = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
+let scrollFrame: number | null = null
 
 interface LevelDef {
   key: string
@@ -66,6 +67,16 @@ function scrollToBottom() {
   if (el) el.scrollTop = el.scrollHeight
 }
 
+function scheduleScrollToBottom() {
+  if (scrollFrame != null)
+    return
+
+  scrollFrame = window.requestAnimationFrame(() => {
+    scrollFrame = null
+    scrollToBottom()
+  })
+}
+
 function handleScroll() {
   const el = containerRef.value
   if (!el) return
@@ -76,7 +87,7 @@ function handleScroll() {
 watch(() => logStore.entries.length, async () => {
   if (autoScroll.value) {
     await nextTick()
-    scrollToBottom()
+    scheduleScrollToBottom()
   }
 })
 
@@ -127,6 +138,10 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(() => {
+  if (scrollFrame != null) {
+    window.cancelAnimationFrame(scrollFrame)
+    scrollFrame = null
+  }
   logStore.disconnect()
 })
 

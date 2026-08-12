@@ -33,6 +33,8 @@ const analyzing = ref(false)
 const analysisResult = ref<BepInExLogAnalysis | null>(null)
 const searchQuery = ref('')
 const levelFilter = ref<string>('All')
+const loadedTailLines = 5000
+const maxRenderedLines = 1000
 
 // Level filter options
 const levelOptions = [
@@ -91,6 +93,13 @@ const filteredLines = computed(() => {
   return lines
 })
 
+const visibleLines = computed(() => {
+  const lines = filteredLines.value
+  return lines.length > maxRenderedLines ? lines.slice(-maxRenderedLines) : lines
+})
+
+const hiddenFilteredLineCount = computed(() => Math.max(0, filteredLines.value.length - visibleLines.value.length))
+
 // Level to CSS class
 function levelClass(level: string): string {
   switch (level.toLowerCase()) {
@@ -108,7 +117,7 @@ function levelClass(level: string): string {
 async function loadLog() {
   loading.value = true
   try {
-    const resp = await bepinexLogApi.get(gameId.value)
+    const resp = await bepinexLogApi.get(gameId.value, loadedTailLines)
     logContent.value = resp.content
     fileSize.value = resp.fileSize
     lastModified.value = resp.lastModified
@@ -263,7 +272,13 @@ onMounted(async () => {
       <div v-else class="log-content">
         <div class="log-lines">
           <div
-            v-for="(line, idx) in filteredLines"
+            v-if="hiddenFilteredLineCount > 0"
+            class="log-line log-info"
+          >
+            已省略 {{ hiddenFilteredLineCount }} 条较早匹配日志，仅显示最后 {{ maxRenderedLines }} 条
+          </div>
+          <div
+            v-for="(line, idx) in visibleLines"
             :key="idx"
             class="log-line"
             :class="levelClass(line.level)"

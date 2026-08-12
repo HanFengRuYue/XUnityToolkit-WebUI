@@ -11,6 +11,7 @@ public class BepInExLogService
     private readonly ILogger<BepInExLogService> _logger;
 
     private const int MaxAnalysisLines = 4000;
+    private const int DefaultReadLines = 5000;
 
     private const string DiagnosticPrompt = """
         你是一个 BepInEx/XUnity.AutoTranslator 日志分析专家。请分析以下 BepInEx 日志，使用 Markdown 格式输出诊断报告，包含以下部分：
@@ -51,7 +52,7 @@ public class BepInExLogService
     public static string GetLogPath(Game game) =>
         Path.Combine(game.GamePath, "BepInEx", "LogOutput.log");
 
-    public async Task<BepInExLogResponse> ReadLogAsync(Game game)
+    public async Task<BepInExLogResponse> ReadLogAsync(Game game, int? tailLines = DefaultReadLines)
     {
         var logPath = GetLogPath(game);
         if (!File.Exists(logPath))
@@ -61,15 +62,68 @@ public class BepInExLogService
         var lastModified = fi.LastWriteTimeUtc;
         var fileSize = fi.Length;
 
-        // Read with FileShare.ReadWrite — game may be running
-        string content;
-        using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-        using (var reader = new StreamReader(fs, Encoding.UTF8))
-        {
-            content = await reader.ReadToEndAsync();
-        }
+        var content = tailLines is > 0
+            ? await ReadTailAsync(logPath, tailLines.Value)
+            : await ReadAllAsync(logPath);
 
         return new BepInExLogResponse(content, fileSize, lastModified);
+    }
+
+    private static async Task<string> ReadAllAsync(string logPath)
+    {
+        await using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+            bufferSize: 64 * 1024, useAsync: true);
+        using var reader = new StreamReader(fs, Encoding.UTF8);
+        return await reader.ReadToEndAsync();
+    }
+
+    private static async Task<string> ReadTailAsync(string logPath, int maxLines)
+    {
+        const int blockSize = 16 * 1024;
+        const int maxTailBytes = 8 * 1024 * 1024;
+        var buffer = new byte[blockSize];
+        var chunks = new List<byte[]>();
+        var newlineCount = 0;
+        var bytesReadTotal = 0;
+
+        await using (var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+                         bufferSize: blockSize, useAsync: true))
+        {
+            var position = fs.Length;
+            while (position > 0 && newlineCount <= maxLines && bytesReadTotal < maxTailBytes)
+            {
+                var toRead = (int)Math.Min(blockSize, position);
+                position -= toRead;
+                fs.Seek(position, SeekOrigin.Begin);
+                var read = await fs.ReadAsync(buffer.AsMemory(0, toRead));
+                if (read <= 0)
+                    break;
+
+                var chunk = new byte[read];
+                Buffer.BlockCopy(buffer, 0, chunk, 0, read);
+                chunks.Add(chunk);
+                bytesReadTotal += read;
+                newlineCount += chunk.Count(static b => b == (byte)'\n');
+            }
+        }
+
+        if (chunks.Count == 0)
+            return string.Empty;
+
+        chunks.Reverse();
+        var tail = new byte[chunks.Sum(static chunk => chunk.Length)];
+        var offset = 0;
+        foreach (var chunk in chunks)
+        {
+            Buffer.BlockCopy(chunk, 0, tail, offset, chunk.Length);
+            offset += chunk.Length;
+        }
+
+        var lines = Encoding.UTF8.GetString(tail)
+            .Split(["\r\n", "\n", "\r"], StringSplitOptions.None);
+        return lines.Length <= maxLines
+            ? string.Join('\n', lines)
+            : string.Join('\n', lines[^maxLines..]);
     }
 
     public async Task<BepInExLogAnalysis> AnalyzeLogAsync(string logContent, CancellationToken ct)

@@ -9,8 +9,8 @@ public static class BepInExLogEndpoints
     {
         var group = app.MapGroup("/api/games/{id}/bepinex-log");
 
-        // GET / — read full log content + metadata
-        group.MapGet("/", async (string id, GameLibraryService library, BepInExLogService logService) =>
+        // GET / — read the recent log tail + metadata
+        group.MapGet("/", async (string id, int? lines, GameLibraryService library, BepInExLogService logService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -22,7 +22,7 @@ public static class BepInExLogEndpoints
 
             try
             {
-                var response = await logService.ReadLogAsync(game);
+                var response = await logService.ReadLogAsync(game, Math.Clamp(lines ?? 5000, 100, 20000));
                 return Results.Ok(ApiResult<BepInExLogResponse>.Ok(response));
             }
             catch (Exception)
@@ -61,7 +61,7 @@ public static class BepInExLogEndpoints
 
             try
             {
-                var logResponse = await logService.ReadLogAsync(game);
+                var logResponse = await logService.ReadLogAsync(game, 4000);
                 var analysis = await logService.AnalyzeLogAsync(logResponse.Content, ct);
                 return Results.Ok(ApiResult<BepInExLogAnalysis>.Ok(analysis));
             }
