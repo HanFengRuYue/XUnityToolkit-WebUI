@@ -24,6 +24,8 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
     public List<TermEntry> FindMatchedTerms(List<TermEntry> allTerms, List<string> sourceTexts)
     {
         var matched = new List<TermEntry>();
+        var combinedText = string.Join('\n', sourceTexts);
+        var combinedTextIgnoreCase = combinedText.ToLowerInvariant();
 
         foreach (var term in allTerms)
         {
@@ -34,17 +36,17 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
             {
                 if (term.IsRegex)
                 {
-                    if (MatchesAnyRegex(term, sourceTexts))
+                    if (MatchesRegex(term, combinedText))
                         matched.Add(term);
                 }
                 else if (term.ExactMatch)
                 {
-                    if (MatchesAnyExact(term, sourceTexts))
+                    if (MatchesExact(term, combinedText))
                         matched.Add(term);
                 }
                 else
                 {
-                    if (MatchesAnyContains(term, sourceTexts))
+                    if (MatchesContains(term, combinedText, combinedTextIgnoreCase))
                         matched.Add(term);
                 }
             }
@@ -145,22 +147,14 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
         return terms.Count * 20;
     }
 
-    private bool MatchesAnyContains(TermEntry term, List<string> sourceTexts)
+    private static bool MatchesContains(TermEntry term, string combinedText, string combinedTextIgnoreCase)
     {
-        var comparison = term.CaseSensitive
-            ? StringComparison.Ordinal
-            : StringComparison.OrdinalIgnoreCase;
-
-        foreach (var text in sourceTexts)
-        {
-            if (text.Contains(term.Original, comparison))
-                return true;
-        }
-
-        return false;
+        return term.CaseSensitive
+            ? combinedText.Contains(term.Original, StringComparison.Ordinal)
+            : combinedTextIgnoreCase.Contains(term.Original.ToLowerInvariant(), StringComparison.Ordinal);
     }
 
-    private bool MatchesAnyExact(TermEntry term, List<string> sourceTexts)
+    private bool MatchesExact(TermEntry term, string combinedText)
     {
         var pattern = BuildExactMatchPattern(term.Original);
         var options = RegexOptions.None;
@@ -168,31 +162,17 @@ public class TermMatchingService(ILogger<TermMatchingService> logger)
             options |= RegexOptions.IgnoreCase;
 
         var regex = RegexCache.GetOrAdd((pattern, options), key => new Regex(key.Pattern, key.Options, RegexTimeout));
-
-        foreach (var text in sourceTexts)
-        {
-            if (regex.IsMatch(text))
-                return true;
-        }
-
-        return false;
+        return regex.IsMatch(combinedText);
     }
 
-    private static bool MatchesAnyRegex(TermEntry term, List<string> sourceTexts)
+    private static bool MatchesRegex(TermEntry term, string combinedText)
     {
         var options = RegexOptions.None;
         if (!term.CaseSensitive)
             options |= RegexOptions.IgnoreCase;
 
         var regex = RegexCache.GetOrAdd((term.Original, options), key => new Regex(key.Pattern, key.Options, RegexTimeout));
-
-        foreach (var text in sourceTexts)
-        {
-            if (regex.IsMatch(text))
-                return true;
-        }
-
-        return false;
+        return regex.IsMatch(combinedText);
     }
 
     private static bool IsCjkChar(char ch)
