@@ -44,7 +44,7 @@ public sealed class AiTranslationPromptTests
     private static string FindRepoRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
-        while (current is not null && !File.Exists(Path.Combine(current.FullName, "CLAUDE.md")))
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "AGENTS.md")))
             current = current.Parent;
 
         return current?.FullName ?? throw new DirectoryNotFoundException("Unable to locate repo root.");

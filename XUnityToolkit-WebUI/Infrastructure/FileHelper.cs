@@ -12,7 +12,7 @@ public static class FileHelper
     /// Standard JSON options for data file serialization.
     /// WriteIndented + camelCase + enum-as-string.
     /// IMPORTANT: Do NOT add a global naming policy to JsonStringEnumConverter
-    /// (per CLAUDE.md enum JSON casing rules).
+    /// (per AGENTS.md enum JSON casing rules).
     /// </summary>
     public static readonly JsonSerializerOptions DataJsonOptions = new()
     {
