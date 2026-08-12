@@ -32,7 +32,7 @@ const message = useMessage()
 const form = ref<XUnityConfig>({
   translationEngine: 'GoogleTranslateV2',
   fallbackEndpoint: '',
-  sourceLanguage: 'ja',
+  sourceLanguage: 'auto',
   targetLanguage: 'zh',
   outputFile: '',
   enableIMGUI: true,
@@ -177,6 +177,11 @@ const languageOptions = [
   { label: '俄语 (ru)', value: 'ru' },
 ]
 
+const sourceLanguageOptions = [
+  { label: '自动识别 (auto)', value: 'auto' },
+  ...languageOptions,
+]
+
 const engineOptions = [
   { label: 'Google Translate', value: 'GoogleTranslate' },
   { label: 'Google Translate V2', value: 'GoogleTranslateV2' },
@@ -290,7 +295,7 @@ watch(() => props.disabled, (disabled) => {
           <div class="config-section">
             <div class="config-section-label">语言设置</div>
             <NFormItem label="源语言">
-              <NSelect v-model:value="form.sourceLanguage" :options="languageOptions" />
+              <NSelect v-model:value="form.sourceLanguage" :options="sourceLanguageOptions" />
             </NFormItem>
             <NFormItem label="目标语言">
               <NSelect v-model:value="form.targetLanguage" :options="languageOptions" />

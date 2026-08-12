@@ -48,9 +48,6 @@ public static class SettingsEndpoints
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
-            DynamicPatternService dynamicPatternService,
-            TermExtractionService extractionService,
-            PreTranslationCacheMonitor cacheMonitor,
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
@@ -85,9 +82,6 @@ public static class SettingsEndpoints
                 termService,
                 scriptTagService,
                 tmService,
-                dynamicPatternService,
-                extractionService,
-                cacheMonitor,
                 translationService,
                 glossaryExtractionService,
                 updateService,
@@ -148,7 +142,7 @@ public static class SettingsEndpoints
                 "models", "llama", "generated-fonts", "logs",
                 "update-staging", "update-backup", "update-temp",
                 "backups", "font-backups", "custom-fonts",
-                "translation-memory", "dynamic-patterns", "term-candidates",
+                "translation-memory",
             };
             // font-generation/temp and font-generation/uploads are excluded separately
             var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
@@ -193,9 +187,6 @@ public static class SettingsEndpoints
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
-            DynamicPatternService dynamicPatternService,
-            TermExtractionService extractionService,
-            PreTranslationCacheMonitor cacheMonitor,
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
@@ -226,9 +217,6 @@ public static class SettingsEndpoints
                     termService,
                     scriptTagService,
                     tmService,
-                    dynamicPatternService,
-                    extractionService,
-                    cacheMonitor,
                     translationService,
                     glossaryExtractionService,
                     updateService,
@@ -254,9 +242,6 @@ public static class SettingsEndpoints
             TermService termService,
             ScriptTagService scriptTagService,
             TranslationMemoryService tmService,
-            DynamicPatternService dynamicPatternService,
-            TermExtractionService extractionService,
-            PreTranslationCacheMonitor cacheMonitor,
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
@@ -289,9 +274,6 @@ public static class SettingsEndpoints
                     termService,
                     scriptTagService,
                     tmService,
-                    dynamicPatternService,
-                    extractionService,
-                    cacheMonitor,
                     translationService,
                     glossaryExtractionService,
                     updateService,
@@ -420,9 +402,6 @@ public static class SettingsEndpoints
         TermService termService,
         ScriptTagService scriptTagService,
         TranslationMemoryService tmService,
-        DynamicPatternService dynamicPatternService,
-        TermExtractionService extractionService,
-        PreTranslationCacheMonitor cacheMonitor,
         LlmTranslationService translationService,
         GlossaryExtractionService glossaryExtractionService,
         UpdateService updateService,
@@ -434,9 +413,6 @@ public static class SettingsEndpoints
         termService.ClearAllCache();
         scriptTagService.ClearAllCache();
         tmService.ClearAllCache();
-        dynamicPatternService.ClearAllCache();
-        extractionService.ClearAllCache();
-        cacheMonitor.UnloadCache();
         translationService.ClearAllRuntimeState();
         glossaryExtractionService.ClearAllRuntimeState();
         updateService.ResetRuntimeState();

@@ -1,8 +1,9 @@
 # build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload] [-Edition full|no-llama|lite]
+# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-Edition full|no-llama|lite]
 
 param(
     [switch]$SkipDownload,
+    [switch]$SkipSmoke,
     [ValidateSet('full', 'no-llama', 'lite')]
     [string]$Edition = 'full'
 )
@@ -67,8 +68,8 @@ $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 $hasUpdater = Test-Path $UpdaterProject
 
-# Generate version: 4.9.{YYYYMMDDHHmm}
-$BuildVersion = "4.9.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 5.0.{YYYYMMDDHHmm}
+$BuildVersion = "5.0.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
@@ -76,7 +77,7 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 }) + $(if (-not $SkipSmoke) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -285,7 +286,7 @@ if (-not $SkipDownload) {
     if ($Edition -ne 'full') {
         Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
     } else {
-    $llamaTag = "b8756"
+    $llamaTag = "b10375"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30
@@ -294,10 +295,10 @@ if (-not $SkipDownload) {
 
     $llamaDir = Join-Path $BundledRoot 'llama'
 
-    # Match assets by pattern (prefer CUDA 13.1 for broader compatibility)
+    # Match assets by pattern (current CUDA 13 runtime published for Windows x64)
     $llamaPatterns = @(
-        @{ Pattern = "llama-*-bin-win-cuda-13.1-x64.zip"; Label = "CUDA 13.1" },
-        @{ Pattern = "cudart-llama-bin-win-cuda-13.1-x64.zip"; Label = "CUDA Runtime" },
+        @{ Pattern = "llama-*-bin-win-cuda-13.3-x64.zip"; Label = "CUDA 13.3" },
+        @{ Pattern = "cudart-llama-bin-win-cuda-13.3-x64.zip"; Label = "CUDA Runtime" },
         @{ Pattern = "llama-*-bin-win-vulkan-x64.zip"; Label = "Vulkan" },
         @{ Pattern = "llama-*-bin-win-cpu-x64.zip"; Label = "CPU" }
     )
@@ -357,8 +358,8 @@ Write-Host ""
 Write-Host "[$currentStep/$stepCount] Building frontend..." -ForegroundColor Yellow
 Push-Location $FrontendDir
 try {
-    & npm install --silent 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    & npm ci --silent 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 
     & npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
@@ -383,8 +384,7 @@ if ($hasEndpoint) {
         if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
         Write-Host "  LLMTranslate.dll build complete." -ForegroundColor Green
     } else {
-        Write-Host "  Skipped: XUnity reference DLLs not found in TranslatorEndpoint/libs/" -ForegroundColor DarkYellow
-        Write-Host "  (LLMTranslate.dll will not be embedded)" -ForegroundColor DarkGray
+        throw "XUnity reference DLLs not found in TranslatorEndpoint/libs; release build cannot embed LLMTranslate.dll"
     }
 }
 
@@ -478,6 +478,64 @@ if (Test-Path $bundledSrc) {
 $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
 Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
+
+if (-not $SkipSmoke) {
+    $currentStep++
+    Write-Host ""
+    Write-Host "[$currentStep/$stepCount] Running release smoke check..." -ForegroundColor Yellow
+
+    $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "xunitytoolkit-smoke-$([Guid]::NewGuid().ToString('N'))"
+    $smokeStdout = Join-Path $smokeRoot 'stdout.log'
+    $smokeStderr = Join-Path $smokeRoot 'stderr.log'
+    $proc = $null
+    try {
+        New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
+        $env:AppData__Root = $smokeRoot
+        $proc = Start-Process -FilePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') `
+            -WorkingDirectory $OutputDir -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
+        $baseUrl = 'http://127.0.0.1:51821'
+        $deadline = [DateTime]::UtcNow.AddSeconds(60)
+        $indexOk = $false
+        $versionOk = $false
+        $lastSmokeError = $null
+        do {
+            Start-Sleep -Milliseconds 500
+            $proc.Refresh()
+            if ($proc.HasExited) {
+                $lastSmokeError = "process exited with code $($proc.ExitCode)"
+                break
+            }
+            try {
+                $indexResponse = Invoke-WebRequest "$baseUrl/" -UseBasicParsing -TimeoutSec 3
+                $versionResponse = Invoke-WebRequest "$baseUrl/api/settings/version" -UseBasicParsing -TimeoutSec 3
+                $indexOk = $indexResponse.StatusCode -ge 200 -and $indexResponse.StatusCode -lt 300
+                $versionOk = $versionResponse.StatusCode -ge 200 -and $versionResponse.StatusCode -lt 300
+                $lastSmokeError = $null
+            } catch {
+                $indexOk = $false
+                $versionOk = $false
+                $lastSmokeError = $_.Exception.Message
+            }
+        } while ((-not ($indexOk -and $versionOk)) -and [DateTime]::UtcNow -lt $deadline)
+
+        if (-not ($indexOk -and $versionOk)) {
+            $processState = if ($proc.HasExited) { "exited ($($proc.ExitCode))" } else { 'still running' }
+            $stdoutTail = if (Test-Path $smokeStdout) { (Get-Content $smokeStdout -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+            $stderrTail = if (Test-Path $smokeStderr) { (Get-Content $smokeStderr -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+            throw "Release smoke check failed for $baseUrl/ and /api/settings/version. Process: $processState. Last error: $lastSmokeError`nstdout:`n$stdoutTail`nstderr:`n$stderrTail"
+        }
+        Write-Host "  Release smoke check passed." -ForegroundColor Green
+    } finally {
+        if ($proc -and -not $proc.HasExited) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+        }
+        Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
+        if (Test-Path $smokeRoot) {
+            Remove-Item $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 # ── Summary ──
 Write-Host ""

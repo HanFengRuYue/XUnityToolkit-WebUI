@@ -24,7 +24,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             TranslationEngine = GetValue(ini, "Service", "Endpoint", "GoogleTranslateV2"),
             FallbackEndpoint = GetValue(ini, "Service", "FallbackEndpoint", null),
             // [General]
-            SourceLanguage = GetValue(ini, "General", "FromLanguage", "ja"),
+            SourceLanguage = GetValue(ini, "General", "FromLanguage", "auto"),
             TargetLanguage = GetValue(ini, "General", "Language", "en"),
             // [Files]
             OutputFile = GetNullableValue(ini, "Files", "OutputFile"),
@@ -132,6 +132,7 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             ["General"] = new(StringComparer.OrdinalIgnoreCase)
             {
                 ["Language"] = "zh",
+                ["FromLanguage"] = "auto",
             },
             ["TextFrameworks"] = new(StringComparer.OrdinalIgnoreCase)
             {

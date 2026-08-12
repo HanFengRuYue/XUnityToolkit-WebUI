@@ -4,11 +4,7 @@ import {
   NIcon,
   NButton,
   NSwitch,
-  NTag,
-  NProgress,
   NSlider,
-  NCollapse,
-  NCollapseItem,
   NPopover,
   useMessage,
 } from 'naive-ui'
@@ -29,7 +25,6 @@ import {
   CloudOutlined,
   ComputerOutlined,
   SportsEsportsOutlined,
-  CachedOutlined,
   ExpandMoreOutlined,
   StorageOutlined,
 } from '@vicons/material'
@@ -46,7 +41,6 @@ defineOptions({ name: 'AiTranslationView' })
 
 const collapsed = reactive({
   settings: false,
-  cache: true,
   recent: true,
   errors: true,
   termSettings: false,
@@ -70,15 +64,10 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   localRepeatPenalty: 1.0,
   endpoints: [],
   glossaryExtractionEnabled: false,
-  enablePreTranslationCache: true,
   termAuditEnabled: true,
   naturalTranslationMode: true,
   enableTranslationMemory: true,
   fuzzyMatchThreshold: 85,
-  enableLlmPatternAnalysis: true,
-  enableMultiRoundTranslation: true,
-  enableAutoTermExtraction: true,
-  autoApplyExtractedTerms: false,
 }
 
 const settings = ref<AppSettings | null>(null)
@@ -135,7 +124,7 @@ const isActivelyTranslating = computed(() => (aiStore.stats?.translating ?? 0) >
 const tmTotalHits = computed(() => {
   const s = aiStore.stats
   if (!s) return 0
-  return s.translationMemoryHits + s.translationMemoryFuzzyHits + s.translationMemoryPatternHits
+  return s.translationMemoryHits + s.translationMemoryFuzzyHits
 })
 
 const llmCompleted = computed(() => {
@@ -264,7 +253,6 @@ onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
     aiStore.fetchStats(),
-    aiStore.fetchCacheStats(),
     loadSettings(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
@@ -275,7 +263,7 @@ onMounted(async () => {
 
 onActivated(async () => {
   await aiStore.connect()
-  await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats(), loadSettings()])
+  await Promise.all([aiStore.fetchStats(), loadSettings()])
   await nextTick()
   await syncPipelineLayout()
   setupPipelineObserver()
@@ -517,7 +505,6 @@ watch(() => [
   tmTotalHits.value,
   aiStore.stats?.translationMemoryHits ?? 0,
   aiStore.stats?.translationMemoryFuzzyHits ?? 0,
-  aiStore.stats?.translationMemoryPatternHits ?? 0,
   extractionStats.value?.totalExtracted ?? 0,
   extractionStats.value?.totalExtractionCalls ?? 0,
   extractionStats.value?.activeExtractions ?? 0,
@@ -757,7 +744,6 @@ watch(() => [
                           <div class="tm-chips-inline">
                             <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryHits ?? 0) }}</strong> 精确</span>
                             <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryFuzzyHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryFuzzyHits ?? 0) }}</strong> 模糊</span>
-                            <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryPatternHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryPatternHits ?? 0) }}</strong> 模式</span>
                           </div>
                         </div>
                       </template>
@@ -854,84 +840,6 @@ watch(() => [
               <div class="audit-seg phase1" :style="{ flex: aiStore.stats?.termAuditPhase1PassCount ?? 0 }"></div>
               <div class="audit-seg phase2" :style="{ flex: aiStore.stats?.termAuditPhase2PassCount ?? 0 }"></div>
               <div class="audit-seg forced" :style="{ flex: aiStore.stats?.termAuditForceCorrectedCount ?? 0 }"></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Pre-Translation Cache Stats -->
-        <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
-          <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
-            <h2 class="section-title">
-              <span class="section-icon">
-                <NIcon :size="16"><CachedOutlined /></NIcon>
-              </span>
-              预翻译缓存
-              <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
-            </h2>
-            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.cache }">
-              <ExpandMoreOutlined />
-            </NIcon>
-          </div>
-          <div class="section-body" :class="{ collapsed: collapsed.cache }">
-            <div class="section-body-inner">
-              <div class="metrics-strip compact-metrics">
-                <div class="metric-pill">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><CachedOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
-                    <span class="metric-label">总条目</span>
-                  </div>
-                </div>
-                <div class="metric-pill rate-good">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><CheckCircleOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.cacheHits }}</span>
-                    <span class="metric-label">命中</span>
-                  </div>
-                </div>
-                <div class="metric-pill" :class="{ 'rate-bad': aiStore.cacheStats.cacheMisses > 0 }">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><ErrorOutlineOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.cacheMisses }}</span>
-                    <span class="metric-label">未命中</span>
-                  </div>
-                </div>
-                <div class="metric-pill" :class="{ 'rate-good': aiStore.cacheStats.hitRate > 80, 'rate-warn': aiStore.cacheStats.hitRate <= 80 && aiStore.cacheStats.hitRate > 50, 'rate-bad': aiStore.cacheStats.hitRate <= 50 }">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><SpeedOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.hitRate }}<small>%</small></span>
-                    <span class="metric-label">命中率</span>
-                  </div>
-                </div>
-              </div>
-              <NProgress
-                type="line"
-                :percentage="aiStore.cacheStats.hitRate"
-                :color="aiStore.cacheStats.hitRate > 50 ? 'var(--success)' : 'var(--danger)'"
-                class="cache-progress"
-              />
-              <NCollapse v-if="aiStore.cacheStats.recentMisses.length > 0">
-                <NCollapseItem title="最近未命中详情" name="misses">
-                  <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" class="cache-miss-item">
-                    <div class="cache-miss-row">
-                      <span class="cache-miss-label">预翻译键:</span>
-                      <code class="cache-miss-code">{{ miss.preTranslatedKey }}</code>
-                    </div>
-                    <div class="cache-miss-row">
-                      <span class="cache-miss-label">运行时文本:</span>
-                      <code class="cache-miss-code">{{ miss.runtimeText }}</code>
-                    </div>
-                  </div>
-                </NCollapseItem>
-              </NCollapse>
             </div>
           </div>
         </div>
@@ -1123,7 +1031,6 @@ watch(() => [
                   <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
                   <span v-if="item.translationSource === 'tmExact'" class="meta-tag tm-exact">TM 精确</span>
                   <span v-else-if="item.translationSource === 'tmFuzzy'" class="meta-tag tm-fuzzy">TM 模糊</span>
-                  <span v-else-if="item.translationSource === 'tmPattern'" class="meta-tag tm-pattern">动态模式</span>
                   <span class="meta-tag">{{ item.tokensUsed }} tok</span>
                   <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
                   <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
@@ -2143,8 +2050,7 @@ watch(() => [
 }
 
 .meta-tag.tm-exact,
-.meta-tag.tm-fuzzy,
-.meta-tag.tm-pattern {
+.meta-tag.tm-fuzzy {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   font-weight: 500;
@@ -2369,43 +2275,6 @@ watch(() => [
 /* ===== Extraction Select ===== */
 .extraction-select {
   max-width: 320px;
-}
-
-/* ===== Cache Stats ===== */
-.cache-progress {
-  margin: 12px 0;
-}
-
-.cache-miss-item {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.cache-miss-item:last-child {
-  border-bottom: none;
-}
-
-.cache-miss-row {
-  display: flex;
-  gap: 8px;
-  font-size: 12px;
-  margin: 3px 0;
-}
-
-.cache-miss-label {
-  color: var(--text-3);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.cache-miss-code {
-  word-break: break-all;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-2);
-  background: var(--bg-subtle);
-  padding: 1px 6px;
-  border-radius: 4px;
 }
 
 /* ===== Responsive ===== */

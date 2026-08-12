@@ -17,8 +17,8 @@ public sealed class UpdateManifestFileSetTests : IDisposable
     [Fact]
     public void ComputeDiff_ShouldTreatMatchingManagedFilesAsUnchanged()
     {
-        WriteFile("bundled/llama/version.txt", "b8756");
-        WriteFile("bundled/llama/llama-b8756-bin-win-cpu-x64.zip", "cpu-zip");
+        WriteFile("bundled/llama/version.txt", "b10375");
+        WriteFile("bundled/llama/llama-b10375-bin-win-cpu-x64.zip", "cpu-zip");
         WriteFile("bundled/fonts/SourceHanSans_U2018", "slice");
         WriteFile("bundled/fonts/SourceHanSansCN-Regular.ttf", "ttf");
         WriteFile("wwwroot/assets/index.js.gz", "gzipped");
@@ -27,7 +27,7 @@ public sealed class UpdateManifestFileSetTests : IDisposable
 
         var manifest = BuildManifest(
             ("bundled/llama/version.txt", "bundled-llama"),
-            ("bundled/llama/llama-b8756-bin-win-cpu-x64.zip", "bundled-llama"),
+            ("bundled/llama/llama-b10375-bin-win-cpu-x64.zip", "bundled-llama"),
             ("bundled/fonts/SourceHanSans_U2018", "bundled-fonts"),
             ("bundled/fonts/SourceHanSansCN-Regular.ttf", "bundled-fonts"),
             ("wwwroot/assets/index.js.gz", "wwwroot"),
@@ -48,7 +48,7 @@ public sealed class UpdateManifestFileSetTests : IDisposable
     [Fact]
     public void ComputeDiff_ShouldFlagOnlyBundledLlamaWhenVersionMarkerChanges()
     {
-        WriteFile("bundled/llama/version.txt", "b8756");
+        WriteFile("bundled/llama/version.txt", "b10375");
         WriteFile("bundled/fonts/SourceHanSans_U2018", "slice");
         WriteFile("wwwroot/assets/index.js.gz", "gzipped");
 
@@ -73,7 +73,7 @@ public sealed class UpdateManifestFileSetTests : IDisposable
     [Fact]
     public void ComputeDiff_ShouldFlagOnlyWwwrootWhenCompressedAssetChanges()
     {
-        WriteFile("bundled/llama/version.txt", "b8756");
+        WriteFile("bundled/llama/version.txt", "b10375");
         WriteFile("wwwroot/assets/index.js.gz", "gzipped");
         WriteFile("wwwroot/assets/index.js.br", "brotli");
 
@@ -135,7 +135,7 @@ public sealed class UpdateManifestFileSetTests : IDisposable
 
         return new UpdateManifest
         {
-            Version = "4.9.0",
+            Version = "5.0.0",
             Rid = "win-x64",
             Files = manifestFiles
         };

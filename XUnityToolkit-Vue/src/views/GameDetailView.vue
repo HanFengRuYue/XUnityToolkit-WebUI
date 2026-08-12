@@ -25,7 +25,6 @@ import {
   WarningAmberOutlined,
   ExtensionOutlined,
   WidgetsOutlined,
-  DataObjectOutlined,
   SmartToyOutlined,
   MenuBookOutlined,
   DescriptionOutlined,
@@ -89,7 +88,6 @@ const installOptions = ref<InstallOptions>({
   autoDeployAiEndpoint: true,
   autoGenerateConfig: true,
   autoApplyOptimalConfig: true,
-  autoExtractAssets: true,
   autoVerifyHealth: true,
 })
 
@@ -171,7 +169,6 @@ const installStepLabel = computed(() => {
     InstallingAiTranslation: '部署 AI 翻译引擎',
     GeneratingConfig: '生成配置',
     ApplyingConfig: '应用最佳配置',
-    ExtractingAssets: '提取游戏资产',
     VerifyingHealth: '验证插件状态',
   }
   return labels[installStore.status?.step ?? ''] ?? '安装中'
@@ -873,13 +870,6 @@ onBeforeUnmount(() => stopWatch())
             </div>
             <div class="install-option-row">
               <div class="install-option-info">
-                <span class="install-option-name">提取游戏资产</span>
-                <span class="install-option-desc">提取游戏文本并自动检测源语言</span>
-              </div>
-              <NSwitch v-model:value="installOptions.autoExtractAssets" size="small" />
-            </div>
-            <div class="install-option-row">
-              <div class="install-option-info">
                 <span class="install-option-name">验证插件状态</span>
                 <span class="install-option-desc">安装后启动游戏验证插件是否正常工作</span>
               </div>
@@ -1023,16 +1013,6 @@ onBeforeUnmount(() => stopWatch())
       <div class="section-body" :class="{ collapsed: collapsed.tools }">
         <div class="section-body-inner">
           <div class="tool-list">
-            <div class="tool-item" @click="router.push(`/games/${gameId}/asset-extraction`)">
-              <div class="tool-item-icon">
-                <NIcon :size="18"><DataObjectOutlined /></NIcon>
-              </div>
-              <div class="tool-item-content">
-                <span class="tool-item-title">资产提取与预翻译</span>
-                <span class="tool-item-desc">从游戏资产中提取文本，使用 AI 进行预翻译</span>
-              </div>
-              <svg class="tool-item-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
             <div class="tool-item" @click="router.push(`/games/${gameId}/translation-editor`)">
               <div class="tool-item-icon">
                 <NIcon :size="18"><DriveFileRenameOutlineOutlined /></NIcon>
@@ -1126,7 +1106,7 @@ onBeforeUnmount(() => stopWatch())
           汉化包
         </h2>
       </div>
-      <p class="asset-extraction-desc">
+      <p class="package-description">
         将当前游戏的全部插件和翻译文件打包为 ZIP 汉化补丁，方便分享给其他玩家。其他玩家解压到游戏目录即可使用。导入汉化包会覆盖同名文件。
       </p>
       <div class="pkg-actions">
@@ -1963,7 +1943,7 @@ onBeforeUnmount(() => stopWatch())
   line-height: 1.6;
 }
 
-.asset-extraction-desc {
+.package-description {
   margin: 0;
   font-size: 13px;
   color: var(--text-2);

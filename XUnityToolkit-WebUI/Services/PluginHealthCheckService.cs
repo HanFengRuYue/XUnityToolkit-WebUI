@@ -13,8 +13,9 @@ public sealed partial class PluginHealthCheckService(
     ILogger<PluginHealthCheckService> logger)
 {
     private const int MaxLogLines = 2000;
-    private const int LogWaitTimeoutSeconds = 30;
-    private const int LogSettleDelaySeconds = 5;
+    private const int VerificationTimeoutSeconds = 30;
+    private const int VerificationPollIntervalMilliseconds = 250;
+    private const int LogSettleDelayMilliseconds = 1000;
 
     private readonly ConcurrentDictionary<string, bool> _activeVerifications = [];
     private readonly ConcurrentDictionary<string, DateTime> _receivedPings = [];
@@ -157,23 +158,31 @@ public sealed partial class PluginHealthCheckService(
                 UseShellExecute = true
             });
 
-            var elapsed = 0;
-            while (!File.Exists(logPath) && elapsed < LogWaitTimeoutSeconds)
+            var deadline = DateTime.UtcNow.AddSeconds(VerificationTimeoutSeconds);
+            var logDetected = false;
+            while (DateTime.UtcNow < deadline)
             {
                 ct.ThrowIfCancellationRequested();
-                await Task.Delay(1000, ct);
-                elapsed++;
+
+                if (!logDetected && File.Exists(logPath))
+                {
+                    logDetected = true;
+                    logger.LogInformation("日志文件已生成，等待 AI 翻译端点完成初始化...");
+                }
+
+                if (logDetected && HasRecentPing(game.Id, verifyStartTime))
+                {
+                    await Task.Delay(LogSettleDelayMilliseconds, ct);
+                    break;
+                }
+
+                await Task.Delay(VerificationPollIntervalMilliseconds, ct);
             }
 
-            if (File.Exists(logPath))
-            {
-                logger.LogInformation("日志文件已生成，等待插件加载完成...");
-                await Task.Delay(LogSettleDelaySeconds * 1000, ct);
-            }
-            else
-            {
-                logger.LogWarning("等待日志文件超时 ({Timeout}s)", LogWaitTimeoutSeconds);
-            }
+            if (!File.Exists(logPath))
+                logger.LogWarning("等待日志文件超时 ({Timeout}s)", VerificationTimeoutSeconds);
+            else if (!HasRecentPing(game.Id, verifyStartTime))
+                logger.LogWarning("日志已生成，但等待工具箱连通性 ping 超时 ({Timeout}s)", VerificationTimeoutSeconds);
         }
         finally
         {

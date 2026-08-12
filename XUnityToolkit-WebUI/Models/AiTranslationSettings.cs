@@ -47,11 +47,6 @@ public sealed class AiTranslationSettings
     /// <summary>repeat_penalty for local LLM (0.5-2.0, default 1.0). 1.0 = no penalty (correct for translation).</summary>
     public double LocalRepeatPenalty { get; set; } = 1.0;
 
-    /// <summary>
-    /// Enable pre-translation cache optimization (normalization, regex generation, monitoring).
-    /// </summary>
-    public bool EnablePreTranslationCache { get; set; } = true;
-
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
     public bool TermAuditEnabled { get; set; } = true;
@@ -60,16 +55,6 @@ public sealed class AiTranslationSettings
     // Translation Memory
     public bool EnableTranslationMemory { get; set; } = true;
     public int FuzzyMatchThreshold { get; set; } = 85;
-
-    // LLM Pattern Analysis (pre-translation phase)
-    public bool EnableLlmPatternAnalysis { get; set; } = true;
-
-    // Multi-Round Translation (default ON = 2 rounds)
-    public bool EnableMultiRoundTranslation { get; set; } = true;
-
-    // Auto Term Extraction
-    public bool EnableAutoTermExtraction { get; set; } = true;
-    public bool AutoApplyExtractedTerms { get; set; }
 
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }

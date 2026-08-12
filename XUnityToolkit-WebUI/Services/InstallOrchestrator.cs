@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using XUnityToolkit_WebUI.Hubs;
 using XUnityToolkit_WebUI.Infrastructure;
@@ -16,10 +15,8 @@ public sealed class InstallOrchestrator(
     TmpFontService tmpFontService,
     ConfigurationService configService,
     AppSettingsService appSettingsService,
-    AssetExtractionService assetExtraction,
     PluginHealthCheckService healthCheckService,
     BundledAssetPaths bundledPaths,
-    AppDataPaths appDataPaths,
     SystemTrayService trayService,
     IHubContext<InstallProgressHub> hubContext,
     ILogger<InstallOrchestrator> logger)
@@ -317,20 +314,6 @@ public sealed class InstallOrchestrator(
 
             await UpdateStatus(status, InstallStep.ApplyingConfig, 92, "配置应用完成");
 
-            // Apply pre-translation cache optimization config if enabled
-            {
-                var aiSettings = await appSettingsService.GetAsync(ct);
-                if (aiSettings.AiTranslation.EnablePreTranslationCache)
-                {
-                    await configService.PatchSectionAsync(game.GamePath, "Behaviour", new Dictionary<string, string>
-                    {
-                        ["CacheWhitespaceDifferences"] = "False",
-                        ["IgnoreWhitespaceInDialogue"] = "True",
-                        ["MinDialogueChars"] = "4",
-                        ["TemplateAllNumberAway"] = "True"
-                    }, ct);
-                }
-            }
         }
 
         // Patch LLMTranslate section with GameId and ToolkitUrl (independent of optimal config —
@@ -347,63 +330,12 @@ public sealed class InstallOrchestrator(
                 }, ct);
         }
 
-        // Step 8: Extract game assets for language detection
-        if (!options.AutoExtractAssets)
-        {
-            await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "提取游戏资产（已跳过）");
-            logger.LogInformation("用户已关闭自动提取游戏资产");
-        }
-        else
-        {
-            await UpdateStatus(status, InstallStep.ExtractingAssets, 90, "正在提取游戏资产以检测语言...");
-            try
-            {
-                var extractResult = await assetExtraction.ExtractTextsAsync(
-                    game.GamePath, game.ExecutableName, gameInfo, ct: ct);
-
-                if (extractResult.DetectedLanguage is not null)
-                {
-                    await configService.PatchSectionAsync(game.GamePath, "General",
-                        new Dictionary<string, string>
-                        {
-                            ["FromLanguage"] = extractResult.DetectedLanguage
-                        }, ct);
-                    await UpdateStatus(status, InstallStep.ExtractingAssets, 93,
-                        $"检测到游戏语言: {extractResult.DetectedLanguage} ({extractResult.TotalTextsExtracted} 条文本)");
-                    logger.LogInformation("游戏语言检测完成: {Lang}, 提取 {Count} 条文本",
-                        extractResult.DetectedLanguage, extractResult.TotalTextsExtracted);
-                }
-
-                var cachePath = appDataPaths.ExtractedTextsFile(game.Id);
-                if (!File.Exists(cachePath) && extractResult.Texts.Count > 0)
-                {
-                    extractResult.GameId = game.Id;
-                    var json = JsonSerializer.Serialize(extractResult, new JsonSerializerOptions
-                    {
-                        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                        WriteIndented = false
-                    });
-                    Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                    var tmpPath = cachePath + ".tmp";
-                    await File.WriteAllTextAsync(tmpPath, json, CancellationToken.None);
-                    File.Move(tmpPath, cachePath, overwrite: true);
-                    logger.LogInformation("安装时提取的文本已缓存: {Count} 条, 游戏 {GameId}",
-                        extractResult.TotalTextsExtracted, game.Id);
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "资产提取失败（不影响安装）");
-                await UpdateStatus(status, InstallStep.ExtractingAssets, 93, "资产提取失败（跳过）");
-            }
-        }
-
         // Mark as installed before verification — cancellation during verify preserves install state
         game.InstalledXUnityVersion = installedXUnityVersion;
         game.InstallState = InstallState.FullyInstalled;
         await gameLibrary.UpdateAsync(game, ct);
 
-        // Step 9: Verify plugin health
+        // Step 8: Verify plugin health
         PluginHealthReport? healthReport = null;
         if (!options.AutoVerifyHealth)
         {

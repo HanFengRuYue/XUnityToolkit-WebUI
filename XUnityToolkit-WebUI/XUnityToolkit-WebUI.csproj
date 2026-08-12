@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <VersionPrefix>5.0</VersionPrefix>
     <RootNamespace>XUnityToolkit_WebUI</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -30,15 +31,20 @@
     <EmbeddedResource Include="Resources\classdata.tpk" LogicalName="classdata.tpk" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="AssetsTools.NET" Version="3.0.4" />
-    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3856.49" />
+    <PackageReference Include="AssetsTools.NET" Version="3.0.5" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="AssetsTools.NET.Cpp2IL" Version="3.0.4" />
     <PackageReference Include="AssetsTools.NET.MonoCecil" Version="3.0.4" />
     <PackageReference Include="AssetsTools.NET.Texture" Version="3.0.2" />
+    <PackageReference Include="AssetRipper.TextureDecoder" Version="2.6.2" />
     <PackageReference Include="FreeTypeSharp" Version="3.1.0" />
+    <PackageReference Include="IndexRange" Version="1.1.1" />
+    <PackageReference Include="Microsoft.Bcl.HashCode" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Bcl.Memory" Version="10.0.11" />
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <PackageReference Include="RectpackSharp" Version="1.2.0" />
-    <PackageReference Include="System.Management" Version="10.0.5" />
-    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.5" />
+    <PackageReference Include="System.Management" Version="10.0.11" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
   </ItemGroup>
 
   <!-- Copy TMP fonts to output directory during build -->
@@ -56,7 +62,7 @@
   <!-- Build frontend before backend build (skip with -p:SkipFrontendBuild=true) -->
   <Target Name="BuildFrontend" BeforeTargets="Build" Condition="'$(SkipFrontendBuild)' != 'true'">
     <Message Importance="high" Text="Installing frontend dependencies..." />
-    <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" />
+    <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)" />
     <Message Importance="high" Text="Building frontend..." />
     <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
   </Target>

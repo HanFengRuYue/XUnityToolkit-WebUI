@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -123,7 +124,6 @@ public sealed class LlmTranslationService(
     // ── Translation memory stats ──
     private long _tmExactHits;
     private long _tmFuzzyHits;
-    private long _tmPatternHits;
     private long _tmMisses;
 
     // ── Per-endpoint runtime stats ──
@@ -132,6 +132,10 @@ public sealed class LlmTranslationService(
     // ── Recent translations circular buffer ──
     private readonly ConcurrentQueue<RecentTranslation> _recentTranslations = new();
     private const int MaxRecentTranslations = 10;
+    private static readonly JsonSerializerOptions LlmUserContentJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     // ── Recent errors circular buffer ──
     private readonly ConcurrentQueue<TranslationError> _recentErrors = new();
@@ -200,7 +204,6 @@ public sealed class LlmTranslationService(
             TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount),
             TranslationMemoryHits = (int)Interlocked.Read(ref _tmExactHits),
             TranslationMemoryFuzzyHits = (int)Interlocked.Read(ref _tmFuzzyHits),
-            TranslationMemoryPatternHits = (int)Interlocked.Read(ref _tmPatternHits),
             TranslationMemoryMisses = (int)Interlocked.Read(ref _tmMisses),
             MaxConcurrency = _currentMaxConcurrency,
         };
@@ -469,7 +472,6 @@ public sealed class LlmTranslationService(
                     {
                         case TmMatchType.Exact: Interlocked.Increment(ref _tmExactHits); break;
                         case TmMatchType.Fuzzy: Interlocked.Increment(ref _tmFuzzyHits); break;
-                        case TmMatchType.Pattern: Interlocked.Increment(ref _tmPatternHits); break;
                     }
                 }
 
@@ -492,7 +494,6 @@ public sealed class LlmTranslationService(
                     {
                         TmMatchType.Exact => "tmExact",
                         TmMatchType.Fuzzy => "tmFuzzy",
-                        TmMatchType.Pattern => "tmPattern",
                         _ => null
                     };
                     perTextCanPersist[idx] = true;
@@ -1605,7 +1606,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
 
         // Local endpoints get additional sampling parameters for faster/better inference
         var isLocal = ep.ApiKey == "local";
@@ -1674,7 +1675,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
@@ -1733,7 +1734,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
@@ -1742,6 +1743,9 @@ public sealed class LlmTranslationService(
 
     // Restore regexes tolerate full-width braces (U+FF5B/U+FF5D) and case variation
     // because Chinese LLMs (Qwen, GLM, Kimi, DeepSeek) commonly output full-width punctuation.
+    internal static string SerializeUserContent(IList<string> texts)
+        => JsonSerializer.Serialize(texts, LlmUserContentJsonOptions);
+
     private static readonly Regex DntRestoreRegex = new(
         @"[{｛]{1,2}\s*DNT_(\d+)\s*[}｝]{1,2}",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);

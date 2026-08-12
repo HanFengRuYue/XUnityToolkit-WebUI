@@ -79,7 +79,6 @@ export type InstallStep =
   | 'InstallingAiTranslation'
   | 'GeneratingConfig'
   | 'ApplyingConfig'
-  | 'ExtractingAssets'
   | 'VerifyingHealth'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
@@ -99,7 +98,6 @@ export interface InstallOptions {
   autoDeployAiEndpoint: boolean
   autoGenerateConfig: boolean
   autoApplyOptimalConfig: boolean
-  autoExtractAssets: boolean
   autoVerifyHealth: boolean
 }
 
@@ -195,15 +193,10 @@ export interface AiTranslationSettings {
   localRepeatPenalty: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
-  enablePreTranslationCache: boolean
   termAuditEnabled: boolean
   naturalTranslationMode: boolean
   enableTranslationMemory: boolean
   fuzzyMatchThreshold: number
-  enableLlmPatternAnalysis: boolean
-  enableMultiRoundTranslation: boolean
-  enableAutoTermExtraction: boolean
-  autoApplyExtractedTerms: boolean
 }
 
 export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
@@ -276,11 +269,8 @@ export interface TranslationStats {
   termAuditForceCorrectedCount: number
   translationMemoryHits: number
   translationMemoryFuzzyHits: number
-  translationMemoryPatternHits: number
   translationMemoryMisses: number
   maxConcurrency: number
-  dynamicPatternCount: number
-  extractedTermCount: number
 }
 
 export interface AiEndpointStatus {
@@ -460,99 +450,17 @@ export interface LogEntry {
   message: string
 }
 
-export interface ExtractedText {
-  text: string
-  source: string
-  assetFile: string
-}
-
-export interface AssetExtractionResult {
-  gameId: string
-  texts: ExtractedText[]
-  detectedLanguage?: string
-  totalAssetsScanned: number
-  totalTextsExtracted: number
-  extractedAt: string
-}
-
-export type PreTranslationState = 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'AwaitingTermReview'
-
-export interface PreTranslationStatus {
-  gameId: string
-  state: PreTranslationState
-  totalTexts: number
-  translatedTexts: number
-  failedTexts: number
-  error?: string
-  currentRound: number
-  currentPhase?: string
-  phaseProgress: number
-  phaseTotal: number
-  extractedTermCount: number
-  dynamicPatternCount: number
-  canResume: boolean
-  fromLang?: string
-  toLang?: string
-  checkpointUpdatedAt?: string
-  resumeBlockedReason?: string
-}
-
-export interface DynamicPattern {
-  originalTemplate: string
-  translatedTemplate: string
-  source: string
-}
-
-export interface DynamicPatternStore {
-  patterns: DynamicPattern[]
-}
-
-export interface TermCandidate {
-  original: string
-  translation: string
-  category: TermCategory
-  frequency: number
-}
-
-export interface TermCandidateStore {
-  candidates: TermCandidate[]
-  extractedAt: string
-}
-
 export interface TranslationEntry {
   original: string
   translation: string
 }
 
-export type TranslationEditorTextSource = 'default' | 'pretranslated'
-export type TranslationEditorSource = TranslationEditorTextSource | 'pretranslated-regex'
-export type RegexRuleKind = 'sr' | 'r'
-export type RegexRuleSection = 'base' | 'dynamic' | 'custom'
-
-export interface RegexTranslationRule {
-  id: string
-  section: RegexRuleSection
-  kind: RegexRuleKind
-  pattern: string
-  replacement: string
-}
-
 export interface TranslationEditorData {
-  source: TranslationEditorTextSource
   language: string
   filePath: string
   fileExists: boolean
   entryCount: number
-  availablePreTranslationLanguages: string[]
   entries: TranslationEntry[]
-}
-
-export interface TranslationRegexEditorData {
-  language: string
-  filePath: string
-  fileExists: boolean
-  availablePreTranslationLanguages: string[]
-  rules: RegexTranslationRule[]
 }
 
 // ── Local LLM ──
@@ -820,21 +728,6 @@ export interface UpdateAvailableInfo {
   changelog?: string
   downloadSize: number
   changedPackages: string[]
-}
-
-export interface PreTranslationCacheStats {
-  totalPreTranslated: number
-  cacheHits: number
-  cacheMisses: number
-  newTexts: number
-  hitRate: number
-  recentMisses: CacheMissEntry[]
-}
-
-export interface CacheMissEntry {
-  preTranslatedKey: string
-  runtimeText: string
-  timestamp: string
 }
 
 // Script Tag Cleaning

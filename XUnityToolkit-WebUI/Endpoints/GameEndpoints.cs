@@ -527,7 +527,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, DynamicPatternService dynamicPatternService, TermExtractionService extractionService, PreTranslationService preTranslationService, PreTranslationCacheMonitor cacheMonitor, LlmTranslationService translationService, GlossaryExtractionService glossaryExtractionService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, LlmTranslationService translationService, GlossaryExtractionService glossaryExtractionService, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -568,22 +568,13 @@ public static class GameEndpoints
                 File.Delete(scriptTagFile);
             scriptTagService.RemoveCache(id);
 
-            // Clean up translation memory, dynamic patterns, term candidates, and pre-translation cache
+            // Clean up translation memory and runtime caches
             tmService.RemoveCache(id);
-            dynamicPatternService.RemoveCache(id);
-            extractionService.RemoveCache(id);
-            cacheMonitor.UnloadCache();
             translationService.RemoveGameRuntimeState(id);
             glossaryExtractionService.RemoveGameState(id);
 
             var tmFile = appDataPaths.TranslationMemoryFile(id);
             if (File.Exists(tmFile)) File.Delete(tmFile);
-            var dpFile = appDataPaths.DynamicPatternsFile(id);
-            if (File.Exists(dpFile)) File.Delete(dpFile);
-            var tcFile = appDataPaths.TermCandidatesFile(id);
-            if (File.Exists(tcFile)) File.Delete(tcFile);
-            await preTranslationService.DeleteCheckpointAsync(id, clearInactiveStatus: true, ct);
-
             return Results.Ok(ApiResult.Ok());
         });
 

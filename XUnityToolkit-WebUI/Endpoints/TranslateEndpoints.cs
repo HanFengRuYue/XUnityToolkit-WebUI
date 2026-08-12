@@ -12,7 +12,6 @@ public static class TranslateEndpoints
             TranslateRequest request,
             LlmTranslationService translationService,
             GlossaryExtractionService extractionService,
-            PreTranslationCacheMonitor cacheMonitor,
             AppSettingsService settingsService,
             LocalLlmService localLlmService,
             ILogger<LlmTranslationService> logger,
@@ -32,18 +31,11 @@ public static class TranslateEndpoints
                 return Results.Json(ApiResult.Fail("本地模型未启动，请先在本地 AI 页面启动模型"), statusCode: 503);
             }
 
-            // Record texts for pre-translation cache monitoring
             var validGameId = !string.IsNullOrEmpty(request.GameId) && Guid.TryParse(request.GameId, out _);
-            if (validGameId)
-            {
-                await cacheMonitor.EnsureCacheAsync(request.GameId!, request.To ?? "zh", ct);
-                cacheMonitor.RecordTexts(request.GameId!, request.Texts);
-            }
-
             try
             {
                 var result = await translationService.TranslateDetailedAsync(
-                    request.Texts, request.From ?? "ja", request.To ?? "zh",
+                    request.Texts, request.From ?? "auto", request.To ?? "zh",
                     request.GameId, ct);
                 var translations = result.Translations;
                 logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
@@ -110,26 +102,8 @@ public static class TranslateEndpoints
             return Results.Ok(new { status = "ok" });
         });
 
-        app.MapGet("/api/translate/stats", (
-            LlmTranslationService translationService,
-            DynamicPatternService dynamicPatternService,
-            TermExtractionService termExtractionService) =>
-        {
-            var stats = translationService.GetStats();
-            var gameId = stats.CurrentGameId;
-            if (gameId is not null)
-            {
-                stats = stats with
-                {
-                    DynamicPatternCount = dynamicPatternService.GetPatternCount(gameId),
-                    ExtractedTermCount = termExtractionService.GetCandidateCount(gameId),
-                };
-            }
-            return Results.Ok(ApiResult<TranslationStats>.Ok(stats));
-        });
-
-        app.MapGet("/api/translate/cache-stats", (PreTranslationCacheMonitor cacheMonitor) =>
-            Results.Ok(ApiResult<PreTranslationCacheStats>.Ok(cacheMonitor.GetStats())));
+        app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
+            Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
 
         app.MapGet("/api/ai/extraction/stats", (GlossaryExtractionService extractionService) =>
             Results.Ok(ApiResult<GlossaryExtractionStats>.Ok(extractionService.GetStats())));

@@ -23,12 +23,6 @@ const router = createRouter({
       meta: { depth: 3 },
     },
     {
-      path: '/games/:id/asset-extraction',
-      name: 'asset-extraction',
-      component: () => import('@/views/AssetExtractionView.vue'),
-      meta: { depth: 3 },
-    },
-    {
       path: '/games/:id/translation-editor',
       name: 'translation-editor',
       component: () => import('@/views/TranslationEditorView.vue'),

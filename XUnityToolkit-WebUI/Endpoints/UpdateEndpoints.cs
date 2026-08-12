@@ -57,7 +57,6 @@ public static class UpdateEndpoints
             LlmTranslationService translationService,
             LocalLlmService localLlmService,
             TmpFontGeneratorService fontGenService,
-            PreTranslationService preTranslationService,
             CancellationToken ct) =>
         {
             // Pre-apply safety checks
@@ -69,9 +68,6 @@ public static class UpdateEndpoints
                 return Results.Json(ApiResult.Fail("本地 LLM 服务正在运行，请先停止"), statusCode: 409);
             if (fontGenService.IsGenerating)
                 return Results.Json(ApiResult.Fail("字体生成正在进行中，请先取消"), statusCode: 409);
-            if (preTranslationService.IsPreTranslating)
-                return Results.Json(ApiResult.Fail("预翻译正在进行中，请先取消"), statusCode: 409);
-
             try
             {
                 var message = await updateService.ApplyUpdateAsync(ct);

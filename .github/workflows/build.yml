@@ -51,14 +51,14 @@ jobs:
       build_version: ${{ steps.ver.outputs.build_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Compute version
         id: ver
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "4.9.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "5.0.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -67,22 +67,22 @@ jobs:
       # ── SDK setup ──
 
       - name: Setup .NET 10 preview
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: XUnityToolkit-Vue/package-lock.json
 
       # ── Caching ──
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -221,15 +221,15 @@ jobs:
           }
 
           # ── llama.cpp (pinned version) ──
-          $llamaTag = "b8756"
+          $llamaTag = "b10375"
           Write-Host "Fetching llama.cpp $llamaTag..."
           $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30
           }.GetNewClosure()
           Write-Host "  llama.cpp: $($llamarel.tag_name)"
           $llamaPatterns = @(
-            "llama-*-bin-win-cuda-13.1-x64.zip",
-            "cudart-llama-bin-win-cuda-13.1-x64.zip",
+            "llama-*-bin-win-cuda-13.3-x64.zip",
+            "cudart-llama-bin-win-cuda-13.3-x64.zip",
             "llama-*-bin-win-vulkan-x64.zip",
             "llama-*-bin-win-cpu-x64.zip"
           )
@@ -377,7 +377,7 @@ jobs:
                   if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed (exit code $LASTEXITCODE)" }
               } -ArgumentList $workDir
           } else {
-              Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
+              throw "XUnity reference DLLs missing - LLMTranslate.dll cannot be embedded."
           }
 
           # Build frontend in foreground (longest task, ~34s)
@@ -546,15 +546,22 @@ jobs:
             $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$($ed.ManifestRid).json" -Encoding utf8
             Write-Host "Generated manifest-$($ed.ManifestRid).json"
 
-            # Per-edition app ZIP (root-level files, exclude appsettings*)
-            $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
+            # Per-edition app ZIP (root-level files plus managed runtimes/, exclude appsettings*)
+            $appFiles = @(
+              Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
+              $runtimesDir = Join-Path $releaseDir "runtimes"
+              if (Test-Path $runtimesDir) {
+                Get-ChildItem -Path $runtimesDir -Recurse -File
+              }
+            )
             if ($appFiles) {
               $appZip = "Release/app-$($ed.ManifestRid).zip"
               if (Test-Path $appZip) { Remove-Item $appZip }
               $zip = [System.IO.Compression.ZipFile]::Open($appZip, 'Create')
               try {
                 foreach ($f in $appFiles) {
-                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
+                  $entry = $f.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
+                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $entry) | Out-Null
                 }
               } finally { $zip.Dispose() }
               Write-Host "Created app-$($ed.ManifestRid).zip"
@@ -755,7 +762,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

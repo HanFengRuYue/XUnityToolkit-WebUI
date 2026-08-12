@@ -7,7 +7,7 @@ public sealed class XUnityConfig
     public string? FallbackEndpoint { get; set; }
 
     // [General]
-    public string SourceLanguage { get; set; } = "ja";
+    public string SourceLanguage { get; set; } = "auto";
     public string TargetLanguage { get; set; } = "en";
 
     // [Files]
