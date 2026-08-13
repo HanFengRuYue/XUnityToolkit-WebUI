@@ -22,7 +22,13 @@ import {
   DeleteOutlined,
   SearchOutlined,
 } from '@vicons/material'
-import type { AiTranslationSettings, ApiEndpointConfig, LlmProvider } from '@/api/types'
+import type {
+  AiTranslationSettings,
+  ApiEndpointConfig,
+  LlmApiFormat,
+  LlmProvider,
+  LlmReasoningEffort,
+} from '@/api/types'
 import { translateApi } from '@/api/games'
 import { DEFAULT_SYSTEM_PROMPT } from '@/constants/prompts'
 
@@ -60,6 +66,8 @@ function addEndpoint() {
     apiBaseUrl: '',
     apiKey: '',
     modelName: '',
+    apiFormat: 'Responses' as LlmApiFormat,
+    reasoningEffort: 'None' as LlmReasoningEffort,
     priority: 5,
     enabled: true,
   }]
@@ -82,6 +90,22 @@ const providerOptions: { label: string; value: LlmProvider }[] = [
   { label: '自定义 (OpenAI 兼容)', value: 'Custom' },
 ]
 
+const apiFormatOptions: { label: string; value: LlmApiFormat }[] = [
+  { label: 'Responses API（推荐）', value: 'Responses' },
+  { label: 'Chat Completions', value: 'ChatCompletions' },
+]
+
+const reasoningEffortOptions: { label: string; value: LlmReasoningEffort }[] = [
+  { label: '跟随提供商默认', value: 'Default' },
+  { label: '关闭思考（none）', value: 'None' },
+  { label: '极低（minimal）', value: 'Minimal' },
+  { label: '低（low）', value: 'Low' },
+  { label: '中（medium）', value: 'Medium' },
+  { label: '高（high）', value: 'High' },
+  { label: '极高（xhigh）', value: 'XHigh' },
+  { label: '最大（max）', value: 'Max' },
+]
+
 const defaultBaseUrls: Record<LlmProvider, string> = {
   OpenAI: 'https://api.openai.com/v1',
   Claude: 'https://api.anthropic.com/v1',
@@ -94,25 +118,123 @@ const defaultBaseUrls: Record<LlmProvider, string> = {
 }
 
 const defaultModels: Record<LlmProvider, string> = {
-  OpenAI: 'gpt-4o-mini',
-  Claude: 'claude-haiku-4-5-20251001',
-  Gemini: 'gemini-2.0-flash',
-  DeepSeek: 'deepseek-chat',
-  Qwen: 'qwen-plus',
-  GLM: 'glm-4-flash',
-  Kimi: 'moonshot-v1-auto',
+  OpenAI: 'gpt-5.6-luna',
+  Claude: 'claude-sonnet-5',
+  Gemini: 'gemini-3.6-flash',
+  DeepSeek: 'deepseek-v4-flash',
+  Qwen: 'qwen3.7-plus',
+  GLM: 'glm-5.2',
+  Kimi: 'kimi-k2.6',
   Custom: '',
+}
+
+const defaultApiFormats: Record<LlmProvider, LlmApiFormat> = {
+  OpenAI: 'Responses',
+  Claude: 'ChatCompletions',
+  Gemini: 'ChatCompletions',
+  DeepSeek: 'Responses',
+  Qwen: 'Responses',
+  GLM: 'ChatCompletions',
+  Kimi: 'ChatCompletions',
+  Custom: 'ChatCompletions',
+}
+
+const defaultReasoningEfforts: Record<LlmProvider, LlmReasoningEffort> = {
+  OpenAI: 'None',
+  Claude: 'None',
+  Gemini: 'None',
+  DeepSeek: 'None',
+  Qwen: 'None',
+  GLM: 'None',
+  Kimi: 'None',
+  Custom: 'Default',
 }
 
 const supportsModelList: Record<LlmProvider, boolean> = {
   OpenAI: true,
-  Claude: false,
+  Claude: true,
   Gemini: true,
   DeepSeek: true,
   Qwen: true,
-  GLM: false,
+  GLM: true,
   Kimi: true,
   Custom: true,
+}
+
+const compatibleProviders = new Set<LlmProvider>([
+  'OpenAI', 'DeepSeek', 'Qwen', 'GLM', 'Kimi', 'Custom',
+])
+
+const responsesProviders = new Set<LlmProvider>([
+  'OpenAI', 'DeepSeek', 'Qwen', 'Custom',
+])
+
+function isCompatibleProvider(provider: LlmProvider) {
+  return compatibleProviders.has(provider)
+}
+
+function getApiFormatOptions(provider: LlmProvider) {
+  return responsesProviders.has(provider)
+    ? apiFormatOptions
+    : apiFormatOptions.filter(option => option.value === 'ChatCompletions')
+}
+
+function handleProviderChange(index: number, provider: LlmProvider) {
+  updateEndpoint(index, {
+    provider,
+    apiBaseUrl: '',
+    modelName: '',
+    apiFormat: defaultApiFormats[provider],
+    reasoningEffort: defaultReasoningEfforts[provider],
+  })
+}
+
+function getApiFormatHint(provider: LlmProvider) {
+  if (provider === 'DeepSeek')
+    return 'DeepSeek V4 原生支持 Responses API；旧模型可切回 Chat Completions。'
+  if (provider === 'Qwen')
+    return 'Qwen 新模型推荐 Responses API，可直接使用 reasoning.effort。'
+  if (provider === 'OpenAI')
+    return 'GPT-5.6 推荐使用 Responses API。'
+  if (provider === 'Custom')
+    return '仅在自定义服务明确兼容 /responses 时选择 Responses API。'
+  return '该提供商当前使用 OpenAI 兼容的 Chat Completions 接口。'
+}
+
+function getReasoningHint(endpoint: ApiEndpointConfig) {
+  const format = endpoint.apiFormat ?? 'ChatCompletions'
+  switch (endpoint.provider) {
+    case 'DeepSeek':
+      return format === 'Responses'
+        ? 'none 会真正关闭思考；minimal/low、medium/high/xhigh、max 会分别映射到 DeepSeek 的低、高、最大档。'
+        : 'none 使用 thinking.disabled；其他档位启用思考并映射到 low/high/max。'
+    case 'OpenAI':
+      return 'GPT-5.6 支持 none、low、medium、high、xhigh、max；minimal 会兼容映射为 low。'
+    case 'Qwen':
+      return format === 'Responses'
+        ? 'none 会关闭思考，其余档位通过 reasoning.effort 控制。'
+        : 'Chat Completions 只映射为 enable_thinking 开关；需要精细档位请使用 Responses API。'
+    case 'Claude':
+      if (endpoint.modelName.startsWith('claude-fable-5') || endpoint.modelName.startsWith('claude-mythos'))
+        return '该 Claude 型号为强制自适应思考模型；none 会降到 low，若要真正关闭请改用 Sonnet 5 等支持型号。'
+      return 'none 使用 thinking.disabled；其余档位使用 adaptive thinking 与 output_config.effort。'
+    case 'Gemini':
+      return endpoint.modelName.startsWith('gemini-2.5-flash')
+        ? 'Gemini 2.5 Flash 的 none 使用 thinkingBudget=0。'
+        : endpoint.modelName.startsWith('gemini-2.5-pro')
+          ? 'Gemini 2.5 Pro 无法完全关闭；none 会使用最低 thinkingBudget。'
+        : 'Gemini 3 无法完全关闭思考；none 会降到其最低的 minimal 档。'
+    case 'GLM':
+      return 'none 使用 thinking.disabled；其他档位同时设置 thinking 与 reasoning_effort。'
+    case 'Kimi':
+      return endpoint.modelName.startsWith('kimi-k3')
+        ? 'Kimi K3 为强制思考模型；none 会降到 low，需要真正关闭时请使用 kimi-k2.6。'
+        : endpoint.modelName.startsWith('kimi-k2.7-code')
+          ? 'Kimi K2.7 Code 为强制思考模型，需要真正关闭时请使用 kimi-k2.6。'
+        : 'kimi-k2.6 支持 thinking.enabled/disabled；非 none 档位都会启用思考。'
+    default:
+      return '自定义服务会接收标准 reasoning_effort；请确认服务端支持所选值。'
+  }
 }
 
 function getBaseUrlPlaceholder(provider: LlmProvider) {
@@ -298,7 +420,7 @@ const priorityMarks = computed(() => {
           :tooltip="true"
           :format-tooltip="(v: number) => v.toFixed(1)"
         />
-        <span class="form-hint">较低的值产生更确定的翻译</span>
+        <span class="form-hint">较低的值产生更确定的翻译；启用思考时，部分新模型会忽略或不接收温度参数</span>
       </div>
 
       <div class="form-row">
@@ -349,6 +471,13 @@ const priorityMarks = computed(() => {
               <NTag size="small" :type="ep.enabled ? 'success' : 'default'">
                 {{ providerOptions.find(p => p.value === ep.provider)?.label || ep.provider }}
               </NTag>
+              <NTag
+                v-if="isCompatibleProvider(ep.provider) && (ep.apiFormat ?? 'ChatCompletions') === 'Responses'"
+                size="small"
+                type="warning"
+              >
+                Responses
+              </NTag>
               <NTag v-if="ep.enabled && ep.apiKey" size="small" type="info">
                 优先级 {{ ep.priority }}
               </NTag>
@@ -381,9 +510,20 @@ const priorityMarks = computed(() => {
               <label class="form-label">LLM 提供商</label>
               <NSelect
                 :value="ep.provider"
-                @update:value="(v: LlmProvider) => updateEndpoint(index, { provider: v })"
+                @update:value="(v: LlmProvider) => handleProviderChange(index, v)"
                 :options="providerOptions"
               />
+            </div>
+
+            <div v-if="isCompatibleProvider(ep.provider)" class="form-row">
+              <label class="form-label">API 格式</label>
+              <NSelect
+                :value="ep.apiFormat ?? 'ChatCompletions'"
+                @update:value="(v: LlmApiFormat) => updateEndpoint(index, { apiFormat: v })"
+                :options="getApiFormatOptions(ep.provider)"
+                :disabled="!responsesProviders.has(ep.provider)"
+              />
+              <span class="form-hint">{{ getApiFormatHint(ep.provider) }}</span>
             </div>
 
             <div class="form-row">
@@ -441,6 +581,16 @@ const priorityMarks = computed(() => {
                 </NButton>
               </div>
               <span class="form-hint">留空使用默认模型{{ supportsModelList[ep.provider] ? '，点击搜索图标获取模型列表' : '' }}</span>
+            </div>
+
+            <div class="form-row">
+              <label class="form-label">思考模式 / 强度</label>
+              <NSelect
+                :value="ep.reasoningEffort ?? 'Default'"
+                @update:value="(v: LlmReasoningEffort) => updateEndpoint(index, { reasoningEffort: v })"
+                :options="reasoningEffortOptions"
+              />
+              <span class="form-hint">{{ getReasoningHint(ep) }}</span>
             </div>
 
             <div class="form-row">

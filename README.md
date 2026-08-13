@@ -48,7 +48,7 @@ XUnityToolkit-WebUI 适合需要给 Unity 游戏做实时机翻增强、术语�
 ## 核心能力
 
 - **一键接入翻译框架**：自动检测 Unity 游戏，安装 BepInEx 与 XUnity.AutoTranslator，并回写 AI 端点配置。
-- **云端 AI 翻译**：支持 OpenAI、Claude、Gemini、DeepSeek、Qwen、GLM、Kimi 与自定义 OpenAI 兼容接口。
+- **云端 AI 翻译**：支持 OpenAI、Claude、Gemini、DeepSeek、Qwen、GLM、Kimi 与自定义 OpenAI 兼容接口；OpenAI、DeepSeek、Qwen 及兼容服务可选 Responses API，并可按端点关闭或调整思考强度。
 - **本地 AI 模式**：内置 llama.cpp，支持 HuggingFace / ModelScope 下载模型，也支持导入自有 GGUF。
 - **统一术语与翻译记忆**：支持术语约束、精确/模糊翻译记忆与分阶段术语审查。
 - **字体与插件工具链**：支持 TMP + Legacy `Font` 替换、SDF 字体生成、插件健康检查、BepInEx 日志分析、插件包导入导出与在线更新。
@@ -68,7 +68,9 @@ XUnityToolkit-WebUI 适合需要给 Unity 游戏做实时机翻增强、术语�
 
 ### 2. 配置 AI 翻译
 
-- **云端模式**：在 **AI 翻译** 页面添加端点，支持优先级、启停、模型名和测试。
+- **云端模式**：在 **AI 翻译** 页面添加端点，支持 API 格式、思考模式/强度、优先级、启停、模型名和连通性测试。
+- **Responses API**：OpenAI、DeepSeek 与 Qwen 新端点默认使用 Responses；旧端点继续保留 Chat Completions，避免升级后静默改变请求格式。
+- **关闭思考**：DeepSeek V4、OpenAI GPT-5.6、Qwen、GLM、Claude Sonnet 5 与 Kimi K2.6 会发送各自真实的关闭参数。Gemini 3 目前只能降到 `minimal`，Kimi K3 属于强制思考模型。
 - **本地模式**：切换到本地 AI 后，可根据显卡情况选择模型、下载运行时、启动 llama.cpp 服务。
 - 如果你只想用自建兼容接口，可以直接使用 **Custom（OpenAI 兼容）**。
 

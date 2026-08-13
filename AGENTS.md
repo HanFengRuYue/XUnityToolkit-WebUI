@@ -231,6 +231,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
   安装/卸载编排
 - `LlmTranslationService`
   AI 翻译总入口，负责并发、统计、术语、TM、端点调度
+- `LlmApiAdapter`
+  负责 Chat Completions / Responses 请求构造、各提供商思考参数映射，以及从带 reasoning block/item 的响应中提取最终文本
 - `TranslationMemoryService`
   每游戏翻译记忆，精确/模糊匹配
 - `LocalLlmService`
@@ -318,6 +320,11 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `LLMTranslate.dll` 目标框架是 `net35`
 - `LLMTranslate.dll` 通过 `[LLMTranslate]` INI 区段读取 `ToolkitUrl`、`GameId` 等配置
 - `Program.cs` 必须使用 `127.0.0.1`，不要使用 `localhost`
+- `ApiEndpointConfig.ApiFormat` 当前支持 `ChatCompletions` / `Responses`；新增字段的后端默认值必须保持 `ChatCompletions`，以免旧 `settings.json` 升级后静默改协议。前端新建 OpenAI、DeepSeek、Qwen 端点时可显式默认 `Responses`
+- Responses 请求统一由 `LlmApiAdapter` 构造，使用 `/responses`、`instructions`、`input` 与 `reasoning.effort`；解析时必须遍历 `output`，跳过 `reasoning` item，只接收 `message.content[].type == output_text` 的最终文本，不能退回读取 `choices[0]`
+- `ApiEndpointConfig.ReasoningEffort` 的 `Default` 表示不干预提供商默认行为，`None` 表示显式请求关闭思考。DeepSeek Responses 使用 `reasoning.effort=none`；DeepSeek/GLM/Kimi Chat 与 Claude 分别使用各自的 `thinking.disabled`；Qwen Chat 使用 `enable_thinking=false`
+- Gemini 3 当前不能完全关闭思考，`None` 只能映射到 `thinkingLevel=minimal`；Gemini 2.5 Flash 才能通过 `thinkingBudget=0` 真正关闭，其他 Gemini 2.5 档位统一映射为数值 budget。Kimi K3 与 Claude Fable 5 / Mythos 也是强制思考模型，需要可关闭思考时分别使用 `kimi-k2.6` 与 Claude Sonnet 5 等支持型号
+- 当前云端默认模型分别为 `gpt-5.6-luna`、`claude-sonnet-5`、`gemini-3.6-flash`、`deepseek-v4-flash`、`qwen3.7-plus`、`glm-5.2`、`kimi-k2.6`；调整这些默认值时必须同步 `LlmTranslationService.GetDefaultModel(...)` 与 `AiTranslationCard.vue`
 - `LlmTranslationService.TranslateDetailedAsync(...)` 是翻译主链路的权威实现；`TranslateAsync(...)` 只是返回 `Translations` 的轻包装。凡是需要决定“是否允许写入 TM / 术语提取 / 运行时上下文缓存”的调用点，都必须使用详细结果而不是只拿字符串数组
 - LLM 返回解析顺序当前固定为：剥离 `<think>` / 代码块包装 → JSON 数组 → 单条 JSON 字符串（仅单条场景）→ 单条纯文本候选（仅单条场景）；批量场景不再接受非结构化原始输出作为译文
 - 单条纯文本候选模式会继续保留给本地 LLM 兼容使用，但所有被接受的译文现在都必须额外经过 `TranslationOuterWrapperGuard` 检查；若原文没有整句外层引号/括号，而候选文本新增了 `“”`、`「」`、`『』`、`【】`、`[]`、`""`、`''` 这类整句包裹，则会自动去壳
@@ -491,6 +498,8 @@ CI：
   - 设置页默认值
   - 后端 `Math.Clamp`
   - 默认系统提示词文案；当前后端默认值与 `XUnityToolkit-Vue/src/constants/prompts.ts` 必须同时要求 `[SPECIAL_01]` / `【SPECIAL_01】` / `{PLAYER}` 这类占位符按输入原样保留，并明确禁止模型擅自新增整句外层引号/括号、说话人前缀、解释性文本
+- `ApiEndpointConfig`
+  需要同步 C# 模型、`src/api/types.ts`、`AiTranslationCard.vue`、`LlmEndpointResolver` 的克隆字段、本地 llama 运行时端点注册，以及 `LlmApiAdapterTests`；本地 llama 端点必须固定为 `ChatCompletions + Default`
 - `LocalLlmSettings`
   需要同步：
   - C# 模型
@@ -623,6 +632,7 @@ CI：
 - 新增每游戏目录时，除了 `AppDataPaths.cs`，还要同步 `DELETE /api/games/{id}` 清理逻辑、缓存驱逐、设置导出排除列表、必要时的设置导入重建逻辑
 - `RecordError`、`NormalizeForCache`、`ApplicationStopping` 回调、日志级别过滤、SignalR 事件名与阶段名，都属于“改一处必须全链路核对”的同步点
 - 翻译解析契约、运行时占位符保护与 `Persistable` 过滤属于新的高频同步点；凡是新增翻译调用方或缓存写入点，都要核对是否错误接收了非结构化回退结果
+- Chat Completions / Responses 与思考模式属于端点级协议契约；凡是新增提供商、默认模型或思考档位，都要同步请求字段映射、最终文本解析、token usage 解析、前端能力提示和 `LlmApiAdapterTests`
 - `TranslationOuterWrapperGuard` 属于翻译链路的全局守卫；凡是新增 TM 命中复用或其他持久化出口，都要核对是否同步做了“原文无外层包裹时禁止译文新增整句外层包裹”的归一化/拦截
 - `build.ps1`、`.github/workflows/build.yml` 与 `.github/workflows/dep-check.yml` 都包含版本前缀/发版假设；流程、版本号、资源来源、构建 edition 或自动依赖构建版本策略发生变化时必须一起核对
 - 若变更首页可用性、静态资源目录、启动端口或启动方式，需要分别核对 `build.ps1` 的发布后 smoke check 与 `.github/workflows/build.yml` 的发布流程

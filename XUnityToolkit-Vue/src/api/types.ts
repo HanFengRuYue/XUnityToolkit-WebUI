@@ -168,6 +168,8 @@ export interface XUnityConfig {
 }
 
 export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'DeepSeek' | 'Qwen' | 'GLM' | 'Kimi' | 'Custom'
+export type LlmApiFormat = 'ChatCompletions' | 'Responses'
+export type LlmReasoningEffort = 'Default' | 'None' | 'Minimal' | 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max'
 
 export interface ApiEndpointConfig {
   id: string
@@ -176,6 +178,8 @@ export interface ApiEndpointConfig {
   apiBaseUrl: string
   apiKey: string
   modelName: string
+  apiFormat: LlmApiFormat
+  reasoningEffort: LlmReasoningEffort
   priority: number
   enabled: boolean
 }

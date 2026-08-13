@@ -773,6 +773,8 @@ public sealed class LocalLlmService(
                 existing.ApiBaseUrl = runtimeEndpoint.ApiBaseUrl;
                 existing.ApiKey = runtimeEndpoint.ApiKey;
                 existing.ModelName = runtimeEndpoint.ModelName;
+                existing.ApiFormat = runtimeEndpoint.ApiFormat;
+                existing.ReasoningEffort = runtimeEndpoint.ReasoningEffort;
                 existing.Priority = runtimeEndpoint.Priority;
                 existing.Enabled = runtimeEndpoint.Enabled;
             }
@@ -811,6 +813,8 @@ public sealed class LocalLlmService(
             ApiBaseUrl = $"http://127.0.0.1:{_internalPort}/v1",
             ApiKey = "local",
             ModelName = modelName,
+            ApiFormat = LlmApiFormat.ChatCompletions,
+            ReasoningEffort = LlmReasoningEffort.Default,
             Priority = 8,
             Enabled = true
         };

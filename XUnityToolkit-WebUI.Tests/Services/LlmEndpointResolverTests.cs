@@ -63,6 +63,8 @@ public sealed class LlmEndpointResolverTests
                     ApiBaseUrl = "https://api.openai.com/v1",
                     ApiKey = "secret",
                     ModelName = "gpt-4o-mini",
+                    ApiFormat = LlmApiFormat.Responses,
+                    ReasoningEffort = LlmReasoningEffort.Low,
                     Priority = 5,
                     Enabled = true
                 }
@@ -74,5 +76,7 @@ public sealed class LlmEndpointResolverTests
         var endpoint = Assert.Single(endpoints);
         Assert.Equal("https://api.openai.com/v1", endpoint.ApiBaseUrl);
         Assert.Equal("gpt-4o-mini", endpoint.ModelName);
+        Assert.Equal(LlmApiFormat.Responses, endpoint.ApiFormat);
+        Assert.Equal(LlmReasoningEffort.Low, endpoint.ReasoningEffort);
     }
 }

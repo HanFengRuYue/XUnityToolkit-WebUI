@@ -2,6 +2,18 @@ namespace XUnityToolkit_WebUI.Models;
 
 public enum LlmProvider { OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Kimi, Custom }
 
+/// <summary>
+/// Wire protocol used by OpenAI-compatible providers. Existing saved endpoints default to
+/// Chat Completions so adding this field does not silently change their request format.
+/// </summary>
+public enum LlmApiFormat { ChatCompletions, Responses }
+
+/// <summary>
+/// Cross-provider reasoning control. Default leaves the provider's own default untouched;
+/// None explicitly requests non-thinking mode where the selected model supports it.
+/// </summary>
+public enum LlmReasoningEffort { Default, None, Minimal, Low, Medium, High, XHigh, Max }
+
 public sealed class AiTranslationSettings
 {
     public bool Enabled { get; set; } = true;
@@ -68,6 +80,8 @@ public sealed class ApiEndpointConfig
     public string ApiBaseUrl { get; set; } = "";
     public string ApiKey { get; set; } = "";
     public string ModelName { get; set; } = "";
+    public LlmApiFormat ApiFormat { get; set; } = LlmApiFormat.ChatCompletions;
+    public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
     public int Priority { get; set; } = 5;
     public bool Enabled { get; set; } = true;
 }
