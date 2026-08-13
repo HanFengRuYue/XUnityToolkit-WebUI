@@ -154,10 +154,6 @@ watch(() => props.initialReport, (value) => {
       </div>
     </div>
 
-    <NAlert type="info" :bordered="false" class="cost-hint">
-      打开页面只执行本地只读检查，不调用模型。点击诊断会进行两阶段模型调用，可能产生 API 费用。
-    </NAlert>
-
     <div v-if="loading && !report" class="loading-state">
       <NSpin size="small" />
       <span>正在收集本地插件事实...</span>
@@ -192,7 +188,6 @@ watch(() => props.initialReport, (value) => {
 <style scoped>
 .section-icon.health { color: var(--accent); }
 
-.cost-hint,
 .card-alert {
   margin-bottom: 12px;
   font-size: 12px;

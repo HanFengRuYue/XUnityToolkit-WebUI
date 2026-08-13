@@ -56,15 +56,6 @@ function statusWeight(status: HealthStatus) {
   return 1
 }
 
-function statusLabel(status: HealthStatus) {
-  switch (status) {
-    case 'Healthy': return '健康'
-    case 'Warning': return '需关注'
-    case 'Error': return '错误'
-    default: return '尚未确认'
-  }
-}
-
 function statusIcon(status: HealthStatus) {
   switch (status) {
     case 'Healthy': return CheckCircleOutlined
@@ -86,7 +77,7 @@ function stateAlertType() {
 function stateMessage() {
   if (props.report.analysisMessage) return props.report.analysisMessage
   switch (props.report.analysisState) {
-    case 'NotRun': return '尚未运行 AI 智能诊断。当前仅展示本地可验证事实。'
+    case 'NotRun': return '尚未运行 AI 智能诊断。本地检查仅供参考，请结合游戏实际运行情况进一步判断。'
     case 'Running': return '正在执行两阶段 AI 智能诊断。'
     case 'Completed': return 'AI 智能诊断已完成。'
     case 'Stale': return '诊断输入已经变化，下方 AI 报告仅供参考。'
@@ -124,17 +115,6 @@ function formatDateTime(value?: string | null) {
 
 <template>
   <div class="diagnostic-report" :class="{ compact }">
-    <div class="overall-row" :class="`status-${report.overall.toLowerCase()}`">
-      <NIcon :size="19"><component :is="statusIcon(report.overall)" /></NIcon>
-      <div class="overall-copy">
-        <span class="overall-title">{{ statusLabel(report.overall) }}</span>
-        <span class="overall-detail">
-          本地检查：{{ statusLabel(report.objectiveOverall) }}
-          <template v-if="report.freshRunVerified"> · 已取得本次启动与连通性证据</template>
-        </span>
-      </div>
-    </div>
-
     <NAlert
       v-if="report.analysisState !== 'Completed'"
       :type="stateAlertType()"
@@ -242,35 +222,6 @@ function formatDateTime(value?: string | null) {
   min-width: 0;
 }
 
-.overall-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-subtle);
-}
-
-.overall-row.status-healthy { color: var(--success); }
-.overall-row.status-warning { color: var(--warning); }
-.overall-row.status-error { color: var(--danger); }
-.overall-row.status-unknown { color: var(--text-3); }
-
-.overall-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.overall-title {
-  color: currentColor;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.overall-detail,
 .analysis-meta,
 .confidence,
 .hidden-hint,

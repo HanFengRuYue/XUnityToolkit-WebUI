@@ -343,17 +343,30 @@ public sealed class PluginHealthCheckService(
             return;
         }
 
-        var enabled = ReadIniValue(content, "UnityDoorstop", "enabled");
-        var targetAssembly = ReadIniValue(content, "UnityDoorstop", "targetAssembly");
+        // UnityDoorstop 4 packages use [General] + target_assembly. Keep the
+        // older [UnityDoorstop] + targetAssembly schema readable for existing installs.
+        var modernEnabled = ReadIniValue(content, "General", "enabled");
+        var modernTargetAssembly = ReadIniValue(content, "General", "target_assembly");
+        var usesModernFormat = modernEnabled is not null || modernTargetAssembly is not null;
+        var enabled = usesModernFormat
+            ? modernEnabled
+            : ReadIniValue(content, "UnityDoorstop", "enabled");
+        var targetAssembly = usesModernFormat
+            ? modernTargetAssembly
+            : ReadIniValue(content, "UnityDoorstop", "targetAssembly");
+        var enabledSetting = usesModernFormat ? "General.enabled" : "UnityDoorstop.enabled";
+        var targetAssemblySetting = usesModernFormat
+            ? "General.target_assembly"
+            : "UnityDoorstop.targetAssembly";
         var errors = new List<string>();
         if (enabled is null)
-            errors.Add("UnityDoorstop.enabled 未配置");
+            errors.Add($"{enabledSetting} 未配置");
         else if (!bool.TryParse(enabled, out var isEnabled) || !isEnabled)
-            errors.Add($"UnityDoorstop.enabled 当前为 {enabled}，Doorstop 未明确启用");
+            errors.Add($"{enabledSetting} 当前为 {enabled}，Doorstop 未明确启用");
 
         if (string.IsNullOrWhiteSpace(targetAssembly))
         {
-            errors.Add("UnityDoorstop.targetAssembly 未配置");
+            errors.Add($"{targetAssemblySetting} 未配置");
         }
         else
         {
@@ -365,22 +378,23 @@ public sealed class PluginHealthCheckService(
                 if (Path.IsPathFullyQualified(targetAssembly)
                     || !targetPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 {
-                    errors.Add("UnityDoorstop.targetAssembly 不在游戏目录内");
+                    errors.Add($"{targetAssemblySetting} 不在游戏目录内");
                 }
                 else if (!File.Exists(targetPath))
                 {
-                    errors.Add($"UnityDoorstop.targetAssembly 指向的 {targetAssembly.Replace('\\', '/')} 不存在");
+                    errors.Add($"{targetAssemblySetting} 指向的 {targetAssembly.Replace('\\', '/')} 不存在");
                 }
             }
             catch
             {
-                errors.Add("UnityDoorstop.targetAssembly 不是有效的游戏内相对路径");
+                errors.Add($"{targetAssemblySetting} 不是有效的游戏内相对路径");
             }
         }
 
         checks.Add(errors.Count == 0
             ? new HealthCheckItem("doorstopConfig", "Doorstop 启动配置", HealthStatus.Healthy,
-                $"配置已启用，目标程序集为 {targetAssembly!.Replace('\\', '/')}。")
+                $"已识别{(usesModernFormat ? "当前" : "旧版")}配置，Doorstop 已启用，" +
+                $"目标程序集 {targetAssembly!.Replace('\\', '/')} 已存在。")
             : new HealthCheckItem("doorstopConfig", "Doorstop 启动配置", HealthStatus.Error,
                 string.Join("；", errors) + "。"));
     }

@@ -184,30 +184,62 @@ public sealed class PluginHealthCheckServiceTests
         Assert.Equal(verified.Fingerprint, passive.Fingerprint);
     }
 
-    [Fact]
-    public async Task CheckDoorstopConfig_ReportsActualTargetAndDeterministicMisconfiguration()
+    [Theory]
+    [InlineData(@"BepInEx\core\BepInEx.Preloader.dll")]
+    [InlineData(@"BepInEx\core\BepInEx.Unity.IL2CPP.dll")]
+    public async Task CheckDoorstopConfig_CurrentBepInExFormatIsHealthy(string targetAssembly)
     {
         using var game = new TemporaryDirectory();
         var core = Path.Combine(game.Path, "BepInEx", "core");
         Directory.CreateDirectory(core);
-        File.WriteAllText(Path.Combine(core, "BepInEx.Preloader.dll"), "preloader");
+        File.WriteAllText(Path.Combine(game.Path, targetAssembly), "preloader");
         var config = Path.Combine(game.Path, "doorstop_config.ini");
-        await File.WriteAllTextAsync(config, "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\n");
+        await File.WriteAllTextAsync(config,
+            $"[General]\nenabled = true\ntarget_assembly = {targetAssembly}\n");
         var checks = new List<HealthCheckItem>();
 
         await PluginHealthCheckService.CheckDoorstopConfigAsync(checks, game.Path);
 
         var healthy = Assert.Single(checks);
         Assert.Equal(HealthStatus.Healthy, healthy.Status);
-        Assert.Contains("BepInEx/core/BepInEx.Preloader.dll", healthy.Detail);
+        Assert.Contains("已识别当前配置", healthy.Detail);
+        Assert.Contains(targetAssembly.Replace('\\', '/'), healthy.Detail);
+    }
 
-        await File.WriteAllTextAsync(config, "[UnityDoorstop]\nenabled=false\ntargetAssembly=missing.dll\n");
-        checks.Clear();
+    [Fact]
+    public async Task CheckDoorstopConfig_LegacyFormatRemainsSupported()
+    {
+        using var game = new TemporaryDirectory();
+        var core = Path.Combine(game.Path, "BepInEx", "core");
+        Directory.CreateDirectory(core);
+        File.WriteAllText(Path.Combine(core, "BepInEx.Preloader.dll"), "preloader");
+        var config = Path.Combine(game.Path, "doorstop_config.ini");
+        await File.WriteAllTextAsync(config,
+            "[UnityDoorstop]\nenabled=true\ntargetAssembly=BepInEx\\core\\BepInEx.Preloader.dll\n");
+        var checks = new List<HealthCheckItem>();
+
+        await PluginHealthCheckService.CheckDoorstopConfigAsync(checks, game.Path);
+
+        var healthy = Assert.Single(checks);
+        Assert.Equal(HealthStatus.Healthy, healthy.Status);
+        Assert.Contains("已识别旧版配置", healthy.Detail);
+    }
+
+    [Fact]
+    public async Task CheckDoorstopConfig_CurrentFormatReportsDeterministicMisconfiguration()
+    {
+        using var game = new TemporaryDirectory();
+        var config = Path.Combine(game.Path, "doorstop_config.ini");
+        await File.WriteAllTextAsync(config,
+            "[General]\nenabled=false\ntarget_assembly=missing.dll\n");
+        var checks = new List<HealthCheckItem>();
+
         await PluginHealthCheckService.CheckDoorstopConfigAsync(checks, game.Path);
 
         var invalid = Assert.Single(checks);
         Assert.Equal(HealthStatus.Error, invalid.Status);
-        Assert.Contains("enabled", invalid.Detail);
+        Assert.Contains("General.enabled", invalid.Detail);
+        Assert.Contains("General.target_assembly", invalid.Detail);
         Assert.Contains("missing.dll", invalid.Detail);
     }
 
