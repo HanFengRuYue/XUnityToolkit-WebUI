@@ -1,17 +1,19 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using XUnity.AutoTranslator.Plugin.Core.Endpoints;
-using XUnity.AutoTranslator.Plugin.Core.Endpoints.Http;
 using XUnity.AutoTranslator.Plugin.Core.Web;
 
 namespace LLMTranslate
 {
-    public class LLMTranslateEndpoint : HttpEndpoint
+    public sealed class LLMTranslateEndpoint : ITranslateEndpoint
     {
         private const string ConfigSection = "LLMTranslate";
         private const string ConfigUrlKey = "ToolkitUrl";
+        private const string ConfigDiscoveryFileKey = "DiscoveryFile";
         private const string ConfigMaxConcurrencyKey = "MaxConcurrency";
         private const string ConfigDebugModeKey = "DebugMode";
         private const string ConfigGameIdKey = "GameId";
@@ -19,71 +21,68 @@ namespace LLMTranslate
         private const string ConfigDisableSpamChecksKey = "DisableSpamChecks";
         private const string ConfigTranslationDelayKey = "TranslationDelay";
         private const string DefaultUrl = "http://127.0.0.1:51821";
+        private const string EndpointVersion = "2.0.0";
+        private const int RecoveryBudgetMilliseconds = 140000;
+        private const int MinimumRequestBudgetMilliseconds = 30000;
+        private const int MaximumRequestTimeoutMilliseconds = 120000;
 
-        private string _translateUrl = DefaultUrl + "/api/translate";
-        private int _maxConcurrency = 10;
+        private readonly string _clientSessionId = Guid.NewGuid().ToString("N");
+        private ToolkitConnectionManager _connection;
+        private int _configuredMaxConcurrency = 10;
         private int _maxTranslationsPerRequest = 10;
-        private bool _debugMode = false;
-        private string _gameId = "";
+        private bool _debugMode;
+        private string _gameId = string.Empty;
 
-        public override string Id
+        public string Id
         {
             get { return "LLMTranslate"; }
         }
 
-        public override string FriendlyName
+        public string FriendlyName
         {
             get { return "AI Translation (LLM via XUnity Toolkit)"; }
         }
 
-        public override int MaxConcurrency
+        public int MaxConcurrency
         {
-            get { return _maxConcurrency; }
+            get { return _connection != null && _connection.IsConnected ? _configuredMaxConcurrency : 1; }
         }
 
-        public override int MaxTranslationsPerRequest
+        public int MaxTranslationsPerRequest
         {
             get { return _maxTranslationsPerRequest; }
         }
 
-        public override void Initialize(IInitializationContext context)
+        public void Initialize(IInitializationContext context)
         {
-            var baseUrl = context.GetOrCreateSetting<string>(ConfigSection, ConfigUrlKey, DefaultUrl);
-            if (string.IsNullOrEmpty(baseUrl))
-                baseUrl = DefaultUrl;
+            var configuredBaseUrl = context.GetOrCreateSetting<string>(ConfigSection, ConfigUrlKey, DefaultUrl);
+            var defaultDiscoveryFile = System.IO.Path.Combine(
+                System.IO.Path.Combine(
+                    System.IO.Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "XUnityToolkit"),
+                    "runtime"),
+                "toolbox-endpoint-v1.json");
+            var discoveryFile = context.GetOrCreateSetting<string>(
+                ConfigSection,
+                ConfigDiscoveryFileKey,
+                defaultDiscoveryFile);
 
-            _maxConcurrency = context.GetOrCreateSetting<int>(ConfigSection, ConfigMaxConcurrencyKey, 10);
-            if (_maxConcurrency < 1) _maxConcurrency = 1;
-            if (_maxConcurrency > 20) _maxConcurrency = 20;
+            _configuredMaxConcurrency = context.GetOrCreateSetting<int>(ConfigSection, ConfigMaxConcurrencyKey, 10);
+            if (_configuredMaxConcurrency < 1) _configuredMaxConcurrency = 1;
+            if (_configuredMaxConcurrency > 20) _configuredMaxConcurrency = 20;
 
             _maxTranslationsPerRequest = context.GetOrCreateSetting<int>(ConfigSection, ConfigMaxTranslationsPerRequestKey, 10);
             if (_maxTranslationsPerRequest < 1) _maxTranslationsPerRequest = 1;
             if (_maxTranslationsPerRequest > 50) _maxTranslationsPerRequest = 50;
 
             _debugMode = context.GetOrCreateSetting<bool>(ConfigSection, ConfigDebugModeKey, false);
-            _gameId = context.GetOrCreateSetting<string>(ConfigSection, ConfigGameIdKey, "");
+            _gameId = context.GetOrCreateSetting<string>(ConfigSection, ConfigGameIdKey, string.Empty);
 
-            _translateUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate";
-
-            // XUnity 的 HttpEndpoint 通过 ConnectionTrackingWebClient → WebClient → HttpWebRequest 发送请求。
-            // Mono 的 ServicePointManager.DefaultConnectionLimit 默认为 2，严重限制并发连接数。
-            // 重要：DefaultConnectionLimit 只影响之后新创建的 ServicePoint，
-            // 必须用 FindServicePoint 直接设置目标主机的 ConnectionLimit。
-            ServicePointManager.DefaultConnectionLimit = Math.Max(ServicePointManager.DefaultConnectionLimit, _maxConcurrency + 10);
+            ServicePointManager.DefaultConnectionLimit = Math.Max(
+                ServicePointManager.DefaultConnectionLimit,
+                _configuredMaxConcurrency + 10);
             ServicePointManager.Expect100Continue = false;
-
-            try
-            {
-                var targetUri = new Uri(_translateUrl);
-                var servicePoint = ServicePointManager.FindServicePoint(targetUri);
-                servicePoint.ConnectionLimit = _maxConcurrency + 10;
-                servicePoint.MaxIdleTime = 120000; // 120 秒空闲后关闭连接
-                DebugLog("  ServicePoint 连接限制: " + servicePoint.ConnectionLimit);
-            }
-            catch (Exception ex)
-            {
-                DebugLog("  设置 ServicePoint 失败: " + ex.Message);
-            }
 
             var disableSpamChecks = context.GetOrCreateSetting<bool>(ConfigSection, ConfigDisableSpamChecksKey, true);
             if (disableSpamChecks)
@@ -93,104 +92,151 @@ namespace LLMTranslate
             if (translationDelay >= 0.1f)
                 context.SetTranslationDelay(translationDelay);
 
+            _connection = new ToolkitConnectionManager(
+                configuredBaseUrl,
+                discoveryFile,
+                _gameId,
+                _clientSessionId,
+                EndpointVersion,
+                Log,
+                DebugLog);
+            _connection.Start();
+
             Log("=== LLMTranslate 插件初始化 ===");
-            Log("  工具箱地址: " + _translateUrl);
-            Log("  并发连接数: " + _maxConcurrency);
+            Log("  连接模式: 本机直连（系统代理已禁用）");
+            Log("  地址顺序: 发现文件 → ToolkitUrl → " + DefaultUrl);
+            Log("  发现文件: " + discoveryFile);
+            Log("  配置地址: " + configuredBaseUrl);
+            Log("  正常并发连接数: " + _configuredMaxConcurrency + "；断线时: 1");
             Log("  每请求文本数: " + _maxTranslationsPerRequest);
-            Log("  最大同时翻译: " + (_maxConcurrency * _maxTranslationsPerRequest));
-            DebugLog("  全局连接池默认: " + ServicePointManager.DefaultConnectionLimit);
             Log("  游戏 ID: " + (string.IsNullOrEmpty(_gameId) ? "(未设置)" : _gameId));
+            Log("  端点版本: " + EndpointVersion);
             Log("  禁用防刷检查: " + (disableSpamChecks ? "是" : "否"));
             Log("  翻译延迟: " + translationDelay + " 秒");
-            Log("  调试模式: " + (_debugMode ? "开启" : "关闭"));
-
-            // Connectivity ping — notify toolbox that the plugin has loaded
-            try
-            {
-                var pingUrl = baseUrl.TrimEnd(new char[] { '/' }) + "/api/translate/ping";
-                if (!string.IsNullOrEmpty(_gameId))
-                    pingUrl += "?gameId=" + Uri.EscapeDataString(_gameId);
-                var pingClient = new WebClient();
-                pingClient.DownloadStringCompleted += (s, e) => ((WebClient)s).Dispose();
-                try { pingClient.DownloadStringAsync(new Uri(pingUrl)); }
-                catch { pingClient.Dispose(); throw; }
-                Log("  连通性测试已发送: " + pingUrl);
-            }
-            catch (Exception ex)
-            {
-                Log("  连通性测试发送失败: " + ex.Message);
-            }
         }
 
-        public override void OnCreateRequest(IHttpRequestCreationContext context)
+        public IEnumerator Translate(ITranslationContext context)
         {
-            var body = BuildRequestBody(
-                context.UntranslatedTexts,
-                context.SourceLanguage,
-                context.DestinationLanguage,
-                _gameId);
+            var requestId = Guid.NewGuid().ToString("N");
+            var stopwatch = Stopwatch.StartNew();
+            var attempt = 0;
+            var immediateProbeRequested = false;
 
-            Log(string.Format("[请求] 发送 {0} 条文本到工具箱: {1} → {2}",
-                context.UntranslatedTexts.Length,
-                context.SourceLanguage,
-                context.DestinationLanguage));
-
-            if (_debugMode && context.UntranslatedTexts.Length > 0)
+            while (stopwatch.ElapsedMilliseconds < RecoveryBudgetMilliseconds)
             {
-                for (int i = 0; i < context.UntranslatedTexts.Length && i < 3; i++)
+                var baseUrl = _connection.CurrentBaseUrl;
+                if (string.IsNullOrEmpty(baseUrl))
                 {
-                    var text = context.UntranslatedTexts[i];
-                    if (text.Length > 50) text = text.Substring(0, 50) + "...";
-                    DebugLog("  [" + i + "] " + text);
+                    if (!immediateProbeRequested)
+                    {
+                        _connection.RequestImmediateProbe();
+                        immediateProbeRequested = true;
+                    }
+                    if (RecoveryBudgetMilliseconds - stopwatch.ElapsedMilliseconds < MinimumRequestBudgetMilliseconds)
+                    {
+                        context.Fail("Toolkit is unavailable and there is not enough time left to send a translation request.");
+                        yield break;
+                    }
+
+                    yield return null;
+                    continue;
                 }
-                if (context.UntranslatedTexts.Length > 3)
-                    DebugLog("  ... 还有 " + (context.UntranslatedTexts.Length - 3) + " 条");
-            }
 
-            var request = new XUnityWebRequest("POST", _translateUrl, body);
-            request.Headers[HttpRequestHeader.ContentType] = "application/json";
-            request.Headers[HttpRequestHeader.Accept] = "application/json";
-            // 不设置 Connection: close — keep-alive 连接复用更高效。
-            // Mono 的 close 实现有 CLOSE_WAIT 泄漏问题，会永久占用连接槽。
+                immediateProbeRequested = false;
 
-            context.Complete(request);
-        }
+                var remaining = RecoveryBudgetMilliseconds - (int)stopwatch.ElapsedMilliseconds;
+                if (remaining < MinimumRequestBudgetMilliseconds)
+                {
+                    context.Fail("Toolkit connection recovered too late to safely send the translation request.");
+                    yield break;
+                }
 
-        public override void OnExtractTranslation(IHttpTranslationExtractionContext context)
-        {
-            var raw = context.Response.Data;
-            if (string.IsNullOrEmpty(raw))
-            {
-                Log("[错误] 工具箱返回空响应");
-                context.Fail("Empty response from toolkit backend.");
-                return;
-            }
+                attempt++;
+                var timeout = Math.Min(MaximumRequestTimeoutMilliseconds, remaining - 5000);
+                var body = BuildRequestBody(
+                    context.UntranslatedTexts,
+                    context.SourceLanguage,
+                    context.DestinationLanguage,
+                    _gameId,
+                    _clientSessionId,
+                    requestId);
+                var request = new XUnityWebRequest("POST", baseUrl + "/api/translate", body);
+                request.Headers[HttpRequestHeader.ContentType] = "application/json";
+                request.Headers[HttpRequestHeader.Accept] = "application/json";
 
-            DebugLog("[响应] 收到工具箱响应: " + (raw.Length > 200 ? raw.Substring(0, 200) + "..." : raw));
-
-            var translations = ParseTranslationsArray(raw);
-
-            if (translations == null || translations.Length != context.UntranslatedTexts.Length)
-            {
-                Log(string.Format("[错误] 翻译数量不匹配: 期望 {0}, 实际 {1}",
+                Log(string.Format(
+                    "[请求] 第 {0} 次发送 {1} 条文本到 {2}: {3} → {4}",
+                    attempt,
                     context.UntranslatedTexts.Length,
-                    translations != null ? translations.Length.ToString() : "null"));
-                context.Fail("Translation count mismatch.");
-                return;
-            }
+                    baseUrl,
+                    context.SourceLanguage,
+                    context.DestinationLanguage));
+                LogRequestPreview(context.UntranslatedTexts);
 
-            Log(string.Format("[完成] 成功翻译 {0} 条文本", translations.Length));
-            if (_debugMode && translations.Length > 0)
-            {
-                for (int i = 0; i < translations.Length && i < 3; i++)
+                var client = new DirectXUnityWebClient(timeout);
+                var response = client.Send(request);
+                yield return response;
+
+                if (response.Error != null)
                 {
-                    var text = translations[i];
-                    if (text.Length > 50) text = text.Substring(0, 50) + "...";
-                    DebugLog("  [" + i + "] " + text);
+                    if (ToolkitConnectionManager.IsConnectivityFailure(response.Error))
+                    {
+                        var classification = ToolkitConnectionManager.ClassifyFailure(response.Error);
+                        Log("[连接] 翻译请求中断: " + classification);
+                        _connection.MarkTransportFailure(baseUrl, response.Error);
+
+                        if (RecoveryBudgetMilliseconds - stopwatch.ElapsedMilliseconds >= MinimumRequestBudgetMilliseconds)
+                            continue;
+                    }
+
+                    context.Fail("Toolkit request failed.", response.Error);
+                    yield break;
                 }
+
+                var statusCode = (int)response.Code;
+                if (statusCode < 200 || statusCode >= 300)
+                {
+                    context.Fail("Toolkit returned HTTP status " + statusCode + ".");
+                    yield break;
+                }
+
+                var raw = response.Data;
+                if (string.IsNullOrEmpty(raw))
+                {
+                    context.Fail("Toolkit returned an empty response.");
+                    yield break;
+                }
+
+                DebugLog("[响应] " + (raw.Length > 200 ? raw.Substring(0, 200) + "..." : raw));
+                var translations = ParseTranslationsArray(raw);
+                if (translations == null || translations.Length != context.UntranslatedTexts.Length)
+                {
+                    context.Fail(string.Format(
+                        "Translation count mismatch. Expected {0}, received {1}.",
+                        context.UntranslatedTexts.Length,
+                        translations == null ? "null" : translations.Length.ToString()));
+                    yield break;
+                }
+
+                Log("[完成] 成功翻译 " + translations.Length + " 条文本");
+                context.Complete(translations);
+                yield break;
             }
 
-            context.Complete(translations);
+            context.Fail("Toolkit recovery budget was exhausted.");
+        }
+
+        private void LogRequestPreview(string[] texts)
+        {
+            if (!_debugMode || texts == null)
+                return;
+
+            for (var i = 0; i < texts.Length && i < 3; i++)
+            {
+                var text = texts[i] ?? string.Empty;
+                if (text.Length > 50) text = text.Substring(0, 50) + "...";
+                DebugLog("  [" + i + "] " + text);
+            }
         }
 
         private void Log(string message)
@@ -200,13 +246,17 @@ namespace LLMTranslate
 
         private void DebugLog(string message)
         {
-            if (!_debugMode) return;
-            Log(message);
+            if (_debugMode)
+                Log(message);
         }
 
-        // --- JSON helpers (no external JSON library available in .NET 3.5) ---
-
-        private static string BuildRequestBody(string[] texts, string from, string to, string gameId)
+        private static string BuildRequestBody(
+            string[] texts,
+            string from,
+            string to,
+            string gameId,
+            string clientSessionId,
+            string requestId)
         {
             var sb = new StringBuilder();
             sb.Append("{\"texts\":");
@@ -216,20 +266,28 @@ namespace LLMTranslate
             sb.Append("\",\"to\":\"");
             EscapeJsonString(sb, to);
             sb.Append("\"");
-            if (!string.IsNullOrEmpty(gameId))
-            {
-                sb.Append(",\"gameId\":\"");
-                EscapeJsonString(sb, gameId);
-                sb.Append("\"");
-            }
+            AppendJsonProperty(sb, "gameId", gameId);
+            AppendJsonProperty(sb, "clientSessionId", clientSessionId);
+            AppendJsonProperty(sb, "requestId", requestId);
             sb.Append("}");
             return sb.ToString();
+        }
+
+        private static void AppendJsonProperty(StringBuilder sb, string name, string value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return;
+            sb.Append(",\"");
+            EscapeJsonString(sb, name);
+            sb.Append("\":\"");
+            EscapeJsonString(sb, value);
+            sb.Append("\"");
         }
 
         private static void SerializeStringArray(StringBuilder sb, string[] values)
         {
             sb.Append("[");
-            for (int i = 0; i < values.Length; i++)
+            for (var i = 0; i < values.Length; i++)
             {
                 if (i > 0) sb.Append(",");
                 sb.Append("\"");
@@ -242,9 +300,9 @@ namespace LLMTranslate
         private static void EscapeJsonString(StringBuilder sb, string value)
         {
             if (value == null) return;
-            for (int i = 0; i < value.Length; i++)
+            for (var i = 0; i < value.Length; i++)
             {
-                char c = value[i];
+                var c = value[i];
                 switch (c)
                 {
                     case '"': sb.Append("\\\""); break;
@@ -261,108 +319,94 @@ namespace LLMTranslate
                             sb.Append(value[++i]);
                         }
                         else if (c < 0x20 || char.IsSurrogate(c))
+                        {
                             sb.AppendFormat("\\u{0:x4}", (int)c);
+                        }
                         else
+                        {
                             sb.Append(c);
+                        }
                         break;
                 }
             }
         }
 
-        /// <summary>
-        /// Parse the response JSON: {"translations":["t1","t2",...]}
-        /// Purpose-built parser for this specific shape.
-        /// </summary>
         private static string[] ParseTranslationsArray(string json)
         {
-            // Find the "translations" key (case-insensitive search not needed - our backend controls the key)
             var key = "\"translations\"";
-            int keyIndex = json.IndexOf(key, StringComparison.Ordinal);
+            var keyIndex = json.IndexOf(key, StringComparison.Ordinal);
             if (keyIndex < 0)
             {
-                // Try PascalCase as fallback
                 key = "\"Translations\"";
                 keyIndex = json.IndexOf(key, StringComparison.Ordinal);
                 if (keyIndex < 0) return null;
             }
 
-            // Find the opening bracket
-            int bracketStart = json.IndexOf('[', keyIndex + key.Length);
+            var bracketStart = json.IndexOf('[', keyIndex + key.Length);
             if (bracketStart < 0) return null;
 
-            // Parse array of strings
             var results = new List<string>();
-            int pos = bracketStart + 1;
-
+            var pos = bracketStart + 1;
             while (pos < json.Length)
             {
-                // Skip whitespace
-                while (pos < json.Length && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == '\r'))
-                    pos++;
-
+                while (pos < json.Length && char.IsWhiteSpace(json[pos])) pos++;
                 if (pos >= json.Length) return null;
-
-                // End of array
                 if (json[pos] == ']') break;
-
-                // Skip comma
                 if (json[pos] == ',')
                 {
                     pos++;
                     continue;
                 }
-
-                // Expect opening quote
                 if (json[pos] != '"') return null;
                 pos++;
 
-                // Read string value with escape handling
-                var valueSb = new StringBuilder();
+                var value = new StringBuilder();
+                var closed = false;
                 while (pos < json.Length)
                 {
-                    char c = json[pos];
-                    if (c == '\\' && pos + 1 < json.Length)
+                    var c = json[pos++];
+                    if (c == '"')
                     {
-                        char next = json[pos + 1];
-                        switch (next)
-                        {
-                            case '"': valueSb.Append('"'); pos += 2; break;
-                            case '\\': valueSb.Append('\\'); pos += 2; break;
-                            case 'n': valueSb.Append('\n'); pos += 2; break;
-                            case 'r': valueSb.Append('\r'); pos += 2; break;
-                            case 't': valueSb.Append('\t'); pos += 2; break;
-                            case 'b': valueSb.Append('\b'); pos += 2; break;
-                            case 'f': valueSb.Append('\f'); pos += 2; break;
-                            case 'u':
-                                if (pos + 6 <= json.Length)
-                                {
-                                    var hex = json.Substring(pos + 2, 4);
-                                    int code;
-                                    if (int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out code))
-                                        valueSb.Append((char)code);
-                                    pos += 6;
-                                }
-                                else
-                                {
-                                    pos += 2;
-                                }
-                                break;
-                            default: valueSb.Append(next); pos += 2; break;
-                        }
-                    }
-                    else if (c == '"')
-                    {
-                        pos++; // skip closing quote
+                        closed = true;
                         break;
                     }
-                    else
+                    if (c != '\\' || pos >= json.Length)
                     {
-                        valueSb.Append(c);
-                        pos++;
+                        value.Append(c);
+                        continue;
+                    }
+
+                    var escaped = json[pos++];
+                    switch (escaped)
+                    {
+                        case '"': value.Append('"'); break;
+                        case '\\': value.Append('\\'); break;
+                        case '/': value.Append('/'); break;
+                        case 'n': value.Append('\n'); break;
+                        case 'r': value.Append('\r'); break;
+                        case 't': value.Append('\t'); break;
+                        case 'b': value.Append('\b'); break;
+                        case 'f': value.Append('\f'); break;
+                        case 'u':
+                            if (pos + 4 > json.Length) return null;
+                            int code;
+                            if (!int.TryParse(
+                                json.Substring(pos, 4),
+                                System.Globalization.NumberStyles.HexNumber,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out code))
+                            {
+                                return null;
+                            }
+                            value.Append((char)code);
+                            pos += 4;
+                            break;
+                        default: value.Append(escaped); break;
                     }
                 }
 
-                results.Add(valueSb.ToString());
+                if (!closed) return null;
+                results.Add(value.ToString());
             }
 
             return results.ToArray();

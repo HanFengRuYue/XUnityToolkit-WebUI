@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Services;
 using Xunit;
@@ -35,6 +36,8 @@ public sealed class ConfigurationServiceTests
         var content = await File.ReadAllTextAsync(configPath);
         Assert.Contains("Language=zh", content);
         Assert.Contains("FromLanguage=auto", content);
+        Assert.Contains("ToolkitUrl=http://127.0.0.1:", content);
+        Assert.Contains($"DiscoveryFile={Path.Combine(temp.Path, "app-data", "runtime", "toolbox-endpoint-v1.json")}", content);
         Assert.Contains("[Custom]", content);
         Assert.Contains("KeepThis=1", content);
     }
@@ -48,10 +51,14 @@ public sealed class ConfigurationServiceTests
             })
             .Build();
         var paths = new AppDataPaths(configuration);
-        var settingsService = new AppSettingsService(paths, NullLogger<AppSettingsService>.Instance);
+        var runtimeEndpoint = new ToolkitRuntimeEndpointState(51821);
+        using (runtimeEndpoint.CreateBoundListenSocket(new IPEndPoint(IPAddress.Loopback, 51821)))
+        {
+        }
         return new ConfigurationService(
             NullLogger<ConfigurationService>.Instance,
-            settingsService);
+            runtimeEndpoint,
+            paths);
     }
 
     private sealed class TemporaryDirectory : IDisposable

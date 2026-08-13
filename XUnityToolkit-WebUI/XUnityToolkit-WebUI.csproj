@@ -21,14 +21,22 @@
     <AssemblyMetadata Include="Edition" Value="$(Edition)" />
   </ItemGroup>
 
-  <!-- Embed LLMTranslate.dll if it has been built -->
-  <ItemGroup Condition="Exists('..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll')">
-    <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll" LogicalName="LLMTranslate.dll" />
-  </ItemGroup>
+  <!-- Always build and embed the official Release endpoint so safety metadata cannot describe a missing DLL. -->
+  <Target Name="BuildAndEmbedTranslatorEndpoint" BeforeTargets="AssignTargetPaths">
+    <MSBuild
+      Projects="..\TranslatorEndpoint\TranslatorEndpoint.csproj"
+      Targets="Build"
+      Properties="Configuration=Release"
+      RemoveProperties="RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile" />
+    <ItemGroup>
+      <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll" LogicalName="LLMTranslate.dll" />
+    </ItemGroup>
+  </Target>
 
   <!-- Embed classdata.tpk for Unity asset type deserialization -->
   <ItemGroup>
     <EmbeddedResource Include="Resources\classdata.tpk" LogicalName="classdata.tpk" />
+    <EmbeddedResource Include="Resources\translator-endpoint-metadata.json" LogicalName="translator-endpoint-metadata.json" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="AssetsTools.NET" Version="3.0.5" />

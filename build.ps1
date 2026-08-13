@@ -1,11 +1,12 @@
 # build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-Edition full|no-llama|lite]
+# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-Edition full|no-llama|lite] [-ReleaseRoot <Release 子目录>]
 
 param(
     [switch]$SkipDownload,
     [switch]$SkipSmoke,
     [ValidateSet('full', 'no-llama', 'lite')]
-    [string]$Edition = 'full'
+    [string]$Edition = 'full',
+    [string]$ReleaseRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,7 +60,24 @@ $ProgressPreference = 'SilentlyContinue'
 $ProjectRoot = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
-$ReleaseRoot = Join-Path $ProjectRoot 'Release'
+$defaultReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot 'Release'))
+if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
+    $ReleaseRoot = $defaultReleaseRoot
+} else {
+    $requestedReleaseRoot = if ([System.IO.Path]::IsPathRooted($ReleaseRoot)) {
+        $ReleaseRoot
+    } else {
+        Join-Path $ProjectRoot $ReleaseRoot
+    }
+    $ReleaseRoot = [System.IO.Path]::GetFullPath($requestedReleaseRoot)
+    $allowedPrefix = $defaultReleaseRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $ReleaseRoot.Equals($defaultReleaseRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $ReleaseRoot.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "ReleaseRoot 必须是 $defaultReleaseRoot 或其子目录。"
+    }
+}
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
 $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
@@ -407,11 +425,22 @@ Write-Host "[$currentStep/$stepCount] Preparing Release folder..." -ForegroundCo
 
 # Stop processes that may lock files in Release folder
 $processesToStop = @('XUnityToolkit-WebUI', 'llama-server')
+$releaseRootPrefix = [System.IO.Path]::GetFullPath($ReleaseRoot).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 foreach ($procName in $processesToStop) {
-    $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
-    if ($procs) {
-        Write-Host "  Stopping $procName..." -ForegroundColor DarkYellow
-        $procs | Stop-Process -Force
+    $releaseProcs = @(Get-Process -Name $procName -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith(
+                $releaseRootPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+    if ($releaseProcs.Count -gt 0) {
+        Write-Host "  Stopping $procName instances from Release..." -ForegroundColor DarkYellow
+        $releaseProcs | Stop-Process -Force
         Start-Sleep -Milliseconds 500
     }
 }
@@ -484,57 +513,138 @@ if (-not $SkipSmoke) {
     Write-Host ""
     Write-Host "[$currentStep/$stepCount] Running release smoke check..." -ForegroundColor Yellow
 
-    $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "xunitytoolkit-smoke-$([Guid]::NewGuid().ToString('N'))"
-    $smokeStdout = Join-Path $smokeRoot 'stdout.log'
-    $smokeStderr = Join-Path $smokeRoot 'stderr.log'
-    $proc = $null
-    try {
-        New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
-        $env:AppData__Root = $smokeRoot
-        $proc = Start-Process -FilePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') `
-            -WorkingDirectory $OutputDir -PassThru -WindowStyle Hidden `
-            -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
-        $baseUrl = 'http://127.0.0.1:51821'
-        $deadline = [DateTime]::UtcNow.AddSeconds(60)
-        $indexOk = $false
-        $versionOk = $false
-        $lastSmokeError = $null
-        do {
-            Start-Sleep -Milliseconds 500
-            $proc.Refresh()
-            if ($proc.HasExited) {
-                $lastSmokeError = "process exited with code $($proc.ExitCode)"
-                break
-            }
-            try {
-                $indexResponse = Invoke-WebRequest "$baseUrl/" -UseBasicParsing -TimeoutSec 3
-                $versionResponse = Invoke-WebRequest "$baseUrl/api/settings/version" -UseBasicParsing -TimeoutSec 3
-                $indexOk = $indexResponse.StatusCode -ge 200 -and $indexResponse.StatusCode -lt 300
-                $versionOk = $versionResponse.StatusCode -ge 200 -and $versionResponse.StatusCode -lt 300
-                $lastSmokeError = $null
-            } catch {
-                $indexOk = $false
-                $versionOk = $false
-                $lastSmokeError = $_.Exception.Message
-            }
-        } while ((-not ($indexOk -and $versionOk)) -and [DateTime]::UtcNow -lt $deadline)
+    function Invoke-ReleaseSmokeCheck {
+        param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][bool]$OccupyPreferredPort
+        )
 
-        if (-not ($indexOk -and $versionOk)) {
-            $processState = if ($proc.HasExited) { "exited ($($proc.ExitCode))" } else { 'still running' }
-            $stdoutTail = if (Test-Path $smokeStdout) { (Get-Content $smokeStdout -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
-            $stderrTail = if (Test-Path $smokeStderr) { (Get-Content $smokeStderr -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
-            throw "Release smoke check failed for $baseUrl/ and /api/settings/version. Process: $processState. Last error: $lastSmokeError`nstdout:`n$stdoutTail`nstderr:`n$stderrTail"
-        }
-        Write-Host "  Release smoke check passed." -ForegroundColor Green
-    } finally {
-        if ($proc -and -not $proc.HasExited) {
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-        }
-        Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
-        if (Test-Path $smokeRoot) {
-            Remove-Item $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "xunitytoolkit-smoke-$([Guid]::NewGuid().ToString('N'))"
+        $smokeStdout = Join-Path $smokeRoot 'stdout.log'
+        $smokeStderr = Join-Path $smokeRoot 'stderr.log'
+        $discoveryFile = Join-Path $smokeRoot 'runtime\toolbox-endpoint-v1.json'
+        $portHolder = $null
+        $proc = $null
+        $httpClient = $null
+        try {
+            New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
+
+            $portHolder = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $portHolder.Server.ExclusiveAddressUse = $true
+            $portHolder.Start()
+            $preferredPort = ([System.Net.IPEndPoint]$portHolder.LocalEndpoint).Port
+            if (-not $OccupyPreferredPort) {
+                $portHolder.Stop()
+                $portHolder = $null
+            }
+
+            @{
+                aiTranslation = @{ port = $preferredPort }
+            } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $smokeRoot 'settings.json') -Encoding utf8
+
+            $env:AppData__Root = $smokeRoot
+            $proc = Start-Process -FilePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') `
+                -WorkingDirectory $OutputDir -PassThru -WindowStyle Hidden `
+                -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
+
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $handler.UseProxy = $false
+            $httpClient = [System.Net.Http.HttpClient]::new($handler)
+            $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+
+            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            $discovery = $null
+            $lastSmokeError = $null
+            do {
+                Start-Sleep -Milliseconds 500
+                $proc.Refresh()
+                if ($proc.HasExited) {
+                    $lastSmokeError = "process exited with code $($proc.ExitCode)"
+                    break
+                }
+
+                try {
+                    if (-not (Test-Path -LiteralPath $discoveryFile)) {
+                        throw 'runtime discovery file has not been published yet'
+                    }
+                    $discovery = Get-Content -LiteralPath $discoveryFile -Raw | ConvertFrom-Json
+                    if ($discovery.product -ne 'XUnityToolkit' -or $discovery.protocolVersion -ne 1) {
+                        throw 'runtime discovery product or protocol validation failed'
+                    }
+                    if ($discovery.baseUrl -notmatch '^http://127\.0\.0\.1:\d+$') {
+                        throw "invalid runtime base URL: $($discovery.baseUrl)"
+                    }
+
+                    $indexResponse = $httpClient.GetAsync("$($discovery.baseUrl)/").GetAwaiter().GetResult()
+                    $versionResponse = $httpClient.GetAsync("$($discovery.baseUrl)/api/settings/version").GetAwaiter().GetResult()
+                    $pingJson = $httpClient.GetStringAsync("$($discovery.baseUrl)/api/translate/ping").GetAwaiter().GetResult() | ConvertFrom-Json
+                    try {
+                        if (-not $indexResponse.IsSuccessStatusCode -or -not $versionResponse.IsSuccessStatusCode) {
+                            throw "HTTP status check failed: index=$($indexResponse.StatusCode), version=$($versionResponse.StatusCode)"
+                        }
+                        if ($pingJson.product -ne 'XUnityToolkit' -or $pingJson.instanceId -ne $discovery.instanceId) {
+                            throw 'ping response does not belong to the discovered instance'
+                        }
+                    } finally {
+                        $indexResponse.Dispose()
+                        $versionResponse.Dispose()
+                    }
+
+                    if ([bool]$discovery.usedFallback -ne $OccupyPreferredPort) {
+                        throw "fallback state mismatch: expected=$OccupyPreferredPort actual=$($discovery.usedFallback)"
+                    }
+                    if ($OccupyPreferredPort -and $discovery.actualPort -eq $preferredPort) {
+                        throw 'occupied preferred port was not replaced with a fallback port'
+                    }
+                    if (-not $OccupyPreferredPort -and $discovery.actualPort -ne $preferredPort) {
+                        throw 'available preferred port was unexpectedly replaced'
+                    }
+
+                    $lastSmokeError = $null
+                } catch {
+                    $discovery = $null
+                    $lastSmokeError = $_.Exception.Message
+                }
+            } while (-not $discovery -and [DateTime]::UtcNow -lt $deadline)
+
+            if (-not $discovery) {
+                $processState = if ($proc.HasExited) { "exited ($($proc.ExitCode))" } else { 'still running' }
+                $stdoutTail = if (Test-Path $smokeStdout) { (Get-Content $smokeStdout -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+                $stderrTail = if (Test-Path $smokeStderr) { (Get-Content $smokeStderr -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+                throw "Release smoke '$Name' failed. Process: $processState. Last error: $lastSmokeError`nstdout:`n$stdoutTail`nstderr:`n$stderrTail"
+            }
+
+            Write-Host "  [$Name] $($discovery.baseUrl) (preferred $preferredPort, fallback $($discovery.usedFallback))" -ForegroundColor Green
+        } finally {
+            if ($httpClient) { $httpClient.Dispose() }
+            if ($proc -and -not $proc.HasExited) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
+            }
+            if ($portHolder) { $portHolder.Stop() }
+            Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $smokeRoot) {
+                $cleanupError = $null
+                for ($cleanupAttempt = 1; $cleanupAttempt -le 5; $cleanupAttempt++) {
+                    try {
+                        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction Stop
+                        $cleanupError = $null
+                        break
+                    } catch {
+                        $cleanupError = $_.Exception.Message
+                        Start-Sleep -Milliseconds 300
+                    }
+                }
+                if (Test-Path -LiteralPath $smokeRoot) {
+                    Write-Host "  [warn] Smoke temp cleanup deferred: $cleanupError" -ForegroundColor DarkYellow
+                }
+            }
         }
     }
+
+    Invoke-ReleaseSmokeCheck -Name 'preferred-port' -OccupyPreferredPort $false
+    Invoke-ReleaseSmokeCheck -Name 'occupied-port-fallback' -OccupyPreferredPort $true
+    Write-Host "  Release smoke checks passed." -ForegroundColor Green
 }
 
 # ── Summary ──

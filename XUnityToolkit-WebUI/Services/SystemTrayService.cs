@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using Microsoft.Web.WebView2.Core;
+using XUnityToolkit_WebUI.Infrastructure;
 
 namespace XUnityToolkit_WebUI.Services;
 
 public sealed class SystemTrayService(
     ILogger<SystemTrayService> logger,
     IHostApplicationLifetime lifetime,
-    IConfiguration configuration) : IHostedService, IDisposable
+    ToolkitRuntimeEndpointState runtimeEndpoint) : IHostedService, IDisposable
 {
     private Thread? _staThread;
     private volatile NotifyIcon? _trayIcon;
@@ -18,14 +19,7 @@ public sealed class SystemTrayService(
     private ToolStripMenuItem? _openMenuItem;
     private readonly TaskCompletionSource _kestrelReady = new();
 
-    private string AppUrl
-    {
-        get
-        {
-            var urls = configuration["urls"] ?? "http://127.0.0.1:51821";
-            return urls.Split(';')[0];
-        }
-    }
+    private string AppUrl => runtimeEndpoint.BaseUrl;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -216,7 +210,7 @@ public sealed class SystemTrayService(
             ContextMenuStrip = BuildContextMenu()
         };
 
-        icon.DoubleClick += (_, _) => ShowOrOpenUI();
+        icon.DoubleClick += (_, _) => ShowOrOpenUICore();
         return icon;
     }
 
@@ -225,7 +219,7 @@ public sealed class SystemTrayService(
         var menu = new ContextMenuStrip();
 
         _openMenuItem = new ToolStripMenuItem(_webView2Available ? "显示窗口" : "打开浏览器");
-        _openMenuItem.Click += (_, _) => ShowOrOpenUI();
+        _openMenuItem.Click += (_, _) => ShowOrOpenUICore();
 
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) =>
@@ -242,7 +236,23 @@ public sealed class SystemTrayService(
         return menu;
     }
 
-    private void ShowOrOpenUI()
+    public bool ActivateUI()
+    {
+        if (Thread.CurrentThread == _staThread)
+        {
+            ShowOrOpenUICore();
+            return true;
+        }
+
+        var context = _syncContext;
+        if (context is null)
+            return false;
+
+        context.Post(_ => ShowOrOpenUICore(), null);
+        return true;
+    }
+
+    private void ShowOrOpenUICore()
     {
         var window = _mainWindow;
         if (window is not null && _webView2Available)

@@ -1,5 +1,7 @@
+using System.Net;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets;
 using Microsoft.Extensions.Logging.Console;
 using XUnityToolkit_WebUI.Endpoints;
 using XUnityToolkit_WebUI.Hubs;
@@ -31,6 +33,23 @@ var appDataRoot = builder.Configuration["AppData:Root"]
     ?? Path.Combine(Environment.GetFolderPath(
            Environment.SpecialFolder.ApplicationData), "XUnityToolkit");
 builder.Configuration["AppData:Root"] = appDataRoot;
+
+if (!ToolkitSingleInstance.TryAcquire(appDataRoot, out var singleInstance, out var instanceError))
+{
+    var discoveryFile = Path.Combine(appDataRoot, "runtime", "toolbox-endpoint-v1.json");
+    var activated = await ToolkitSingleInstance.TryActivateExistingAsync(
+        discoveryFile, TimeSpan.FromSeconds(5));
+    if (!activated)
+    {
+        MessageBox.Show(
+            $"{instanceError}\n\n无法唤起现有实例。请等待其启动完成，或在任务管理器中结束残留进程后重试。",
+            "XUnity Toolkit 已在运行",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+    return;
+}
+using var acquiredSingleInstance = singleInstance;
 var settingsPath = Path.Combine(appDataRoot, "settings.json");
 var listenPort = 51821;
 if (File.Exists(settingsPath))
@@ -41,7 +60,7 @@ if (File.Exists(settingsPath))
         if (settingsJson.RootElement.TryGetProperty("aiTranslation", out var aiSection) &&
             aiSection.TryGetProperty("port", out var portProp) &&
             portProp.TryGetInt32(out var configuredPort) &&
-            configuredPort is > 0 and < 65536)
+            configuredPort is >= 1024 and <= 65535)
         {
             listenPort = configuredPort;
         }
@@ -51,7 +70,11 @@ if (File.Exists(settingsPath))
         // Ignore parse errors, use default port
     }
 }
-builder.WebHost.UseUrls($"http://127.0.0.1:{listenPort}");
+var runtimeEndpoint = new ToolkitRuntimeEndpointState(listenPort);
+builder.WebHost.ConfigureKestrel(options =>
+    options.Listen(IPAddress.Loopback, listenPort));
+builder.WebHost.UseSockets(options =>
+    options.CreateBoundListenSocket = runtimeEndpoint.CreateBoundListenSocket);
 
 // 控制台日志：仅显示自身服务日志 + 启动信息，过滤框架噪音
 builder.Logging.ClearProviders();
@@ -74,6 +97,7 @@ builder.Services.AddSingleton<FileLoggerProvider>(_ => fileLoggerProvider);
 // Infrastructure
 builder.Services.AddSingleton<AppDataPaths>();
 builder.Services.AddSingleton<BundledAssetPaths>();
+builder.Services.AddSingleton(runtimeEndpoint);
 
 // JSON serialization: enums as strings for API responses
 builder.Services.ConfigureHttpJsonOptions(options =>
@@ -86,11 +110,7 @@ builder.Services.AddHttpClient("LLM", client =>
 {
     client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI/1.0");
     client.Timeout = TimeSpan.FromSeconds(120);
-}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-{
-    MaxConnectionsPerServer = 200,
-    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-});
+}).ConfigurePrimaryHttpMessageHandler(ToolkitHttpHandlers.CreateCloudLlmHandler);
 
 // HTTP client for SteamGridDB API
 builder.Services.AddHttpClient("SteamGridDB", client =>
@@ -145,6 +165,12 @@ builder.Services.AddHttpClient("GitHubCdn", client =>
     client.DefaultRequestHeaders.Add("User-Agent", "XUnityToolkit-WebUI");
 });
 
+// Local protocol traffic must never inherit Windows proxy/PAC settings.
+builder.Services.AddHttpClient("ToolkitLoopback", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(3);
+}).ConfigurePrimaryHttpMessageHandler(ToolkitHttpHandlers.CreateLoopbackHandler);
+
 // Services
 builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
@@ -154,8 +180,13 @@ builder.Services.AddSingleton<UnityDetectionService>();
 builder.Services.AddSingleton<PluginDetectionService>();
 builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
+builder.Services.AddSingleton<TranslatorEndpointUpgradeService>();
 builder.Services.AddSingleton<TmpFontService>();
 builder.Services.AddSingleton<ConfigurationService>();
+builder.Services.AddSingleton<ToolkitRuntimeDiscoveryService>();
+builder.Services.AddSingleton<PluginConnectionRegistry>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<TranslationRequestCoordinator>();
 builder.Services.AddSingleton<InstallOrchestrator>();
 builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<TermService>();
@@ -171,6 +202,8 @@ builder.Services.AddSingleton<FontReplacementService>();
 builder.Services.AddSingleton<TmpFontGeneratorService>();
 builder.Services.AddSingleton<CharacterSetService>();
 builder.Services.AddSingleton<BepInExLogService>();
+builder.Services.AddSingleton<PluginDiagnosticArtifactCollector>();
+builder.Services.AddSingleton<PluginDiagnosticAgentService>();
 builder.Services.AddSingleton<PluginHealthCheckService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<SystemTrayService>();
@@ -327,11 +360,70 @@ app.Lifetime.ApplicationStopping.Register(() =>
 {
     app.Services.GetRequiredService<SystemTrayService>().HideUIImmediately();
     app.Services.GetRequiredService<TranslationMemoryService>().FlushAllDirtyWithTimeout(TimeSpan.FromSeconds(3));
+    app.Services.GetRequiredService<ToolkitRuntimeDiscoveryService>().DeleteOwnedDiscoveryFile();
 });
 
 // Deferred initialization after Kestrel is ready — avoids blocking startup with disk I/O + DPAPI
 app.Lifetime.ApplicationStarted.Register(() =>
 {
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var discoveryService = app.Services.GetRequiredService<ToolkitRuntimeDiscoveryService>();
+            await discoveryService.PublishAndVerifyAsync(app.Lifetime.ApplicationStopping);
+            startupLogger.LogInformation(
+                "工具箱本机端点已就绪: PreferredPort={PreferredPort}, ActualPort={ActualPort}, UsedFallback={UsedFallback}, Reason={Reason}",
+                runtimeEndpoint.PreferredPort,
+                runtimeEndpoint.ActualPort,
+                runtimeEndpoint.UsedFallback,
+                runtimeEndpoint.FallbackReason);
+        }
+        catch (OperationCanceledException) when (app.Lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex)
+        {
+            startupLogger.LogError(ex, "发布工具箱本机端点发现信息失败");
+        }
+    });
+
+    // Keep checking hash-confirmed old official endpoints. A game that was running during startup
+    // is upgraded automatically after it exits; unknown/custom DLLs are never touched by this pass.
+    _ = Task.Run(async () =>
+    {
+        var firstPass = true;
+        while (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            try
+            {
+                await app.Services.GetRequiredService<TranslatorEndpointUpgradeService>()
+                    .UpgradeManagedGamesAsync(
+                        app.Lifetime.ApplicationStopping,
+                        refreshCurrentConfigurations: firstPass);
+                firstPass = false;
+                await Task.Delay(TimeSpan.FromSeconds(30), app.Lifetime.ApplicationStopping);
+            }
+            catch (OperationCanceledException) when (app.Lifetime.ApplicationStopping.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                startupLogger.LogWarning(ex, "后台检查官方 AI 翻译端点升级失败");
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), app.Lifetime.ApplicationStopping);
+                }
+                catch (OperationCanceledException) when (app.Lifetime.ApplicationStopping.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    });
+
     // Initialize AI translation enabled state + cleanup stale local endpoint
     _ = Task.Run(async () =>
     {
@@ -366,4 +458,21 @@ app.Lifetime.ApplicationStarted.Register(() =>
     });
 });
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    startupLogger.LogCritical(ex, "工具箱本机服务异常停止");
+    Environment.ExitCode = 1;
+    MessageBox.Show(
+        $"工具箱无法启动本机服务。\n\n{ex.GetBaseException().Message}",
+        "XUnity Toolkit 启动失败",
+        MessageBoxButtons.OK,
+        MessageBoxIcon.Error);
+}
+finally
+{
+    app.Services.GetRequiredService<ToolkitRuntimeDiscoveryService>().DeleteOwnedDiscoveryFile();
+}

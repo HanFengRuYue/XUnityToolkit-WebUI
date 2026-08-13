@@ -14,7 +14,6 @@ public sealed class InstallOrchestrator(
     XUnityInstallerService xUnityInstaller,
     TmpFontService tmpFontService,
     ConfigurationService configService,
-    AppSettingsService appSettingsService,
     PluginHealthCheckService healthCheckService,
     BundledAssetPaths bundledPaths,
     SystemTrayService trayService,
@@ -220,7 +219,7 @@ public sealed class InstallOrchestrator(
             logger.LogInformation("用户已关闭自动部署 AI 翻译端点");
             await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "部署 AI 翻译端点（已跳过）");
         }
-        else if (xUnityInstaller.DeployTranslatorEndpoint(game.GamePath))
+        else if (xUnityInstaller.DeployTranslatorEndpoint(game))
             await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点已部署");
         else
             await UpdateStatus(status, InstallStep.InstallingAiTranslation, 72, "AI 翻译端点不可用（跳过）");
@@ -320,14 +319,7 @@ public sealed class InstallOrchestrator(
         // required for AI endpoint to work correctly)
         if (File.Exists(configPath) && xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath))
         {
-            var appSettings = await appSettingsService.GetAsync(ct);
-            var port = appSettings.AiTranslation.Port;
-            await configService.PatchSectionAsync(game.GamePath, "LLMTranslate",
-                new Dictionary<string, string>
-                {
-                    ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
-                    ["GameId"] = game.Id
-                }, ct);
+            await configService.PatchTranslatorEndpointAsync(game.GamePath, game.Id, ct);
         }
 
         // Mark as installed before verification — cancellation during verify preserves install state
@@ -349,17 +341,19 @@ public sealed class InstallOrchestrator(
             {
                 healthReport = await healthCheckService.VerifyForInstallAsync(game, ct);
 
-                if (healthReport.Overall == HealthStatus.Healthy)
+                if (healthReport.ObjectiveOverall == HealthStatus.Healthy)
                 {
-                    await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "插件验证通过，所有检查项正常");
-                    logger.LogInformation("安装验证通过，游戏 {GameId}", game.Id);
+                    await UpdateStatus(status, InstallStep.VerifyingHealth, 99, "本地验证通过（未调用 AI）");
+                    logger.LogInformation("安装本地验证通过，未调用 AI，游戏 {GameId}", game.Id);
                 }
                 else
                 {
-                    var problemCount = healthReport.Checks.Count(c => c.Status != HealthStatus.Healthy);
+                    var problemCount = healthReport.Checks.Count(c => c.Status is HealthStatus.Error or HealthStatus.Warning);
                     await UpdateStatus(status, InstallStep.VerifyingHealth, 99,
-                        $"验证完成，发现 {problemCount} 项问题（不影响安装）");
-                    logger.LogWarning("安装验证发现 {Count} 项问题，游戏 {GameId}", problemCount, game.Id);
+                        problemCount > 0
+                            ? $"本地验证发现 {problemCount} 项确定性问题（未调用 AI）"
+                            : "本地验证完成，运行证据尚不完整（未调用 AI）");
+                    logger.LogWarning("安装本地验证完成，确定性问题 {Count} 项，游戏 {GameId}", problemCount, game.Id);
                 }
             }
             catch (OperationCanceledException) { throw; }

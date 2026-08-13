@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "product": "XUnityToolkit.LLMTranslate",
+  "currentVersion": "2.0.0",
+  "protocolVersion": 1,
+  "legacyOfficialBuilds": [
+    {
+      "version": "1.x",
+      "sha256": "438E48A43C964D1A44CCA0D5589DC6E1F4C1B91F19833C1142D20F4FCF0849FA"
+    }
+  ]
+}

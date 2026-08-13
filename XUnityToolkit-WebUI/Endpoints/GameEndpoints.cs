@@ -115,7 +115,6 @@ public static class GameEndpoints
             GameImageService imageService,
             XUnityInstallerService xUnityInstaller,
             ConfigurationService configService,
-            AppSettingsService appSettingsService,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.FolderPath))
@@ -165,7 +164,7 @@ public static class GameEndpoints
 
             var (game, skipReason) = await DetectAndAddAsync(
                 folderPath, exePath, library, detection, pluginDetection,
-                imageService, xUnityInstaller, configService, appSettingsService, ct);
+                imageService, xUnityInstaller, configService, ct);
 
             if (game is null)
                 return Results.Conflict(ApiResult<AddGameResponse>.Fail(skipReason ?? "添加游戏失败。"));
@@ -187,7 +186,6 @@ public static class GameEndpoints
             GameImageService imageService,
             XUnityInstallerService xUnityInstaller,
             ConfigurationService configService,
-            AppSettingsService appSettingsService,
             CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(request.ParentFolderPath))
@@ -242,7 +240,7 @@ public static class GameEndpoints
                 {
                     var (game, skipReason) = await DetectAndAddAsync(
                         folderPath, exePath, library, detection, pluginDetection,
-                        imageService, xUnityInstaller, configService, appSettingsService, ct);
+                        imageService, xUnityInstaller, configService, ct);
 
                     if (game is not null)
                     {
@@ -527,7 +525,7 @@ public static class GameEndpoints
             }
         });
 
-        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, LlmTranslationService translationService, GlossaryExtractionService glossaryExtractionService, CancellationToken ct) =>
+        group.MapDelete("/{id}", async (string id, GameLibraryService library, GameImageService imageService, AppDataPaths appDataPaths, TermService termService, ScriptTagService scriptTagService, TranslationMemoryService tmService, LlmTranslationService translationService, GlossaryExtractionService glossaryExtractionService, PluginDiagnosticAgentService diagnosticAgent, CancellationToken ct) =>
         {
             var removed = await library.RemoveAsync(id);
             if (!removed)
@@ -572,6 +570,7 @@ public static class GameEndpoints
             tmService.RemoveCache(id);
             translationService.RemoveGameRuntimeState(id);
             glossaryExtractionService.RemoveGameState(id);
+            diagnosticAgent.RemoveGame(id);
 
             var tmFile = appDataPaths.TranslationMemoryFile(id);
             if (File.Exists(tmFile)) File.Delete(tmFile);
@@ -635,16 +634,16 @@ public static class GameEndpoints
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            var installed = xUnityInstaller.IsTranslatorEndpointInstalled(game.GamePath);
-            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(installed)));
+            var status = xUnityInstaller.GetTranslatorEndpointStatus(game);
+            return Results.Ok(ApiResult<TranslatorEndpointStatus>.Ok(status));
         });
 
         group.MapPost("/{id}/ai-endpoint", async (
             string id,
+            AiEndpointInstallRequest request,
             GameLibraryService library,
             XUnityInstallerService xUnityInstaller,
             ConfigurationService configService,
-            AppSettingsService appSettingsService,
             CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
@@ -654,27 +653,18 @@ public static class GameEndpoints
             if (game.InstallState != InstallState.FullyInstalled)
                 return Results.BadRequest(ApiResult.Fail("请先安装 BepInEx 和 XUnity.AutoTranslator。"));
 
-            var deployed = xUnityInstaller.ForceDeployTranslatorEndpoint(game.GamePath);
-            if (!deployed)
-                return Results.BadRequest(ApiResult.Fail("AI 翻译端点 DLL 不可用（未嵌入构建）。"));
+            var status = xUnityInstaller.EnsureTranslatorEndpoint(game, request.ForceReplaceUnknown);
+            if (!status.Installed)
+                return Results.BadRequest(ApiResult<TranslatorEndpointStatus>.Fail(status.Message));
 
             // Patch config to ensure LLMTranslate uses 127.0.0.1 (avoids localhost IPv6 issues)
             var configPath = configService.GetConfigPath(game.GamePath);
             if (File.Exists(configPath))
             {
-                var settings = await appSettingsService.GetAsync(ct);
-                var port = settings.AiTranslation.Port;
-                await configService.PatchSectionAsync(game.GamePath, "LLMTranslate",
-                    new Dictionary<string, string>
-                    {
-                        ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
-                        ["MaxConcurrency"] = "10",
-                        ["MaxTranslationsPerRequest"] = "10",
-                        ["GameId"] = id
-                    }, ct);
+                await configService.PatchTranslatorEndpointAsync(game.GamePath, id, ct);
             }
 
-            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(true)));
+            return Results.Ok(ApiResult<TranslatorEndpointStatus>.Ok(status));
         });
 
         group.MapDelete("/{id}/ai-endpoint", async (
@@ -687,7 +677,8 @@ public static class GameEndpoints
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
             xUnityInstaller.RemoveTranslatorEndpoint(game.GamePath);
-            return Results.Ok(ApiResult<AiEndpointStatus>.Ok(new AiEndpointStatus(false)));
+            return Results.Ok(ApiResult<TranslatorEndpointStatus>.Ok(
+                xUnityInstaller.GetTranslatorEndpointStatus(game)));
         });
 
         // TMP font management
@@ -977,7 +968,6 @@ public static class GameEndpoints
         GameImageService imageService,
         XUnityInstallerService xUnityInstaller,
         ConfigurationService configService,
-        AppSettingsService appSettingsService,
         CancellationToken ct)
     {
         var name = Path.GetFileName(folderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -1050,14 +1040,7 @@ public static class GameEndpoints
                 var configPath = configService.GetConfigPath(folderPath);
                 if (File.Exists(configPath))
                 {
-                    var settings = await appSettingsService.GetAsync(ct);
-                    var port = settings.AiTranslation.Port;
-                    await configService.PatchSectionAsync(folderPath, "LLMTranslate",
-                        new Dictionary<string, string>
-                        {
-                            ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
-                            ["GameId"] = game.Id
-                        }, ct);
+                    await configService.PatchTranslatorEndpointAsync(folderPath, game.Id, ct);
                 }
             }
 
@@ -1098,7 +1081,7 @@ public record AddGameRequest(string GamePath, string? Name = null, string? Execu
 public record AddWithDetectionRequest(string FolderPath, string? ExePath = null);
 public record BatchAddRequest(string ParentFolderPath);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
-public record AiEndpointStatus(bool Installed);
+public record AiEndpointInstallRequest(bool ForceReplaceUnknown = false);
 public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);
 public record IconSelectRequest(string ImageUrl, int SteamGridDbGameId);

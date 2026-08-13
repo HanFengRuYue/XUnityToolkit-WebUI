@@ -1,9 +1,13 @@
 using System.Text;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Services;
 
-public sealed class ConfigurationService(ILogger<ConfigurationService> logger, AppSettingsService settingsService)
+public sealed class ConfigurationService(
+    ILogger<ConfigurationService> logger,
+    ToolkitRuntimeEndpointState runtimeEndpoint,
+    AppDataPaths appDataPaths)
 {
     private const string ConfigFileName = "AutoTranslatorConfig.ini";
 
@@ -115,17 +119,14 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
     /// Apply optimal default settings to the config file (called during installation).
     /// Only modifies specific keys, preserves all other content.
     /// </summary>
-    public async Task ApplyOptimalDefaultsAsync(string gamePath, CancellationToken ct = default)
+    public Task ApplyOptimalDefaultsAsync(string gamePath, CancellationToken ct = default)
     {
         var configPath = GetConfigPath(gamePath);
         if (!File.Exists(configPath))
-            return;
+            return Task.CompletedTask;
 
+        ct.ThrowIfCancellationRequested();
         var lines = File.ReadAllLines(configPath).ToList();
-
-        // Read current port from settings for LLMTranslate URL
-        var settings = await settingsService.GetAsync(ct);
-        var port = settings.AiTranslation.Port;
 
         var modifications = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase)
         {
@@ -158,13 +159,15 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
             },
             ["LLMTranslate"] = new(StringComparer.OrdinalIgnoreCase)
             {
-                ["ToolkitUrl"] = $"http://127.0.0.1:{port}",
+                ["ToolkitUrl"] = runtimeEndpoint.BaseUrl,
+                ["DiscoveryFile"] = appDataPaths.ToolkitEndpointDiscoveryFile,
             },
         };
 
         var result = ApplyModifications(lines, modifications);
         File.WriteAllText(configPath, string.Join(Environment.NewLine, result) + Environment.NewLine);
         logger.LogInformation("已应用最佳默认配置: {Path}", configPath);
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -359,6 +362,22 @@ public sealed class ConfigurationService(ILogger<ConfigurationService> logger, A
         File.WriteAllText(configPath, string.Join(Environment.NewLine, result) + Environment.NewLine);
         logger.LogInformation("已更新配置 [{Section}]: {Path}", section, configPath);
         return Task.CompletedTask;
+    }
+
+    public Task PatchTranslatorEndpointAsync(
+        string gamePath,
+        string gameId,
+        CancellationToken ct = default)
+    {
+        return PatchSectionAsync(gamePath, "LLMTranslate",
+            new Dictionary<string, string>
+            {
+                ["ToolkitUrl"] = runtimeEndpoint.BaseUrl,
+                ["DiscoveryFile"] = appDataPaths.ToolkitEndpointDiscoveryFile,
+                ["MaxConcurrency"] = "10",
+                ["MaxTranslationsPerRequest"] = "10",
+                ["GameId"] = gameId,
+            }, ct);
     }
 
     private static List<string> ApplyModifications(

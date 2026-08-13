@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using XUnityToolkit_WebUI.Models;
 
 namespace XUnityToolkit_WebUI.Infrastructure;
 
@@ -10,6 +11,62 @@ namespace XUnityToolkit_WebUI.Infrastructure;
 /// </summary>
 public static class GameProcessHelper
 {
+    /// <summary>
+    /// Checks whether the configured game executable is currently running from this game directory.
+    /// Access-denied processes are treated as running when the executable name matches, because replacing
+    /// an endpoint DLL in that situation is less safe than deferring the upgrade.
+    /// </summary>
+    public static bool IsGameRunning(Game game)
+    {
+        var exeName = game.ExecutableName ?? game.DetectedInfo?.DetectedExecutable;
+        if (string.IsNullOrWhiteSpace(exeName))
+            return false;
+
+        var processName = Path.GetFileNameWithoutExtension(exeName);
+        var normalizedGamePath = Path.GetFullPath(game.GamePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+
+        var processes = Process.GetProcessesByName(processName);
+        try
+        {
+            foreach (var process in processes)
+            {
+                try
+                {
+                    if (process.HasExited)
+                        continue;
+
+                    try
+                    {
+                        var modulePath = process.MainModule?.FileName;
+                        if (modulePath is not null
+                            && Path.GetFullPath(modulePath).StartsWith(normalizedGamePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                    catch
+                    {
+                        // Matching executable name but inaccessible module path: defer the file replacement.
+                        return true;
+                    }
+                }
+                catch
+                {
+                    // Processes may exit between enumeration and inspection.
+                }
+            }
+        }
+        finally
+        {
+            foreach (var process in processes)
+                process.Dispose();
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Kill a game process and any remaining processes matching the executable name within the game directory.
     /// </summary>

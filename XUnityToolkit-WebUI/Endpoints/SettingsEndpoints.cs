@@ -23,11 +23,37 @@ public static class SettingsEndpoints
             return Results.Ok(ApiResult<AppSettings>.Ok(settings));
         });
 
+        group.MapGet("/connection", async (
+            AppSettingsService settingsService,
+            ToolkitRuntimeEndpointState runtimeEndpoint,
+            PluginConnectionRegistry connectionRegistry,
+            CancellationToken ct) =>
+        {
+            var settings = await settingsService.GetAsync(ct);
+            var info = new ToolkitConnectionInfo(
+                runtimeEndpoint.PreferredPort,
+                runtimeEndpoint.ActualPort,
+                runtimeEndpoint.BaseUrl,
+                runtimeEndpoint.UsedFallback,
+                runtimeEndpoint.FallbackReason,
+                settings.AiTranslation.Port != runtimeEndpoint.PreferredPort,
+                ToolkitRuntimeEndpointState.ProtocolVersion,
+                runtimeEndpoint.LoopbackSelfTestSucceeded,
+                runtimeEndpoint.LoopbackSelfTestError,
+                connectionRegistry.GetSummary());
+            return Results.Ok(ApiResult<ToolkitConnectionInfo>.Ok(info));
+        });
+
+        app.MapPost("/api/app/activate", (SystemTrayService trayService) =>
+            trayService.ActivateUI()
+                ? Results.Ok(ApiResult.Ok())
+                : Results.Json(ApiResult.Fail("桌面窗口尚未就绪"), statusCode: 503));
+
         group.MapPut("/", async (AppSettings settings, AppSettingsService settingsService) =>
         {
             // Server-side validation: clamp values to valid ranges
             settings.AiTranslation.MaxConcurrency = Math.Clamp(settings.AiTranslation.MaxConcurrency, 1, 100);
-            settings.AiTranslation.Port = Math.Clamp(settings.AiTranslation.Port, 1, 65535);
+            settings.AiTranslation.Port = Math.Clamp(settings.AiTranslation.Port, 1024, 65535);
             settings.AiTranslation.ContextSize = Math.Clamp(settings.AiTranslation.ContextSize, 0, 100);
             settings.AiTranslation.LocalContextSize = Math.Clamp(settings.AiTranslation.LocalContextSize, 0, 10);
             settings.AiTranslation.Temperature = Math.Clamp(settings.AiTranslation.Temperature, 0.0, 2.0);
@@ -51,6 +77,7 @@ public static class SettingsEndpoints
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
+            ToolkitRuntimeDiscoveryService discoveryService,
             FileLoggerProvider fileLoggerProvider,
             ILogger<AppSettingsService> logger,
             CancellationToken ct) =>
@@ -86,6 +113,7 @@ public static class SettingsEndpoints
                 glossaryExtractionService,
                 updateService,
                 ct);
+            await discoveryService.PublishAsync(ct);
 
             if (errors.Count > 0)
             {
@@ -142,7 +170,7 @@ public static class SettingsEndpoints
                 "models", "llama", "generated-fonts", "logs",
                 "update-staging", "update-backup", "update-temp",
                 "backups", "font-backups", "custom-fonts",
-                "translation-memory",
+                "translation-memory", "runtime",
             };
             // font-generation/temp and font-generation/uploads are excluded separately
             var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
@@ -190,6 +218,7 @@ public static class SettingsEndpoints
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
+            ToolkitRuntimeDiscoveryService discoveryService,
             ILogger<AppSettingsService> logger,
             CancellationToken ct) =>
         {
@@ -221,6 +250,7 @@ public static class SettingsEndpoints
                     glossaryExtractionService,
                     updateService,
                     ct);
+                await discoveryService.PublishAsync(ct);
 
                 logger.LogInformation("已导入配置数据");
                 return Results.Ok(ApiResult.Ok());
@@ -245,6 +275,7 @@ public static class SettingsEndpoints
             LlmTranslationService translationService,
             GlossaryExtractionService glossaryExtractionService,
             UpdateService updateService,
+            ToolkitRuntimeDiscoveryService discoveryService,
             ILogger<AppSettingsService> logger,
             CancellationToken ct) =>
         {
@@ -278,6 +309,7 @@ public static class SettingsEndpoints
                     glossaryExtractionService,
                     updateService,
                     ct);
+                await discoveryService.PublishAsync(ct);
 
                 logger.LogInformation("已从路径导入配置数据");
                 return Results.Ok(ApiResult.Ok());
@@ -305,6 +337,12 @@ public static class SettingsEndpoints
         foreach (var entry in archive.Entries)
         {
             if (string.IsNullOrEmpty(entry.Name))
+                continue;
+
+            var firstSegment = entry.FullName
+                .Split('/', '\\', StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
+            if (string.Equals(firstSegment, "runtime", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var destinationPath = PathSecurity.PrepareZipExtractionPath(

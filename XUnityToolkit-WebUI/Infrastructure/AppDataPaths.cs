@@ -17,6 +17,9 @@ public sealed class AppDataPaths(IConfiguration config)
     public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
     public string BackgroundsDirectory => Path.Combine(CacheDirectory, "backgrounds");
     public string LogsDirectory => Path.Combine(_root, "logs");
+    public string RuntimeDirectory => Path.Combine(_root, "runtime");
+    public string ToolkitEndpointDiscoveryFile =>
+        Path.Combine(RuntimeDirectory, "toolbox-endpoint-v1.json");
     public string LlamaDirectory => Path.Combine(_root, "llama");
     public string LlamaLaunchCacheDirectory => Path.Combine(LlamaDirectory, "launch-cache");
     public string ModelsDirectory => Path.Combine(_root, "models");
@@ -90,6 +93,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(BackgroundsDirectory);
         Directory.CreateDirectory(GlossariesDirectory);
         Directory.CreateDirectory(LogsDirectory);
+        Directory.CreateDirectory(RuntimeDirectory);
         Directory.CreateDirectory(ModelsDirectory);
         Directory.CreateDirectory(LlamaDirectory);
         Directory.CreateDirectory(LlamaLaunchCacheDirectory);
