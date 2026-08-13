@@ -279,6 +279,33 @@ export interface TranslationStats {
 
 export interface AiEndpointStatus {
   installed: boolean
+  origin: 'Missing' | 'OfficialCurrent' | 'OfficialOutdated' | 'UnknownOrCustom'
+  version?: string
+  sha256?: string
+  updatePending: boolean
+  autoDiscoverySupported: boolean
+  directConnectionMode: boolean
+  message: string
+}
+
+export interface PluginConnectionSummary {
+  connectedCount: number
+  connectedGameIds: string[]
+  lastHeartbeatAt?: string
+  hasLegacyConnections: boolean
+}
+
+export interface ToolkitConnectionInfo {
+  preferredPort: number
+  actualPort: number
+  baseUrl: string
+  usedFallback: boolean
+  fallbackReason?: string
+  restartRequired: boolean
+  discoveryProtocolVersion: number
+  loopbackSelfTestSucceeded: boolean
+  loopbackSelfTestError?: string
+  pluginConnection: PluginConnectionSummary
 }
 
 export interface TmpFontStatus {
@@ -667,6 +694,9 @@ export interface BepInExLogAnalysis {
 
 // Plugin Health Check
 export type HealthStatus = 'Healthy' | 'Warning' | 'Error' | 'Unknown'
+export type PluginAnalysisState = 'NotRun' | 'Running' | 'Completed' | 'Stale' | 'Unavailable' | 'Failed'
+export type DiagnosticSeverity = 'Info' | 'Warning' | 'Error'
+export type DiagnosticConfidence = 'Low' | 'Medium' | 'High'
 
 export interface HealthCheckDetail {
   category: string
@@ -682,11 +712,53 @@ export interface HealthCheckItem {
   details?: HealthCheckDetail[]
 }
 
+export interface PluginDiagnosticEvidence {
+  artifactId: string
+  label: string
+  relativePath?: string | null
+  startLine: number
+  endLine: number
+  excerpt: string
+}
+
+export interface PluginDiagnosticFinding {
+  id: string
+  severity: DiagnosticSeverity
+  confidence: DiagnosticConfidence
+  category: string
+  title: string
+  explanation: string
+  suggestedActions: string[]
+  evidence: PluginDiagnosticEvidence[]
+}
+
+export interface ReviewedDiagnosticArtifact {
+  id: string
+  label: string
+  kind: string
+  relativePath?: string | null
+  truncated: boolean
+  selectionReason?: string | null
+}
+
+export interface PluginDiagnosticAnalysis {
+  summary: string
+  findings: PluginDiagnosticFinding[]
+  reviewedArtifacts: ReviewedDiagnosticArtifact[]
+  endpointName: string
+  analyzedAt: string
+}
+
 export interface PluginHealthReport {
   overall: HealthStatus
+  objectiveOverall: HealthStatus
   checks: HealthCheckItem[]
-  logLastModified?: string
+  analysisState: PluginAnalysisState
+  analysisMessage?: string | null
+  analysis?: PluginDiagnosticAnalysis | null
+  logLastModified?: string | null
   gameNeverRun: boolean
+  freshRunVerified: boolean
   checkedAt: string
 }
 

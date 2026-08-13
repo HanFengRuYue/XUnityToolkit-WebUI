@@ -3,7 +3,6 @@ import { ref, computed } from 'vue'
 import {
   NSelect,
   NInput,
-  NInputNumber,
   NButton,
   NIcon,
   NSwitch,
@@ -370,18 +369,6 @@ const priorityMarks = computed(() => {
           :tooltip="true"
         />
         <span class="form-hint">同时进行的 LLM API 调用数量</span>
-      </div>
-
-      <div class="form-row">
-        <label class="form-label">端口</label>
-        <NInputNumber
-          :value="modelValue.port"
-          @update:value="(v: number | null) => update({ port: v ?? 51821 })"
-          :min="1024"
-          :max="65535"
-          style="width: 140px"
-        />
-        <span class="form-hint">修改后需重启工具箱生效</span>
       </div>
 
       <div class="form-row">

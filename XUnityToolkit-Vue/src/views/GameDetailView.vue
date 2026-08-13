@@ -43,7 +43,7 @@ import {
 } from '@vicons/material'
 import { useGamesStore } from '@/stores/games'
 import { useInstallStore } from '@/stores/install'
-import type { Game, XUnityConfig, InstallOptions, ModFrameworkType } from '@/api/types'
+import type { Game, XUnityConfig, InstallOptions, ModFrameworkType, AiEndpointStatus } from '@/api/types'
 import { gamesApi, settingsApi, pluginPackageApi } from '@/api/games'
 import { useFileExplorer } from '@/composables/useFileExplorer'
 import ConfigPanel from '@/components/config/ConfigPanel.vue'
@@ -75,7 +75,16 @@ const gameId = route.params['id'] as string
 const game = ref<Game | null>(null)
 const config = ref<XUnityConfig | null>(null)
 const loading = ref(true)
-const aiEndpointInstalled = ref<boolean | null>(null)
+const aiEndpointStatus = ref<AiEndpointStatus | null>(null)
+const aiEndpointInstalled = computed(() => aiEndpointStatus.value?.installed ?? false)
+const aiEndpointStatusLabel = computed(() => {
+  switch (aiEndpointStatus.value?.origin) {
+    case 'OfficialCurrent': return '官方最新版'
+    case 'OfficialOutdated': return aiEndpointStatus.value.updatePending ? '待升级' : '旧官方版'
+    case 'UnknownOrCustom': return '自定义版本'
+    default: return '未安装'
+  }
+})
 const aiEndpointLoading = ref(false)
 const aiDescription = ref('')
 const showCoverPicker = ref(false)
@@ -221,13 +230,13 @@ async function loadGame() {
       config.value = await gamesApi.getConfig(gameId)
       try {
         const status = await gamesApi.getAiEndpointStatus(gameId)
-        aiEndpointInstalled.value = status.installed
+        aiEndpointStatus.value = status
       } catch {
-        aiEndpointInstalled.value = null
+        aiEndpointStatus.value = null
       }
     } else {
       config.value = null
-      aiEndpointInstalled.value = null
+      aiEndpointStatus.value = null
     }
     // Load install options from global settings
     try {
@@ -259,6 +268,15 @@ async function handleInstall() {
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
   }
+}
+
+function handleInstallAction() {
+  if (isInstalling.value) {
+    installStore.isDrawerOpen = true
+    return
+  }
+
+  void handleInstall()
 }
 
 function handleUninstall() {
@@ -402,11 +420,20 @@ function handleBackgroundSaved() {
 }
 
 async function handleInstallAiEndpoint() {
+  await performInstallAiEndpoint(false)
+}
+
+async function performInstallAiEndpoint(forceReplaceUnknown: boolean) {
   aiEndpointLoading.value = true
   try {
-    const result = await gamesApi.installAiEndpoint(gameId)
-    aiEndpointInstalled.value = result.installed
-    message.success('AI 翻译引擎已安装')
+    const result = await gamesApi.installAiEndpoint(gameId, forceReplaceUnknown)
+    aiEndpointStatus.value = result
+    if (result.origin === 'UnknownOrCustom')
+      message.warning(result.message)
+    else if (result.updatePending)
+      message.warning(result.message)
+    else
+      message.success(result.message)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
   } finally {
@@ -415,16 +442,18 @@ async function handleInstallAiEndpoint() {
 }
 
 async function handleReinstallAiEndpoint() {
-  aiEndpointLoading.value = true
-  try {
-    const result = await gamesApi.installAiEndpoint(gameId)
-    aiEndpointInstalled.value = result.installed
-    message.success('AI 翻译引擎已重装')
-  } catch (e) {
-    message.error(e instanceof Error ? e.message : '重装失败')
-  } finally {
-    aiEndpointLoading.value = false
+  if (aiEndpointStatus.value?.origin === 'UnknownOrCustom') {
+    dialog.warning({
+      title: '替换自定义 AI 翻译端点',
+      content: '当前 DLL 的 SHA-256 不属于官方版本。继续会覆盖未知或自定义端点，且无法自动恢复。是否确认替换为官方版本？',
+      positiveText: '确认替换',
+      negativeText: '保留当前文件',
+      onPositiveClick: () => performInstallAiEndpoint(true),
+    })
+    return
   }
+
+  await performInstallAiEndpoint(false)
 }
 
 function handleUninstallAiEndpoint() {
@@ -437,7 +466,7 @@ function handleUninstallAiEndpoint() {
       aiEndpointLoading.value = true
       try {
         const result = await gamesApi.uninstallAiEndpoint(gameId)
-        aiEndpointInstalled.value = result.installed
+        aiEndpointStatus.value = result
         message.success('AI 翻译引擎已卸载')
       } catch (e) {
         message.error(e instanceof Error ? e.message : '卸载失败')
@@ -771,112 +800,99 @@ onBeforeUnmount(() => stopWatch())
         检测到 IL2CPP 游戏，将使用 BepInEx 6 (预发布版)。首次启动游戏可能需要 30-90 秒生成互操作程序集。
       </NAlert>
 
-      <!-- Installing State -->
-      <div v-if="!isInstalled && isInstalling" class="install-cta-horizontal installing">
-        <div class="cta-left">
-          <div class="cta-visual installing">
-            <svg class="cta-icon-spin" width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <circle cx="14" cy="14" r="11" stroke="currentColor" stroke-width="2.5" opacity="0.2"/>
-              <path d="M14 3A11 11 0 0 1 25 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-            </svg>
-          </div>
+      <!-- Uninstalled / Installing State -->
+      <div v-if="!isInstalled" class="install-uninstalled-area">
+        <div class="install-cta-center">
           <div class="cta-text">
-            <span class="cta-title">正在安装翻译插件</span>
-            <span class="cta-desc">{{ installStepLabel }}... · 关闭此面板不会中断安装</span>
-          </div>
-        </div>
-        <NButton
-          type="primary"
-          size="large"
-          @click="installStore.isDrawerOpen = true"
-          class="install-button"
-        >
-          查看进度
-        </NButton>
-      </div>
-
-      <!-- Uninstalled State -->
-      <div v-else-if="!isInstalled" class="install-uninstalled-area">
-        <div class="install-cta-horizontal">
-          <div class="cta-left">
-            <div class="cta-visual">
-              <svg class="cta-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
-                <rect x="4" y="4" width="32" height="32" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.2"/>
-                <path d="M20 12V24M20 24L14 18M20 24L26 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M12 28H28" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              </svg>
-            </div>
-            <div class="cta-text">
-              <span class="cta-title">准备安装翻译插件</span>
-              <span class="cta-desc">将自动安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件</span>
-            </div>
+            <span class="cta-title">
+              {{ isInstalling ? '正在安装翻译插件' : '准备安装翻译插件' }}
+            </span>
+            <span class="cta-desc">
+              {{ isInstalling
+                ? `${installStepLabel} · 关闭此页面不会中断安装`
+                : '将自动安装 BepInEx 框架和 XUnity.AutoTranslator 翻译插件' }}
+            </span>
           </div>
           <NButton
             type="primary"
             size="large"
-            :disabled="!game.detectedInfo"
-            @click="handleInstall"
             class="install-button"
+            :class="{ 'is-installing': isInstalling }"
+            :disabled="!isInstalling && !game.detectedInfo"
+            :aria-busy="isInstalling"
+            @click="handleInstallAction"
           >
-            <template #icon>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M9 3V12M9 12L5 8M9 12L13 8M3 15H15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <span v-if="isInstalling" class="install-button-loading">
+              <span class="install-loader" aria-hidden="true">
+                <span class="install-loader-ring"></span>
+                <span class="install-loader-core"></span>
+              </span>
+              <span class="install-button-labels">
+                <span class="install-button-label">{{ installStepLabel }}...</span>
+                <span class="install-button-hint">点击查看详细进度</span>
+              </span>
+            </span>
+            <span v-else class="install-button-ready">
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+                <path d="M11 3.5V14M11 14L6.5 9.5M11 14L15.5 9.5M4 18H18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-            </template>
-            一键安装
+              <span>一键安装</span>
+            </span>
           </NButton>
         </div>
 
         <!-- Advanced Install Options -->
-        <div class="install-options-toggle" @click="collapsed.installOptions = !collapsed.installOptions">
-          <span class="install-options-label">高级选项</span>
-          <svg
-            class="install-options-arrow"
-            :class="{ expanded: !collapsed.installOptions }"
-            width="16" height="16" viewBox="0 0 16 16" fill="none"
-          >
-            <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div class="install-options-body" :class="{ collapsed: collapsed.installOptions }">
-          <div class="install-options-body-inner">
-            <div class="install-option-row">
-              <div class="install-option-info">
-                <span class="install-option-name">安装 TMP 字体</span>
-                <span class="install-option-desc">自动安装匹配游戏 Unity 版本的中文 TMP 字体</span>
+        <template v-if="!isInstalling">
+          <div class="install-options-toggle" @click="collapsed.installOptions = !collapsed.installOptions">
+            <span class="install-options-label">高级选项</span>
+            <svg
+              class="install-options-arrow"
+              :class="{ expanded: !collapsed.installOptions }"
+              width="16" height="16" viewBox="0 0 16 16" fill="none"
+            >
+              <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="install-options-body" :class="{ collapsed: collapsed.installOptions }">
+            <div class="install-options-body-inner">
+              <div class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">安装 TMP 字体</span>
+                  <span class="install-option-desc">自动安装匹配游戏 Unity 版本的中文 TMP 字体</span>
+                </div>
+                <NSwitch v-model:value="installOptions.autoInstallTmpFont" size="small" />
               </div>
-              <NSwitch v-model:value="installOptions.autoInstallTmpFont" size="small" />
-            </div>
-            <div class="install-option-row">
-              <div class="install-option-info">
-                <span class="install-option-name">部署 AI 翻译端点</span>
-                <span class="install-option-desc">安装 LLMTranslate.dll，允许游戏连接本工具进行 AI 翻译</span>
+              <div class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">部署 AI 翻译端点</span>
+                  <span class="install-option-desc">安装 LLMTranslate.dll，允许游戏连接本工具进行 AI 翻译</span>
+                </div>
+                <NSwitch v-model:value="installOptions.autoDeployAiEndpoint" size="small" />
               </div>
-              <NSwitch v-model:value="installOptions.autoDeployAiEndpoint" size="small" />
-            </div>
-            <div class="install-option-row">
-              <div class="install-option-info">
-                <span class="install-option-name">启动游戏生成配置</span>
-                <span class="install-option-desc">自动启动游戏以生成 AutoTranslatorConfig.ini 配置文件</span>
+              <div class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">启动游戏生成配置</span>
+                  <span class="install-option-desc">自动启动游戏以生成 AutoTranslatorConfig.ini 配置文件</span>
+                </div>
+                <NSwitch v-model:value="installOptions.autoGenerateConfig" size="small" />
               </div>
-              <NSwitch v-model:value="installOptions.autoGenerateConfig" size="small" />
-            </div>
-            <div class="install-option-row">
-              <div class="install-option-info">
-                <span class="install-option-name">应用最佳配置</span>
-                <span class="install-option-desc">自动写入推荐的翻译插件配置（语言、字体、翻译引擎等）</span>
+              <div class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">应用最佳配置</span>
+                  <span class="install-option-desc">自动写入推荐的翻译插件配置（语言、字体、翻译引擎等）</span>
+                </div>
+                <NSwitch v-model:value="installOptions.autoApplyOptimalConfig" size="small" />
               </div>
-              <NSwitch v-model:value="installOptions.autoApplyOptimalConfig" size="small" />
-            </div>
-            <div class="install-option-row">
-              <div class="install-option-info">
-                <span class="install-option-name">验证插件状态</span>
-                <span class="install-option-desc">安装后启动游戏验证插件是否正常工作</span>
+              <div class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">验证插件状态</span>
+                  <span class="install-option-desc">安装后启动游戏验证插件是否正常工作</span>
+                </div>
+                <NSwitch v-model:value="installOptions.autoVerifyHealth" size="small" />
               </div>
-              <NSwitch v-model:value="installOptions.autoVerifyHealth" size="small" />
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <!-- Installed State -->
@@ -918,7 +934,7 @@ onBeforeUnmount(() => stopWatch())
     />
 
     <!-- Translation Config Card (Unity only, separate full-width card) -->
-    <div v-if="game.isUnityGame" class="section-card" :class="{ 'is-collapsed': collapsed.config }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
+    <div v-if="game.isUnityGame && isInstalled" class="section-card" :class="{ 'is-collapsed': collapsed.config }" :style="{ animationDelay: otherFrameworks.length > 0 ? '0.3s' : '0.25s' }">
       <div class="section-header collapsible" @click="collapsed.config = !collapsed.config">
         <h2 class="section-title">
           <span class="section-icon translate">
@@ -950,16 +966,16 @@ onBeforeUnmount(() => stopWatch())
           </span>
           AI 翻译引擎
         </h2>
-        <div v-if="aiEndpointInstalled !== null" class="ai-status-badge" :class="{ installed: aiEndpointInstalled }">
+        <div v-if="aiEndpointStatus !== null" class="ai-status-badge" :class="{ installed: aiEndpointInstalled }">
           <span class="ai-status-dot"></span>
-          {{ aiEndpointInstalled ? '已安装' : '未安装' }}
+          {{ aiEndpointStatusLabel }}
         </div>
       </div>
 
       <div class="ai-endpoint-content">
         <div class="ai-endpoint-desc">
           <p v-if="aiEndpointInstalled">
-            AI 翻译引擎已部署到游戏内，启动游戏后可通过工具箱的 AI 翻译功能实时翻译游戏文本。
+            {{ aiEndpointStatus?.message }}
           </p>
           <p v-else>
             安装 AI 翻译引擎后，游戏将通过工具箱连接 LLM 进行实时翻译。需要在 AI 翻译页面配置 API Key。
@@ -982,7 +998,7 @@ onBeforeUnmount(() => stopWatch())
               @click="handleReinstallAiEndpoint"
             >
               <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
-              重装引擎
+              {{ aiEndpointStatus?.origin === 'UnknownOrCustom' ? '替换为官方版' : '检查并升级' }}
             </NButton>
             <NButton
               type="error"
@@ -1623,35 +1639,33 @@ onBeforeUnmount(() => stopWatch())
   color: var(--text-3);
 }
 
-/* ===== Install CTA Horizontal (Uninstalled State) ===== */
-.install-cta-horizontal {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.install-cta-horizontal .cta-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.install-cta-horizontal .cta-text {
+/* ===== Install CTA (Uninstalled State) ===== */
+.install-cta-center {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 10px 0 8px;
+  text-align: center;
 }
 
-.install-cta-horizontal .cta-title {
+.install-cta-center .cta-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.install-cta-center .cta-title {
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 650;
   color: var(--text-1);
   letter-spacing: -0.01em;
 }
 
-.install-cta-horizontal .cta-desc {
+.install-cta-center .cta-desc {
   font-size: 13px;
   color: var(--text-3);
   line-height: 1.5;
@@ -1811,41 +1825,146 @@ onBeforeUnmount(() => stopWatch())
   border: 1px solid rgba(251, 191, 36, 0.15);
 }
 
-/* ===== CTA Visual ===== */
-.cta-visual {
-  width: 52px;
-  height: 52px;
+/* ===== Primary Install Button ===== */
+.install-button {
+  position: relative;
+  width: min(100%, 420px);
+  height: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 18px !important;
+  background: linear-gradient(110deg, #2768df 0%, #438cff 50%, #2768df 100%) !important;
+  background-size: 200% 100% !important;
+  box-shadow:
+    0 12px 30px color-mix(in srgb, var(--accent) 24%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.install-button:not(.is-installing):not(:disabled):hover {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+  box-shadow:
+    0 16px 38px color-mix(in srgb, var(--accent) 34%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.install-button:not(.is-installing):not(:disabled):active {
+  transform: translateY(0) scale(0.99);
+}
+
+.install-button::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.2) 48%, transparent 70%);
+  content: '';
+  transform: translateX(-110%);
+  pointer-events: none;
+}
+
+.install-button:not(.is-installing):not(:disabled):hover::before {
+  animation: install-button-sheen 0.75s ease-out;
+}
+
+.install-button.is-installing {
+  cursor: pointer;
+  background: linear-gradient(110deg, #1f5fd3 0%, #4f8fff 42%, #7357e8 72%, #1f5fd3 100%) !important;
+  background-size: 240% 100% !important;
+  animation: install-button-flow 3s ease-in-out infinite;
+}
+
+:deep(.install-button .n-button__content) {
+  width: 100%;
+  height: 100%;
+}
+
+.install-button-ready,
+.install-button-loading {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent-border);
-  color: var(--accent);
-  animation: breathe 3s ease-in-out infinite;
-  flex-shrink: 0;
+  gap: 12px;
+  width: 100%;
+  color: #fff;
 }
 
-.install-button {
+.install-button-ready {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.install-button-labels {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 132px;
+  text-align: left;
+}
+
+.install-button-label {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.install-button-hint {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.2;
+  opacity: 0.72;
+}
+
+.install-loader {
   position: relative;
-  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
 }
 
-/* Installing state */
-.cta-visual.installing {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-color: var(--accent-border);
-  animation: none;
+.install-loader-ring {
+  position: absolute;
+  inset: 1px;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  border-top-color: #fff;
+  border-right-color: rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  animation: install-loader-spin 0.9s linear infinite;
 }
 
-.cta-icon-spin {
-  color: var(--accent);
-  animation: spin 1s linear infinite;
+.install-loader-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.85);
+  transform: translate(-50%, -50%);
+  animation: install-loader-pulse 1.2s ease-in-out infinite;
 }
 
-@keyframes spin {
+@keyframes install-loader-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@keyframes install-loader-pulse {
+  0%, 100% { opacity: 0.45; transform: translate(-50%, -50%) scale(0.7); }
+  50% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes install-button-flow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes install-button-sheen {
+  to { transform: translateX(110%); }
 }
 
 .version-card {
@@ -2085,17 +2204,6 @@ onBeforeUnmount(() => stopWatch())
     font-size: 15px;
   }
 
-  .install-cta-horizontal {
-    flex-direction: column;
-    align-items: stretch;
-    text-align: center;
-  }
-
-  .install-cta-horizontal .cta-left {
-    flex-direction: column;
-    align-items: center;
-  }
-
   .install-options-toggle {
     align-self: center;
   }
@@ -2165,8 +2273,15 @@ onBeforeUnmount(() => stopWatch())
     grid-template-columns: 1fr;
   }
 
-  .install-cta-horizontal .install-button {
-    width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .install-button,
+  .install-button::before,
+  .install-loader-ring,
+  .install-loader-core {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 </style>

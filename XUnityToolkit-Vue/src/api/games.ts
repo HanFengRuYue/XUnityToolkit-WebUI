@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, BepInExPlugin } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, BepInExPlugin, ToolkitConnectionInfo } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -50,7 +50,8 @@ export const gamesApi = {
   launch: (id: string) => api.post<void>(`/api/games/${id}/launch`),
 
   getAiEndpointStatus: (id: string) => api.get<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
-  installAiEndpoint: (id: string) => api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, {}),
+  installAiEndpoint: (id: string, forceReplaceUnknown = false) =>
+    api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, { forceReplaceUnknown }),
   uninstallAiEndpoint: (id: string) => api.del<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
 
   getTmpFontStatus: (id: string) => api.get<TmpFontStatus>(`/api/games/${id}/tmp-font`),
@@ -173,6 +174,7 @@ export const settingsApi = {
   get: () => api.get<AppSettings>('/api/settings'),
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
+  getConnection: () => api.get<ToolkitConnectionInfo>('/api/settings/connection'),
   reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
   getDataPath: () => api.get<DataPathInfo>('/api/settings/data-path'),
   openDataFolder: () => api.post('/api/settings/open-data-folder'),
@@ -268,6 +270,7 @@ export const bepinexLogApi = {
 // Plugin Health Check
 export const pluginHealthApi = {
   check: (id: string) => api.get<PluginHealthReport>(`/api/games/${id}/health-check`),
+  analyze: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/analyze`, {}),
   verify: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/verify`, {}),
 }
 
