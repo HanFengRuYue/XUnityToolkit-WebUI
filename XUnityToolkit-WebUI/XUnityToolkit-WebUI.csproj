@@ -1,15 +1,26 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <VersionPrefix>5.0</VersionPrefix>
     <RootNamespace>XUnityToolkit_WebUI</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <UseWindowsForms>true</UseWindowsForms>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <AppxPackage>false</AppxPackage>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <SpaRoot>..\XUnityToolkit-Vue\</SpaRoot>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);MSB3277;NU1900</NoWarn>
@@ -39,6 +50,9 @@
     <EmbeddedResource Include="Resources\translator-endpoint-metadata.json" LogicalName="translator-endpoint-metadata.json" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.2" />
     <PackageReference Include="AssetsTools.NET" Version="3.0.5" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="AssetsTools.NET.Cpp2IL" Version="3.0.4" />
@@ -53,6 +67,10 @@
     <PackageReference Include="RectpackSharp" Version="1.2.0" />
     <PackageReference Include="System.Management" Version="10.0.11" />
     <PackageReference Include="System.Reflection.MetadataLoadContext" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Copy TMP fonts to output directory during build -->
@@ -73,6 +91,45 @@
     <Exec Command="npm ci" WorkingDirectory="$(SpaRoot)" />
     <Message Importance="high" Text="Building frontend..." />
     <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+  </Target>
+
+  <!-- Microsoft.NET.Sdk does not implicitly copy/publish wwwroot like Microsoft.NET.Sdk.Web did.
+       Resolve the Vite output after BuildFrontend and replace stale hashed assets atomically per tree. -->
+  <Target Name="CopyFrontendAssetsToBuildOutput" AfterTargets="Build" DependsOnTargets="BuildFrontend">
+    <ItemGroup>
+      <_FrontendAsset Include="wwwroot\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(OutDir)wwwroot" />
+    <Copy
+      SourceFiles="@(_FrontendAsset)"
+      DestinationFiles="@(_FrontendAsset->'$(OutDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <Target Name="CopyFrontendAssetsToPublishOutput" AfterTargets="Publish" DependsOnTargets="BuildFrontend">
+    <ItemGroup>
+      <_FrontendPublishAsset Include="wwwroot\**\*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PublishDir)wwwroot" />
+    <Copy
+      SourceFiles="@(_FrontendPublishAsset)"
+      DestinationFiles="@(_FrontendPublishAsset->'$(PublishDir)wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <!-- The modular WinUI package emits the application's compiled XAML and PRI into
+       TargetDir, but Microsoft.NET.Sdk does not add those generated files to publish.
+       A publish without them builds successfully and then fails in InitializeComponent. -->
+  <Target Name="CopyWinUIResourcesToPublishOutput" AfterTargets="Publish">
+    <ItemGroup>
+      <_WinUICompiledXaml Include="$(TargetDir)*.xbf" />
+      <_WinUIAppResource Include="$(TargetDir)$(AssemblyName).pri" />
+      <_WinUIPublishResource Include="@(_WinUICompiledXaml);@(_WinUIAppResource)" />
+    </ItemGroup>
+    <Error Condition="'@(_WinUICompiledXaml)' == ''" Text="WinUI compiled XAML files were not generated in $(TargetDir)." />
+    <Error Condition="!Exists('$(TargetDir)$(AssemblyName).pri')" Text="WinUI application resource index was not generated in $(TargetDir)." />
+    <Copy
+      SourceFiles="@(_WinUIPublishResource)"
+      DestinationFiles="@(_WinUIPublishResource->'$(PublishDir)%(Filename)%(Extension)')"
+      SkipUnchangedFiles="true" />
   </Target>
 
 </Project>

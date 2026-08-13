@@ -447,6 +447,9 @@ public sealed class UpdateService(
                 // Extract only changed files from this package (scoped to release file handle before delete)
                 {
                     using var archive = ZipFile.OpenRead(zipPath);
+                    if (string.Equals(pkg, "app", StringComparison.OrdinalIgnoreCase))
+                        UpdateManifestFileSet.ValidateAppPackageInventory(archive, _remoteManifest);
+
                     foreach (var entry in archive.Entries)
                     {
                         if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories

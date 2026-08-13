@@ -504,6 +504,10 @@ if (Test-Path $bundledSrc) {
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
 
+# Record every application-component file, including WinUI self-contained native resources.
+& (Join-Path $ProjectRoot 'New-AppFileInventory.ps1') -ReleaseDir $OutputDir
+if ($LASTEXITCODE -ne 0) { throw "Generating app file inventory failed" }
+
 $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
 Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
@@ -544,6 +548,7 @@ if (-not $SkipSmoke) {
 
             $env:AppData__Root = $smokeRoot
             $proc = Start-Process -FilePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') `
+                -ArgumentList '--headless-smoke' `
                 -WorkingDirectory $OutputDir -PassThru -WindowStyle Hidden `
                 -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
 

@@ -40,7 +40,7 @@ XUnityToolkit-WebUI 是一个面向 Unity 游戏汉化/翻译工作流的 Window
 顶层关键目录：
 
 - `XUnityToolkit-WebUI/`
-  后端主程序。ASP.NET Core Minimal API + WinForms/WebView2 宿主。
+  后端主程序。ASP.NET Core Minimal API + WinUI 3/WebView2 原生宿主；WinForms 只保留 `NotifyIcon` 托盘兼容层。
 - `XUnityToolkit-Vue/`
   前端。Vue 3 + TypeScript + Naive UI + Pinia + Vite。
 - `XUnityToolkit-WebUI.Tests/`
@@ -60,10 +60,11 @@ XUnityToolkit-WebUI 是一个面向 Unity 游戏汉化/翻译工作流的 Window
 
 后端：
 
-- `.NET 10` `net10.0-windows`
+- `.NET 10` `net10.0-windows10.0.19041.0`
 - ASP.NET Core Minimal API
 - SignalR
-- WinForms + WebView2
+- WinUI 3 + WebView2（非打包、Windows App SDK 自包含）
+- WinForms `NotifyIcon`（仅托盘，不拥有窗口）
 - AssetsTools.NET
 - FreeTypeSharp
 
@@ -129,7 +130,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `XUnityToolkit-WebUI.csproj` 默认会在构建前自动执行前端 `npm ci` + `npm run build`。
 - 前端开发代理到 `http://127.0.0.1:51821`，不要改成 `localhost`。
 - `51821` 只是首选端口；完整 UI 预览应读取 `runtime/toolbox-endpoint-v1.json` 中的 `baseUrl`，因为端口冲突时后端会自动回退。
-- 本地 `build.ps1` 默认会在发布后读取发现文件，分别执行首选端口可用与被占用两种首页、版本和产品 ping smoke；自动化或只想打包时可显式传 `-SkipSmoke`。
+- 本地 `build.ps1` 默认会在发布后使用 `--headless-smoke`（不创建 WinUI 窗口或托盘）读取发现文件，分别执行首选端口可用与被占用两种首页、版本和产品 ping smoke；自动化或只想打包时可显式传 `-SkipSmoke`。
 - 若默认 `Release/win-x64` 正在运行，可用 `-ReleaseRoot .\Release\<隔离子目录>` 做不打断现有实例的验证构建；为防误删，该参数只接受默认 `Release` 或其子目录。
 
 ## 6. 运行时架构
@@ -153,6 +154,16 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - 注册全部 Minimal API 端点
 - 在 `ApplicationStopping` 时立即隐藏 UI，并刷新脏的翻译记忆
 - 在 `ApplicationStarted` 时异步初始化 AI 翻译状态，并自动检查更新
+
+桌面宿主：
+
+- 自定义 STA `Main` 在同一进程启动 WinUI 3 消息循环与 Kestrel；`App.xaml` / `MainWindow.xaml` 提供原生窗口、加载/错误遮罩和 WebView2 内容区
+- 主窗口使用系统标题栏，不启用 `ExtendsContentIntoTitleBar`；Windows 负责拖动、缩放、系统菜单与 Snap Layout，最小内容尺寸为 330×400 epx
+- `IDesktopWindowService` 是窗口激活、隐藏、浏览器回退与幂等退出的统一入口；第二实例、托盘与主机停止不得各自操作 HWND
+- WebView2 用户数据目录为 `cache/webview2`，随 `AppData:Root` 隔离；网页只接收只读宿主描述并发送结构化 `themeChanged` 消息
+- WebView2 缺失、初始化失败、首页探测失败或导航超时时打开默认浏览器，Kestrel 与托盘继续可用
+- WinUI 消息循环结束后必须先清除 `DispatcherQueueSynchronizationContext` 再同步停止 ASP.NET Core，否则关闭延续可能被投递到已经退出的 UI dispatcher，导致更新器一直等不到主进程退出
+- 使用普通 `Microsoft.NET.Sdk` 发布模块化 WinUI 时，构建生成的 `App.xbf`、`MainWindow.xbf` 与 `XUnityToolkit-WebUI.pri` 不会自动进入发布目录；`CopyWinUIResourcesToPublishOutput` 必须保留并在缺失时令发布失败，否则产物会编译成功但在 `InitializeComponent()` 阶段崩溃
 
 前端入口：
 
@@ -308,7 +319,6 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `src/composables/useAddGameFlow.ts`
 - `src/composables/useAutoSave.ts`
 - `src/composables/useFileExplorer.ts`
-- `src/composables/useWindowControls.ts`
 
 ## 10. 翻译链路速记
 
@@ -648,7 +658,8 @@ CI：
 - 若变更首页可用性、静态资源目录、启动端口或启动方式，需要分别核对 `build.ps1` 的发布后 smoke check 与 `.github/workflows/build.yml` 的发布流程
 - Git 提交标题规范、`.github/workflows/build.yml` 中 `### Changelog` 的生成逻辑，以及 `XUnityToolkit-Vue/src/views/SettingsView.vue` 的 `typeLabels` / 正则解析属于联动点；若调整提交格式、更新内容展示样式或 changelog 生成方式，必须同时核对这三处，且注意 `--no-merges` 会让 merge commit 不进入工具箱更新列表
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
-- 更新器 manifest 管理根目录、`wwwroot/`、`bundled/`、`runtimes/`；CI 组件包必须覆盖这些根对应文件，`app-*.zip` 必须包含根目录文件与 `runtimes/`，否则客户端 staging 完整性校验会失败
+- 根目录 `app-file-inventory-v1.json` 是应用组件的文件权威清单，覆盖根文件、`runtimes/` 与 WinUI 自包含产生的所有原生资源子目录，并排除 `wwwroot/`、`bundled/`、`data/`、`appsettings*`；CI 的 `app-*.zip` 必须严格按清单打包，更新器必须校验 ZIP、远端 manifest 与清单集合一致
+- 增量删除优先使用已安装版本的 `app-file-inventory-v1.json` 限定范围；旧版没有清单时才回退到根文件、`runtimes/`、`wwwroot/`、`bundled/` 的既有安全规则，不能借新清单删除用户额外文件
 - Release 构建必须成功生成并嵌入 `LLMTranslate.dll`；缺少 `TranslatorEndpoint/libs` 引用 DLL 时，本地构建和 CI 都应失败而不是只警告
 
 ## 21. 后端专项补充
@@ -690,7 +701,7 @@ CI：
 - `FileLoggerProvider` 的内存 ring buffer 只用于运行中日志页展示；`GET /api/logs/download` 必须导出当前 session 的磁盘日志快照，不能退化成只导出 ring buffer 截断结果
 - 向前端返回的错误消息要避免泄露内部绝对路径、异常堆栈或敏感配置；详细信息只写服务器日志
 
-### 21.5 资源、字体、WebView2 与周边服务
+### 21.5 资源、字体、WinUI/WebView2 与周边服务
 
 - TTF 字体替换支持 `dynamicEmbedded` 的 Unity Legacy `Font`，也支持将 `osFallback` / 名称映射动态字体原位转成内嵌字体；`staticAtlas` 与 `unknown` 仍统一扫描但拒绝替换
 - Legacy `Font.m_FontData` 的单字节元素既可能是 `UInt8` 也可能是 `Int8/char`；写回数组项时要按 `AssetValueType` 选择 `AsByte` 或 `AsSByte`，否则会在 `SetNewData` 时触发有符号溢出
@@ -698,8 +709,9 @@ CI：
 - `WebImageSearchService` 通过网页抓取提供图片搜索；所有 URL 在真正请求之前必须先走 SSRF 校验，保存前还要校验内容类型
 - 图标、封面、背景图这类外链下载现在统一通过禁用自动重定向的 `HttpClient` + `PathSecurity.SendWithValidatedRedirectsAsync(...)` 逐跳校验；不要再直接 `GetAsync(url)` 后信任框架自动跟随 30x
 - 外链图片下载必须额外限制响应体积（当前上限 10 MB），避免网页搜索结果或第三方 CDN 把超大文件直接读进内存
-- `WebViewWindow`、`SystemTrayService`、WebView2 预热、加载 overlay、快速隐藏 UI、关闭超时等机制都属于桌面宿主层不变量，改动前要完整回看历史实现
-- `WebViewWindow.InitializeAsync()` 现在会先探测 `GET /`，并且只在首页首次 `NavigationCompleted` 成功后才隐藏原生 loading overlay；首页探测或首屏导航失败时必须保留 overlay 并给出明确错误，不能直接暴露系统 404 页面
+- `MainWindow`、`DesktopWindowService`、`SystemTrayService`、WebView2 预热、加载 overlay、快速隐藏 UI、关闭超时等机制都属于桌面宿主层不变量；旧 `WebViewWindow` 已删除，不得重新引入无边框 WinForms 窗口或网页标题栏按钮
+- `MainWindow.NavigateToBackendAsync()` 会先用禁用代理的 `ToolkitLoopback` 探测 `GET /`，并且只在首页首次 `NavigationCompleted` 成功后才隐藏原生 loading overlay；首页探测或首屏导航失败时必须保留 overlay、显示明确错误并启用浏览器兜底，不能直接暴露系统 404 页面
+- 宿主只接受当前实际 `127.0.0.1:<port>` 来源的 `{ type: "themeChanged", theme }`；不要恢复旧的 `minimize` / `maximize` / `close` 字符串消息，也不要给网页重新添加拖拽区域和 40px 标题栏补偿
 - `Updater/Program.cs` 在成功重启和回滚重启两条路径里都必须保持 `WorkingDirectory = appDir`，否则可能出现 API 正常但首页因 `wwwroot` 解析到错误目录而 404
 - `QuickAccessHelper` 使用 Shell COM 且要求 STA 线程；相关 COM 对象必须逐级 `Marshal.ReleaseComObject`
 - `BepInExLogService`、`PluginHealthCheckService`、`BepInExPluginService` 都依赖文件共享读或被动分析模式，不要在这些路径里引入“加载用户 DLL 到当前进程”这类高风险操作
@@ -759,7 +771,7 @@ CI：
 - `TermEditorView` 是统一术语编辑页，替代早期独立 glossary/do-not-translate 页面；相关新能力优先接到这里
 - 文件浏览器由 `FileExplorerModal.vue` 全局挂载一次，`useFileExplorer()` 通过 Promise 返回选中的服务器路径
 - 背景图、封面图、图标、网页图片搜索、游戏详情 hero 视觉、视差滚动、缓存失效时间戳，都有现成模式，不要局部重写
-- 涉及复杂多步骤交互时，优先抽成 composable，例如 `useAddGameFlow`、`useAutoSave`、`useWindowControls`
+- 涉及复杂多步骤交互时，优先抽成 composable，例如 `useAddGameFlow`、`useAutoSave`、`useFileExplorer`
 
 ## 23. 构建、发布、CI/CD 补充
 

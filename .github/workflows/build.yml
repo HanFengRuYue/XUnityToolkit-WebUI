@@ -483,6 +483,10 @@ jobs:
               Copy-Item $updaterExe "$outDir/" -Force
             }
 
+            # WinUI self-contained deployment adds native files below several resource folders.
+            # Generate the authoritative application-component inventory after all copies finish.
+            & "./New-AppFileInventory.ps1" -ReleaseDir $outDir
+
             $exeFile = Get-Item (Join-Path $outDir "XUnityToolkit-WebUI.exe")
             $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
             Write-Host "$($ed.Name) done (exe: $sizeMB MB)"
@@ -527,10 +531,8 @@ jobs:
             $releaseDirAbs = (Resolve-Path $releaseDir).Path
 
             $manifest = @{ version = $version; rid = $ed.ManifestRid; files = @{} }
-            # Keep manifest coverage aligned with the desktop updater's managed path roots.
-            # The client now compares all files under root/wwwroot/bundled/runtimes by path,
-            # not by extension whitelist, so entries like version.txt, .xml, .gz and .br
-            # must remain in the manifest when they live under those managed roots.
+            # Cover every releasable file. Local deletion safety is governed separately by
+            # app-file-inventory-v1.json, so WinUI native resource folders are not omitted.
             Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
               $relativePath = $_.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
@@ -546,14 +548,31 @@ jobs:
             $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$($ed.ManifestRid).json" -Encoding utf8
             Write-Host "Generated manifest-$($ed.ManifestRid).json"
 
-            # Per-edition app ZIP (root-level files plus managed runtimes/, exclude appsettings*)
-            $appFiles = @(
-              Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
-              $runtimesDir = Join-Path $releaseDir "runtimes"
-              if (Test-Path $runtimesDir) {
-                Get-ChildItem -Path $runtimesDir -Recurse -File
+            # Per-edition app ZIP is driven solely by the generated inventory. This captures
+            # root files, runtimes/, and all WinUI self-contained native resource directories.
+            $inventoryPath = Join-Path $releaseDir "app-file-inventory-v1.json"
+            if (-not (Test-Path -LiteralPath $inventoryPath)) {
+              throw "Missing app file inventory for $($ed.Name)"
+            }
+            $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+            if ($inventory.protocolVersion -ne 1 -or -not $inventory.files) {
+              throw "Invalid app file inventory for $($ed.Name)"
+            }
+            $releasePrefix = $releaseDirAbs.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+            $appFiles = @($inventory.files | ForEach-Object {
+              $relativePath = [string]$_
+              if ([string]::IsNullOrWhiteSpace($relativePath) -or
+                  [System.IO.Path]::IsPathRooted($relativePath) -or
+                  $relativePath.Replace('\', '/').Split('/') -contains '..') {
+                throw "Unsafe app inventory path: $relativePath"
               }
-            )
+              $fullPath = [System.IO.Path]::GetFullPath((Join-Path $releaseDir $relativePath))
+              if (-not $fullPath.StartsWith($releasePrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+                  -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                throw "Missing or escaped app inventory file: $relativePath"
+              }
+              Get-Item -LiteralPath $fullPath
+            })
             if ($appFiles) {
               $appZip = "Release/app-$($ed.ManifestRid).zip"
               if (Test-Path $appZip) { Remove-Item $appZip }

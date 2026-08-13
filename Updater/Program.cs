@@ -60,8 +60,8 @@ Log($"  data-dir:     {effectiveDataDir}");
 // Wait for main process to exit
 if (pidArg is not null && int.TryParse(pidArg, out int pid))
 {
-    Log($"Waiting for process PID={pid} to exit (timeout 30s)...");
-    var deadline = DateTime.UtcNow.AddSeconds(30);
+    Log($"Waiting for process PID={pid} to exit (timeout 120s)...");
+    var deadline = DateTime.UtcNow.AddSeconds(120);
     bool exited = false;
     while (DateTime.UtcNow < deadline)
     {
@@ -85,7 +85,10 @@ if (pidArg is not null && int.TryParse(pidArg, out int pid))
     if (exited)
         Log("Main process has exited.");
     else
-        Log("Warning: main process did not exit within 30s; proceeding anyway.");
+    {
+        Log("Error: main process did not exit; update was not applied.");
+        return 6;
+    }
 }
 else
 {
@@ -106,12 +109,24 @@ var stagingFiles = Directory
 
 Log($"Staging contains {stagingFiles.Count} file(s).");
 
+var deleteFiles = deleteListPath is not null && File.Exists(deleteListPath)
+    ? File.ReadAllLines(deleteListPath)
+        .Select(line => line.Trim())
+        .Where(line => line.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList()
+    : [];
+var filesToBackup = stagingFiles
+    .Concat(deleteFiles)
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToList();
+
 string backupDir = Path.Combine(effectiveDataDir, "update-backup");
 string normalizedAppDir = Path.GetFullPath(appDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
 // ── Phase 1: BACKUP ALL ──────────────────────────────────────────────────────
 Log("Phase 1: Backing up existing files...");
-foreach (string rel in stagingFiles)
+foreach (string rel in filesToBackup)
 {
     string src = Path.GetFullPath(Path.Combine(appDir, rel));
     if (!src.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
@@ -171,7 +186,7 @@ foreach (string rel in stagingFiles)
 if (replaceError is not null)
 {
     Log("Phase 2 failed — initiating rollback.");
-    Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, replaceError, "replace", replaced, stagingFiles.Count - replaced, exeName, log);
+    Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, deleteFiles, replaceError, "replace", replaced, stagingFiles.Count - replaced, exeName, log);
     return 4;
 }
 Log("Phase 2 complete.");
@@ -180,14 +195,9 @@ Log("Phase 2 complete.");
 Log("Phase 3: Processing delete list...");
 if (deleteListPath is not null && File.Exists(deleteListPath))
 {
-    var toDelete = File.ReadAllLines(deleteListPath)
-        .Select(l => l.Trim())
-        .Where(l => l.Length > 0)
-        .ToList();
-
-    Log($"  Delete list has {toDelete.Count} entry/entries.");
+    Log($"  Delete list has {deleteFiles.Count} entry/entries.");
     string? deleteError = null;
-    foreach (string rel in toDelete)
+    foreach (string rel in deleteFiles)
     {
         string target = Path.GetFullPath(Path.Combine(appDir, rel));
         if (!target.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
@@ -218,7 +228,7 @@ if (deleteListPath is not null && File.Exists(deleteListPath))
     if (deleteError is not null)
     {
         Log("Phase 3 failed — initiating rollback.");
-        Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, deleteError, "delete", replaced, 0, exeName, log);
+        Rollback(appDir, effectiveDataDir, backupDir, stagingFiles, deleteFiles, deleteError, "delete", replaced, 0, exeName, log);
         return 5;
     }
 }
@@ -271,6 +281,7 @@ static void Rollback(
     string dataDir,
     string backupDir,
     List<string> stagingFiles,
+    List<string> deleteFiles,
     string errorMessage,
     string phase,
     int filesReplaced,
@@ -285,14 +296,43 @@ static void Rollback(
         Console.WriteLine(line);
     }
 
-    Log("ROLLBACK: Restoring backed-up files...");
-    foreach (string rel in stagingFiles)
+    Log("ROLLBACK: Restoring backed-up files and removing newly added files...");
+    var normalizedAppDir = Path.GetFullPath(appDir)
+        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+        + Path.DirectorySeparatorChar;
+    var replacedFiles = stagingFiles.Take(filesReplaced).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var rollbackFiles = stagingFiles
+        .Concat(deleteFiles)
+        .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    foreach (string rel in rollbackFiles)
     {
         string backupSrc = Path.Combine(backupDir, rel);
-        string appDst = Path.Combine(appDir, rel);
+        string appDst = Path.GetFullPath(Path.Combine(appDir, rel));
+        if (!appDst.StartsWith(normalizedAppDir, StringComparison.OrdinalIgnoreCase))
+        {
+            Log($"  [ROLLBACK SKIP] {rel} (rejected: path outside app directory)");
+            continue;
+        }
+
         if (!File.Exists(backupSrc))
         {
-            Log($"  [ROLLBACK SKIP] {rel} (no backup exists — was new file)");
+            if (replacedFiles.Contains(rel) && File.Exists(appDst))
+            {
+                try
+                {
+                    File.Delete(appDst);
+                    Log($"  [ROLLBACK DELETE] {rel} (new file)");
+                }
+                catch (Exception ex)
+                {
+                    Log($"  [ROLLBACK ERROR] Could not remove new file {rel}: {ex.Message}");
+                }
+            }
+            else
+            {
+                Log($"  [ROLLBACK SKIP] {rel} (no backup exists)");
+            }
             continue;
         }
         try

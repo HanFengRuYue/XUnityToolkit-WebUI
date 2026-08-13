@@ -49,6 +49,7 @@ XUnityToolkit-WebUI 适合需要给 Unity 游戏做实时机翻增强、术语�
 
 - **一键接入翻译框架**：自动检测 Unity 游戏，安装 BepInEx 与 XUnity.AutoTranslator，并回写 AI 端点配置。
 - **本机连接自愈**：首选端口被占用时自动回退，游戏插件通过运行时发现文件重新连接；工具箱重启或实际端口变化后无需手工改 INI。
+- **Windows 原生窗口**：桌面端使用 WinUI 3 + WebView2 原生壳，保留系统标题栏、`Win+Z`、Windows 11 分屏布局与贴靠组；业务网页和浏览器访问方式保持一致。
 - **云端 AI 翻译**：支持 OpenAI、Claude、Gemini、DeepSeek、Qwen、GLM、Kimi 与自定义 OpenAI 兼容接口；OpenAI、DeepSeek、Qwen 及兼容服务可选 Responses API，并可按端点关闭或调整思考强度。
 - **本地 AI 模式**：内置 llama.cpp，支持 HuggingFace / ModelScope 下载模型，也支持导入自有 GGUF。
 - **统一术语与翻译记忆**：支持术语约束、精确/模糊翻译记忆与分阶段术语审查。
@@ -186,7 +187,7 @@ cd ..
 
 ### 关键子项目
 
-- `XUnityToolkit-WebUI/`：ASP.NET Core Minimal API + WinForms / WebView2 宿主
+- `XUnityToolkit-WebUI/`：ASP.NET Core Minimal API + WinUI 3 / WebView2 原生宿主（WinForms 仅用于托盘图标）
 - `XUnityToolkit-Vue/`：Vue 3 + TypeScript + Naive UI 前端
 - `TranslatorEndpoint/`：提供给 XUnity.AutoTranslator 调用的 `LLMTranslate.dll`
 - `Updater/`：AOT 更新器

@@ -16,6 +16,7 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
     public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
     public string BackgroundsDirectory => Path.Combine(CacheDirectory, "backgrounds");
+    public string WebView2CacheDirectory => Path.Combine(CacheDirectory, "webview2");
     public string LogsDirectory => Path.Combine(_root, "logs");
     public string RuntimeDirectory => Path.Combine(_root, "runtime");
     public string ToolkitEndpointDiscoveryFile =>
@@ -91,6 +92,7 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CoversDirectory);
         Directory.CreateDirectory(IconsDirectory);
         Directory.CreateDirectory(BackgroundsDirectory);
+        Directory.CreateDirectory(WebView2CacheDirectory);
         Directory.CreateDirectory(GlossariesDirectory);
         Directory.CreateDirectory(LogsDirectory);
         Directory.CreateDirectory(RuntimeDirectory);
