@@ -68,15 +68,15 @@ public sealed partial class ToolboxAgentToolExecutor(
     private const string CapabilityCatalog = """
         游戏：GET /api/games；GET/PUT/DELETE /api/games/{id}；POST /api/games/{id}/detect、/launch、/open-folder；POST /api/games/add-with-detection {folderPath,exePath?}；POST /api/games/batch-add {parentFolderPath}。
         安装：GET /api/games/{id}/status；POST /api/games/{id}/install {installBepInEx,installXUnity,autoInstallTmpFont,autoDeployAiEndpoint,applyOptimalConfig}；DELETE /api/games/{id}/install；POST /api/games/{id}/cancel。
-        XUnity 配置：GET/PUT /api/games/{id}/config；GET/PUT /api/games/{id}/config/raw（原始字符串 JSON）；GET/POST/DELETE /api/games/{id}/ai-endpoint；GET/POST/DELETE /api/games/{id}/tmp-font。
-        术语与描述：GET/PUT /api/games/{id}/terms；POST /api/games/{id}/terms/import-from-game；GET/PUT /api/games/{id}/description；兼容 glossary/do-not-translate；GET/PUT /api/games/{id}/script-tags；GET /api/script-tag-presets。
-        译文：GET/PUT /api/games/{id}/translation-editor；POST .../translation-editor/import；GET .../translation-editor/export；GET .../translation-memory/stats；DELETE .../translation-memory。
+        XUnity 配置：GET/PUT /api/games/{id}/config；GET/PUT /api/games/{id}/config/raw，PUT raw 请求体必须是 {"content":"完整 INI 文本"}；GET/POST/DELETE /api/games/{id}/ai-endpoint；GET/POST/DELETE /api/games/{id}/tmp-font。
+        术语与描述：GET/PUT /api/games/{id}/terms，PUT 请求体必须直接是术语数组，例如 [{"type":"translate","original":"Captain","translation":"船长","category":"character","isRegex":false,"caseSensitive":true,"exactMatch":true}]，不要再包 entries；POST /api/games/{id}/terms/import-from-game {"sourceGameId":"..."}；GET/PUT /api/games/{id}/description，PUT 请求体是 {"description":"..."}；兼容 glossary/do-not-translate；GET/PUT /api/games/{id}/script-tags，PUT 请求体是 {"presetVersion":1,"rules":[{"pattern":"^NPC:(.+)$","action":"Extract","description":"提取 NPC 文本","isBuiltin":false}]}，action 只能是 Extract 或 Exclude；GET /api/script-tag-presets。
+        译文：GET/PUT /api/games/{id}/translation-editor，PUT 请求体是 {"entries":[{"original":"Hello","translation":"你好"}]}；POST .../translation-editor/import 请求体是 {"content":"Hello=你好"}；GET .../translation-editor/export；GET .../translation-memory/stats；DELETE .../translation-memory。
         插件：GET /api/games/{id}/plugins；POST .../plugins/toggle {relativePath}；DELETE .../plugins?relativePath=；GET .../plugins/config?configFile=；POST .../plugin-package/import {zipPath}；插件附件请用 use_attachment。
         诊断：GET /api/games/{id}/health-check；POST .../health-check/analyze、/repair、/verify；GET /api/games/{id}/bepinex-log?lines=；POST .../bepinex-log/analyze。
         字体替换：POST /api/games/{id}/font-replacement/scan、/replace {fonts:[{pathId,assetFile,sourceId}]}、/restore、/cancel；GET .../status；DELETE .../custom-fonts/{sourceId}。上传与全自动应用优先 use_attachment/apply_custom_font。
         字体生成：GET /api/font-generation/status、/history、/charsets、/report/{fileName}；POST .../generate {fileName,unityVersion,samplingSize,atlasWidth,atlasHeight,characterSet,renderMode,samplingSizeMode,paddingMode,paddingValue}、/cancel、/charset/preview、/install-tmp-font/{gameId} {fileName}；DELETE /api/font-generation/{fileName}。
         图片：封面、图标、背景的 search/grids/select/web-search/web-select/steam-search/steam-select 端点均位于 /api/games/{id}/；本地附件请用 use_attachment。
-        AI 与日志：GET /api/translate/stats、/api/ai/extraction/stats、/api/ai/models、/api/logs、/api/logs/history；POST /api/ai/toggle {enabled}、/api/translate/test。
+        AI 与日志：GET /api/translate/stats、/api/ai/extraction/stats、/api/logs、/api/logs/history；POST /api/ai/toggle {enabled}、/api/translate/test。/api/ai/models 需要在查询串传递 API Key，出于凭据隔离不能由智能体调用。
         本地模型管理：GET /api/local-llm/status、/gpus、/settings、/catalog、/downloads、/llama-status、/models；PUT /settings；POST /gpus/refresh、/test、/start、/stop、/llama-download、/llama-download/cancel、/download、/download/pause、/download/cancel、/models/add；DELETE /models/{id}。智能体自身仍只由云端 AI 驱动，但可以按用户要求管理本地模型。
         更新：GET /api/update/check、/status；POST /api/update/download、/cancel、/dismiss。为防止对话连接中途销毁进程，/api/update/apply 只能由用户在更新页面点击。
         设置：GET /api/settings/connection、/version；设置导入附件用 use_attachment。完整设置（含密钥）、全量重置和任意主机文件浏览不会暴露给云端智能体。
@@ -142,6 +142,10 @@ public sealed partial class ToolboxAgentToolExecutor(
         }
 
         var pathOnly = decodedPath.Split('?', 2)[0].TrimEnd('/');
+        var containsSensitiveQuery = Regex.IsMatch(
+            decodedPath,
+            @"[?&](?:api[_-]?key|password|secret|authorization|(?:(?:access|refresh)[_-]?)?token)=",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         var binaryDownload = method.Equals("GET", StringComparison.OrdinalIgnoreCase)
                              && (pathOnly.EndsWith("/download", StringComparison.OrdinalIgnoreCase)
                                  || pathOnly.Contains("/download/", StringComparison.OrdinalIgnoreCase));
@@ -156,6 +160,7 @@ public sealed partial class ToolboxAgentToolExecutor(
             || pathOnly.EndsWith("/plugins/install", StringComparison.OrdinalIgnoreCase)
             || pathOnly.EndsWith("/plugin-package/export", StringComparison.OrdinalIgnoreCase)
             || pathOnly.Equals("/api/settings/export", StringComparison.OrdinalIgnoreCase)
+            || containsSensitiveQuery
             || binaryDownload)
         {
             error = "该接口包含密钥、任意主机路径、不可恢复重置、进程替换或二进制下载，不能由智能体直接调用。";
@@ -180,10 +185,12 @@ public sealed partial class ToolboxAgentToolExecutor(
             || method.Equals("PUT", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        return (method.Equals("POST", StringComparison.OrdinalIgnoreCase)
-                && (normalized.Equals("/api/games", StringComparison.OrdinalIgnoreCase)
-                    || normalized.Equals("/api/games/add-with-detection", StringComparison.OrdinalIgnoreCase)
-                    || normalized.Equals("/api/games/batch-add", StringComparison.OrdinalIgnoreCase)))
+        if (!method.Equals("POST", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return normalized.Equals("/api/games", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals("/api/games/add-with-detection", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals("/api/games/batch-add", StringComparison.OrdinalIgnoreCase)
                || normalized.Contains("/uninstall", StringComparison.OrdinalIgnoreCase)
                || normalized.EndsWith("/install", StringComparison.OrdinalIgnoreCase)
                || normalized.EndsWith("/launch", StringComparison.OrdinalIgnoreCase)
@@ -365,14 +372,33 @@ public sealed partial class ToolboxAgentToolExecutor(
         if (characterSets.Count == 0)
             characterSets.Add("GB2312");
 
-        var generation = await fontGenerator.GenerateAsync(new FontGenerationRequest(
+        var generationInputPath = CreateFontGenerationInputCopy(
             attachment.FullPath,
-            game.DetectedInfo.UnityVersion,
-            CharacterSet: new CharacterSetConfig
+            appDataPaths.FontGenerationUploadsDirectory);
+        FontGenerationResult generation;
+        try
+        {
+            generation = await fontGenerator.GenerateAsync(new FontGenerationRequest(
+                generationInputPath,
+                game.DetectedInfo.UnityVersion,
+                CharacterSet: new CharacterSetConfig
+                {
+                    BuiltinSets = characterSets,
+                    TranslationGameId = game.Id
+                }));
+        }
+        finally
+        {
+            try
             {
-                BuiltinSets = characterSets,
-                TranslationGameId = game.Id
-            }));
+                if (File.Exists(generationInputPath))
+                    File.Delete(generationInputPath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "清理智能体字体生成输入副本失败: {Path}", generationInputPath);
+            }
+        }
         if (!generation.Success || string.IsNullOrWhiteSpace(generation.OutputPath))
             throw new InvalidOperationException(generation.Error ?? "TMP 字体生成失败。");
 
@@ -428,6 +454,18 @@ public sealed partial class ToolboxAgentToolExecutor(
             failed = replacement.FailedFonts.Select(item => new { item.AssetFile, item.PathId, item.Error }),
             fallbackConfigured = true
         }, userMessage);
+    }
+
+    internal static string CreateFontGenerationInputCopy(string sourcePath, string uploadDirectory)
+    {
+        var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        if (extension is not (".ttf" or ".otf"))
+            throw new InvalidDataException("字体生成副本只接受 TTF/OTF 文件。");
+
+        Directory.CreateDirectory(uploadDirectory);
+        var targetPath = Path.Combine(uploadDirectory, $"{Guid.NewGuid():N}{extension}");
+        File.Copy(sourcePath, targetPath, overwrite: false);
+        return targetPath;
     }
 
     private async Task<ToolboxAgentToolResult> UpdateToolboxSettingAsync(

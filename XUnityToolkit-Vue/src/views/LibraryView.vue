@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, h, computed } from 'vue'
+import { onMounted, onActivated, ref, h, computed } from 'vue'
 import { NButton, NIcon, NSelect, NButtonGroup, NDropdown, NModal, NInput, useMessage, useDialog } from 'naive-ui'
 import { Add } from '@vicons/ionicons5'
 import { GamepadFilled, GridViewRound, ViewListRound, PlayArrowRound, DriveFileRenameOutlineOutlined, PhotoCameraOutlined, WallpaperOutlined, ImageSearchOutlined, DeleteOutlineOutlined } from '@vicons/material'
@@ -50,7 +50,14 @@ const renameSaving = ref(false)
 
 onMounted(async () => {
   await gamesStore.loadPreferences()
-  gamesStore.fetchGames()
+  await gamesStore.fetchGames()
+})
+
+onActivated(async () => {
+  await Promise.all([
+    gamesStore.loadPreferences(),
+    gamesStore.fetchGames(),
+  ])
 })
 
 async function handleAddGame() {

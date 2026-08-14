@@ -33,6 +33,9 @@ public sealed class ToolboxAgentSafetyTests
     [InlineData("GET", "https://example.com/api/games", false)]
     [InlineData("GET", "/api/games/../settings", false)]
     [InlineData("GET", "/api/games/%252e%252e/settings", false)]
+    [InlineData("GET", "/api/ai/models?provider=DeepSeek&apiKey=secret", false)]
+    [InlineData("GET", "/api/ai/models?provider=DeepSeek&api%4Bey=secret", false)]
+    [InlineData("GET", "/api/example?access_token=secret", false)]
     public void ApiGate_AllowsToolboxJsonRoutesAndRejectsPrivilegeEscapes(
         string method,
         string path,
@@ -51,8 +54,12 @@ public sealed class ToolboxAgentSafetyTests
     [InlineData("POST", "/api/games/add-with-detection", true)]
     [InlineData("POST", "/api/games/%69d/launch", true)]
     [InlineData("POST", "/api/local-llm/models/add", true)]
+    [InlineData("POST", "/api/local-llm/download", true)]
     [InlineData("POST", "/api/settings/open-data-folder", true)]
     [InlineData("PUT", "/api/games/id/terms", true)]
+    [InlineData("GET", "/api/local-llm/downloads", false)]
+    [InlineData("GET", "/api/font-generation/history/download", false)]
+    [InlineData("GET", "/api/games/id/open-folder", false)]
     [InlineData("POST", "/api/games/id/detect", false)]
     [InlineData("GET", "/api/games", false)]
     public void ApiGate_RequiresConfirmationForHighImpactOperations(
@@ -149,5 +156,30 @@ public sealed class ToolboxAgentSafetyTests
         Assert.Equal("new-model", endpoint.ModelName);
         Assert.Equal("keep-secret", endpoint.ApiKey);
         Assert.Equal("https://example.com", endpoint.ApiBaseUrl);
+    }
+
+    [Fact]
+    public void FontGenerationInputCopy_CanBeConsumedWithoutDeletingTheAgentAttachment()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"xunity-agent-font-{Guid.NewGuid():N}");
+        var source = Path.Combine(root, "attachment.ttf");
+        var uploads = Path.Combine(root, "generation-uploads");
+        Directory.CreateDirectory(root);
+        File.WriteAllBytes(source, [0x00, 0x01, 0x00, 0x00, 0x74, 0x65, 0x73, 0x74]);
+
+        try
+        {
+            var generationInput = ToolboxAgentToolExecutor.CreateFontGenerationInputCopy(source, uploads);
+
+            Assert.NotEqual(source, generationInput);
+            Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(generationInput));
+
+            File.Delete(generationInput);
+            Assert.True(File.Exists(source));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

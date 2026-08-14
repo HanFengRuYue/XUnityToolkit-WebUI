@@ -16,6 +16,7 @@ import {
   WarningAmberOutlined,
 } from '@vicons/material'
 import { gamesApi, toolboxAgentApi } from '@/api/games'
+import { useGamesStore } from '@/stores/games'
 import type {
   Game,
   LlmProvider,
@@ -45,6 +46,7 @@ interface ChatMessage {
 }
 
 const notification = useMessage()
+const gamesStore = useGamesStore()
 const status = ref<ToolboxAgentStatus | null>(null)
 const games = ref<Game[]>([])
 const historySessions = ref<ToolboxAgentConversationSummary[]>([])
@@ -315,6 +317,7 @@ async function send(confirmPendingAction = false) {
     if (status.value) {
       status.value = { ...status.value, supported: true, reason: null }
     }
+    await refreshChangedResources(response.executions)
   } catch (error) {
     const text = errorText(error, '智能体执行失败')
     messages.value.push({
@@ -329,6 +332,35 @@ async function send(confirmPendingAction = false) {
     loading.value = false
     await refreshHistory()
     await scrollToBottom()
+  }
+}
+
+const mutatingTools = new Set([
+  'auto_repair_plugins',
+  'patch_game_file',
+  'apply_custom_font',
+  'update_toolbox_setting',
+  'use_attachment',
+  'call_toolbox_api',
+])
+
+async function refreshChangedResources(executions: ToolboxAgentToolExecution[]) {
+  const changed = executions.some(execution =>
+    execution.state === 'Completed' && mutatingTools.has(execution.tool),
+  )
+  if (!changed) return
+
+  try {
+    await Promise.all([
+      gamesStore.fetchGames(),
+      gamesStore.loadPreferences(),
+    ])
+    games.value = [...gamesStore.games]
+    if (selectedGameId.value && !games.value.some(game => game.id === selectedGameId.value)) {
+      selectedGameId.value = null
+    }
+  } catch {
+    notification.warning('操作已执行，但界面状态刷新失败；重新进入页面后会再次同步。')
   }
 }
 
