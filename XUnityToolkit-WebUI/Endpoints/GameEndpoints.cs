@@ -685,21 +685,22 @@ public static class GameEndpoints
         group.MapGet("/{id}/tmp-font", async (
             string id,
             GameLibraryService library,
-            TmpFontService tmpFontService) =>
+            RuntimeTmpFontService runtimeTmpFontService,
+            CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            var installed = tmpFontService.IsFontInstalled(game.GamePath);
-            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(installed)));
+            var status = await runtimeTmpFontService.GetStatusAsync(game, ct);
+            return Results.Ok(ApiResult<TmpFontStatus>.Ok(status));
         });
 
         group.MapPost("/{id}/tmp-font", async (
             string id,
+            TmpFontInstallRequest? request,
             GameLibraryService library,
-            TmpFontService tmpFontService,
-            ConfigurationService configService,
+            RuntimeTmpFontService runtimeTmpFontService,
             CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
@@ -712,31 +713,37 @@ public static class GameEndpoints
             if (game.DetectedInfo is null)
                 return Results.BadRequest(ApiResult.Fail("未检测到 Unity 版本信息。"));
 
-            var configValue = tmpFontService.InstallFont(game.GamePath, game.DetectedInfo);
-            if (configValue is null)
-                return Results.BadRequest(ApiResult.Fail("未找到可用的 TMP 字体文件。"));
+            request ??= new TmpFontInstallRequest();
+            if (request.ApplicationMode is not ("fallback" or "override"))
+                return Results.BadRequest(ApiResult.Fail("applicationMode 必须为 fallback 或 override。"));
 
-            // Patch config to set FallbackFontTextMeshPro
-            await configService.PatchSectionAsync(game.GamePath, "Behaviour",
-                new Dictionary<string, string>
-                {
-                    ["FallbackFontTextMeshPro"] = configValue
-                }, ct);
-
-            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(true)));
+            try
+            {
+                var status = await runtimeTmpFontService.InstallAsync(game, request, ct);
+                return Results.Ok(ApiResult<TmpFontStatus>.Ok(status));
+            }
+            catch (RuntimeFontConfigurationConflictException ex)
+            {
+                return Results.Conflict(ApiResult<TmpFontStatus>.Fail(ex.Message));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or FileNotFoundException)
+            {
+                return Results.BadRequest(ApiResult<TmpFontStatus>.Fail(ex.Message));
+            }
         });
 
         group.MapDelete("/{id}/tmp-font", async (
             string id,
             GameLibraryService library,
-            TmpFontService tmpFontService) =>
+            RuntimeTmpFontService runtimeTmpFontService,
+            CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("Game not found."));
 
-            tmpFontService.RemoveFont(game.GamePath);
-            return Results.Ok(ApiResult<TmpFontStatus>.Ok(new TmpFontStatus(false)));
+            var status = await runtimeTmpFontService.RemoveAsync(game, ct);
+            return Results.Ok(ApiResult<TmpFontStatus>.Ok(status));
         });
 
         // Unified term management
@@ -1082,7 +1089,6 @@ public record AddWithDetectionRequest(string FolderPath, string? ExePath = null)
 public record BatchAddRequest(string ParentFolderPath);
 public record UpdateGameRequest(string? Name = null, string? ExecutableName = null);
 public record AiEndpointInstallRequest(bool ForceReplaceUnknown = false);
-public record TmpFontStatus(bool Installed);
 public record UpdateDescriptionRequest(string? Description);
 public record IconSelectRequest(string ImageUrl, int SteamGridDbGameId);
 public record ImportFromGameRequest(string SourceGameId);

@@ -41,6 +41,10 @@ public record ReplacementSource
     public bool IsDefault { get; init; }
     public long FileSize { get; init; }
     public DateTime? UploadedAt { get; init; }
+    public string? Version { get; init; }
+    public string? License { get; init; }
+    public string? LicenseUrl { get; init; }
+    public string? Sha256 { get; init; }
 }
 
 public record ReplacementSourceSet

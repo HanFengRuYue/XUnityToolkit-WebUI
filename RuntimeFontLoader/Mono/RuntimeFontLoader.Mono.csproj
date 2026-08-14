@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net35</TargetFramework>
+    <AssemblyName>XUnityToolkit.RuntimeFontLoader</AssemblyName>
+    <RootNamespace>XUnityToolkit.RuntimeFontLoader</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net35" Version="1.0.3" PrivateAssets="all" />
+    <ProjectReference Include="..\ReferenceStubs\UnityEngine.Reference.csproj" PrivateAssets="all" />
+    <Compile Include="..\Shared\RuntimeFontBootstrap.cs" Link="RuntimeFontBootstrap.cs" />
+    <Compile Include="..\Shared\RuntimeFontFileValidator.cs" Link="RuntimeFontFileValidator.cs" />
+    <Reference Include="BepInEx"><HintPath>..\libs\mono\BepInEx.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>..\libs\mono\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

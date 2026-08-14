@@ -19,14 +19,11 @@ import { gamesApi, toolboxAgentApi } from '@/api/games'
 import { useGamesStore } from '@/stores/games'
 import type {
   Game,
-  LlmProvider,
   ToolboxAgentAttachment,
   ToolboxAgentConversationSummary,
   ToolboxAgentStatus,
   ToolboxAgentToolExecution,
 } from '@/api/types'
-
-const AUTOMATIC_ENDPOINT = '__automatic__'
 
 const props = withDefaults(defineProps<{
   show: boolean
@@ -51,7 +48,6 @@ const status = ref<ToolboxAgentStatus | null>(null)
 const games = ref<Game[]>([])
 const historySessions = ref<ToolboxAgentConversationSummary[]>([])
 const selectedGameId = ref<string | null>(null)
-const selectedEndpointId = ref(AUTOMATIC_ENDPOINT)
 const lastEndpointName = ref<string | null>(null)
 const input = ref('')
 const messages = ref<ChatMessage[]>([])
@@ -94,51 +90,13 @@ const gameOptions = computed(() => games.value.map(game => ({
   value: game.id,
 })))
 
-const automaticEndpoint = computed(() =>
-  status.value?.endpoints?.find(endpoint => endpoint.isAutomaticDefault) ?? null,
-)
-
-const endpointOptions = computed(() => {
-  const automaticName = automaticEndpoint.value?.name || status.value?.endpointName
-  const options: Array<{ label: string; value: string; disabled?: boolean }> = [{
-    label: automaticName ? `自动（${automaticName}）` : '自动（按优先级）',
-    value: AUTOMATIC_ENDPOINT,
-  }]
-  for (const endpoint of status.value?.endpoints ?? []) {
-    const model = endpoint.modelName ? ` · ${endpoint.modelName}` : ''
-    options.push({
-      label: `${providerLabel(endpoint.provider)} · ${endpoint.name}${model}`,
-      value: endpoint.id,
-    })
-  }
-  if (selectedEndpointId.value !== AUTOMATIC_ENDPOINT
-    && !(status.value?.endpoints?.some(endpoint => endpoint.id === selectedEndpointId.value))) {
-    options.push({
-      label: `${lastEndpointName.value || '原端点'}（当前不可用）`,
-      value: selectedEndpointId.value,
-      disabled: true,
-    })
-  }
-  return options
-})
-
-const selectedEndpointAvailable = computed(() => {
-  if (selectedEndpointId.value === AUTOMATIC_ENDPOINT) return status.value?.supported === true
-  return status.value?.endpoints?.some(endpoint => endpoint.id === selectedEndpointId.value) === true
-})
-
 const headerEndpointName = computed(() => {
   if (lastEndpointName.value) return lastEndpointName.value
-  if (selectedEndpointId.value !== AUTOMATIC_ENDPOINT) {
-    return status.value?.endpoints?.find(endpoint => endpoint.id === selectedEndpointId.value)?.name
-      || '所选端点不可用'
-  }
   return status.value?.endpointName || '云端 AI'
 })
 
 const canSend = computed(() =>
   status.value?.supported === true
-  && selectedEndpointAvailable.value
   && !loading.value
   && !uploading.value
   && !sessionLoading.value
@@ -302,7 +260,6 @@ async function send(confirmPendingAction = false) {
       gameId: selectedGameId.value,
       attachmentIds: confirmPendingAction ? [] : attachments.map(item => item.id),
       confirmPendingAction,
-      endpointId: selectedEndpointId.value === AUTOMATIC_ENDPOINT ? null : selectedEndpointId.value,
     })
     messages.value.push({
       id: createMessageId(),
@@ -316,6 +273,11 @@ async function send(confirmPendingAction = false) {
     lastEndpointName.value = response.endpointName
     if (status.value) {
       status.value = { ...status.value, supported: true, reason: null }
+    }
+    if (response.reloadRequired) {
+      localStorage.clear()
+      notification.warning('工具箱正在退出并清空全部数据，完成后会自动重启。')
+      return
     }
     await refreshChangedResources(response.executions)
   } catch (error) {
@@ -339,8 +301,10 @@ const mutatingTools = new Set([
   'auto_repair_plugins',
   'patch_game_file',
   'apply_custom_font',
+  'configure_tmp_runtime_font',
   'update_toolbox_setting',
   'use_attachment',
+  'manage_files',
   'call_toolbox_api',
 ])
 
@@ -392,7 +356,6 @@ function resetConversation() {
   needsConfirmation.value = false
   pendingActionDescription.value = null
   selectedGameId.value = null
-  selectedEndpointId.value = AUTOMATIC_ENDPOINT
   lastEndpointName.value = null
   input.value = ''
 }
@@ -429,7 +392,6 @@ async function loadConversation(summary: ToolboxAgentConversationSummary) {
       && games.value.some(game => game.id === conversation.summary.gameId)
       ? conversation.summary.gameId
       : null
-    selectedEndpointId.value = conversation.summary.endpointId || AUTOMATIC_ENDPOINT
     lastEndpointName.value = conversation.summary.endpointName ?? null
     needsConfirmation.value = false
     pendingActionDescription.value = null
@@ -488,20 +450,6 @@ function executionIcon(state: ToolboxAgentToolExecution['state']) {
   if (state === 'Completed') return CheckCircleOutlined
   if (state === 'Failed') return ErrorOutlineOutlined
   return WarningAmberOutlined
-}
-
-function providerLabel(provider: LlmProvider) {
-  const labels: Record<LlmProvider, string> = {
-    OpenAI: 'OpenAI',
-    Claude: 'Claude',
-    Gemini: 'Gemini',
-    DeepSeek: 'DeepSeek',
-    Qwen: '通义千问',
-    GLM: '智谱 GLM',
-    Kimi: 'Kimi',
-    Custom: '自定义',
-  }
-  return labels[provider]
 }
 
 function formatSize(bytes: number) {
@@ -670,15 +618,6 @@ function createMessageId() {
               size="small"
               placeholder="选择要操作的游戏（可选）"
             />
-            <NSelect
-              v-model:value="selectedEndpointId"
-              :options="endpointOptions"
-              :disabled="historyBusy"
-              filterable
-              size="small"
-              placeholder="选择云端提供商"
-              @update:value="lastEndpointName = null"
-            />
           </div>
 
           <NAlert
@@ -689,21 +628,13 @@ function createMessageId() {
           >
             {{ status.reason }}
           </NAlert>
-          <NAlert
-            v-else-if="!selectedEndpointAvailable"
-            type="warning"
-            :bordered="false"
-            class="agent-alert"
-          >
-            该历史对话原先使用的云端端点当前不可用，请选择“自动”或其他端点后继续。
-          </NAlert>
 
           <div ref="messageList" class="message-list">
             <div v-if="messages.length === 0" class="welcome">
               <NIcon :size="30"><AutoAwesomeOutlined /></NIcon>
               <strong>直接告诉我你想完成什么</strong>
-              <p>我能调用工具箱现有功能、检查和修改游戏配置、自动修复插件问题，也能接收字体或插件附件。</p>
-              <p class="welcome-example">例如：上传 TTF 后说“给当前游戏生成并应用这个字体”。</p>
+              <p>我能调用工具箱功能、诊断插件、读取电脑环境，并在已添加游戏目录和工具箱数据目录中管理文件。</p>
+              <p class="welcome-example">例如：“检查插件为什么没有加载”；脚本和外部文件读取会先展示用途并等待确认。</p>
             </div>
 
             <article
@@ -780,7 +711,7 @@ function createMessageId() {
               circle
               secondary
               :loading="uploading"
-              :disabled="loading || sessionLoading || !selectedEndpointAvailable"
+              :disabled="loading || sessionLoading || status?.supported !== true"
               title="上传附件"
               @click="fileInput?.click()"
             >
@@ -790,7 +721,7 @@ function createMessageId() {
               v-model:value="input"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 5 }"
-              :disabled="loading || sessionLoading || !selectedEndpointAvailable"
+              :disabled="loading || sessionLoading || status?.supported !== true"
               placeholder="描述你想让智能体完成的操作..."
               @keydown="handleKeydown"
             />
@@ -798,7 +729,7 @@ function createMessageId() {
               <template #icon><NIcon><SendOutlined /></NIcon></template>
             </NButton>
           </footer>
-          <div class="cloud-note">智能体独立使用上方所选云端端点并可能产生费用；附件二进制不发送给模型，必要的脱敏文本会发送到云端。</div>
+          <div class="cloud-note">智能体使用设置页统一选择的云端提供商并可能产生费用；可信目录原文、经确认的外部读取内容和脚本输出可能发送到该提供商。</div>
         </main>
       </div>
     </section>

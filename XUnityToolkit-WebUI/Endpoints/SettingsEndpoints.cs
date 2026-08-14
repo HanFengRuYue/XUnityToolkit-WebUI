@@ -67,62 +67,16 @@ public static class SettingsEndpoints
         });
 
         group.MapPost("/reset", async (
-            AppDataPaths paths,
-            AppSettingsService settingsService,
-            GameLibraryService gameLibraryService,
-            LocalLlmService localLlmService,
-            TermService termService,
-            ScriptTagService scriptTagService,
-            TranslationMemoryService tmService,
-            LlmTranslationService translationService,
-            GlossaryExtractionService glossaryExtractionService,
-            UpdateService updateService,
-            ToolkitRuntimeDiscoveryService discoveryService,
-            FileLoggerProvider fileLoggerProvider,
-            ILogger<AppSettingsService> logger,
+            ToolboxDataResetService resetService,
             CancellationToken ct) =>
         {
-            var errors = new List<string>();
-
-            // Suspend file logging so the log file handle is released,
-            // allowing the entire data directory to be deleted cleanly.
-            fileLoggerProvider.SuspendFileLog();
-            try
+            await resetService.ScheduleAsync(ct);
+            return Results.Ok(ApiResult<object>.Ok(new
             {
-                TryDelete(() =>
-                {
-                    if (Directory.Exists(paths.Root))
-                        Directory.Delete(paths.Root, recursive: true);
-                }, paths.Root, errors);
-            }
-            finally
-            {
-                // Release log file lock first to prevent deadlock if EnsureDirectoriesExist throws
-                fileLoggerProvider.ResumeFileLog();
-                paths.EnsureDirectoriesExist();
-            }
-
-            await RefreshApplicationRuntimeStateAsync(
-                settingsService,
-                gameLibraryService,
-                localLlmService,
-                termService,
-                scriptTagService,
-                tmService,
-                translationService,
-                glossaryExtractionService,
-                updateService,
-                ct);
-            await discoveryService.PublishAsync(ct);
-
-            if (errors.Count > 0)
-            {
-                logger.LogWarning("重置配置时部分操作失败: {Errors}", string.Join(", ", errors));
-                return Results.Ok(ApiResult<object>.Ok(new { partial = true, errors }));
-            }
-
-            logger.LogInformation("已重置所有配置和缓存（已删除数据目录 {Root}）", paths.Root);
-            return Results.Ok(ApiResult<object>.Ok(new { partial = false }));
+                scheduled = true,
+                restartRequired = true,
+                message = "工具箱即将退出；清空完整数据目录后会自动重启。"
+            }));
         });
 
         group.MapGet("/version", () =>
@@ -458,11 +412,6 @@ public static class SettingsEndpoints
         updateService.ResetRuntimeState();
     }
 
-    private static void TryDelete(Action action, string name, List<string> errors)
-    {
-        try { action(); }
-        catch (Exception) { errors.Add($"删除失败: {Path.GetFileName(name)}"); }
-    }
 }
 
 public record VersionInfo(string Version, string Edition);

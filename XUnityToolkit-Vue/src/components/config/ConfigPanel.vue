@@ -11,12 +11,13 @@ import {
   NCollapse,
   NCollapseItem,
   NButton,
+  NAlert,
   NIcon,
-  NTooltip,
+  NTag,
   useMessage,
 } from 'naive-ui'
 import { EditNoteOutlined, DownloadOutlined, DeleteOutlineOutlined } from '@vicons/material'
-import type { XUnityConfig } from '@/api/types'
+import type { TmpFontStatus, XUnityConfig } from '@/api/types'
 import { gamesApi } from '@/api/games'
 import { useAutoSave } from '@/composables/useAutoSave'
 
@@ -228,30 +229,61 @@ const labelPlacement = computed(() => isMobile.value ? 'top' as const : 'left' a
 const labelWidth = computed(() => isMobile.value ? undefined : '160')
 
 // TMP font state
-const tmpFontInstalled = ref<boolean | null>(null)
+const tmpFontStatus = ref<TmpFontStatus | null>(null)
 const tmpFontLoading = ref(false)
+const tmpFontSourceId = ref('ttf-default')
+const tmpFontApplicationMode = ref<'fallback' | 'override'>('fallback')
+const tmpFontSourceOptions = computed(() => (tmpFontStatus.value?.availableSources ?? []).map(source => ({
+  label: source.version ? `${source.displayName} (${source.version})` : source.displayName,
+  value: source.id,
+})))
+const tmpFontModeOptions = [
+  { label: '全局回退（保留原字体风格）', value: 'fallback' },
+  { label: '全部 TMP 文本替换', value: 'override' },
+]
 
 async function loadTmpFontStatus() {
   try {
     const status = await gamesApi.getTmpFontStatus(props.gameId)
-    tmpFontInstalled.value = status.installed
+    tmpFontStatus.value = status
+    tmpFontSourceId.value = status.sourceId
+    tmpFontApplicationMode.value = status.applicationMode
   } catch {
-    tmpFontInstalled.value = null
+    tmpFontStatus.value = null
   }
 }
 
 async function handleInstallTmpFont() {
   tmpFontLoading.value = true
   try {
-    const result = await gamesApi.installTmpFont(props.gameId)
-    tmpFontInstalled.value = result.installed
-    // Reload config to reflect FallbackFontTextMeshPro written by backend
+    let replaceExistingConfig = false
+    let result: TmpFontStatus
+    try {
+      result = await gamesApi.installTmpFont(props.gameId, {
+        sourceId: tmpFontSourceId.value,
+        applicationMode: tmpFontApplicationMode.value,
+        enabled: true,
+      })
+    } catch (e) {
+      if ((e as { status?: number }).status !== 409
+          || !window.confirm(`${e instanceof Error ? e.message : '检测到外部字体配置'}\n\n是否确认由工具箱接管并覆盖这些 TMP 字体键？`)) {
+        throw e
+      }
+      replaceExistingConfig = true
+      result = await gamesApi.installTmpFont(props.gameId, {
+        sourceId: tmpFontSourceId.value,
+        applicationMode: tmpFontApplicationMode.value,
+        enabled: true,
+        replaceExistingConfig,
+      })
+    }
+    tmpFontStatus.value = result
     disableAutoSave()
     const updatedConfig = await gamesApi.getConfig(props.gameId)
     form.value = { ...updatedConfig }
     await nextTick()
     enableAutoSave()
-    message.success('TMP 字体已安装')
+    message.success('运行时 TMP 字体已配置，请重启游戏验证')
   } catch (e) {
     message.error(e instanceof Error ? e.message : '安装失败')
   } finally {
@@ -263,8 +295,7 @@ async function handleUninstallTmpFont() {
   tmpFontLoading.value = true
   try {
     const result = await gamesApi.uninstallTmpFont(props.gameId)
-    tmpFontInstalled.value = result.installed
-    // Reload config to reflect font removal
+    tmpFontStatus.value = result
     disableAutoSave()
     const updatedConfig = await gamesApi.getConfig(props.gameId)
     form.value = { ...updatedConfig }
@@ -282,7 +313,7 @@ watch(() => props.disabled, (disabled) => {
   if (!disabled) {
     loadTmpFontStatus()
   } else {
-    tmpFontInstalled.value = null
+    tmpFontStatus.value = null
   }
 }, { immediate: true })
 </script>
@@ -433,38 +464,63 @@ watch(() => props.disabled, (disabled) => {
               />
             </NFormItem>
             <NFormItem label="TMP 后备字体">
-              <div class="tmp-font-row">
-                <NInput
-                  :value="form.fallbackFontTextMeshPro ?? ''"
-                  @update:value="(v: string) => { form.fallbackFontTextMeshPro = v }"
-                  placeholder="TextMeshPro 后备字体" clearable
-                />
-                <NTooltip v-if="tmpFontInstalled !== null">
-                  <template #trigger>
-                    <NButton
-                      v-if="!tmpFontInstalled"
-                      size="small"
-                      type="primary"
-                      :loading="tmpFontLoading"
-                      @click="handleInstallTmpFont"
-                    >
-                      <template #icon><NIcon :size="14"><DownloadOutlined /></NIcon></template>
-                      安装字体
-                    </NButton>
-                    <NButton
-                      v-else
-                      size="small"
-                      type="error"
-                      ghost
-                      :loading="tmpFontLoading"
-                      @click="handleUninstallTmpFont"
-                    >
-                      <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
-                      卸载
-                    </NButton>
-                  </template>
-                  {{ tmpFontInstalled ? 'TMP 字体资源已安装到游戏内' : '安装思源黑体 TMP 字体资源（自动匹配 Unity 版本）' }}
-                </NTooltip>
+              <NInput
+                :value="form.fallbackFontTextMeshPro ?? ''"
+                @update:value="(v: string) => { form.fallbackFontTextMeshPro = v }"
+                placeholder="手动 XUnity 后备字体（运行时模式会接管此键）" clearable
+              />
+            </NFormItem>
+            <NFormItem label="运行时 TMP 字体" class="tmp-runtime-form-item">
+              <div class="tmp-runtime-panel">
+                <div class="tmp-runtime-controls">
+                  <NSelect
+                    v-model:value="tmpFontSourceId"
+                    :options="tmpFontSourceOptions"
+                    placeholder="选择 TTF/OTF 来源"
+                  />
+                  <NSelect
+                    v-model:value="tmpFontApplicationMode"
+                    :options="tmpFontModeOptions"
+                  />
+                  <NButton type="primary" :loading="tmpFontLoading" @click="handleInstallTmpFont">
+                    <template #icon><NIcon :size="14"><DownloadOutlined /></NIcon></template>
+                    {{ tmpFontStatus?.installed ? '应用配置' : '安装并应用' }}
+                  </NButton>
+                  <NButton
+                    v-if="tmpFontStatus?.installed"
+                    type="error"
+                    ghost
+                    :loading="tmpFontLoading"
+                    @click="handleUninstallTmpFont"
+                  >
+                    <template #icon><NIcon :size="14"><DeleteOutlineOutlined /></NIcon></template>
+                    卸载
+                  </NButton>
+                </div>
+                <NAlert
+                  v-if="tmpFontStatus"
+                  :type="tmpFontStatus.legacyFallbackUsed ? 'warning' : (tmpFontStatus.error ? 'error' : (tmpFontStatus.requiresRestart ? 'warning' : 'info'))"
+                  :show-icon="false"
+                  class="tmp-runtime-status"
+                >
+                  <div class="tmp-runtime-status-line">
+                    <span>{{ tmpFontStatus.message }}</span>
+                    <NTag v-if="tmpFontStatus.requiresRestart" size="small" type="warning">等待重启验证</NTag>
+                    <NTag v-else-if="tmpFontStatus.activeLoader === 'direct-ttf'" size="small" type="success">TTF 直接加载</NTag>
+                    <NTag v-else-if="tmpFontStatus.legacyFallbackUsed" size="small" type="warning">兼容资产回退</NTag>
+                  </div>
+                  <div v-if="tmpFontStatus.error" class="tmp-runtime-error">{{ tmpFontStatus.error }}</div>
+                  <NButton
+                    v-if="tmpFontStatus.error && tmpFontStatus.sourceId !== 'ttf-default'"
+                    size="tiny"
+                    tertiary
+                    type="warning"
+                    class="tmp-runtime-compat-action"
+                    @click="router.push('/font-generator')"
+                  >
+                    生成兼容 TMP 资产
+                  </NButton>
+                </NAlert>
               </div>
             </NFormItem>
             <NFormItem label="行间距缩放">
@@ -631,17 +687,40 @@ watch(() => props.disabled, (disabled) => {
   gap: 0 24px;
 }
 
-.tmp-font-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-  width: 100%;
+.tmp-runtime-form-item {
+  grid-column: 1 / -1;
 }
 
-.tmp-font-row .n-input {
-  flex: 1 1 240px;
+.tmp-runtime-panel {
+  width: 100%;
   min-width: 0;
+}
+
+.tmp-runtime-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.tmp-runtime-status {
+  margin-top: 10px;
+}
+
+.tmp-runtime-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.tmp-runtime-error {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.tmp-runtime-compat-action {
+  margin-top: 8px;
 }
 
 .config-footer {
@@ -674,6 +753,10 @@ watch(() => props.disabled, (disabled) => {
   }
 
   .collapse-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tmp-runtime-controls {
     grid-template-columns: 1fr;
   }
 }

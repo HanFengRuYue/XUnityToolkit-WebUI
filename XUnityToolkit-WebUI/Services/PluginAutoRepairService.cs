@@ -73,10 +73,51 @@ public sealed class PluginAutoRepairService(
         return results;
     }
 
+    internal PluginHealthReport AttachRepairAvailability(Game game, PluginHealthReport report)
+    {
+        if (BuildDeterministicPlan(game, report).Count > 0)
+        {
+            return report with
+            {
+                RepairAvailable = true,
+                RepairAvailabilityReason = "本地检查发现工具箱可安全修复的组件或配置问题。"
+            };
+        }
+
+        return !HasEvidenceBackedAiRepair(report)
+            ? report with { RepairAvailable = false, RepairAvailabilityReason = null }
+            : report with
+            {
+                RepairAvailable = true,
+                RepairAvailabilityReason = "本次 AI 诊断发现有明确证据且可信度足够的可修复问题。"
+            };
+    }
+
+    internal static bool HasEvidenceBackedAiRepair(PluginHealthReport report) =>
+        report.AnalysisState == PluginAnalysisState.Completed
+        && report.Analysis?.Findings.Any(static finding =>
+            finding.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error
+            && finding.Confidence is DiagnosticConfidence.Medium or DiagnosticConfidence.High
+            && finding.Evidence.Count > 0) == true;
+
+    internal bool HasDeterministicRepair(Game game, PluginHealthReport report) =>
+        BuildDeterministicPlan(game, report).Count > 0;
+
     private List<PluginRepairPlanAction> BuildCombinedPlan(
         Game game,
         PluginHealthReport report,
         IReadOnlyList<PluginRepairPlanAction> aiActions)
+    {
+        var actions = BuildDeterministicPlan(game, report);
+        actions.AddRange(aiActions);
+        return actions
+            .Where(action => !string.IsNullOrWhiteSpace(action.Tool))
+            .DistinctBy(ActionKey, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    private List<PluginRepairPlanAction> BuildDeterministicPlan(Game game, PluginHealthReport report)
     {
         var actions = new List<PluginRepairPlanAction>();
         var unhealthyIds = report.Checks
@@ -94,9 +135,11 @@ public sealed class PluginAutoRepairService(
             actions.Add(ComponentAction("xunity", "恢复 XUnity.AutoTranslator 插件与基础配置。"));
         }
 
-        if (unhealthyIds.Contains("translatorEndpoint") || unhealthyIds.Contains("translatorEndpointVersion"))
+        var endpoint = xUnityInstaller.GetTranslatorEndpointStatus(game);
+        if (unhealthyIds.Contains("translatorEndpoint")
+            || unhealthyIds.Contains("translatorEndpointVersion")
+            || endpoint.Origin == TranslatorEndpointOrigin.OfficialOutdated)
         {
-            var endpoint = xUnityInstaller.GetTranslatorEndpointStatus(game);
             if (endpoint.Origin is TranslatorEndpointOrigin.Missing or TranslatorEndpointOrigin.OfficialOutdated)
                 actions.Add(ComponentAction("translator_endpoint", "安装或升级工具箱官方 AI 翻译端点。"));
         }
@@ -106,7 +149,6 @@ public sealed class PluginAutoRepairService(
             actions.Add(ComponentAction("translator_routing", "恢复 XUnity 到当前工具箱实例的端点路由配置。"));
         }
 
-        actions.AddRange(aiActions);
         return actions
             .Where(action => !string.IsNullOrWhiteSpace(action.Tool))
             .DistinctBy(ActionKey, StringComparer.OrdinalIgnoreCase)

@@ -165,14 +165,14 @@ watch(() => props.initialReport, (value) => {
         <span class="section-icon health">
           <NIcon :size="16"><MonitorHeartOutlined /></NIcon>
         </span>
-        插件智能诊断
+        工具箱智能体
       </h2>
       <div class="header-actions">
         <NButton size="small" :loading="analyzing" :disabled="busy && !analyzing" @click="analyzeCurrentState">
           <template #icon><NIcon :size="14"><AutoFixHighOutlined /></NIcon></template>
-          {{ analyzing ? '正在诊断...' : 'AI 智能诊断' }}
+          {{ analyzing ? '正在诊断...' : '智能诊断' }}
         </NButton>
-        <NButton type="primary" size="small" :loading="repairing" :disabled="busy && !repairing" @click="repairAutomatically">
+        <NButton v-if="report?.repairAvailable" type="primary" size="small" :loading="repairing" :disabled="busy && !repairing" @click="repairAutomatically">
           <template #icon><NIcon :size="14"><BuildOutlined /></NIcon></template>
           {{ repairing ? '正在自动修复...' : 'AI 全自动修复' }}
         </NButton>
@@ -200,7 +200,7 @@ watch(() => props.initialReport, (value) => {
         正在使用云端 AI 诊断、规划受限修复，工具箱会先备份目标文件，执行后再重新诊断。请保持游戏关闭。
       </NAlert>
       <NAlert v-else-if="analyzing" type="info" :bordered="false" class="card-alert">
-        正在让云端 AI 先选择关键资料，再根据脱敏证据生成结构化报告。本地 AI 不支持此功能。
+        正在让工具箱智能体先选择关键资料，再根据所选证据生成结构化报告。
       </NAlert>
 
       <div v-if="repairResult" class="repair-result">

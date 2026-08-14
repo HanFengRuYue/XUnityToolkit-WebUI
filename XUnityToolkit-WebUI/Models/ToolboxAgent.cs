@@ -20,16 +20,11 @@ public enum PluginRepairActionState
 public record ToolboxAgentStatus(
     bool Supported,
     string? Reason,
+    string? EndpointId,
     string? EndpointName,
-    List<ToolboxAgentEndpointOption> Endpoints
-);
-
-public record ToolboxAgentEndpointOption(
-    string Id,
-    string Name,
-    LlmProvider Provider,
-    string ModelName,
-    bool IsAutomaticDefault
+    LlmProvider? Provider,
+    string? ModelName,
+    bool IsAutomatic
 );
 
 public record ToolboxAgentAttachment(
@@ -44,8 +39,7 @@ public record ToolboxAgentChatRequest(
     string Message,
     string? GameId = null,
     List<string>? AttachmentIds = null,
-    bool ConfirmPendingAction = false,
-    string? EndpointId = null
+    bool ConfirmPendingAction = false
 );
 
 public record ToolboxAgentToolExecution(
@@ -63,7 +57,8 @@ public record ToolboxAgentChatResponse(
     bool RequiresConfirmation,
     string? PendingActionDescription,
     string EndpointId,
-    string EndpointName
+    string EndpointName,
+    bool ReloadRequired = false
 );
 
 public record ToolboxAgentConversationMessage(

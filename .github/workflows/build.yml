@@ -171,53 +171,32 @@ jobs:
             New-Item -ItemType Directory -Path $d -Force | Out-Null
           }
 
-          # ── BepInEx 5 (Mono) ──
-          Write-Host "Fetching BepInEx 5..."
-          $b5releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/BepInEx/BepInEx/releases?per_page=20" -Headers $headers -TimeoutSec 30
-          }.GetNewClosure()
-          $b5rel = $b5releases |
-            Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } |
-            Select-Object -First 1
-          if (-not $b5rel) { throw "BepInEx 5 release not found" }
-          Write-Host "  BepInEx 5: $($b5rel.tag_name)"
+          # ── BepInEx 5 (Mono), pinned for reproducible plugin references ──
+          $b5Version = '5.4.23.5'
+          Write-Host "BepInEx 5: v$b5Version (pinned)"
           foreach ($arch in @('x64', 'x86')) {
-            $asset = $b5rel.assets |
-              Where-Object { $_.name -like "BepInEx_win_${arch}_*" } |
-              Select-Object -First 1
-            if ($asset) {
-              Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\bepinex5"
-            }
+            $name = "BepInEx_win_${arch}_$b5Version.zip"
+            $url = "https://github.com/BepInEx/BepInEx/releases/download/v$b5Version/$name"
+            Download-Asset -Url $url -DestDir "$BundledRoot\bepinex5" -FileName $name
           }
 
-          # ── BepInEx 6 BE (IL2CPP) ──
-          Write-Host "Fetching BepInEx 6 BE..."
-          $buildsHtml = (Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
-            Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
-          }).Content
-          if ($buildsHtml -match 'href="[^"]*?/(\d+)/BepInEx-Unity\.IL2CPP-win-x64-6\.0\.0-be\.\d+%2B([a-f0-9]+)\.zip"') {
-            $buildNo = $Matches[1]
-            $commit  = $Matches[2]
-            Write-Host "  BepInEx 6 BE: build $buildNo ($commit)"
-            foreach ($arch in @('x64', 'x86')) {
-              $url  = "https://builds.bepinex.dev/projects/bepinex_be/$buildNo/BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo%2B$commit.zip"
-              $name = "BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo+$commit.zip"
-              Download-Asset -Url $url -DestDir "$BundledRoot\bepinex6" -FileName $name
-            }
-          } else {
-            throw "Failed to parse BepInEx 6 BE build info"
+          # ── BepInEx 6 BE (IL2CPP), pinned for reproducible plugin references ──
+          $buildNo = '785'
+          $commit = '6abdba4'
+          Write-Host "BepInEx 6 BE: build $buildNo ($commit, pinned)"
+          foreach ($arch in @('x64', 'x86')) {
+            $url  = "https://builds.bepinex.dev/projects/bepinex_be/$buildNo/BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo%2B$commit.zip"
+            $name = "BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$buildNo+$commit.zip"
+            Download-Asset -Url $url -DestDir "$BundledRoot\bepinex6" -FileName $name
           }
 
-          # ── XUnity.AutoTranslator ──
-          Write-Host "Fetching XUnity.AutoTranslator..."
-          $xureleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
-            Invoke-RestMethod -Uri "https://api.github.com/repos/bbepis/XUnity.AutoTranslator/releases?per_page=5" -Headers $headers -TimeoutSec 30
-          }.GetNewClosure()
-          $xurel = $xureleases | Select-Object -First 1
-          if (-not $xurel) { throw "XUnity release not found" }
-          Write-Host "  XUnity: $($xurel.tag_name)"
-          foreach ($asset in ($xurel.assets | Where-Object { $_.name -like 'XUnity.AutoTranslator-BepInEx*' })) {
-            Download-Asset -Url $asset.browser_download_url -DestDir "$BundledRoot\xunity"
+          # ── XUnity.AutoTranslator 5.6.1 ──
+          $xunityVersion = '5.6.1'
+          Write-Host "XUnity: v$xunityVersion (pinned)"
+          foreach ($variant in @('BepInEx', 'BepInEx-IL2CPP')) {
+            $name = "XUnity.AutoTranslator-$variant-$xunityVersion.zip"
+            $url = "https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v$xunityVersion/$name"
+            Download-Asset -Url $url -DestDir "$BundledRoot\xunity" -FileName $name
           }
 
           # ── llama.cpp (pinned version) ──
@@ -422,6 +401,28 @@ jobs:
               Write-Host "::endgroup::"
           }
 
+      - name: Build RuntimeFontLoader plugins
+        shell: pwsh
+        run: |
+          & ./RuntimeFontLoader/prepare-references.ps1 -ProjectRoot $PWD.Path
+
+          dotnet build RuntimeFontLoader/Mono/RuntimeFontLoader.Mono.csproj -c Release --nologo -v quiet
+          if ($LASTEXITCODE -ne 0) { throw "RuntimeFontLoader Mono build failed" }
+          dotnet build RuntimeFontLoader/Il2Cpp/RuntimeFontLoader.Il2Cpp.csproj -c Release --nologo -v quiet
+          if ($LASTEXITCODE -ne 0) { throw "RuntimeFontLoader IL2CPP build failed" }
+
+          New-Item -ItemType Directory -Path bundled/runtime-font-loader/mono,bundled/runtime-font-loader/il2cpp -Force | Out-Null
+          Copy-Item RuntimeFontLoader/Mono/bin/Release/net35/XUnityToolkit.RuntimeFontLoader.dll bundled/runtime-font-loader/mono/ -Force
+          Copy-Item RuntimeFontLoader/Il2Cpp/bin/Release/net6.0/XUnityToolkit.RuntimeFontLoader.IL2CPP.dll bundled/runtime-font-loader/il2cpp/ -Force
+
+      - name: Run backend and runtime-font tests
+        shell: pwsh
+        run: |
+          dotnet test XUnityToolkit-WebUI.Tests/XUnityToolkit-WebUI.Tests.csproj -c Release -p:SkipFrontendBuild=true --nologo -v minimal
+          if ($LASTEXITCODE -ne 0) { throw "Backend tests failed" }
+          dotnet test RuntimeFontLoader.Tests/RuntimeFontLoader.Tests.csproj -c Release --nologo -v minimal
+          if ($LASTEXITCODE -ne 0) { throw "RuntimeFontLoader tests failed" }
+
       # ── Build Updater (AOT) ──
       # AOT publish requires its own restore phase to populate PrivateSdkAssemblies;
       # --no-restore breaks AOT. Runs as a dedicated step for clear error reporting.
@@ -491,10 +492,48 @@ jobs:
               }
             }
 
+            $requiredReleaseFiles = @(
+              'XUnityToolkit-WebUI.exe',
+              'XUnityToolkit-WebUI.dll',
+              'wwwroot/index.html',
+              'App.xbf',
+              'MainWindow.xbf',
+              'XUnityToolkit-WebUI.pri',
+              'bundled/runtime-font-loader/mono/XUnityToolkit.RuntimeFontLoader.dll',
+              'bundled/runtime-font-loader/il2cpp/XUnityToolkit.RuntimeFontLoader.IL2CPP.dll',
+              'bundled/fonts/SourceHanSansCN-VF.ttf',
+              'bundled/fonts/SourceHanSansCN-Regular.otf',
+              'bundled/fonts/font-catalog.json',
+              'bundled/fonts/licenses/SourceHanSans-OFL-1.1.txt',
+              'bundled/bepinex5/BepInEx_win_x64_5.4.23.5.zip',
+              'bundled/bepinex6/BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785+6abdba4.zip',
+              'bundled/xunity/XUnity.AutoTranslator-BepInEx-5.6.1.zip',
+              'bundled/xunity/XUnity.AutoTranslator-BepInEx-IL2CPP-5.6.1.zip'
+            )
+            foreach ($relativeFile in $requiredReleaseFiles) {
+              $requiredPath = Join-Path $outDir $relativeFile
+              if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf) -or (Get-Item -LiteralPath $requiredPath).Length -eq 0) {
+                throw "Release payload is missing or empty: $relativeFile"
+              }
+            }
+            $fontHashes = @{
+              'bundled/fonts/SourceHanSansCN-VF.ttf' = '25A01E41B5CC99893EB35A6CD2CC7611841DC19EB03CBAF7F0C1DE8210F2BA0B'
+              'bundled/fonts/SourceHanSansCN-Regular.otf' = 'E2BC8A2E7F37474B774FFF8DB758681ECE40BB6947A90D571BCE9DD60671A8E4'
+            }
+            foreach ($relativeFile in $fontHashes.Keys) {
+              $actualHash = (Get-FileHash -LiteralPath (Join-Path $outDir $relativeFile) -Algorithm SHA256).Hash
+              if (-not $actualHash.Equals($fontHashes[$relativeFile], [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Release font SHA-256 mismatch: $relativeFile ($actualHash)"
+              }
+            }
+
             # Copy Updater.exe
             $updaterExe = "Updater/bin/Release/net10.0/win-x64/publish/Updater.exe"
             if (Test-Path $updaterExe) {
               Copy-Item $updaterExe "$outDir/" -Force
+            }
+            if (-not (Test-Path -LiteralPath (Join-Path $outDir 'Updater.exe') -PathType Leaf)) {
+              throw 'Release payload is missing: Updater.exe'
             }
 
             # WinUI self-contained deployment adds native files below several resource folders.
@@ -554,7 +593,7 @@ jobs:
               $package = if ($relativePath -match '^wwwroot/') { "wwwroot" }
                          elseif ($relativePath -match '^bundled/llama/') { "bundled-llama" }
                          elseif ($relativePath -match '^bundled/fonts/') { "bundled-fonts" }
-                         elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity)/') { "bundled-plugins" }
+                         elseif ($relativePath -match '^bundled/(bepinex5|bepinex6|xunity|runtime-font-loader)/') { "bundled-plugins" }
                          elseif ($relativePath -match '^bundled/') { "bundled-misc" }
                          else { "app" }
               $manifest.files[$relativePath] = @{ hash = "sha256:$hash"; size = $_.Length; package = $package }
@@ -626,7 +665,7 @@ jobs:
             $bundledSubs = @(
               @{ Name = "bundled-llama";   Dirs = @("llama") },
               @{ Name = "bundled-fonts";   Dirs = @("fonts") },
-              @{ Name = "bundled-plugins"; Dirs = @("bepinex5", "bepinex6", "xunity") }
+              @{ Name = "bundled-plugins"; Dirs = @("bepinex5", "bepinex6", "xunity", "runtime-font-loader") }
             )
             foreach ($sub in $bundledSubs) {
               $zipPath = "Release/$($sub.Name).zip"

@@ -176,7 +176,6 @@ public sealed partial class PluginDiagnosticArtifactCollector(
                 continue;
             }
 
-            content = SanitizeContent(content, gamePath);
             var artifactBudget = artifact.Required && requiredRemaining > 0
                 ? Math.Max(500, remaining / requiredRemaining)
                 : remaining;
@@ -548,7 +547,7 @@ public sealed partial class PluginDiagnosticArtifactCollector(
                     Path.GetFileName(fullPath),
                     "config",
                     relative,
-                    "第三方 BepInEx 插件配置；仅在 AI 明确选择后读取并脱敏",
+                    "第三方 BepInEx 插件配置；仅在 AI 明确选择后读取原文",
                     info.Length,
                     info.LastWriteTimeUtc,
                     fullPath,

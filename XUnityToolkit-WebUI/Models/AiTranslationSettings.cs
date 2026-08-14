@@ -61,6 +61,12 @@ public sealed class AiTranslationSettings
 
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
+    /// <summary>
+    /// Cloud endpoint used by every Toolbox Agent capability. Null selects the highest-priority
+    /// available cloud endpoint. An explicit endpoint never silently falls back when unavailable.
+    /// </summary>
+    public string? AgentEndpointId { get; set; }
+
     public bool TermAuditEnabled { get; set; } = true;
     public bool NaturalTranslationMode { get; set; } = true;
 

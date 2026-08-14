@@ -459,6 +459,38 @@ public sealed class PluginHealthCheckServiceTests
             PluginDiagnosticAgentService.DetermineOverall(objectiveError, includeAnalysis: true));
     }
 
+    [Fact]
+    public void RepairAvailability_RequiresFreshCompletedEvidenceBackedMediumOrHighFinding()
+    {
+        var evidence = new PluginDiagnosticEvidence(
+            "log", "日志", "BepInEx/LogOutput.log", 1, 1, "warning");
+        var low = new PluginDiagnosticFinding(
+            "low", DiagnosticSeverity.Warning, DiagnosticConfidence.Low,
+            "加载", "低置信度", "说明", [], [evidence]);
+        var highWithoutEvidence = new PluginDiagnosticFinding(
+            "empty", DiagnosticSeverity.Error, DiagnosticConfidence.High,
+            "加载", "无证据", "说明", [], []);
+        var medium = new PluginDiagnosticFinding(
+            "medium", DiagnosticSeverity.Warning, DiagnosticConfidence.Medium,
+            "加载", "可修复", "说明", [], [evidence]);
+
+        var report = BaseReport(HealthStatus.Healthy) with
+        {
+            AnalysisState = PluginAnalysisState.Completed,
+            Analysis = new PluginDiagnosticAnalysis(
+                "测试", [low, highWithoutEvidence], [], "测试端点", DateTime.UtcNow)
+        };
+        Assert.False(PluginAutoRepairService.HasEvidenceBackedAiRepair(report));
+
+        report = report with
+        {
+            Analysis = report.Analysis with { Findings = [medium] }
+        };
+        Assert.True(PluginAutoRepairService.HasEvidenceBackedAiRepair(report));
+        Assert.False(PluginAutoRepairService.HasEvidenceBackedAiRepair(
+            report with { AnalysisState = PluginAnalysisState.Stale }));
+    }
+
     private static PluginHealthReport BaseReport(HealthStatus objectiveOverall) => new(
         HealthStatus.Unknown,
         objectiveOverall,

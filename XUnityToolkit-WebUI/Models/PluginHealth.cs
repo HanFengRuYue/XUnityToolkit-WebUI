@@ -69,5 +69,7 @@ public record PluginHealthReport(
     DateTime? LogLastModified,
     bool GameNeverRun,
     bool FreshRunVerified,
-    DateTime CheckedAt
+    DateTime CheckedAt,
+    bool RepairAvailable = false,
+    string? RepairAvailabilityReason = null
 );

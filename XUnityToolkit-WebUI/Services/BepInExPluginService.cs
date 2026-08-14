@@ -19,6 +19,7 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         "XUnity.Common",
         "XUnity.ResourceRedirector",
         "LLMTranslate",
+        "XUnityToolkit.RuntimeFontLoader",
     };
 
     private static readonly Lazy<string[]> RuntimeDlls = new(() =>

@@ -75,7 +75,12 @@
 
   <!-- Copy TMP fonts to output directory during build -->
   <ItemGroup Condition="Exists('..\bundled\fonts')">
-    <Content Include="..\bundled\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\fonts\%(Filename)%(Extension)" />
+    <Content Include="..\bundled\fonts\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\fonts\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- RuntimeFontLoader is built from pinned BepInEx archives by build.ps1 / CI. -->
+  <ItemGroup Condition="Exists('..\bundled\runtime-font-loader')">
+    <Content Include="..\bundled\runtime-font-loader\**" CopyToOutputDirectory="PreserveNewest" Link="bundled\runtime-font-loader\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- Copy script tag presets to output directory during build -->

@@ -43,6 +43,9 @@ docs/*
 # Claude Code
 .claude/
 
+# Codex remote attachments
+.codex-remote-attachments/
+
 # OS
 Thumbs.db
 .DS_Store

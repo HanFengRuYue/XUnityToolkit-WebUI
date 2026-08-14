@@ -23,7 +23,10 @@ public sealed class UpdateManifestFileSetTests : IDisposable
         WriteFile("bundled/llama/version.txt", "b10375");
         WriteFile("bundled/llama/llama-b10375-bin-win-cpu-x64.zip", "cpu-zip");
         WriteFile("bundled/fonts/SourceHanSans_U2018", "slice");
-        WriteFile("bundled/fonts/SourceHanSansCN-Regular.ttf", "ttf");
+        WriteFile("bundled/fonts/SourceHanSansCN-VF.ttf", "ttf");
+        WriteFile("bundled/fonts/SourceHanSansCN-Regular.otf", "otf");
+        WriteFile("bundled/fonts/licenses/SourceHanSans-OFL-1.1.txt", "ofl");
+        WriteFile("bundled/runtime-font-loader/mono/XUnityToolkit.RuntimeFontLoader.dll", "plugin");
         WriteFile("wwwroot/assets/index.js.gz", "gzipped");
         WriteFile("wwwroot/assets/index.js.br", "brotli");
         WriteFile("Microsoft.Web.WebView2.Core.xml", "<xml />");
@@ -32,7 +35,10 @@ public sealed class UpdateManifestFileSetTests : IDisposable
             ("bundled/llama/version.txt", "bundled-llama"),
             ("bundled/llama/llama-b10375-bin-win-cpu-x64.zip", "bundled-llama"),
             ("bundled/fonts/SourceHanSans_U2018", "bundled-fonts"),
-            ("bundled/fonts/SourceHanSansCN-Regular.ttf", "bundled-fonts"),
+            ("bundled/fonts/SourceHanSansCN-VF.ttf", "bundled-fonts"),
+            ("bundled/fonts/SourceHanSansCN-Regular.otf", "bundled-fonts"),
+            ("bundled/fonts/licenses/SourceHanSans-OFL-1.1.txt", "bundled-fonts"),
+            ("bundled/runtime-font-loader/mono/XUnityToolkit.RuntimeFontLoader.dll", "bundled-plugins"),
             ("wwwroot/assets/index.js.gz", "wwwroot"),
             ("wwwroot/assets/index.js.br", "wwwroot"),
             ("Microsoft.Web.WebView2.Core.xml", "app"));

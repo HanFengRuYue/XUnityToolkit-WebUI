@@ -17,6 +17,10 @@ public static class InstallEndpoints
             InstallRequest? request,
             InstallOrchestrator orchestrator) =>
         {
+            var tmpFontMode = request?.Options?.TmpFontApplicationMode?.Trim().ToLowerInvariant();
+            if (tmpFontMode is not null and not ("fallback" or "override"))
+                return Results.BadRequest(ApiResult<InstallationStatus>.Fail(
+                    "TmpFontApplicationMode 必须为 fallback 或 override。"));
             try
             {
                 var status = await orchestrator.StartInstallAsync(id, request?.Config, request?.Options);

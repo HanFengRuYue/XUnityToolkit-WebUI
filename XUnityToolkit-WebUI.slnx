@@ -2,5 +2,6 @@
   <Project Path="XUnityToolkit-WebUI/XUnityToolkit-WebUI.csproj" />
   <Project Path="XUnityToolkit-WebUI.Tests/XUnityToolkit-WebUI.Tests.csproj" />
   <Project Path="TranslatorEndpoint/TranslatorEndpoint.csproj" />
+  <Project Path="RuntimeFontLoader.Tests/RuntimeFontLoader.Tests.csproj" />
   <Project Path="Updater/Updater.csproj" />
 </Solution>
