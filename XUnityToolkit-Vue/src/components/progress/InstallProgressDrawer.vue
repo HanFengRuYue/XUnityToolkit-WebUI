@@ -22,7 +22,6 @@ const installSteps: { key: InstallStep; label: string }[] = [
   { key: 'InstallingAiTranslation', label: '部署 AI 翻译引擎' },
   { key: 'GeneratingConfig', label: '生成配置' },
   { key: 'ApplyingConfig', label: '应用最佳配置' },
-  { key: 'ExtractingAssets', label: '提取游戏资产' },
   { key: 'VerifyingHealth', label: '验证插件状态' },
 ]
 

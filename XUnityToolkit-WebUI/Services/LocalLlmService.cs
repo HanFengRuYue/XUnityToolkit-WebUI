@@ -57,7 +57,7 @@ public sealed class LocalLlmService(
 
     // ── llama.cpp binary constants ──
 
-    public const string LlamaVersion = "b8756";
+    public const string LlamaVersion = "b10375";
 
     // ── Settings persistence ──
 
@@ -219,7 +219,7 @@ public sealed class LocalLlmService(
             catch { /* ignore read errors */ }
         }
 
-        // Fallback: parse version from ZIP filename (e.g., llama-b8756-bin-win-cuda-13.1-x64.zip)
+        // Fallback: parse version from ZIP filename (e.g., llama-b10375-bin-win-cuda-13.3-x64.zip)
         try
         {
             var llamaDir = bundledPaths.LlamaDirectory;
@@ -773,6 +773,8 @@ public sealed class LocalLlmService(
                 existing.ApiBaseUrl = runtimeEndpoint.ApiBaseUrl;
                 existing.ApiKey = runtimeEndpoint.ApiKey;
                 existing.ModelName = runtimeEndpoint.ModelName;
+                existing.ApiFormat = runtimeEndpoint.ApiFormat;
+                existing.ReasoningEffort = runtimeEndpoint.ReasoningEffort;
                 existing.Priority = runtimeEndpoint.Priority;
                 existing.Enabled = runtimeEndpoint.Enabled;
             }
@@ -811,6 +813,8 @@ public sealed class LocalLlmService(
             ApiBaseUrl = $"http://127.0.0.1:{_internalPort}/v1",
             ApiKey = "local",
             ModelName = modelName,
+            ApiFormat = LlmApiFormat.ChatCompletions,
+            ReasoningEffort = LlmReasoningEffort.Default,
             Priority = 8,
             Enabled = true
         };

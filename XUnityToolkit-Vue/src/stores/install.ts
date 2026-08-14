@@ -94,7 +94,6 @@ export const useInstallStore = defineStore('install', () => {
     if (!options.autoDeployAiEndpoint) steps.add('InstallingAiTranslation')
     if (!options.autoGenerateConfig) steps.add('GeneratingConfig')
     if (!options.autoApplyOptimalConfig) steps.add('ApplyingConfig')
-    if (!options.autoExtractAssets) steps.add('ExtractingAssets')
     if (!options.autoVerifyHealth) steps.add('VerifyingHealth')
     return steps
   }

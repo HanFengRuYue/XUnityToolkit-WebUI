@@ -1,10 +1,12 @@
 # build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload] [-Edition full|no-llama|lite]
+# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-Edition full|no-llama|lite] [-ReleaseRoot <Release 子目录>]
 
 param(
     [switch]$SkipDownload,
+    [switch]$SkipSmoke,
     [ValidateSet('full', 'no-llama', 'lite')]
-    [string]$Edition = 'full'
+    [string]$Edition = 'full',
+    [string]$ReleaseRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,17 +60,35 @@ $ProgressPreference = 'SilentlyContinue'
 $ProjectRoot = $PSScriptRoot
 $ProjectFile = Join-Path $ProjectRoot 'XUnityToolkit-WebUI\XUnityToolkit-WebUI.csproj'
 $FrontendDir = Join-Path $ProjectRoot 'XUnityToolkit-Vue'
-$ReleaseRoot = Join-Path $ProjectRoot 'Release'
+$defaultReleaseRoot = [System.IO.Path]::GetFullPath((Join-Path $ProjectRoot 'Release'))
+if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
+    $ReleaseRoot = $defaultReleaseRoot
+} else {
+    $requestedReleaseRoot = if ([System.IO.Path]::IsPathRooted($ReleaseRoot)) {
+        $ReleaseRoot
+    } else {
+        Join-Path $ProjectRoot $ReleaseRoot
+    }
+    $ReleaseRoot = [System.IO.Path]::GetFullPath($requestedReleaseRoot)
+    $allowedPrefix = $defaultReleaseRoot.TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $ReleaseRoot.Equals($defaultReleaseRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
+        -not $ReleaseRoot.StartsWith($allowedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "ReleaseRoot 必须是 $defaultReleaseRoot 或其子目录。"
+    }
+}
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
 $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
+$EndpointDll = Join-Path $ProjectRoot 'TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll'
 $UpdaterProject = Join-Path $ProjectRoot 'Updater\Updater.csproj'
 $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
 $hasUpdater = Test-Path $UpdaterProject
 
-# Generate version: 4.9.{YYYYMMDDHHmm}
-$BuildVersion = "4.9.$(Get-Date -Format 'yyyyMMddHHmm')"
+# Generate version: 5.0.{YYYYMMDDHHmm}
+$BuildVersion = "5.0.$(Get-Date -Format 'yyyyMMddHHmm')"
 
 # ── GitHub repo owners ──
 $BepInEx5Owner = "BepInEx"
@@ -76,7 +96,7 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 })
+$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 }) + $(if (-not $SkipSmoke) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -285,7 +305,7 @@ if (-not $SkipDownload) {
     if ($Edition -ne 'full') {
         Write-Host "  [skip] llama.cpp download (edition: $Edition)" -ForegroundColor DarkGray
     } else {
-    $llamaTag = "b8756"
+    $llamaTag = "b10375"
     Write-Host "  Fetching llama.cpp $llamaTag..." -ForegroundColor DarkGray
     $llamaRelease = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
         Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $GitHubHeaders -TimeoutSec 30
@@ -294,10 +314,10 @@ if (-not $SkipDownload) {
 
     $llamaDir = Join-Path $BundledRoot 'llama'
 
-    # Match assets by pattern (prefer CUDA 13.1 for broader compatibility)
+    # Match assets by pattern (current CUDA 13 runtime published for Windows x64)
     $llamaPatterns = @(
-        @{ Pattern = "llama-*-bin-win-cuda-13.1-x64.zip"; Label = "CUDA 13.1" },
-        @{ Pattern = "cudart-llama-bin-win-cuda-13.1-x64.zip"; Label = "CUDA Runtime" },
+        @{ Pattern = "llama-*-bin-win-cuda-13.3-x64.zip"; Label = "CUDA 13.3" },
+        @{ Pattern = "cudart-llama-bin-win-cuda-13.3-x64.zip"; Label = "CUDA Runtime" },
         @{ Pattern = "llama-*-bin-win-vulkan-x64.zip"; Label = "Vulkan" },
         @{ Pattern = "llama-*-bin-win-cpu-x64.zip"; Label = "CPU" }
     )
@@ -357,8 +377,8 @@ Write-Host ""
 Write-Host "[$currentStep/$stepCount] Building frontend..." -ForegroundColor Yellow
 Push-Location $FrontendDir
 try {
-    & npm install --silent 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+    & npm ci --silent 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
 
     & npm run build
     if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
@@ -368,6 +388,7 @@ try {
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
 # ── Step: Build TranslatorEndpoint (LLMTranslate.dll) ──
+$endpointHashBeforePublish = $null
 if ($hasEndpoint) {
     $currentStep++
     Write-Host ""
@@ -381,10 +402,14 @@ if ($hasEndpoint) {
     if ($hasLibs) {
         & dotnet build $EndpointProject -c Release --nologo -v quiet
         if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
+        if (-not (Test-Path -LiteralPath $EndpointDll)) {
+            throw "TranslatorEndpoint build did not produce $EndpointDll"
+        }
+        $endpointHashBeforePublish = (Get-FileHash -LiteralPath $EndpointDll -Algorithm SHA256).Hash
+        Write-Host "  Stable endpoint SHA-256: $endpointHashBeforePublish" -ForegroundColor DarkGray
         Write-Host "  LLMTranslate.dll build complete." -ForegroundColor Green
     } else {
-        Write-Host "  Skipped: XUnity reference DLLs not found in TranslatorEndpoint/libs/" -ForegroundColor DarkYellow
-        Write-Host "  (LLMTranslate.dll will not be embedded)" -ForegroundColor DarkGray
+        throw "XUnity reference DLLs not found in TranslatorEndpoint/libs; release build cannot embed LLMTranslate.dll"
     }
 }
 
@@ -407,11 +432,22 @@ Write-Host "[$currentStep/$stepCount] Preparing Release folder..." -ForegroundCo
 
 # Stop processes that may lock files in Release folder
 $processesToStop = @('XUnityToolkit-WebUI', 'llama-server')
+$releaseRootPrefix = [System.IO.Path]::GetFullPath($ReleaseRoot).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 foreach ($procName in $processesToStop) {
-    $procs = Get-Process -Name $procName -ErrorAction SilentlyContinue
-    if ($procs) {
-        Write-Host "  Stopping $procName..." -ForegroundColor DarkYellow
-        $procs | Stop-Process -Force
+    $releaseProcs = @(Get-Process -Name $procName -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and [System.IO.Path]::GetFullPath($_.Path).StartsWith(
+                $releaseRootPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+    if ($releaseProcs.Count -gt 0) {
+        Write-Host "  Stopping $procName instances from Release..." -ForegroundColor DarkYellow
+        $releaseProcs | Stop-Process -Force
         Start-Sleep -Milliseconds 500
     }
 }
@@ -440,6 +476,14 @@ Write-Host "[$currentStep/$stepCount] Publishing $rid ($Edition)..." -Foreground
     -o $OutputDir
 
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
+
+if ($hasEndpoint -and $endpointHashBeforePublish) {
+    $endpointHashAfterPublish = (Get-FileHash -LiteralPath $EndpointDll -Algorithm SHA256).Hash
+    if (-not $endpointHashAfterPublish.Equals($endpointHashBeforePublish, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Main publish changed LLMTranslate.dll SHA-256 ($endpointHashBeforePublish -> $endpointHashAfterPublish). App build properties must not leak into TranslatorEndpoint."
+    }
+    Write-Host "  Endpoint SHA-256 remained stable after main publish." -ForegroundColor Green
+}
 
 # Clean up unnecessary files
 @('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {
@@ -475,9 +519,153 @@ if (Test-Path $bundledSrc) {
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
 
+# Record every application-component file, including WinUI self-contained native resources.
+& (Join-Path $ProjectRoot 'New-AppFileInventory.ps1') -ReleaseDir $OutputDir
+if ($LASTEXITCODE -ne 0) { throw "Generating app file inventory failed" }
+
 $exeFile = Get-Item (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe')
 $exeSize = [math]::Round($exeFile.Length / 1MB, 1)
 Write-Host "  $rid done (exe: $exeSize MB)" -ForegroundColor Green
+
+if (-not $SkipSmoke) {
+    $currentStep++
+    Write-Host ""
+    Write-Host "[$currentStep/$stepCount] Running release smoke check..." -ForegroundColor Yellow
+
+    function Invoke-ReleaseSmokeCheck {
+        param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][bool]$OccupyPreferredPort
+        )
+
+        $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "xunitytoolkit-smoke-$([Guid]::NewGuid().ToString('N'))"
+        $smokeStdout = Join-Path $smokeRoot 'stdout.log'
+        $smokeStderr = Join-Path $smokeRoot 'stderr.log'
+        $discoveryFile = Join-Path $smokeRoot 'runtime\toolbox-endpoint-v1.json'
+        $portHolder = $null
+        $proc = $null
+        $httpClient = $null
+        try {
+            New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
+
+            $portHolder = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $portHolder.Server.ExclusiveAddressUse = $true
+            $portHolder.Start()
+            $preferredPort = ([System.Net.IPEndPoint]$portHolder.LocalEndpoint).Port
+            if (-not $OccupyPreferredPort) {
+                $portHolder.Stop()
+                $portHolder = $null
+            }
+
+            @{
+                aiTranslation = @{ port = $preferredPort }
+            } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $smokeRoot 'settings.json') -Encoding utf8
+
+            $env:AppData__Root = $smokeRoot
+            $proc = Start-Process -FilePath (Join-Path $OutputDir 'XUnityToolkit-WebUI.exe') `
+                -ArgumentList '--headless-smoke' `
+                -WorkingDirectory $OutputDir -PassThru -WindowStyle Hidden `
+                -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr
+
+            $handler = [System.Net.Http.HttpClientHandler]::new()
+            $handler.UseProxy = $false
+            $httpClient = [System.Net.Http.HttpClient]::new($handler)
+            $httpClient.Timeout = [TimeSpan]::FromSeconds(3)
+
+            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            $discovery = $null
+            $lastSmokeError = $null
+            do {
+                Start-Sleep -Milliseconds 500
+                $proc.Refresh()
+                if ($proc.HasExited) {
+                    $lastSmokeError = "process exited with code $($proc.ExitCode)"
+                    break
+                }
+
+                try {
+                    if (-not (Test-Path -LiteralPath $discoveryFile)) {
+                        throw 'runtime discovery file has not been published yet'
+                    }
+                    $discovery = Get-Content -LiteralPath $discoveryFile -Raw | ConvertFrom-Json
+                    if ($discovery.product -ne 'XUnityToolkit' -or $discovery.protocolVersion -ne 1) {
+                        throw 'runtime discovery product or protocol validation failed'
+                    }
+                    if ($discovery.baseUrl -notmatch '^http://127\.0\.0\.1:\d+$') {
+                        throw "invalid runtime base URL: $($discovery.baseUrl)"
+                    }
+
+                    $indexResponse = $httpClient.GetAsync("$($discovery.baseUrl)/").GetAwaiter().GetResult()
+                    $versionResponse = $httpClient.GetAsync("$($discovery.baseUrl)/api/settings/version").GetAwaiter().GetResult()
+                    $pingJson = $httpClient.GetStringAsync("$($discovery.baseUrl)/api/translate/ping").GetAwaiter().GetResult() | ConvertFrom-Json
+                    try {
+                        if (-not $indexResponse.IsSuccessStatusCode -or -not $versionResponse.IsSuccessStatusCode) {
+                            throw "HTTP status check failed: index=$($indexResponse.StatusCode), version=$($versionResponse.StatusCode)"
+                        }
+                        if ($pingJson.product -ne 'XUnityToolkit' -or $pingJson.instanceId -ne $discovery.instanceId) {
+                            throw 'ping response does not belong to the discovered instance'
+                        }
+                    } finally {
+                        $indexResponse.Dispose()
+                        $versionResponse.Dispose()
+                    }
+
+                    if ([bool]$discovery.usedFallback -ne $OccupyPreferredPort) {
+                        throw "fallback state mismatch: expected=$OccupyPreferredPort actual=$($discovery.usedFallback)"
+                    }
+                    if ($OccupyPreferredPort -and $discovery.actualPort -eq $preferredPort) {
+                        throw 'occupied preferred port was not replaced with a fallback port'
+                    }
+                    if (-not $OccupyPreferredPort -and $discovery.actualPort -ne $preferredPort) {
+                        throw 'available preferred port was unexpectedly replaced'
+                    }
+
+                    $lastSmokeError = $null
+                } catch {
+                    $discovery = $null
+                    $lastSmokeError = $_.Exception.Message
+                }
+            } while (-not $discovery -and [DateTime]::UtcNow -lt $deadline)
+
+            if (-not $discovery) {
+                $processState = if ($proc.HasExited) { "exited ($($proc.ExitCode))" } else { 'still running' }
+                $stdoutTail = if (Test-Path $smokeStdout) { (Get-Content $smokeStdout -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+                $stderrTail = if (Test-Path $smokeStderr) { (Get-Content $smokeStderr -Tail 20) -join [Environment]::NewLine } else { '<empty>' }
+                throw "Release smoke '$Name' failed. Process: $processState. Last error: $lastSmokeError`nstdout:`n$stdoutTail`nstderr:`n$stderrTail"
+            }
+
+            Write-Host "  [$Name] $($discovery.baseUrl) (preferred $preferredPort, fallback $($discovery.usedFallback))" -ForegroundColor Green
+        } finally {
+            if ($httpClient) { $httpClient.Dispose() }
+            if ($proc -and -not $proc.HasExited) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Wait-Process -Id $proc.Id -Timeout 5 -ErrorAction SilentlyContinue
+            }
+            if ($portHolder) { $portHolder.Stop() }
+            Remove-Item Env:AppData__Root -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $smokeRoot) {
+                $cleanupError = $null
+                for ($cleanupAttempt = 1; $cleanupAttempt -le 5; $cleanupAttempt++) {
+                    try {
+                        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction Stop
+                        $cleanupError = $null
+                        break
+                    } catch {
+                        $cleanupError = $_.Exception.Message
+                        Start-Sleep -Milliseconds 300
+                    }
+                }
+                if (Test-Path -LiteralPath $smokeRoot) {
+                    Write-Host "  [warn] Smoke temp cleanup deferred: $cleanupError" -ForegroundColor DarkYellow
+                }
+            }
+        }
+    }
+
+    Invoke-ReleaseSmokeCheck -Name 'preferred-port' -OccupyPreferredPort $false
+    Invoke-ReleaseSmokeCheck -Name 'occupied-port-fallback' -OccupyPreferredPort $true
+    Write-Host "  Release smoke checks passed." -ForegroundColor Green
+}
 
 # ── Summary ──
 Write-Host ""

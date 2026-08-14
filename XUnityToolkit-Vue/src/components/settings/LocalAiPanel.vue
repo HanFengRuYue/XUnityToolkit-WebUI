@@ -435,17 +435,6 @@ onBeforeUnmount(() => {
       <h3 class="subsection-title">翻译设置</h3>
       <div class="settings-grid">
         <div class="form-row">
-          <label class="form-label">工具箱端口</label>
-          <NInputNumber
-            :value="modelValue.port"
-            @update:value="(v: number | null) => updateAiSettings({ port: v ?? 51821 })"
-            :min="1024"
-            :max="65535"
-            style="width: 140px"
-          />
-          <span class="form-hint">修改后需重启工具箱生效</span>
-        </div>
-        <div class="form-row">
           <label class="form-label">温度（{{ modelValue.temperature }}）</label>
           <NSlider
             :value="modelValue.temperature"

@@ -51,14 +51,14 @@ jobs:
       build_version: ${{ steps.ver.outputs.build_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Compute version
         id: ver
         shell: pwsh
         run: |
           $v = '${{ inputs.build_version }}'
-          if (-not $v) { $v = "4.9.$(Get-Date -Format 'yyyyMMddHHmm')" }
+          if (-not $v) { $v = "5.0.$(Get-Date -Format 'yyyyMMddHHmm')" }
           $prefix = $v.Split('.')[0..1] -join '.'
           "build_version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "version_prefix=$prefix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -67,22 +67,22 @@ jobs:
       # ── SDK setup ──
 
       - name: Setup .NET 10 preview
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
           dotnet-quality: 'preview'
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: XUnityToolkit-Vue/package-lock.json
 
       # ── Caching ──
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -221,15 +221,15 @@ jobs:
           }
 
           # ── llama.cpp (pinned version) ──
-          $llamaTag = "b8756"
+          $llamaTag = "b10375"
           Write-Host "Fetching llama.cpp $llamaTag..."
           $llamarel = Invoke-WithRetry -Operation "Fetch llama.cpp $llamaTag" -ScriptBlock {
             Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$llamaTag" -Headers $headers -TimeoutSec 30
           }.GetNewClosure()
           Write-Host "  llama.cpp: $($llamarel.tag_name)"
           $llamaPatterns = @(
-            "llama-*-bin-win-cuda-13.1-x64.zip",
-            "cudart-llama-bin-win-cuda-13.1-x64.zip",
+            "llama-*-bin-win-cuda-13.3-x64.zip",
+            "cudart-llama-bin-win-cuda-13.3-x64.zip",
             "llama-*-bin-win-vulkan-x64.zip",
             "llama-*-bin-win-cpu-x64.zip"
           )
@@ -377,7 +377,7 @@ jobs:
                   if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed (exit code $LASTEXITCODE)" }
               } -ArgumentList $workDir
           } else {
-              Write-Host "::warning::XUnity reference DLLs missing - LLMTranslate.dll will not be embedded."
+              throw "XUnity reference DLLs missing - LLMTranslate.dll cannot be embedded."
           }
 
           # Build frontend in foreground (longest task, ~34s)
@@ -411,6 +411,13 @@ jobs:
                   throw "TranslatorEndpoint build failed: $err"
               }
               Remove-Job $endpointJob -Force
+              $endpointDll = "TranslatorEndpoint/bin/Release/net35/LLMTranslate.dll"
+              if (-not (Test-Path -LiteralPath $endpointDll)) {
+                  throw "TranslatorEndpoint build did not produce $endpointDll"
+              }
+              $endpointHash = (Get-FileHash -LiteralPath $endpointDll -Algorithm SHA256).Hash
+              "TRANSLATOR_ENDPOINT_BUILD_HASH=$endpointHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "Stable endpoint SHA-256: $endpointHash"
               Write-Host "TranslatorEndpoint build complete."
               Write-Host "::endgroup::"
           }
@@ -461,6 +468,13 @@ jobs:
             & dotnet @publishArgs
             if ($LASTEXITCODE -ne 0) { throw "Publish failed for $($ed.Name)" }
 
+            $endpointDll = "TranslatorEndpoint/bin/Release/net35/LLMTranslate.dll"
+            $endpointHashAfterPublish = (Get-FileHash -LiteralPath $endpointDll -Algorithm SHA256).Hash
+            if (-not $endpointHashAfterPublish.Equals($env:TRANSLATOR_ENDPOINT_BUILD_HASH, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Main publish changed LLMTranslate.dll SHA-256 ($env:TRANSLATOR_ENDPOINT_BUILD_HASH -> $endpointHashAfterPublish). App build properties must not leak into TranslatorEndpoint."
+            }
+            Write-Host "Endpoint SHA-256 remained stable after $($ed.Name) publish."
+
             # Cleanup unnecessary files
             Get-ChildItem $outDir -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |
               Remove-Item -Force -ErrorAction SilentlyContinue
@@ -482,6 +496,10 @@ jobs:
             if (Test-Path $updaterExe) {
               Copy-Item $updaterExe "$outDir/" -Force
             }
+
+            # WinUI self-contained deployment adds native files below several resource folders.
+            # Generate the authoritative application-component inventory after all copies finish.
+            & "./New-AppFileInventory.ps1" -ReleaseDir $outDir
 
             $exeFile = Get-Item (Join-Path $outDir "XUnityToolkit-WebUI.exe")
             $sizeMB = [math]::Round($exeFile.Length / 1MB, 1)
@@ -527,10 +545,8 @@ jobs:
             $releaseDirAbs = (Resolve-Path $releaseDir).Path
 
             $manifest = @{ version = $version; rid = $ed.ManifestRid; files = @{} }
-            # Keep manifest coverage aligned with the desktop updater's managed path roots.
-            # The client now compares all files under root/wwwroot/bundled/runtimes by path,
-            # not by extension whitelist, so entries like version.txt, .xml, .gz and .br
-            # must remain in the manifest when they live under those managed roots.
+            # Cover every releasable file. Local deletion safety is governed separately by
+            # app-file-inventory-v1.json, so WinUI native resource folders are not omitted.
             Get-ChildItem -Path $releaseDir -Recurse -File | ForEach-Object {
               $relativePath = $_.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
               if ($relativePath -match '^data/' -or $relativePath -match '^appsettings') { return }
@@ -546,15 +562,39 @@ jobs:
             $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path "Release/manifest-$($ed.ManifestRid).json" -Encoding utf8
             Write-Host "Generated manifest-$($ed.ManifestRid).json"
 
-            # Per-edition app ZIP (root-level files, exclude appsettings*)
-            $appFiles = Get-ChildItem -Path $releaseDir -File | Where-Object { $_.Name -notmatch '^appsettings' }
+            # Per-edition app ZIP is driven solely by the generated inventory. This captures
+            # root files, runtimes/, and all WinUI self-contained native resource directories.
+            $inventoryPath = Join-Path $releaseDir "app-file-inventory-v1.json"
+            if (-not (Test-Path -LiteralPath $inventoryPath)) {
+              throw "Missing app file inventory for $($ed.Name)"
+            }
+            $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+            if ($inventory.protocolVersion -ne 1 -or -not $inventory.files) {
+              throw "Invalid app file inventory for $($ed.Name)"
+            }
+            $releasePrefix = $releaseDirAbs.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+            $appFiles = @($inventory.files | ForEach-Object {
+              $relativePath = [string]$_
+              if ([string]::IsNullOrWhiteSpace($relativePath) -or
+                  [System.IO.Path]::IsPathRooted($relativePath) -or
+                  $relativePath.Replace('\', '/').Split('/') -contains '..') {
+                throw "Unsafe app inventory path: $relativePath"
+              }
+              $fullPath = [System.IO.Path]::GetFullPath((Join-Path $releaseDir $relativePath))
+              if (-not $fullPath.StartsWith($releasePrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+                  -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+                throw "Missing or escaped app inventory file: $relativePath"
+              }
+              Get-Item -LiteralPath $fullPath
+            })
             if ($appFiles) {
               $appZip = "Release/app-$($ed.ManifestRid).zip"
               if (Test-Path $appZip) { Remove-Item $appZip }
               $zip = [System.IO.Compression.ZipFile]::Open($appZip, 'Create')
               try {
                 foreach ($f in $appFiles) {
-                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $f.Name) | Out-Null
+                  $entry = $f.FullName.Substring($releaseDirAbs.Length + 1).Replace('\', '/')
+                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $f.FullName, $entry) | Out-Null
                 }
               } finally { $zip.Dispose() }
               Write-Host "Created app-$($ed.ManifestRid).zip"
@@ -755,7 +795,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

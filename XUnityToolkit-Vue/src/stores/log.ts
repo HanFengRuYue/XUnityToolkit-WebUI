@@ -17,6 +17,8 @@ export const useLogStore = defineStore('log', () => {
   })
 
   let connection: signalR.HubConnection | null = null
+  let pendingEntries: LogEntry[] = []
+  let flushTimer: ReturnType<typeof setTimeout> | null = null
 
   function resetLevelCounts() {
     levelCounts.value = {
@@ -42,8 +44,16 @@ export const useLogStore = defineStore('log', () => {
   }
 
   function appendEntry(entry: LogEntry) {
-    entries.value.push(entry)
-    incrementLevel(entry.level, 1)
+    appendEntries([entry])
+  }
+
+  function appendEntries(batch: LogEntry[]) {
+    if (batch.length === 0) return
+
+    entries.value.push(...batch)
+    for (const entry of batch) {
+      incrementLevel(entry.level, 1)
+    }
 
     const overflow = entries.value.length - MAX_ENTRIES
     if (overflow > 0) {
@@ -52,6 +62,18 @@ export const useLogStore = defineStore('log', () => {
         incrementLevel(item.level, -1)
       }
     }
+  }
+
+  function queueEntry(entry: LogEntry) {
+    pendingEntries.push(entry)
+    if (flushTimer) return
+
+    flushTimer = setTimeout(() => {
+      const batch = pendingEntries
+      pendingEntries = []
+      flushTimer = null
+      appendEntries(batch)
+    }, 100)
   }
 
   async function connect() {
@@ -63,7 +85,7 @@ export const useLogStore = defineStore('log', () => {
       .build()
 
     connection.on('logEntry', (entry: LogEntry) => {
-      appendEntry(entry)
+      queueEntry(entry)
     })
 
     connection.onreconnected(async () => {
@@ -84,6 +106,12 @@ export const useLogStore = defineStore('log', () => {
       await connection.stop()
       connection = null
     }
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    appendEntries(pendingEntries)
+    pendingEntries = []
   }
 
   async function fetchRecent() {

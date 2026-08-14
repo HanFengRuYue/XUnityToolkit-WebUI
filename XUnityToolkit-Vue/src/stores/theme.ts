@@ -47,6 +47,13 @@ function darkenColor(hex: string, amount: number): string {
   return rgbToHex(r * (1 - amount), g * (1 - amount), b * (1 - amount))
 }
 
+function notifyDesktopHostTheme(theme: 'dark' | 'light') {
+  const host = window.__XUNITY_DESKTOP_HOST__
+  if (host?.protocolVersion !== 1 || host.shell !== 'winui3' || !host.nativeTitleBar) return
+
+  window.chrome?.webview?.postMessage({ type: 'themeChanged', theme })
+}
+
 /** Generate Naive UI primary color variants from a single accent hex */
 export function getAccentVariants(hex: string, mode: ThemeMode) {
   if (mode === 'dark') {
@@ -129,6 +136,7 @@ export const useThemeStore = defineStore('theme', () => {
     resolvedTheme.value = resolved
     applyTheme(resolved)
     applyAccentColor(accentColor.value, resolved)
+    notifyDesktopHostTheme(resolved)
   }
 
   function setTheme(theme: ThemeMode) {

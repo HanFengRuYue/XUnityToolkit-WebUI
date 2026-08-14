@@ -2,6 +2,18 @@ namespace XUnityToolkit_WebUI.Models;
 
 public enum LlmProvider { OpenAI, Claude, Gemini, DeepSeek, Qwen, GLM, Kimi, Custom }
 
+/// <summary>
+/// Wire protocol used by OpenAI-compatible providers. Existing saved endpoints default to
+/// Chat Completions so adding this field does not silently change their request format.
+/// </summary>
+public enum LlmApiFormat { ChatCompletions, Responses }
+
+/// <summary>
+/// Cross-provider reasoning control. Default leaves the provider's own default untouched;
+/// None explicitly requests non-thinking mode where the selected model supports it.
+/// </summary>
+public enum LlmReasoningEffort { Default, None, Minimal, Low, Medium, High, XHigh, Max }
+
 public sealed class AiTranslationSettings
 {
     public bool Enabled { get; set; } = true;
@@ -47,11 +59,6 @@ public sealed class AiTranslationSettings
     /// <summary>repeat_penalty for local LLM (0.5-2.0, default 1.0). 1.0 = no penalty (correct for translation).</summary>
     public double LocalRepeatPenalty { get; set; } = 1.0;
 
-    /// <summary>
-    /// Enable pre-translation cache optimization (normalization, regex generation, monitoring).
-    /// </summary>
-    public bool EnablePreTranslationCache { get; set; } = true;
-
     public List<ApiEndpointConfig> Endpoints { get; set; } = [];
 
     public bool TermAuditEnabled { get; set; } = true;
@@ -60,16 +67,6 @@ public sealed class AiTranslationSettings
     // Translation Memory
     public bool EnableTranslationMemory { get; set; } = true;
     public int FuzzyMatchThreshold { get; set; } = 85;
-
-    // LLM Pattern Analysis (pre-translation phase)
-    public bool EnableLlmPatternAnalysis { get; set; } = true;
-
-    // Multi-Round Translation (default ON = 2 rounds)
-    public bool EnableMultiRoundTranslation { get; set; } = true;
-
-    // Auto Term Extraction
-    public bool EnableAutoTermExtraction { get; set; } = true;
-    public bool AutoApplyExtractedTerms { get; set; }
 
     // Glossary extraction
     public bool GlossaryExtractionEnabled { get; set; }
@@ -83,6 +80,8 @@ public sealed class ApiEndpointConfig
     public string ApiBaseUrl { get; set; } = "";
     public string ApiKey { get; set; } = "";
     public string ModelName { get; set; } = "";
+    public LlmApiFormat ApiFormat { get; set; } = LlmApiFormat.ChatCompletions;
+    public LlmReasoningEffort ReasoningEffort { get; set; } = LlmReasoningEffort.Default;
     public int Priority { get; set; } = 5;
     public bool Enabled { get; set; } = true;
 }

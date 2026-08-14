@@ -2,18 +2,19 @@
 import { ref, computed, onMounted } from 'vue'
 import { formatBytes } from '@/utils/format'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NIcon, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
+import { NAlert, NButton, NIcon, NInput, NSelect, NSpin, useMessage } from 'naive-ui'
 import {
   ArrowBackOutlined,
   RefreshOutlined,
   FileDownloadOutlined,
   AutoFixHighOutlined,
+  BuildOutlined,
   TerminalOutlined,
   SearchOutlined,
 } from '@vicons/material'
-import { bepinexLogApi, gamesApi } from '@/api/games'
-import type { BepInExLogAnalysis, Game } from '@/api/types'
-import { Marked } from 'marked'
+import { bepinexLogApi, gamesApi, pluginHealthApi } from '@/api/games'
+import type { Game, PluginAutoRepairResult, PluginHealthReport } from '@/api/types'
+import PluginDiagnosticReport from '@/components/health/PluginDiagnosticReport.vue'
 
 defineOptions({ name: 'BepInExLogView' })
 
@@ -30,9 +31,13 @@ const fileSize = ref(0)
 const lastModified = ref('')
 const loading = ref(false)
 const analyzing = ref(false)
-const analysisResult = ref<BepInExLogAnalysis | null>(null)
+const repairing = ref(false)
+const repairResult = ref<PluginAutoRepairResult | null>(null)
+const healthReport = ref<PluginHealthReport | null>(null)
 const searchQuery = ref('')
 const levelFilter = ref<string>('All')
+const loadedTailLines = 5000
+const maxRenderedLines = 1000
 
 // Level filter options
 const levelOptions = [
@@ -91,6 +96,13 @@ const filteredLines = computed(() => {
   return lines
 })
 
+const visibleLines = computed(() => {
+  const lines = filteredLines.value
+  return lines.length > maxRenderedLines ? lines.slice(-maxRenderedLines) : lines
+})
+
+const hiddenFilteredLineCount = computed(() => Math.max(0, filteredLines.value.length - visibleLines.value.length))
+
 // Level to CSS class
 function levelClass(level: string): string {
   switch (level.toLowerCase()) {
@@ -108,10 +120,11 @@ function levelClass(level: string): string {
 async function loadLog() {
   loading.value = true
   try {
-    const resp = await bepinexLogApi.get(gameId.value)
+    const resp = await bepinexLogApi.get(gameId.value, loadedTailLines)
     logContent.value = resp.content
     fileSize.value = resp.fileSize
     lastModified.value = resp.lastModified
+    await loadHealthReport()
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : '加载日志失败'
     message.error(msg)
@@ -142,29 +155,43 @@ async function handleExport() {
 // AI analysis
 async function handleAnalyze() {
   analyzing.value = true
-  analysisResult.value = null
   try {
-    const result = await bepinexLogApi.analyze(gameId.value)
-    analysisResult.value = result
+    healthReport.value = await pluginHealthApi.analyze(gameId.value)
+    if (healthReport.value.analysisState === 'Completed') {
+      message.success('AI 智能诊断已完成')
+    } else {
+      message.warning(healthReport.value.analysisMessage || '本地检查已完成，但 AI 诊断未完成')
+    }
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'AI 分析失败'
+    const msg = e instanceof Error ? e.message : 'AI 智能诊断失败'
     message.error(msg)
   } finally {
     analyzing.value = false
   }
 }
 
-// Render markdown
-const safeMarked = new Marked({
-  renderer: {
-    html({ text }: { text: string }) {
-      return escapeHtml(text)
-    }
+async function handleRepair() {
+  repairing.value = true
+  repairResult.value = null
+  try {
+    repairResult.value = await pluginHealthApi.repair(gameId.value)
+    healthReport.value = repairResult.value.after
+    message.success(repairResult.value.summary)
+    await loadLog()
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '插件全自动修复失败'
+    message.error(msg)
+  } finally {
+    repairing.value = false
   }
-})
+}
 
-function renderMarkdown(md: string): string {
-  return safeMarked.parse(md, { async: false }) as string
+async function loadHealthReport() {
+  try {
+    healthReport.value = await pluginHealthApi.check(gameId.value)
+  } catch {
+    // The log viewer remains usable even if the local health snapshot cannot be read.
+  }
 }
 
 // Highlight search matches in text
@@ -184,7 +211,8 @@ onMounted(async () => {
   try {
     game.value = await gamesApi.get(gameId.value)
   } catch { /* ignore */ }
-  loadLog()
+  await loadLog()
+  if (!healthReport.value) await loadHealthReport()
 })
 </script>
 
@@ -227,9 +255,13 @@ onMounted(async () => {
             <template #icon><NIcon><FileDownloadOutlined /></NIcon></template>
             导出
           </NButton>
-          <NButton size="small" type="primary" @click="handleAnalyze" :loading="analyzing" :disabled="!logContent">
+          <NButton size="small" type="primary" @click="handleAnalyze" :loading="analyzing">
             <template #icon><NIcon><AutoFixHighOutlined /></NIcon></template>
-            AI 分析
+            AI 智能诊断
+          </NButton>
+          <NButton size="small" type="warning" @click="handleRepair" :loading="repairing" :disabled="analyzing">
+            <template #icon><NIcon><BuildOutlined /></NIcon></template>
+            AI 全自动修复
           </NButton>
         </div>
       </div>
@@ -263,7 +295,13 @@ onMounted(async () => {
       <div v-else class="log-content">
         <div class="log-lines">
           <div
-            v-for="(line, idx) in filteredLines"
+            v-if="hiddenFilteredLineCount > 0"
+            class="log-line log-info"
+          >
+            已省略 {{ hiddenFilteredLineCount }} 条较早匹配日志，仅显示最后 {{ maxRenderedLines }} 条
+          </div>
+          <div
+            v-for="(line, idx) in visibleLines"
             :key="idx"
             class="log-line"
             :class="levelClass(line.level)"
@@ -276,25 +314,30 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- AI Analysis Card -->
-    <div v-if="analyzing || analysisResult" class="section-card" style="animation-delay: 0.15s">
+    <!-- Unified plugin diagnostic report -->
+    <div v-if="analyzing || repairing || healthReport" class="section-card" style="animation-delay: 0.15s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
             <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
           </span>
-          AI 诊断分析
+          插件智能诊断
         </h2>
-        <span v-if="analysisResult" class="analysis-meta">
-          由 {{ analysisResult.endpointName }} 生成 · {{ new Date(analysisResult.analyzedAt).toLocaleString() }}
-        </span>
       </div>
 
-      <div v-if="analyzing" class="analysis-loading">
+      <NAlert type="info" :bordered="false" class="analysis-cost-hint">
+        智能诊断与自动修复仅支持云端 AI。自动修复会先备份目标文件，执行受限修复工具，再重新诊断；多阶段调用可能产生模型 API 费用。
+      </NAlert>
+
+      <NAlert v-if="repairResult" type="success" :bordered="false" class="analysis-cost-hint">
+        {{ repairResult.summary }}
+      </NAlert>
+
+      <div v-if="analyzing || repairing" class="analysis-loading">
         <NSpin size="medium" />
-        <span>正在分析日志...</span>
+        <span>{{ repairing ? '正在诊断、备份、自动修复并复检...' : '正在选择关键资料并生成结构化诊断...' }}</span>
       </div>
-      <div v-else-if="analysisResult" class="analysis-content markdown-body" v-html="renderMarkdown(analysisResult.report)" />
+      <PluginDiagnosticReport v-else-if="healthReport" :report="healthReport" />
     </div>
   </div>
 </template>
@@ -377,12 +420,6 @@ onMounted(async () => {
   padding: 0 1px;
 }
 
-/* Analysis */
-.analysis-meta {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
 .analysis-loading {
   display: flex;
   align-items: center;
@@ -390,141 +427,6 @@ onMounted(async () => {
   padding: 24px;
   justify-content: center;
   color: var(--text-3);
-}
-
-.analysis-content {
-  color: var(--text-1);
-  line-height: 1.7;
-}
-
-/* Markdown body styles */
-.markdown-body :deep(h1),
-.markdown-body :deep(h2),
-.markdown-body :deep(h3),
-.markdown-body :deep(h4) {
-  color: var(--text-1);
-  margin-top: 16px;
-  margin-bottom: 8px;
-}
-
-.markdown-body :deep(h1) {
-  font-size: 20px;
-}
-
-.markdown-body :deep(h2) {
-  font-size: 16px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 6px;
-}
-
-.markdown-body :deep(h3) {
-  font-size: 14px;
-}
-
-.markdown-body :deep(h4) {
-  font-size: 13px;
-}
-
-.markdown-body :deep(ul),
-.markdown-body :deep(ol) {
-  padding-left: 20px;
-  margin: 8px 0;
-}
-
-.markdown-body :deep(li) {
-  margin: 4px 0;
-  line-height: 1.6;
-}
-
-.markdown-body :deep(li > ul),
-.markdown-body :deep(li > ol) {
-  margin: 4px 0;
-}
-
-.markdown-body :deep(code) {
-  background: var(--bg-subtle);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-family: var(--font-mono);
-}
-
-.markdown-body :deep(pre) {
-  background: var(--bg-subtle);
-  padding: 12px 16px;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-.markdown-body :deep(pre code) {
-  background: none;
-  padding: 0;
-  font-size: 12px;
-}
-
-.markdown-body :deep(p) {
-  margin: 8px 0;
-}
-
-.markdown-body :deep(strong) {
-  color: var(--text-1);
-}
-
-.markdown-body :deep(em) {
-  color: var(--text-2);
-}
-
-.markdown-body :deep(blockquote) {
-  margin: 8px 0;
-  padding: 8px 16px;
-  border-left: 3px solid var(--accent);
-  background: var(--bg-subtle);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--text-2);
-}
-
-.markdown-body :deep(blockquote p) {
-  margin: 4px 0;
-}
-
-.markdown-body :deep(hr) {
-  border: none;
-  border-top: 1px solid var(--border);
-  margin: 16px 0;
-}
-
-.markdown-body :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 8px 0;
-  font-size: 13px;
-}
-
-.markdown-body :deep(th),
-.markdown-body :deep(td) {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  text-align: left;
-}
-
-.markdown-body :deep(th) {
-  background: var(--bg-subtle);
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.markdown-body :deep(tr:nth-child(even)) {
-  background: color-mix(in srgb, var(--bg-subtle) 50%, transparent);
-}
-
-.markdown-body :deep(a) {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.markdown-body :deep(a:hover) {
-  text-decoration: underline;
 }
 
 /* Responsive */
@@ -553,9 +455,6 @@ onMounted(async () => {
     font-size: 12px;
   }
 
-  .analysis-meta {
-    font-size: 11px;
-  }
 }
 
 @media (max-width: 480px) {

@@ -26,12 +26,9 @@ public sealed record TranslationStats(
     public int TermAuditForceCorrectedCount { get; init; }
     public int TranslationMemoryHits { get; init; }
     public int TranslationMemoryFuzzyHits { get; init; }
-    public int TranslationMemoryPatternHits { get; init; }
     public int TranslationMemoryMisses { get; init; }
     /// <summary>Current max concurrency (API request slots).</summary>
     public int MaxConcurrency { get; init; }
-    public int DynamicPatternCount { get; init; }
-    public int ExtractedTermCount { get; init; }
 }
 
 public sealed record RecentTranslation(
@@ -57,7 +54,7 @@ public sealed record RecentTranslation(
     public string? TermAuditResult { get; init; }
 
     /// <summary>
-    /// Translation source: null=LLM, "tmExact", "tmFuzzy", "tmPattern"
+    /// Translation source: null=LLM, "tmExact", "tmFuzzy"
     /// </summary>
     public string? TranslationSource { get; init; }
 };
@@ -90,20 +87,5 @@ public sealed record GlossaryExtractionStats(
 public sealed record RecentExtraction(
     string GameId,
     int TermsExtracted,
-    DateTime Timestamp
-);
-
-public sealed record PreTranslationCacheStats(
-    int TotalPreTranslated,
-    int CacheHits,
-    int CacheMisses,
-    int NewTexts,
-    double HitRate,
-    IList<CacheMissEntry> RecentMisses
-);
-
-public sealed record CacheMissEntry(
-    string PreTranslatedKey,
-    string RuntimeText,
     DateTime Timestamp
 );

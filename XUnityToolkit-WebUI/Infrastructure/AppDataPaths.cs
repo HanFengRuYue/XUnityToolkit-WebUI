@@ -16,8 +16,13 @@ public sealed class AppDataPaths(IConfiguration config)
     public string CoversDirectory => Path.Combine(CacheDirectory, "covers");
     public string IconsDirectory => Path.Combine(CacheDirectory, "icons");
     public string BackgroundsDirectory => Path.Combine(CacheDirectory, "backgrounds");
+    public string WebView2CacheDirectory => Path.Combine(CacheDirectory, "webview2");
+    public string ToolboxAgentUploadsDirectory => Path.Combine(CacheDirectory, "toolbox-agent-uploads");
+    public string ToolboxAgentHistoryDirectory => Path.Combine(_root, "toolbox-agent", "conversations");
     public string LogsDirectory => Path.Combine(_root, "logs");
-    public string ExtractedTextsDirectory => Path.Combine(CacheDirectory, "extracted-texts");
+    public string RuntimeDirectory => Path.Combine(_root, "runtime");
+    public string ToolkitEndpointDiscoveryFile =>
+        Path.Combine(RuntimeDirectory, "toolbox-endpoint-v1.json");
     public string LlamaDirectory => Path.Combine(_root, "llama");
     public string LlamaLaunchCacheDirectory => Path.Combine(LlamaDirectory, "launch-cache");
     public string ModelsDirectory => Path.Combine(_root, "models");
@@ -29,18 +34,10 @@ public sealed class AppDataPaths(IConfiguration config)
     [Obsolete("Migrated to glossaries/. Kept for migration path.")]
     public string DoNotTranslateDirectory => Path.Combine(_root, "do-not-translate");
     public string ScriptTagsDirectory => Path.Combine(_root, "script-tags");
-    public string PreTranslationRegexDirectory => Path.Combine(CacheDirectory, "pre-translation-regex");
-    public string PreTranslationSessionDirectory => Path.Combine(CacheDirectory, "pre-translation-sessions");
     public string TranslationMemoryDirectory => Path.Combine(_root, "translation-memory");
-    public string DynamicPatternsDirectory => Path.Combine(_root, "dynamic-patterns");
-    public string TermCandidatesDirectory => Path.Combine(_root, "term-candidates");
 
     public string TranslationMemoryFile(string gameId) =>
         Path.Combine(TranslationMemoryDirectory, $"{gameId}.json");
-    public string DynamicPatternsFile(string gameId) =>
-        Path.Combine(DynamicPatternsDirectory, $"{gameId}.json");
-    public string TermCandidatesFile(string gameId) =>
-        Path.Combine(TermCandidatesDirectory, $"{gameId}.json");
     public string FontGenerationCharsetUploadsDirectory =>
         Path.Combine(_root, "font-generation", "uploads", "charset");
     public string FontGenerationTranslationUploadsDirectory =>
@@ -68,17 +65,8 @@ public sealed class AppDataPaths(IConfiguration config)
         Path.Combine(DoNotTranslateDirectory, $"{gameId}.json");
 #pragma warning restore CS0618
 
-    public string PreTranslationRegexFile(string gameId) =>
-        Path.Combine(PreTranslationRegexDirectory, $"{gameId}.txt");
-
-    public string PreTranslationSessionFile(string gameId) =>
-        Path.Combine(PreTranslationSessionDirectory, $"{gameId}.json");
-
     public string ScriptTagFile(string gameId) =>
         Path.Combine(ScriptTagsDirectory, $"{gameId}.json");
-
-    public string ExtractedTextsFile(string gameId) =>
-        Path.Combine(ExtractedTextsDirectory, $"{gameId}.json");
 
     public string BackupDirectory(string gameId) =>
         Path.Combine(BackupsDirectory, gameId);
@@ -106,9 +94,12 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(CoversDirectory);
         Directory.CreateDirectory(IconsDirectory);
         Directory.CreateDirectory(BackgroundsDirectory);
+        Directory.CreateDirectory(WebView2CacheDirectory);
+        Directory.CreateDirectory(ToolboxAgentUploadsDirectory);
+        Directory.CreateDirectory(ToolboxAgentHistoryDirectory);
         Directory.CreateDirectory(GlossariesDirectory);
         Directory.CreateDirectory(LogsDirectory);
-        Directory.CreateDirectory(ExtractedTextsDirectory);
+        Directory.CreateDirectory(RuntimeDirectory);
         Directory.CreateDirectory(ModelsDirectory);
         Directory.CreateDirectory(LlamaDirectory);
         Directory.CreateDirectory(LlamaLaunchCacheDirectory);
@@ -120,13 +111,9 @@ public sealed class AppDataPaths(IConfiguration config)
         Directory.CreateDirectory(DoNotTranslateDirectory);
 #pragma warning restore CS0618
         Directory.CreateDirectory(ScriptTagsDirectory);
-        Directory.CreateDirectory(PreTranslationRegexDirectory);
-        Directory.CreateDirectory(PreTranslationSessionDirectory);
         Directory.CreateDirectory(FontGenerationCharsetUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTranslationUploadsDirectory);
         Directory.CreateDirectory(FontGenerationTempDirectory);
         Directory.CreateDirectory(TranslationMemoryDirectory);
-        Directory.CreateDirectory(DynamicPatternsDirectory);
-        Directory.CreateDirectory(TermCandidatesDirectory);
     }
 }

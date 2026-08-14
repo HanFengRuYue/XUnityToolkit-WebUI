@@ -1,12 +1,7 @@
-using System.Text.RegularExpressions;
-
 namespace XUnityToolkit_WebUI.Services;
 
-internal static partial class TranslationEditorPathResolver
+internal static class TranslationEditorPathResolver
 {
-    [GeneratedRegex(@"^[a-zA-Z0-9_\-]{1,20}$")]
-    private static partial Regex SafeLanguageCodeRegex();
-
     internal static string ResolveDefaultTranslationFilePath(string gamePath, string? outputFile, string targetLang)
     {
         var template = string.IsNullOrWhiteSpace(outputFile)
@@ -15,56 +10,6 @@ internal static partial class TranslationEditorPathResolver
         var relative = template.Replace("{Lang}", targetLang, StringComparison.Ordinal);
         return ResolvePathUnderBepInEx(gamePath, relative);
     }
-
-    internal static string ResolvePreTranslatedTextFilePath(string gamePath, string targetLang)
-        => ResolvePathUnderBepInEx(gamePath, Path.Combine("Translation", targetLang, "Text", "_PreTranslated.txt"));
-
-    internal static string ResolvePreTranslatedRegexFilePath(string gamePath, string targetLang)
-        => ResolvePathUnderBepInEx(gamePath, Path.Combine("Translation", targetLang, "Text", "_PreTranslated_Regex.txt"));
-
-    internal static IReadOnlyList<string> ListAvailablePreTranslationLanguages(
-        string gamePath,
-        params string[] fileNames)
-    {
-        var translationDir = Path.Combine(gamePath, "BepInEx", "Translation");
-        if (!Directory.Exists(translationDir))
-            return [];
-
-        var languages = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var languageDir in Directory.EnumerateDirectories(translationDir))
-        {
-            var language = Path.GetFileName(languageDir);
-            if (!IsSafeLanguage(language))
-                continue;
-
-            var textDir = Path.Combine(languageDir, "Text");
-            if (!Directory.Exists(textDir))
-                continue;
-
-            if (fileNames.Any(fileName => File.Exists(Path.Combine(textDir, fileName))))
-                languages.Add(language);
-        }
-
-        return languages.ToList();
-    }
-
-    internal static string ResolvePreTranslationLanguage(
-        string gamePath,
-        string? requestedLang,
-        string? defaultLang,
-        params string[] fileNames)
-    {
-        if (IsSafeLanguage(requestedLang))
-            return requestedLang!;
-        if (IsSafeLanguage(defaultLang))
-            return defaultLang!;
-
-        return ListAvailablePreTranslationLanguages(gamePath, fileNames).FirstOrDefault()
-            ?? "zh";
-    }
-
-    private static bool IsSafeLanguage(string? value)
-        => !string.IsNullOrWhiteSpace(value) && SafeLanguageCodeRegex().IsMatch(value);
 
     private static string ResolvePathUnderBepInEx(string gamePath, string relativePath)
     {

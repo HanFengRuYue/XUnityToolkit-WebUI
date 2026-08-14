@@ -9,27 +9,85 @@ public static class PluginHealthEndpoints
     {
         var group = app.MapGroup("/api/games/{id}/health-check");
 
-        // GET / — passive health check (file + log analysis)
+        // GET / — local objective facts plus the current process's cached AI report; never calls a model
         group.MapGet("/", async (string id, GameLibraryService library,
-            PluginHealthCheckService healthService) =>
+            PluginHealthCheckService healthService, CancellationToken ct) =>
         {
-            var game = await library.GetByIdAsync(id);
+            var game = await library.GetByIdAsync(id, ct);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
             if (game.InstallState == InstallState.NotInstalled)
                 return Results.BadRequest(ApiResult.Fail("游戏未安装插件"));
 
-            var report = await healthService.CheckAsync(game);
+            var report = await healthService.CheckAsync(game, ct: ct);
             return Results.Ok(ApiResult<PluginHealthReport>.Ok(report));
         });
 
-        // POST /verify — launch game briefly to generate log, then analyze
+        // POST /analyze — explicit two-stage AI diagnostic without launching the game
+        group.MapPost("/analyze", async (string id, GameLibraryService library,
+            PluginHealthCheckService healthService, CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("游戏不存在"));
+
+            if (game.InstallState == InstallState.NotInstalled)
+                return Results.BadRequest(ApiResult.Fail("游戏未安装 BepInEx 插件"));
+
+            try
+            {
+                var report = await healthService.AnalyzeAsync(game, ct: ct);
+                return Results.Ok(ApiResult<PluginHealthReport>.Ok(report));
+            }
+            catch (PluginDiagnosticAlreadyRunningException ex)
+            {
+                return Results.Conflict(ApiResult.Fail(ex.Message));
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(ApiResult.Fail("智能诊断已取消"), statusCode: 499);
+            }
+        });
+
+        // POST /repair — cloud-only diagnosis, allowlisted automatic repair, backup and re-diagnosis
+        group.MapPost("/repair", async (string id, GameLibraryService library,
+            PluginHealthCheckService healthService, InstallOrchestrator orchestrator,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("游戏不存在"));
+            if (game.InstallState == InstallState.NotInstalled)
+                return Results.BadRequest(ApiResult.Fail("游戏未安装 BepInEx 插件"));
+
+            var installStatus = orchestrator.GetStatus(id);
+            if (installStatus.Step is not (InstallStep.Idle or InstallStep.Complete or InstallStep.Failed))
+                return Results.Conflict(ApiResult.Fail("游戏正在安装或卸载中，无法执行自动修复"));
+
+            try
+            {
+                var result = await healthService.RepairAsync(game, ct);
+                if (result.Before.AnalysisState == PluginAnalysisState.Unavailable)
+                    return Results.BadRequest(ApiResult.Fail(result.Summary));
+                return Results.Ok(ApiResult<PluginAutoRepairResult>.Ok(result));
+            }
+            catch (PluginDiagnosticAlreadyRunningException ex)
+            {
+                return Results.Conflict(ApiResult.Fail(ex.Message));
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(ApiResult.Fail("插件自动修复已取消"), statusCode: 499);
+            }
+        });
+
+        // POST /verify — launch game briefly, wait for a fresh log and ping, then run the same AI agent
         group.MapPost("/verify", async (string id, GameLibraryService library,
             PluginHealthCheckService healthService, InstallOrchestrator orchestrator,
             CancellationToken ct) =>
         {
-            var game = await library.GetByIdAsync(id);
+            var game = await library.GetByIdAsync(id, ct);
             if (game is null)
                 return Results.NotFound(ApiResult.Fail("游戏不存在"));
 
@@ -45,6 +103,10 @@ public static class PluginHealthEndpoints
             {
                 var report = await healthService.VerifyAsync(game, ct);
                 return Results.Ok(ApiResult<PluginHealthReport>.Ok(report));
+            }
+            catch (PluginDiagnosticAlreadyRunningException ex)
+            {
+                return Results.Conflict(ApiResult.Fail(ex.Message));
             }
             catch (InvalidOperationException ex)
             {

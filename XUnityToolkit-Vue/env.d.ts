@@ -8,15 +8,20 @@ declare module 'vue-router' {
   }
 }
 
-// WebView2 host object injected by the WinForms WebView2 control
+// Read-only WinUI shell descriptor and the single structured web-to-host message channel.
 declare global {
+  interface XUnityDesktopHostDescriptor {
+    readonly protocolVersion: 1
+    readonly shell: 'winui3'
+    readonly nativeTitleBar: true
+  }
+
   interface ChromeWebView {
-    postMessage(message: string): void
-    addEventListener(type: 'message', listener: (event: { data: string }) => void): void
-    removeEventListener(type: 'message', listener: (event: { data: string }) => void): void
+    postMessage(message: unknown): void
   }
 
   interface Window {
+    readonly __XUNITY_DESKTOP_HOST__?: XUnityDesktopHostDescriptor
     chrome?: {
       webview?: ChromeWebView
     }

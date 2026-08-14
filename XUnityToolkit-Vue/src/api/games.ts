@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, AssetExtractionResult, PreTranslationStatus, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, DynamicPatternStore, TermCandidateStore, PluginHealthReport, BepInExPlugin, TranslationEditorTextSource, TranslationRegexEditorData, RegexTranslationRule } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, PluginAutoRepairResult, ToolboxAgentStatus, ToolboxAgentChatRequest, ToolboxAgentChatResponse, ToolboxAgentAttachment, ToolboxAgentConversationSummary, ToolboxAgentConversation, BepInExPlugin, ToolkitConnectionInfo, ApiResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -50,7 +50,8 @@ export const gamesApi = {
   launch: (id: string) => api.post<void>(`/api/games/${id}/launch`),
 
   getAiEndpointStatus: (id: string) => api.get<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
-  installAiEndpoint: (id: string) => api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, {}),
+  installAiEndpoint: (id: string, forceReplaceUnknown = false) =>
+    api.post<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`, { forceReplaceUnknown }),
   uninstallAiEndpoint: (id: string) => api.del<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
 
   getTmpFontStatus: (id: string) => api.get<TmpFontStatus>(`/api/games/${id}/tmp-font`),
@@ -169,28 +170,11 @@ export const gamesApi = {
   selectWebBackground: (id: string, imageUrl: string) =>
     api.post<void>(`/api/games/${id}/background/web-select`, { imageUrl }),
 }
-
-export const assetApi = {
-  extractAssets: (id: string) =>
-    api.post<AssetExtractionResult>(`/api/games/${id}/extract-assets`, {}),
-  getExtractedTexts: (id: string) =>
-    api.get<AssetExtractionResult | null>(`/api/games/${id}/extracted-texts`),
-  deleteExtractedTexts: (id: string) =>
-    api.del<void>(`/api/games/${id}/extracted-texts`),
-  startPreTranslation: (id: string, fromLang?: string, toLang?: string, restart = false) =>
-    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate`, { fromLang, toLang, restart }),
-  resumePreTranslation: (id: string) =>
-    api.post<PreTranslationStatus>(`/api/games/${id}/pre-translate/resume`, {}),
-  getPreTranslationStatus: (id: string) =>
-    api.get<PreTranslationStatus>(`/api/games/${id}/pre-translate/status`),
-  cancelPreTranslation: (id: string) =>
-    api.post<void>(`/api/games/${id}/pre-translate/cancel`, {}),
-}
-
 export const settingsApi = {
   get: () => api.get<AppSettings>('/api/settings'),
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
+  getConnection: () => api.get<ToolkitConnectionInfo>('/api/settings/connection'),
   reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
   getDataPath: () => api.get<DataPathInfo>('/api/settings/data-path'),
   openDataFolder: () => api.post('/api/settings/open-data-folder'),
@@ -224,30 +208,14 @@ export const translateApi = {
 }
 
 export const translationEditorApi = {
-  getEntries: (id: string, options?: { source?: TranslationEditorTextSource; lang?: string }) =>
-    api.get<TranslationEditorData>(`/api/games/${id}/translation-editor${buildTranslationEditorQuery(options)}`),
-  saveEntries: (id: string, entries: TranslationEntry[], options?: { source?: TranslationEditorTextSource; lang?: string }) =>
-    api.put<void>(`/api/games/${id}/translation-editor${buildTranslationEditorQuery(options)}`, { entries }),
+  getEntries: (id: string) =>
+    api.get<TranslationEditorData>(`/api/games/${id}/translation-editor`),
+  saveEntries: (id: string, entries: TranslationEntry[]) =>
+    api.put<void>(`/api/games/${id}/translation-editor`, { entries }),
   parseImport: (id: string, content: string) =>
     api.post<TranslationEntry[]>(`/api/games/${id}/translation-editor/import`, { content }),
-  getExportUrl: (id: string, options?: { source?: TranslationEditorTextSource; lang?: string }) =>
-    `/api/games/${id}/translation-editor/export${buildTranslationEditorQuery(options)}`,
-  getRegex: (id: string, lang?: string) =>
-    api.get<TranslationRegexEditorData>(`/api/games/${id}/translation-editor/regex${buildTranslationEditorQuery({ lang })}`),
-  saveRegex: (id: string, rules: RegexTranslationRule[], lang?: string) =>
-    api.put<void>(`/api/games/${id}/translation-editor/regex${buildTranslationEditorQuery({ lang })}`, { rules }),
-  importRegex: (id: string, content: string, lang?: string) =>
-    api.post<RegexTranslationRule[]>(`/api/games/${id}/translation-editor/regex/import${buildTranslationEditorQuery({ lang })}`, { content }),
-  getRegexExportUrl: (id: string, lang?: string) =>
-    `/api/games/${id}/translation-editor/regex/export${buildTranslationEditorQuery({ lang })}`,
-}
-
-function buildTranslationEditorQuery(options?: { source?: TranslationEditorTextSource; lang?: string }) {
-  const params = new URLSearchParams()
-  if (options?.source) params.set('source', options.source)
-  if (options?.lang) params.set('lang', options.lang)
-  const query = params.toString()
-  return query ? `?${query}` : ''
+  getExportUrl: (id: string) =>
+    `/api/games/${id}/translation-editor/export`,
 }
 
 export const pluginPackageApi = {
@@ -294,7 +262,7 @@ export const scriptTagApi = {
 }
 
 export const bepinexLogApi = {
-  get: (id: string) => api.get<BepInExLogResponse>(`/api/games/${id}/bepinex-log`),
+  get: (id: string, lines = 5000) => api.get<BepInExLogResponse>(`/api/games/${id}/bepinex-log?lines=${lines}`),
   analyze: (id: string) => api.post<BepInExLogAnalysis>(`/api/games/${id}/bepinex-log/analyze`, {}),
   getDownloadUrl: (id: string) => `/api/games/${id}/bepinex-log/download`,
 }
@@ -302,7 +270,29 @@ export const bepinexLogApi = {
 // Plugin Health Check
 export const pluginHealthApi = {
   check: (id: string) => api.get<PluginHealthReport>(`/api/games/${id}/health-check`),
+  analyze: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/analyze`, {}),
+  repair: (id: string) => api.post<PluginAutoRepairResult>(`/api/games/${id}/health-check/repair`, {}),
   verify: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/verify`, {}),
+}
+
+export const toolboxAgentApi = {
+  status: () => api.get<ToolboxAgentStatus>('/api/toolbox-agent/status'),
+  listSessions: () => api.get<ToolboxAgentConversationSummary[]>('/api/toolbox-agent/sessions'),
+  getSession: (sessionId: string) =>
+    api.get<ToolboxAgentConversation>(`/api/toolbox-agent/sessions/${sessionId}`),
+  chat: (request: ToolboxAgentChatRequest) =>
+    api.post<ToolboxAgentChatResponse>('/api/toolbox-agent/chat', request),
+  upload: async (sessionId: string, files: File[]) => {
+    const form = new FormData()
+    form.append('sessionId', sessionId)
+    for (const file of files) form.append('files', file)
+    const response = await fetch('/api/toolbox-agent/uploads', { method: 'POST', body: form })
+    const result = (await response.json()) as ApiResult<ToolboxAgentAttachment[]>
+    if (!response.ok || !result.success) throw new Error(result.error || '附件上传失败')
+    return result.data ?? []
+  },
+  deleteSession: (sessionId: string) => api.del<void>(`/api/toolbox-agent/sessions/${sessionId}`),
+  clearSessions: () => api.del<void>('/api/toolbox-agent/sessions'),
 }
 
 // BepInEx Plugin Management
@@ -329,14 +319,4 @@ export const bepinexPluginApi = {
     api.post<BepInExPlugin>(`/api/games/${gameId}/plugins/toggle`, { relativePath }),
   getConfig: (gameId: string, configFile: string) =>
     api.get<string>(`/api/games/${gameId}/plugins/config?configFile=${encodeURIComponent(configFile)}`),
-}
-
-// Term Candidates
-export const termCandidatesApi = {
-  get: (gameId: string) =>
-    api.get<TermCandidateStore>(`/api/games/${gameId}/term-candidates`),
-  apply: (gameId: string, originals: string[] | null) =>
-    api.post(`/api/games/${gameId}/term-candidates/apply`, { originals }),
-  clear: (gameId: string) =>
-    api.del(`/api/games/${gameId}/term-candidates`),
 }

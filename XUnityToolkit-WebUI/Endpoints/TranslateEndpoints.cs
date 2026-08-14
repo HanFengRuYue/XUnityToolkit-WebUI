@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
 
@@ -12,9 +13,9 @@ public static class TranslateEndpoints
             TranslateRequest request,
             LlmTranslationService translationService,
             GlossaryExtractionService extractionService,
-            PreTranslationCacheMonitor cacheMonitor,
             AppSettingsService settingsService,
             LocalLlmService localLlmService,
+            TranslationRequestCoordinator requestCoordinator,
             ILogger<LlmTranslationService> logger,
             CancellationToken ct) =>
         {
@@ -32,40 +33,42 @@ public static class TranslateEndpoints
                 return Results.Json(ApiResult.Fail("本地模型未启动，请先在本地 AI 页面启动模型"), statusCode: 503);
             }
 
-            // Record texts for pre-translation cache monitoring
             var validGameId = !string.IsNullOrEmpty(request.GameId) && Guid.TryParse(request.GameId, out _);
-            if (validGameId)
-            {
-                await cacheMonitor.EnsureCacheAsync(request.GameId!, request.To ?? "zh", ct);
-                cacheMonitor.RecordTexts(request.GameId!, request.Texts);
-            }
-
             try
             {
-                var result = await translationService.TranslateDetailedAsync(
-                    request.Texts, request.From ?? "ja", request.To ?? "zh",
-                    request.GameId, ct);
-                var translations = result.Translations;
-                logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
-
-                // Buffer for glossary extraction (fire-and-forget, non-blocking)
-                // Disabled in local mode — local models can't handle extra inference
-                var isLocalMode = string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
-                if (!isLocalMode && validGameId)
-                {
-                    for (int i = 0; i < request.Texts.Count; i++)
+                var response = await requestCoordinator.ExecuteAsync(
+                    request.ClientSessionId,
+                    request.RequestId,
+                    async operationCt =>
                     {
-                        if (!result.Persistable[i])
-                            continue;
+                        var result = await translationService.TranslateDetailedAsync(
+                            request.Texts, request.From ?? "auto", request.To ?? "zh",
+                            request.GameId, operationCt);
+                        var translations = result.Translations;
+                        logger.LogInformation("AI 翻译完成: {Count} 条文本", request.Texts.Count);
 
-                        extractionService.BufferTranslation(request.GameId!, request.Texts[i], translations[i]);
-                    }
+                        // Buffer for glossary extraction (fire-and-forget, non-blocking)
+                        // Disabled in local mode — local models can't handle extra inference
+                        var isLocalMode = string.Equals(appSettings.AiTranslation.ActiveMode, "local", StringComparison.OrdinalIgnoreCase);
+                        if (!isLocalMode && validGameId)
+                        {
+                            for (int i = 0; i < request.Texts.Count; i++)
+                            {
+                                if (!result.Persistable[i])
+                                    continue;
 
-                    if (result.Persistable.Any(static canPersist => canPersist))
-                        extractionService.TryTriggerExtraction(request.GameId!);
-                }
+                                extractionService.BufferTranslation(request.GameId!, request.Texts[i], translations[i]);
+                            }
 
-                return Results.Ok(new TranslateResponse(translations));
+                            if (result.Persistable.Any(static canPersist => canPersist))
+                                extractionService.TryTriggerExtraction(request.GameId!);
+                        }
+
+                        return new TranslateResponse(translations);
+                    },
+                    ct);
+
+                return Results.Ok(response);
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("已停用"))
             {
@@ -103,33 +106,40 @@ public static class TranslateEndpoints
         });
 
         // Lightweight ping endpoint — LLMTranslate.dll calls this on Initialize to verify connectivity
-        app.MapGet("/api/translate/ping", (string? gameId, PluginHealthCheckService healthService) =>
+        app.MapGet("/api/translate/ping", (
+            string? gameId,
+            string? sessionId,
+            string? endpointVersion,
+            bool? discovery,
+            bool? direct,
+            PluginHealthCheckService healthService,
+            PluginConnectionRegistry connectionRegistry,
+            ToolkitRuntimeEndpointState runtimeEndpoint) =>
         {
             if (!string.IsNullOrEmpty(gameId))
-                healthService.RecordPing(gameId);
-            return Results.Ok(new { status = "ok" });
-        });
-
-        app.MapGet("/api/translate/stats", (
-            LlmTranslationService translationService,
-            DynamicPatternService dynamicPatternService,
-            TermExtractionService termExtractionService) =>
-        {
-            var stats = translationService.GetStats();
-            var gameId = stats.CurrentGameId;
-            if (gameId is not null)
             {
-                stats = stats with
-                {
-                    DynamicPatternCount = dynamicPatternService.GetPatternCount(gameId),
-                    ExtractedTermCount = termExtractionService.GetCandidateCount(gameId),
-                };
+                healthService.RecordPing(gameId);
+                connectionRegistry.RecordHeartbeat(
+                    gameId,
+                    sessionId,
+                    endpointVersion,
+                    discovery == true,
+                    direct == true,
+                    runtimeEndpoint.BaseUrl);
             }
-            return Results.Ok(ApiResult<TranslationStats>.Ok(stats));
+            return Results.Ok(new
+            {
+                status = "ok",
+                product = ToolkitRuntimeEndpointState.ProductName,
+                protocolVersion = ToolkitRuntimeEndpointState.ProtocolVersion,
+                instanceId = runtimeEndpoint.InstanceId,
+                baseUrl = runtimeEndpoint.BaseUrl,
+                serverTimeUtc = DateTime.UtcNow,
+            });
         });
 
-        app.MapGet("/api/translate/cache-stats", (PreTranslationCacheMonitor cacheMonitor) =>
-            Results.Ok(ApiResult<PreTranslationCacheStats>.Ok(cacheMonitor.GetStats())));
+        app.MapGet("/api/translate/stats", (LlmTranslationService translationService) =>
+            Results.Ok(ApiResult<TranslationStats>.Ok(translationService.GetStats())));
 
         app.MapGet("/api/ai/extraction/stats", (GlossaryExtractionService extractionService) =>
             Results.Ok(ApiResult<GlossaryExtractionStats>.Ok(extractionService.GetStats())));
@@ -200,7 +210,9 @@ public record TranslateRequest(
     [property: JsonPropertyName("texts")] IList<string> Texts,
     [property: JsonPropertyName("from")] string? From,
     [property: JsonPropertyName("to")] string? To,
-    [property: JsonPropertyName("gameId")] string? GameId);
+    [property: JsonPropertyName("gameId")] string? GameId,
+    [property: JsonPropertyName("clientSessionId")] string? ClientSessionId = null,
+    [property: JsonPropertyName("requestId")] string? RequestId = null);
 
 public record TranslateResponse(
     [property: JsonPropertyName("translations")] IList<string> Translations);

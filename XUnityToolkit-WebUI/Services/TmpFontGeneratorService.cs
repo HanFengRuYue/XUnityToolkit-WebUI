@@ -478,10 +478,9 @@ public sealed class TmpFontGeneratorService(
                 var result = new FontGenerationResult(true, outputPath, fontName,
                     allGlyphs.Count, request.AtlasWidth, request.AtlasHeight, null, report);
 
-                // Broadcast completion
-                hubContext.Clients.Group("font-generation")
-                    .SendAsync("FontGenerationComplete",
-                        new FontGenerationComplete(true, fontName, allGlyphs.Count, null, report)).Wait();
+                // Broadcast completion without blocking the CPU-bound generator thread.
+                _ = SendHubEventAsync("FontGenerationComplete",
+                    new FontGenerationComplete(true, fontName, allGlyphs.Count, null, report));
 
                 logger.LogInformation("字体生成完成: {FontName}, {Count} 个字形, {Pages} 页 Atlas, 耗时 {Ms}ms, 输出: {Path}",
                     fontName, allGlyphs.Count, atlasPages.Count, stopwatch.ElapsedMilliseconds, outputPath);
@@ -1031,8 +1030,20 @@ public sealed class TmpFontGeneratorService(
             return;
 
         var progress = new FontGenerationProgress(phase, current, total, message);
-        hubContext.Clients.Group("font-generation")
-            .SendAsync("FontGenerationProgress", progress).Wait();
+        _ = SendHubEventAsync("FontGenerationProgress", progress);
+    }
+
+    private async Task SendHubEventAsync(string eventName, object payload)
+    {
+        try
+        {
+            await hubContext.Clients.Group("font-generation")
+                .SendAsync(eventName, payload);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "发送字体生成 SignalR 事件失败: {EventName}", eventName);
+        }
     }
 
     private static string SanitizeFileName(string name)

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -123,7 +124,6 @@ public sealed class LlmTranslationService(
     // ── Translation memory stats ──
     private long _tmExactHits;
     private long _tmFuzzyHits;
-    private long _tmPatternHits;
     private long _tmMisses;
 
     // ── Per-endpoint runtime stats ──
@@ -132,6 +132,10 @@ public sealed class LlmTranslationService(
     // ── Recent translations circular buffer ──
     private readonly ConcurrentQueue<RecentTranslation> _recentTranslations = new();
     private const int MaxRecentTranslations = 10;
+    private static readonly JsonSerializerOptions LlmUserContentJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     // ── Recent errors circular buffer ──
     private readonly ConcurrentQueue<TranslationError> _recentErrors = new();
@@ -200,7 +204,6 @@ public sealed class LlmTranslationService(
             TermAuditForceCorrectedCount = (int)Interlocked.Read(ref _termAuditForceCorrectedCount),
             TranslationMemoryHits = (int)Interlocked.Read(ref _tmExactHits),
             TranslationMemoryFuzzyHits = (int)Interlocked.Read(ref _tmFuzzyHits),
-            TranslationMemoryPatternHits = (int)Interlocked.Read(ref _tmPatternHits),
             TranslationMemoryMisses = (int)Interlocked.Read(ref _tmMisses),
             MaxConcurrency = _currentMaxConcurrency,
         };
@@ -469,7 +472,6 @@ public sealed class LlmTranslationService(
                     {
                         case TmMatchType.Exact: Interlocked.Increment(ref _tmExactHits); break;
                         case TmMatchType.Fuzzy: Interlocked.Increment(ref _tmFuzzyHits); break;
-                        case TmMatchType.Pattern: Interlocked.Increment(ref _tmPatternHits); break;
                     }
                 }
 
@@ -492,7 +494,6 @@ public sealed class LlmTranslationService(
                     {
                         TmMatchType.Exact => "tmExact",
                         TmMatchType.Fuzzy => "tmFuzzy",
-                        TmMatchType.Pattern => "tmPattern",
                         _ => null
                     };
                     perTextCanPersist[idx] = true;
@@ -1507,13 +1508,13 @@ public sealed class LlmTranslationService(
 
     private static string GetDefaultModel(ApiEndpointConfig ep) => ep.Provider switch
     {
-        LlmProvider.OpenAI => "gpt-4o-mini",
-        LlmProvider.Claude => "claude-haiku-4-5-20251001",
-        LlmProvider.Gemini => "gemini-2.0-flash",
-        LlmProvider.DeepSeek => "deepseek-chat",
-        LlmProvider.Qwen => "qwen-plus",
-        LlmProvider.GLM => "glm-4-flash",
-        LlmProvider.Kimi => "moonshot-v1-auto",
+        LlmProvider.OpenAI => "gpt-5.6-luna",
+        LlmProvider.Claude => "claude-sonnet-5",
+        LlmProvider.Gemini => "gemini-3.6-flash",
+        LlmProvider.DeepSeek => "deepseek-v4-flash",
+        LlmProvider.Qwen => "qwen3.7-plus",
+        LlmProvider.GLM => "glm-5.2",
+        LlmProvider.Kimi => "kimi-k2.6",
         _ => ""
     };
 
@@ -1552,29 +1553,14 @@ public sealed class LlmTranslationService(
             throw new InvalidOperationException("API Base URL 未配置");
 
         var model = string.IsNullOrWhiteSpace(ep.ModelName) ? GetDefaultModel(ep) : ep.ModelName;
-        var endpoint = baseUrl.TrimEnd('/') + "/chat/completions";
-
-        var messages = new object[]
-        {
-            new { role = "system", content = systemPrompt },
-            new { role = "user", content = userContent }
-        };
-
-        // Build request body — include sampling parameters for local endpoints
-        object body = minP.HasValue || repeatPenalty.HasValue || maxTokens.HasValue
-            ? new
-            {
-                model, temperature, messages,
-                min_p = minP ?? 0.05,
-                repeat_penalty = repeatPenalty ?? 1.0,
-                max_tokens = maxTokens ?? 4096
-            }
-            : new { model, temperature, messages } as object;
+        var apiRequest = LlmApiAdapter.BuildOpenAiCompatibleRequest(
+            ep, model, systemPrompt, userContent, temperature, minP, repeatPenalty, maxTokens);
+        var endpoint = baseUrl.TrimEnd('/') + apiRequest.RelativePath;
 
         var client = httpClientFactory.CreateClient("LLM");
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            Content = new StringContent(apiRequest.Body.ToJsonString(), Encoding.UTF8, "application/json")
         };
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", ep.ApiKey);
 
@@ -1588,10 +1574,8 @@ public sealed class LlmTranslationService(
         }
 
         var node = JsonNode.Parse(json);
-        var content = node?["choices"]?[0]?["message"]?["content"]?.GetValue<string>()
-            ?? throw new InvalidOperationException("LLM 响应格式无效");
-
-        var tokens = ExtractOpenAiTokens(node);
+        var content = LlmApiAdapter.ExtractOpenAiCompatibleText(node, ep.ApiFormat);
+        var tokens = LlmApiAdapter.ExtractOpenAiCompatibleTokens(node);
         return (content, tokens);
     }
 
@@ -1605,7 +1589,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
 
         // Local endpoints get additional sampling parameters for faster/better inference
         var isLocal = ep.ApiKey == "local";
@@ -1629,19 +1613,12 @@ public sealed class LlmTranslationService(
         var model = string.IsNullOrWhiteSpace(ep.ModelName) ? GetDefaultModel(ep) : ep.ModelName;
         var endpoint = baseUrl.TrimEnd('/') + "/messages";
 
-        var body = new
-        {
-            model,
-            max_tokens = 4096,
-            temperature,
-            system = systemPrompt,
-            messages = new[] { new { role = "user", content = userContent } }
-        };
+        var body = LlmApiAdapter.BuildClaudeRequest(ep, model, systemPrompt, userContent, temperature);
 
         var client = httpClientFactory.CreateClient("LLM");
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
         };
         req.Headers.Add("x-api-key", ep.ApiKey);
         req.Headers.Add("anthropic-version", "2023-06-01");
@@ -1656,8 +1633,7 @@ public sealed class LlmTranslationService(
         }
 
         var node = JsonNode.Parse(json);
-        var content = node?["content"]?[0]?["text"]?.GetValue<string>()
-            ?? throw new InvalidOperationException("Claude 响应格式无效");
+        var content = LlmApiAdapter.ExtractClaudeText(node);
 
         var inputTokens = node?["usage"]?["input_tokens"]?.GetValue<long>() ?? 0;
         var outputTokens = node?["usage"]?["output_tokens"]?.GetValue<long>() ?? 0;
@@ -1674,7 +1650,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
         var (content, tokens) = await CallClaudeRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
@@ -1691,17 +1667,12 @@ public sealed class LlmTranslationService(
             : ep.ApiBaseUrl;
         var endpoint = $"{baseUrl.TrimEnd('/')}/models/{model}:generateContent";
 
-        var combinedContent = systemPrompt + "\n\n" + userContent;
-        var body = new
-        {
-            contents = new[] { new { role = "user", parts = new[] { new { text = combinedContent } } } },
-            generationConfig = new { temperature }
-        };
+        var body = LlmApiAdapter.BuildGeminiRequest(ep, model, systemPrompt, userContent, temperature);
 
         var client = httpClientFactory.CreateClient("LLM");
         using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json")
         };
         req.Headers.TryAddWithoutValidation("x-goog-api-key", ep.ApiKey);
 
@@ -1715,8 +1686,7 @@ public sealed class LlmTranslationService(
         }
 
         var node = JsonNode.Parse(json);
-        var content = node?["candidates"]?[0]?["content"]?["parts"]?[0]?["text"]?.GetValue<string>()
-            ?? throw new InvalidOperationException("Gemini 响应格式无效");
+        var content = LlmApiAdapter.ExtractGeminiText(node);
 
         var promptTokens = node?["usageMetadata"]?["promptTokenCount"]?.GetValue<long>() ?? 0;
         var candidateTokens = node?["usageMetadata"]?["candidatesTokenCount"]?.GetValue<long>() ?? 0;
@@ -1733,7 +1703,7 @@ public sealed class LlmTranslationService(
     {
         var systemPrompt = overrideSystemPrompt
             ?? BuildSystemPrompt(ai.SystemPrompt, from, to, glossary, gameDescription, memoryContext, dntHint);
-        var userContent = JsonSerializer.Serialize(texts);
+        var userContent = SerializeUserContent(texts);
         var (content, tokens) = await CallGeminiRawAsync(ep, systemPrompt, userContent, ai.Temperature, ct);
         return (TranslationResponseParser.Parse(content, texts.Count, fallbackTexts, logger), tokens);
     }
@@ -1742,6 +1712,9 @@ public sealed class LlmTranslationService(
 
     // Restore regexes tolerate full-width braces (U+FF5B/U+FF5D) and case variation
     // because Chinese LLMs (Qwen, GLM, Kimi, DeepSeek) commonly output full-width punctuation.
+    internal static string SerializeUserContent(IList<string> texts)
+        => JsonSerializer.Serialize(texts, LlmUserContentJsonOptions);
+
     private static readonly Regex DntRestoreRegex = new(
         @"[{｛]{1,2}\s*DNT_(\d+)\s*[}｝]{1,2}",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -2190,19 +2163,6 @@ public sealed class LlmTranslationService(
         }
     }
 
-    // ── Token extraction helpers ──
-
-    private static long ExtractOpenAiTokens(JsonNode? node)
-    {
-        var usage = node?["usage"];
-        if (usage is null) return 0;
-        var total = usage["total_tokens"]?.GetValue<long>();
-        if (total.HasValue) return total.Value;
-        var prompt = usage["prompt_tokens"]?.GetValue<long>() ?? 0;
-        var completion = usage["completion_tokens"]?.GetValue<long>() ?? 0;
-        return prompt + completion;
-    }
-
     // ── Response parsing ──
 
     private static (List<string> Originals, List<string> Translations) CollectPersistableTranslations(
@@ -2369,10 +2329,12 @@ public sealed class LlmTranslationService(
     {
         return provider switch
         {
-            LlmProvider.OpenAI or LlmProvider.DeepSeek or LlmProvider.Qwen or LlmProvider.Kimi or LlmProvider.Custom
+            LlmProvider.OpenAI or LlmProvider.DeepSeek or LlmProvider.Qwen or LlmProvider.GLM
+                or LlmProvider.Kimi or LlmProvider.Custom
                 => await FetchOpenAiModelsAsync(provider, apiBaseUrl, apiKey, ct),
+            LlmProvider.Claude => await FetchClaudeModelsAsync(apiBaseUrl, apiKey, ct),
             LlmProvider.Gemini => await FetchGeminiModelsAsync(apiBaseUrl, apiKey, ct),
-            _ => [] // Claude, GLM — no model list API
+            _ => []
         };
     }
 
@@ -2386,6 +2348,33 @@ public sealed class LlmTranslationService(
         var client = httpClientFactory.CreateClient("LLM");
         using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
         req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+        using var resp = await client.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return [];
+
+        var json = await resp.Content.ReadAsStringAsync(ct);
+        var node = JsonNode.Parse(json);
+        var data = node?["data"]?.AsArray();
+        if (data is null) return [];
+
+        return data
+            .Select(m => m?["id"]?.GetValue<string>())
+            .Where(id => !string.IsNullOrEmpty(id))
+            .OrderBy(id => id)
+            .ToList()!;
+    }
+
+    private async Task<IList<string>> FetchClaudeModelsAsync(string apiBaseUrl, string apiKey, CancellationToken ct)
+    {
+        var baseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
+            ? "https://api.anthropic.com/v1"
+            : apiBaseUrl;
+        var endpoint = baseUrl.TrimEnd('/') + "/models";
+
+        var client = httpClientFactory.CreateClient("LLM");
+        using var req = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        req.Headers.Add("x-api-key", apiKey);
+        req.Headers.Add("anthropic-version", "2023-06-01");
 
         using var resp = await client.SendAsync(req, ct);
         if (!resp.IsSuccessStatusCode) return [];

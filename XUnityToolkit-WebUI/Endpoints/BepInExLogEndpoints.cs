@@ -9,8 +9,8 @@ public static class BepInExLogEndpoints
     {
         var group = app.MapGroup("/api/games/{id}/bepinex-log");
 
-        // GET / — read full log content + metadata
-        group.MapGet("/", async (string id, GameLibraryService library, BepInExLogService logService) =>
+        // GET / — read the recent log tail + metadata
+        group.MapGet("/", async (string id, int? lines, GameLibraryService library, BepInExLogService logService) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -22,7 +22,7 @@ public static class BepInExLogEndpoints
 
             try
             {
-                var response = await logService.ReadLogAsync(game);
+                var response = await logService.ReadLogAsync(game, Math.Clamp(lines ?? 5000, 100, 20000));
                 return Results.Ok(ApiResult<BepInExLogResponse>.Ok(response));
             }
             catch (Exception)
@@ -42,14 +42,15 @@ public static class BepInExLogEndpoints
             if (!File.Exists(logPath))
                 return Results.NotFound(ApiResult.Fail("BepInEx 日志文件不存在"));
 
-            // Stream with FileShare.ReadWrite
-            var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            // Keep downloads available while BepInEx is writing or rotating the log.
+            var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             return Results.File(fs, "text/plain", "LogOutput.log");
         });
 
-        // POST /analyze — AI analysis of log content
+        // POST /analyze — legacy Markdown adapter over the unified structured diagnostic report
         group.MapPost("/analyze", async (string id, GameLibraryService library,
-            BepInExLogService logService, CancellationToken ct) =>
+            PluginHealthCheckService healthService, CancellationToken ct) =>
         {
             var game = await library.GetByIdAsync(id);
             if (game is null)
@@ -61,13 +62,17 @@ public static class BepInExLogEndpoints
 
             try
             {
-                var logResponse = await logService.ReadLogAsync(game);
-                var analysis = await logService.AnalyzeLogAsync(logResponse.Content, ct);
+                var report = await healthService.AnalyzeAsync(game, ct: ct);
+                var analysis = BepInExLogService.FormatCompatibilityAnalysis(report);
                 return Results.Ok(ApiResult<BepInExLogAnalysis>.Ok(analysis));
             }
-            catch (InvalidOperationException ex)
+            catch (PluginDiagnosticAlreadyRunningException ex)
             {
-                return Results.BadRequest(ApiResult.Fail(ex.Message));
+                return Results.Conflict(ApiResult.Fail(ex.Message));
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(ApiResult.Fail("智能诊断已取消"), statusCode: 499);
             }
             catch (Exception)
             {

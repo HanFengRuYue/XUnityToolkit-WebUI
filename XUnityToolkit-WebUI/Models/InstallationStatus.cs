@@ -10,7 +10,6 @@ public enum InstallStep
     InstallingAiTranslation,
     GeneratingConfig,
     ApplyingConfig,
-    ExtractingAssets,
     VerifyingHealth,
     RemovingXUnity,
     RemovingBepInEx,

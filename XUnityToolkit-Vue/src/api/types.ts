@@ -79,7 +79,6 @@ export type InstallStep =
   | 'InstallingAiTranslation'
   | 'GeneratingConfig'
   | 'ApplyingConfig'
-  | 'ExtractingAssets'
   | 'VerifyingHealth'
   | 'RemovingXUnity'
   | 'RemovingBepInEx'
@@ -99,7 +98,6 @@ export interface InstallOptions {
   autoDeployAiEndpoint: boolean
   autoGenerateConfig: boolean
   autoApplyOptimalConfig: boolean
-  autoExtractAssets: boolean
   autoVerifyHealth: boolean
 }
 
@@ -170,6 +168,8 @@ export interface XUnityConfig {
 }
 
 export type LlmProvider = 'OpenAI' | 'Claude' | 'Gemini' | 'DeepSeek' | 'Qwen' | 'GLM' | 'Kimi' | 'Custom'
+export type LlmApiFormat = 'ChatCompletions' | 'Responses'
+export type LlmReasoningEffort = 'Default' | 'None' | 'Minimal' | 'Low' | 'Medium' | 'High' | 'XHigh' | 'Max'
 
 export interface ApiEndpointConfig {
   id: string
@@ -178,6 +178,8 @@ export interface ApiEndpointConfig {
   apiBaseUrl: string
   apiKey: string
   modelName: string
+  apiFormat: LlmApiFormat
+  reasoningEffort: LlmReasoningEffort
   priority: number
   enabled: boolean
 }
@@ -195,15 +197,10 @@ export interface AiTranslationSettings {
   localRepeatPenalty: number
   endpoints: ApiEndpointConfig[]
   glossaryExtractionEnabled: boolean
-  enablePreTranslationCache: boolean
   termAuditEnabled: boolean
   naturalTranslationMode: boolean
   enableTranslationMemory: boolean
   fuzzyMatchThreshold: number
-  enableLlmPatternAnalysis: boolean
-  enableMultiRoundTranslation: boolean
-  enableAutoTermExtraction: boolean
-  autoApplyExtractedTerms: boolean
 }
 
 export type ModelDownloadSource = 'HuggingFace' | 'ModelScope'
@@ -276,15 +273,39 @@ export interface TranslationStats {
   termAuditForceCorrectedCount: number
   translationMemoryHits: number
   translationMemoryFuzzyHits: number
-  translationMemoryPatternHits: number
   translationMemoryMisses: number
   maxConcurrency: number
-  dynamicPatternCount: number
-  extractedTermCount: number
 }
 
 export interface AiEndpointStatus {
   installed: boolean
+  origin: 'Missing' | 'OfficialCurrent' | 'CompatibleCurrent' | 'OfficialOutdated' | 'UnknownOrCustom'
+  version?: string
+  sha256?: string
+  updatePending: boolean
+  autoDiscoverySupported: boolean
+  directConnectionMode: boolean
+  message: string
+}
+
+export interface PluginConnectionSummary {
+  connectedCount: number
+  connectedGameIds: string[]
+  lastHeartbeatAt?: string
+  hasLegacyConnections: boolean
+}
+
+export interface ToolkitConnectionInfo {
+  preferredPort: number
+  actualPort: number
+  baseUrl: string
+  usedFallback: boolean
+  fallbackReason?: string
+  restartRequired: boolean
+  discoveryProtocolVersion: number
+  loopbackSelfTestSucceeded: boolean
+  loopbackSelfTestError?: string
+  pluginConnection: PluginConnectionSummary
 }
 
 export interface TmpFontStatus {
@@ -460,99 +481,17 @@ export interface LogEntry {
   message: string
 }
 
-export interface ExtractedText {
-  text: string
-  source: string
-  assetFile: string
-}
-
-export interface AssetExtractionResult {
-  gameId: string
-  texts: ExtractedText[]
-  detectedLanguage?: string
-  totalAssetsScanned: number
-  totalTextsExtracted: number
-  extractedAt: string
-}
-
-export type PreTranslationState = 'Idle' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'AwaitingTermReview'
-
-export interface PreTranslationStatus {
-  gameId: string
-  state: PreTranslationState
-  totalTexts: number
-  translatedTexts: number
-  failedTexts: number
-  error?: string
-  currentRound: number
-  currentPhase?: string
-  phaseProgress: number
-  phaseTotal: number
-  extractedTermCount: number
-  dynamicPatternCount: number
-  canResume: boolean
-  fromLang?: string
-  toLang?: string
-  checkpointUpdatedAt?: string
-  resumeBlockedReason?: string
-}
-
-export interface DynamicPattern {
-  originalTemplate: string
-  translatedTemplate: string
-  source: string
-}
-
-export interface DynamicPatternStore {
-  patterns: DynamicPattern[]
-}
-
-export interface TermCandidate {
-  original: string
-  translation: string
-  category: TermCategory
-  frequency: number
-}
-
-export interface TermCandidateStore {
-  candidates: TermCandidate[]
-  extractedAt: string
-}
-
 export interface TranslationEntry {
   original: string
   translation: string
 }
 
-export type TranslationEditorTextSource = 'default' | 'pretranslated'
-export type TranslationEditorSource = TranslationEditorTextSource | 'pretranslated-regex'
-export type RegexRuleKind = 'sr' | 'r'
-export type RegexRuleSection = 'base' | 'dynamic' | 'custom'
-
-export interface RegexTranslationRule {
-  id: string
-  section: RegexRuleSection
-  kind: RegexRuleKind
-  pattern: string
-  replacement: string
-}
-
 export interface TranslationEditorData {
-  source: TranslationEditorTextSource
   language: string
   filePath: string
   fileExists: boolean
   entryCount: number
-  availablePreTranslationLanguages: string[]
   entries: TranslationEntry[]
-}
-
-export interface TranslationRegexEditorData {
-  language: string
-  filePath: string
-  fileExists: boolean
-  availablePreTranslationLanguages: string[]
-  rules: RegexTranslationRule[]
 }
 
 // ── Local LLM ──
@@ -755,6 +694,9 @@ export interface BepInExLogAnalysis {
 
 // Plugin Health Check
 export type HealthStatus = 'Healthy' | 'Warning' | 'Error' | 'Unknown'
+export type PluginAnalysisState = 'NotRun' | 'Running' | 'Completed' | 'Stale' | 'Unavailable' | 'Failed'
+export type DiagnosticSeverity = 'Info' | 'Warning' | 'Error'
+export type DiagnosticConfidence = 'Low' | 'Medium' | 'High'
 
 export interface HealthCheckDetail {
   category: string
@@ -770,12 +712,150 @@ export interface HealthCheckItem {
   details?: HealthCheckDetail[]
 }
 
+export interface PluginDiagnosticEvidence {
+  artifactId: string
+  label: string
+  relativePath?: string | null
+  startLine: number
+  endLine: number
+  excerpt: string
+}
+
+export interface PluginDiagnosticFinding {
+  id: string
+  severity: DiagnosticSeverity
+  confidence: DiagnosticConfidence
+  category: string
+  title: string
+  explanation: string
+  suggestedActions: string[]
+  evidence: PluginDiagnosticEvidence[]
+}
+
+export interface ReviewedDiagnosticArtifact {
+  id: string
+  label: string
+  kind: string
+  relativePath?: string | null
+  truncated: boolean
+  selectionReason?: string | null
+}
+
+export interface PluginDiagnosticAnalysis {
+  summary: string
+  findings: PluginDiagnosticFinding[]
+  reviewedArtifacts: ReviewedDiagnosticArtifact[]
+  endpointName: string
+  analyzedAt: string
+}
+
 export interface PluginHealthReport {
   overall: HealthStatus
+  objectiveOverall: HealthStatus
   checks: HealthCheckItem[]
-  logLastModified?: string
+  analysisState: PluginAnalysisState
+  analysisMessage?: string | null
+  analysis?: PluginDiagnosticAnalysis | null
+  logLastModified?: string | null
   gameNeverRun: boolean
+  freshRunVerified: boolean
   checkedAt: string
+}
+
+export type PluginRepairActionState = 'Completed' | 'Failed' | 'Skipped'
+
+export interface PluginRepairActionResult {
+  id: string
+  tool: string
+  description: string
+  state: PluginRepairActionState
+  message: string
+  target?: string | null
+}
+
+export interface PluginAutoRepairResult {
+  before: PluginHealthReport
+  after: PluginHealthReport
+  actions: PluginRepairActionResult[]
+  summary: string
+  endpointName: string
+  repairedAt: string
+}
+
+export type AgentToolExecutionState = 'Completed' | 'Failed' | 'Skipped' | 'RequiresConfirmation'
+
+export interface ToolboxAgentStatus {
+  supported: boolean
+  reason?: string | null
+  endpointName?: string | null
+  endpoints: ToolboxAgentEndpointOption[]
+}
+
+export interface ToolboxAgentEndpointOption {
+  id: string
+  name: string
+  provider: LlmProvider
+  modelName: string
+  isAutomaticDefault: boolean
+}
+
+export interface ToolboxAgentAttachment {
+  id: string
+  fileName: string
+  kind: string
+  fileSize: number
+}
+
+export interface ToolboxAgentToolExecution {
+  id: string
+  tool: string
+  description: string
+  state: AgentToolExecutionState
+  message: string
+}
+
+export interface ToolboxAgentChatRequest {
+  sessionId: string
+  message: string
+  gameId?: string | null
+  attachmentIds?: string[]
+  confirmPendingAction?: boolean
+  endpointId?: string | null
+}
+
+export interface ToolboxAgentChatResponse {
+  sessionId: string
+  message: string
+  executions: ToolboxAgentToolExecution[]
+  requiresConfirmation: boolean
+  pendingActionDescription?: string | null
+  endpointId: string
+  endpointName: string
+}
+
+export interface ToolboxAgentConversationMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  attachments: ToolboxAgentAttachment[]
+  executions: ToolboxAgentToolExecution[]
+  createdAt: string
+}
+
+export interface ToolboxAgentConversationSummary {
+  sessionId: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  endpointId?: string | null
+  endpointName?: string | null
+  gameId?: string | null
+  messageCount: number
+}
+
+export interface ToolboxAgentConversation {
+  summary: ToolboxAgentConversationSummary
+  messages: ToolboxAgentConversationMessage[]
 }
 
 // BepInEx Plugin Management
@@ -820,21 +900,6 @@ export interface UpdateAvailableInfo {
   changelog?: string
   downloadSize: number
   changedPackages: string[]
-}
-
-export interface PreTranslationCacheStats {
-  totalPreTranslated: number
-  cacheHits: number
-  cacheMisses: number
-  newTexts: number
-  hitRate: number
-  recentMisses: CacheMissEntry[]
-}
-
-export interface CacheMissEntry {
-  preTranslatedKey: string
-  runtimeText: string
-  timestamp: string
 }
 
 // Script Tag Cleaning

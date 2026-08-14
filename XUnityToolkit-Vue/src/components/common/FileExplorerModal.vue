@@ -37,6 +37,7 @@ const error = ref<string | null>(null)
 const selectedFile = ref<FileSystemEntry | null>(null)
 const activeFilterIndex = ref(0)
 const pathInput = ref('')
+const maxRenderedEntries = 1000
 
 const standardFolderIcons: Record<string, Component> = {
   '桌面': DesktopWindowsOutlined,
@@ -106,6 +107,9 @@ const filteredEntries = computed(() => {
     (e) => e.isDirectory || (e.extension && exts.has(e.extension)),
   )
 })
+
+const visibleEntries = computed(() => filteredEntries.value.slice(0, maxRenderedEntries))
+const hiddenEntryCount = computed(() => Math.max(0, filteredEntries.value.length - visibleEntries.value.length))
 
 const parentPath = computed(() => {
   if (!currentPath.value) return null
@@ -447,9 +451,13 @@ onBeforeUnmount(() => {
                 空文件夹
               </div>
 
+              <div v-if="hiddenEntryCount > 0" class="list-state">
+                当前目录项目较多，仅显示前 {{ maxRenderedEntries }} 项，已省略 {{ hiddenEntryCount }} 项
+              </div>
+
               <!-- Entries -->
               <div
-                v-for="entry in filteredEntries"
+                v-for="entry in visibleEntries"
                 :key="entry.fullPath"
                 class="file-row"
                 :class="{

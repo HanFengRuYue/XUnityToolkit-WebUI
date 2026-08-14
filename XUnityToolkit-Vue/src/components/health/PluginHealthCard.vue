@@ -1,113 +1,157 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { NIcon, NButton, NAlert, NSpin, useMessage } from 'naive-ui'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { NAlert, NButton, NIcon, NSpin, useMessage } from 'naive-ui'
 import {
-  CheckCircleOutlined,
-  ErrorOutlineOutlined,
-  WarningAmberOutlined,
-  HelpOutlineOutlined,
-  PlayArrowFilled,
+  AutoFixHighOutlined,
+  ArticleOutlined,
+  BuildOutlined,
   MonitorHeartOutlined,
+  PlayArrowFilled,
 } from '@vicons/material'
 import { pluginHealthApi } from '@/api/games'
-import type { PluginHealthReport, HealthStatus, HealthCheckItem } from '@/api/types'
+import type { PluginAutoRepairResult, PluginHealthReport } from '@/api/types'
+import PluginDiagnosticReport from '@/components/health/PluginDiagnosticReport.vue'
 
 const props = defineProps<{
   gameId: string
   initialReport?: PluginHealthReport | null
 }>()
 
-const report = ref<PluginHealthReport | null>(null)
-const loading = ref(false)
-const verifying = ref(false)
-const error = ref<string | null>(null)
+type ReportSource = 'passive' | 'analysis' | 'repair' | 'verification' | 'install'
+
+const router = useRouter()
 const message = useMessage()
+const report = ref<PluginHealthReport | null>(null)
+const reportSource = ref<ReportSource>('passive')
+const loading = ref(false)
+const analyzing = ref(false)
+const repairing = ref(false)
+const verifying = ref(false)
+const repairResult = ref<PluginAutoRepairResult | null>(null)
+const error = ref<string | null>(null)
 
-function problemItemOrder(item: HealthCheckItem) {
-  switch (item.id) {
-    case 'toolboxAiState':
-      return 0
-    case 'logErrors':
-      return 1
-    default:
-      return 2
+const busy = computed(() => loading.value || analyzing.value || repairing.value || verifying.value)
+
+const reportSourceLabel = computed(() => {
+  switch (reportSource.value) {
+    case 'analysis': return 'AI 智能诊断'
+    case 'repair': return 'AI 全自动修复与复检'
+    case 'verification': return '本次启动并诊断'
+    case 'install': return '安装流程本地验证'
+    default: return '本地检查 / 缓存报告'
   }
-}
+})
 
-// Only show problematic items (non-Healthy)
-const problemItems = computed<HealthCheckItem[]>(() =>
-  (report.value?.checks ?? [])
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => item.status !== 'Healthy')
-    .sort((a, b) => {
-      const orderDiff = problemItemOrder(a.item) - problemItemOrder(b.item)
-      return orderDiff !== 0 ? orderDiff : a.index - b.index
-    })
-    .map(({ item }) => item)
-)
-
-const allHealthy = computed(() =>
-  report.value !== null && report.value.overall === 'Healthy'
-)
+const reportMeta = computed(() => {
+  if (!report.value) return ''
+  const checked = formatDateTime(report.value.checkedAt)
+  const log = report.value.logLastModified ? formatDateTime(report.value.logLastModified) : '未发现'
+  return `来源：${reportSourceLabel.value} · 检查时间：${checked} · 日志时间：${log}`
+})
 
 async function loadPassiveCheck() {
   loading.value = true
+  error.value = null
   try {
     report.value = await pluginHealthApi.check(props.gameId)
-  } catch {
-    // Silent fail for passive check — user can use verify button
+    reportSource.value = 'passive'
+  } catch (e: unknown) {
+    if (!report.value) error.value = errorMessage(e, '读取插件状态失败')
   } finally {
     loading.value = false
   }
 }
 
-async function verifyInstallation() {
+async function analyzeCurrentState() {
+  analyzing.value = true
+  error.value = null
+  try {
+    report.value = await pluginHealthApi.analyze(props.gameId)
+    reportSource.value = 'analysis'
+    notifyResult(report.value)
+  } catch (e: unknown) {
+    error.value = errorMessage(e, 'AI 智能诊断失败')
+    message.error(error.value)
+  } finally {
+    analyzing.value = false
+  }
+}
+
+async function verifyAndAnalyze() {
   verifying.value = true
   error.value = null
   try {
     report.value = await pluginHealthApi.verify(props.gameId)
-    if (report.value.overall === 'Healthy') {
-      message.success('验证通过，所有检查项均正常')
-    } else {
-      message.warning('验证完成，发现问题')
-    }
-  } catch {
-    error.value = '验证安装失败，请确认游戏可执行文件可以正常启动'
-    message.error('验证安装失败')
+    reportSource.value = 'verification'
+    notifyResult(report.value)
+  } catch (e: unknown) {
+    error.value = errorMessage(e, '启动验证失败，请确认游戏可执行文件可以正常启动')
+    message.error(error.value)
   } finally {
     verifying.value = false
   }
 }
 
-function statusIcon(status: HealthStatus) {
-  switch (status) {
-    case 'Healthy': return CheckCircleOutlined
-    case 'Warning': return WarningAmberOutlined
-    case 'Error': return ErrorOutlineOutlined
-    default: return HelpOutlineOutlined
+async function repairAutomatically() {
+  repairing.value = true
+  repairResult.value = null
+  error.value = null
+  try {
+    repairResult.value = await pluginHealthApi.repair(props.gameId)
+    report.value = repairResult.value.after
+    reportSource.value = 'repair'
+    const completed = repairResult.value.actions.filter(action => action.state === 'Completed').length
+    const failed = repairResult.value.actions.filter(action => action.state === 'Failed').length
+    if (failed > 0) message.warning(`自动修复完成：${completed} 项成功，${failed} 项失败`)
+    else if (completed > 0) message.success(`自动修复并复检完成，共修复 ${completed} 项`)
+    else message.info('诊断完成，没有发现可安全自动执行的修复项')
+  } catch (e: unknown) {
+    error.value = errorMessage(e, '插件全自动修复失败')
+    message.error(error.value)
+  } finally {
+    repairing.value = false
   }
 }
 
-function statusClass(status: HealthStatus) {
-  switch (status) {
-    case 'Healthy': return 'status-healthy'
-    case 'Warning': return 'status-warning'
-    case 'Error': return 'status-error'
-    default: return 'status-unknown'
+function notifyResult(value: PluginHealthReport) {
+  if (value.analysisState === 'Completed') {
+    if (value.overall === 'Healthy') message.success('智能诊断完成，已取得本次运行的健康证据')
+    else message.warning('智能诊断完成，请查看报告中的关注项')
+    return
   }
+  message.warning(value.analysisMessage || '本地检查已完成，但 AI 诊断未完成')
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '未知'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? '未知'
+    : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+function openFullReport() {
+  router.push(`/games/${props.gameId}/bepinex-log`)
 }
 
 onMounted(() => {
   if (props.initialReport) {
     report.value = props.initialReport
+    reportSource.value = 'install'
   } else {
     loadPassiveCheck()
   }
 })
 
-watch(() => props.initialReport, (newReport) => {
-  if (newReport) {
-    report.value = newReport
+watch(() => props.initialReport, (value) => {
+  if (value) {
+    report.value = value
+    reportSource.value = 'install'
   } else {
     loadPassiveCheck()
   }
@@ -121,230 +165,126 @@ watch(() => props.initialReport, (newReport) => {
         <span class="section-icon health">
           <NIcon :size="16"><MonitorHeartOutlined /></NIcon>
         </span>
-        插件健康状态
+        插件智能诊断
       </h2>
       <div class="header-actions">
-        <NButton
-          size="small"
-          :loading="verifying"
-          :disabled="loading"
-          @click="verifyInstallation"
-        >
+        <NButton size="small" :loading="analyzing" :disabled="busy && !analyzing" @click="analyzeCurrentState">
+          <template #icon><NIcon :size="14"><AutoFixHighOutlined /></NIcon></template>
+          {{ analyzing ? '正在诊断...' : 'AI 智能诊断' }}
+        </NButton>
+        <NButton type="primary" size="small" :loading="repairing" :disabled="busy && !repairing" @click="repairAutomatically">
+          <template #icon><NIcon :size="14"><BuildOutlined /></NIcon></template>
+          {{ repairing ? '正在自动修复...' : 'AI 全自动修复' }}
+        </NButton>
+        <NButton size="small" :loading="verifying" :disabled="busy && !verifying" @click="verifyAndAnalyze">
           <template #icon><NIcon :size="14"><PlayArrowFilled /></NIcon></template>
-          {{ verifying ? '正在验证...' : '启动验证' }}
+          {{ verifying ? '正在启动并诊断...' : '启动并智能诊断' }}
         </NButton>
       </div>
     </div>
 
-    <!-- Initial loading -->
     <div v-if="loading && !report" class="loading-state">
       <NSpin size="small" />
-      <span>正在检查插件状态...</span>
+      <span>正在收集本地插件事实...</span>
     </div>
 
-    <!-- Report loaded -->
     <template v-else-if="report">
-      <!-- Reference hint -->
-      <NAlert type="info" :bordered="false" class="card-alert reference-hint">
-        检查结果仅供参考，以实际运行情况为准
-      </NAlert>
-
-      <!-- Error from verify -->
+      <div class="report-meta">{{ reportMeta }}</div>
       <NAlert v-if="error" type="error" closable class="card-alert" @close="error = null">
         {{ error }}
       </NAlert>
-
-      <!-- Verifying hint -->
       <NAlert v-if="verifying" type="info" :bordered="false" class="card-alert">
-        正在启动游戏验证插件状态，游戏将在检测完成后自动关闭...
+        正在启动游戏获取本次运行日志与连通性证据，完成后会继续执行 AI 智能诊断；游戏随后自动关闭。
+      </NAlert>
+      <NAlert v-else-if="repairing" type="warning" :bordered="false" class="card-alert">
+        正在使用云端 AI 诊断、规划受限修复，工具箱会先备份目标文件，执行后再重新诊断。请保持游戏关闭。
+      </NAlert>
+      <NAlert v-else-if="analyzing" type="info" :bordered="false" class="card-alert">
+        正在让云端 AI 先选择关键资料，再根据脱敏证据生成结构化报告。本地 AI 不支持此功能。
       </NAlert>
 
-      <!-- All healthy -->
-      <div v-if="allHealthy && !verifying" class="overall-status status-healthy">
-        <NIcon :size="18"><CheckCircleOutlined /></NIcon>
-        <span>所有检查项均正常</span>
-      </div>
-
-      <!-- Game never run (no log) -->
-      <div v-else-if="report.gameNeverRun && problemItems.length === 0 && !verifying" class="overall-status status-unknown">
-        <NIcon :size="18"><HelpOutlineOutlined /></NIcon>
-        <span>游戏尚未运行，请点击「启动验证」检查插件状态</span>
-      </div>
-
-      <!-- Problem items only -->
-      <div v-if="problemItems.length > 0" class="check-group">
-        <div
-          v-for="item in problemItems"
-          :key="item.id"
-          class="check-item"
-          :class="[statusClass(item.status), { 'has-details': item.details?.length }]"
-        >
-          <div class="check-item-main">
-            <NIcon :size="16" class="check-icon"><component :is="statusIcon(item.status)" /></NIcon>
-            <span class="check-label">{{ item.label }}</span>
-            <span v-if="item.detail" class="check-detail">{{ item.detail }}</span>
+      <div v-if="repairResult" class="repair-result">
+        <strong>{{ repairResult.summary }}</strong>
+        <div v-if="repairResult.actions.length" class="repair-actions">
+          <div v-for="action in repairResult.actions" :key="action.id" :class="`repair-${action.state.toLowerCase()}`">
+            <span>{{ action.description }}</span>
+            <small>{{ action.message }}</small>
           </div>
-          <ul v-if="item.details?.length" class="check-detail-list">
-            <li v-for="(d, i) in item.details" :key="i" class="detail-entry">
-              <span class="detail-category">{{ d.category }}</span>
-              <span class="detail-excerpt">{{ d.excerpt }}</span>
-              <span v-if="d.suggestion" class="detail-suggestion">{{ d.suggestion }}</span>
-            </li>
-          </ul>
         </div>
+      </div>
+
+      <PluginDiagnosticReport :report="report" compact />
+
+      <div class="report-actions">
+        <NButton text type="primary" @click="openFullReport">
+          <template #icon><NIcon><ArticleOutlined /></NIcon></template>
+          查看日志与完整诊断报告
+        </NButton>
       </div>
     </template>
 
-    <!-- Error without report -->
-    <NAlert v-else-if="error" type="error">
-      {{ error }}
-    </NAlert>
+    <NAlert v-else-if="error" type="error">{{ error }}</NAlert>
   </div>
 </template>
 
 <style scoped>
-.section-icon.health {
-  color: var(--accent);
-}
+.section-icon.health { color: var(--accent); }
 
 .card-alert {
   margin-bottom: 12px;
-}
-
-.reference-hint {
   font-size: 12px;
-  opacity: 0.75;
 }
 
-.overall-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.overall-status.status-healthy {
-  background: color-mix(in srgb, var(--success) 10%, transparent);
-  color: var(--success);
-}
-
-.overall-status.status-unknown {
-  background: color-mix(in srgb, var(--text-3) 10%, transparent);
+.report-meta {
+  margin: -2px 0 12px;
   color: var(--text-3);
-}
-
-.check-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.check-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-}
-
-.check-item.has-details {
-  flex-direction: column;
-  gap: 0;
-}
-
-.check-item-main {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.check-icon {
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.check-detail-list {
-  list-style: none;
-  padding: 4px 0 2px 24px;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.detail-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1.5;
-  padding: 3px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-}
-
-.detail-entry:last-child {
-  border-bottom: none;
-}
-
-.detail-category {
-  font-weight: 600;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-.detail-excerpt {
-  color: var(--text-3);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  word-break: break-all;
-}
-
-.detail-suggestion {
-  color: color-mix(in srgb, var(--accent) 80%, var(--text-3));
-  font-size: 11px;
-}
-
-.check-item.status-warning .check-icon {
-  color: var(--warning);
-}
-
-.check-item.status-error .check-icon {
-  color: var(--danger);
-}
-
-.check-item.status-unknown .check-icon {
-  color: var(--text-3);
-}
-
-.check-label {
-  color: var(--text-1);
-  white-space: nowrap;
-}
-
-.check-detail {
-  color: var(--text-3);
-  font-size: 12px;
-  margin-left: 4px;
-}
-
-.check-item.status-error .check-detail {
-  color: color-mix(in srgb, var(--danger) 80%, var(--text-3));
-}
-
-.check-item.status-warning .check-detail {
-  color: color-mix(in srgb, var(--warning) 70%, var(--text-3));
 }
 
 .loading-state {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px 0;
+  padding: 18px 0;
   color: var(--text-3);
   font-size: 13px;
+}
+
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.repair-result {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.repair-result > strong { color: var(--text-1); font-size: 12px; }
+.repair-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.repair-actions > div { padding-left: 8px; border-left: 2px solid var(--text-3); }
+.repair-actions span,
+.repair-actions small { display: block; }
+.repair-actions span { color: var(--text-2); font-size: 11px; }
+.repair-actions small { margin-top: 2px; color: var(--text-3); font-size: 10px; line-height: 1.45; }
+.repair-actions .repair-completed { border-left-color: var(--success); }
+.repair-actions .repair-failed { border-left-color: var(--danger); }
+.repair-actions .repair-skipped { border-left-color: var(--warning); }
+
+@media (max-width: 900px) {
+  .section-header {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 </style>

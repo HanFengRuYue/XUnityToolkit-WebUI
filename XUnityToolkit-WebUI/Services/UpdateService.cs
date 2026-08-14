@@ -366,6 +366,18 @@ public sealed class UpdateService(
                 appDir,
                 preserveCustomLlamaFiles: true,
                 hasBundledLlama: EditionInfo.HasBundledLlama);
+            var filesRequiredForStaging = _remoteManifest.Files
+                .Where(pair => UpdateManifestFileSet.ShouldManageForManifest(pair.Key))
+                .Where(pair =>
+                {
+                    var relative = pair.Key.Replace('\\', '/');
+                    localFiles.TryGetValue(relative, out var localFile);
+                    return UpdateManifestFileSet.IsManifestFileChanged(localFile, pair.Value);
+                })
+                .ToDictionary(
+                    pair => pair.Key.Replace('\\', '/'),
+                    pair => pair.Value,
+                    StringComparer.OrdinalIgnoreCase);
             var totalBytes = _lastCheckResult.DownloadSize;
             long downloadedBytes = 0;
 
@@ -393,8 +405,7 @@ public sealed class UpdateService(
                     var asset = _releaseAssets?.FirstOrDefault(a => a.Name == zipName);
                     if (asset is null)
                     {
-                        logger.LogWarning("找不到 Release Asset: {Name}", zipName);
-                        continue;
+                        throw new InvalidOperationException($"找不到更新组件包: {zipName}");
                     }
                     downloadUrl = asset.BrowserDownloadUrl;
                 }
@@ -436,6 +447,9 @@ public sealed class UpdateService(
                 // Extract only changed files from this package (scoped to release file handle before delete)
                 {
                     using var archive = ZipFile.OpenRead(zipPath);
+                    if (string.Equals(pkg, "app", StringComparison.OrdinalIgnoreCase))
+                        UpdateManifestFileSet.ValidateAppPackageInventory(archive, _remoteManifest);
+
                     foreach (var entry in archive.Entries)
                     {
                         if (string.IsNullOrEmpty(entry.Name)) continue; // Skip directories
@@ -447,6 +461,9 @@ public sealed class UpdateService(
                         // For wwwroot.zip and bundled.zip, the zip may contain the directory name
                         // Normalize path
                         if (!_remoteManifest.Files.TryGetValue(entryRelativePath, out var manifestEntry))
+                            continue;
+
+                        if (!string.Equals(manifestEntry.Package, pkg, StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         // Check if this file actually changed
@@ -484,18 +501,15 @@ public sealed class UpdateService(
             }
 
             // Verify extracted files
-            foreach (var filePath in Directory.EnumerateFiles(filesDir, "*", SearchOption.AllDirectories))
+            foreach (var (relative, expected) in filesRequiredForStaging)
             {
-                var relative = Path.GetRelativePath(filesDir, filePath).Replace(Path.DirectorySeparatorChar, '/');
-                if (!UpdateManifestFileSet.ShouldManageForManifest(relative))
-                    continue;
+                var filePath = PathSecurity.SafeJoin(filesDir, relative.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(filePath))
+                    throw new InvalidOperationException($"更新组件缺少文件: {relative}");
 
-                if (_remoteManifest.Files.TryGetValue(relative, out var expected))
-                {
-                    var actualHash = UpdateManifestFileSet.ComputeFileHash(filePath);
-                    if (actualHash != expected.Hash)
-                        throw new InvalidOperationException($"文件校验失败: {relative} (预期: {expected.Hash}, 实际: {actualHash})");
-                }
+                var actualHash = UpdateManifestFileSet.ComputeFileHash(filePath);
+                if (actualHash != expected.Hash)
+                    throw new InvalidOperationException($"文件校验失败: {relative} (预期: {expected.Hash}, 实际: {actualHash})");
             }
 
             // Write update manifest for staging recovery

@@ -46,6 +46,7 @@ public sealed class FontReplacementService(
     });
 
     private readonly ConcurrentDictionary<FontScanCacheKey, IReadOnlyList<FontInfo>> _fontScanCache = new();
+    private const int MaxFontScanCacheEntries = 128;
 
     private static FontScanCacheKey BuildFontScanCacheKey(string filePath, string unityVersion, bool isBundle)
     {
@@ -210,6 +211,7 @@ public sealed class FontReplacementService(
                             gameInfo.UnityVersion, isBundle: false);
                         results.AddRange(fonts);
                         _fontScanCache[cacheKey] = fonts;
+                        TrimFontScanCache();
                     }
                     catch (Exception ex)
                     {
@@ -270,6 +272,7 @@ public sealed class FontReplacementService(
 
                         results.AddRange(bundleFonts);
                         _fontScanCache[cacheKey] = bundleFonts;
+                        TrimFontScanCache();
                     }
                     catch (Exception ex)
                     {
@@ -292,6 +295,16 @@ public sealed class FontReplacementService(
             logger.LogInformation("Font scan completed: found {Count} fonts.", results.Count);
             return results;
         }, ct);
+    }
+
+    private void TrimFontScanCache()
+    {
+        var overflow = _fontScanCache.Count - MaxFontScanCacheEntries;
+        if (overflow <= 0)
+            return;
+
+        foreach (var key in _fontScanCache.Keys.Take(overflow))
+            _fontScanCache.TryRemove(key, out _);
     }
 
     private List<FontInfo> ScanAssetsInstance(

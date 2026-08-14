@@ -177,24 +177,6 @@ public sealed class ScriptTagService(
         return text; // No match → return unchanged
     }
 
-    public async Task<List<string>> FilterAndCleanAsync(
-        string gameId, List<ExtractedText> texts, CancellationToken ct = default)
-    {
-        await GetAsync(gameId, ct); // Ensure rules are loaded & compiled
-
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = new List<string>();
-
-        foreach (var item in texts)
-        {
-            var cleaned = CleanText(gameId, item.Text);
-            if (cleaned is not null && !string.IsNullOrWhiteSpace(cleaned) && seen.Add(cleaned))
-                result.Add(cleaned);
-        }
-
-        return result;
-    }
-
     public string NormalizeForCache(string gameId, string text)
     {
         var stripped = XUnityTranslationFormat.NormalizeForCache(text);

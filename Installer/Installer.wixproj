@@ -1,6 +1,8 @@
-<Project Sdk="WixToolset.Sdk/6.0.2">
+<Project Sdk="WixToolset.Sdk/7.0.0">
   <PropertyGroup>
     <OutputType>Package</OutputType>
+    <!-- WiX v7 requires explicit acceptance of the wix7 OSMF EULA for automated builds. -->
+    <AcceptEula>wix7</AcceptEula>
     <InstallerPlatform Condition="'$(Platform)' == ''">x64</InstallerPlatform>
     <!-- Skip ICE validation entirely (faster builds; per-user install triggers many false positives anyway) -->
     <SuppressValidation>true</SuppressValidation>
@@ -17,7 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
-    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.0" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="7.0.0" />
   </ItemGroup>
 </Project>

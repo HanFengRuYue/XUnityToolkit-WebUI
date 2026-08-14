@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Buffers;
 using System.Diagnostics;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 
@@ -25,7 +24,6 @@ public sealed class TranslationMemoryService(
 
     // Hit stats
     private long _exactHits;
-    private long _patternHits;
     private long _fuzzyHits;
     private long _misses;
 
@@ -36,7 +34,6 @@ public sealed class TranslationMemoryService(
     {
         public ConcurrentDictionary<string, TranslationMemoryEntry> ExactIndex { get; } = new(StringComparer.Ordinal);
         public ConcurrentDictionary<int, (Lock Lock, List<TranslationMemoryEntry> Entries)> LengthBuckets { get; } = new();
-        public List<(Regex Pattern, string TranslatedTemplate, List<VariablePosition> Variables)> CompiledPatterns { get; set; } = [];
         public PriorityQueue<string, long> EvictionQueue { get; } = new();
         public Lock EvictionLock { get; } = new();
         public bool LoadAttempted { get; set; }
@@ -68,7 +65,7 @@ public sealed class TranslationMemoryService(
 
     /// <summary>
     /// Try to match text against the TM. Returns null if no match found.
-    /// Tries exact → pattern → fuzzy in order.
+    /// Tries exact → fuzzy in order.
     /// </summary>
     public TmMatchResult? TryMatch(string gameId, string text, double fuzzyThreshold = 0.85)
     {
@@ -93,18 +90,7 @@ public sealed class TranslationMemoryService(
             };
         }
 
-        // 2. Pattern match
-        var patternResult = TryPatternMatch(store, text);
-        if (patternResult is not null)
-        {
-            Interlocked.Increment(ref _patternHits);
-            if (logger.IsEnabled(LogLevel.Debug))
-                logger.LogDebug("TM 匹配命中: game={GameId}, type=pattern, elapsedMs={ElapsedMs}",
-                    gameId, matchStopwatch.Elapsed.TotalMilliseconds);
-            return patternResult;
-        }
-
-        // 3. Fuzzy match
+        // 2. Fuzzy match
         var fuzzyResult = TryFuzzyMatch(store, normalized, fuzzyThreshold);
         if (fuzzyResult is not null)
         {
@@ -218,18 +204,6 @@ public sealed class TranslationMemoryService(
             await PersistAsync(gameId, store, ct);
     }
 
-    /// <summary>
-    /// Load compiled patterns from DynamicPatternService.
-    /// </summary>
-    public void LoadPatterns(
-        string gameId,
-        List<(Regex Pattern, string TranslatedTemplate, List<VariablePosition> Variables)> patterns)
-    {
-        var store = _stores.GetOrAdd(gameId, _ => new TranslationMemoryStore());
-        store.CompiledPatterns = patterns;
-        logger.LogDebug("翻译记忆库 {GameId}: 加载 {Count} 个动态模式", gameId, patterns.Count);
-    }
-
     public void RemoveCache(string gameId)
     {
         CancelDebounceTimer(gameId);
@@ -266,11 +240,10 @@ public sealed class TranslationMemoryService(
         return _stores.TryGetValue(gameId, out var store) ? store.ExactIndex.Count : 0;
     }
 
-    public (long ExactHits, long PatternHits, long FuzzyHits, long Misses) GetHitStats()
+    public (long ExactHits, long FuzzyHits, long Misses) GetHitStats()
     {
         return (
             Interlocked.Read(ref _exactHits),
-            Interlocked.Read(ref _patternHits),
             Interlocked.Read(ref _fuzzyHits),
             Interlocked.Read(ref _misses)
         );
@@ -373,34 +346,6 @@ public sealed class TranslationMemoryService(
             try { cts.Cancel(); } catch { /* already disposed */ }
             cts.Dispose();
         }
-    }
-
-    // ── Pattern matching ──
-
-    private static TmMatchResult? TryPatternMatch(
-        TranslationMemoryStore store,
-        string text)
-    {
-        foreach (var (pattern, translatedTemplate, variables) in store.CompiledPatterns)
-        {
-            var match = pattern.Match(text);
-            if (!match.Success) continue;
-
-            // Replace group references in translated template
-            var result = translatedTemplate;
-            for (var i = match.Groups.Count - 1; i >= 1; i--)
-            {
-                result = result.Replace($"${i}", match.Groups[i].Value);
-            }
-
-            return new TmMatchResult
-            {
-                Translation = result,
-                MatchType = TmMatchType.Pattern
-            };
-        }
-
-        return null;
     }
 
     // ── Fuzzy matching ──

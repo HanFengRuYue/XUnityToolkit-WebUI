@@ -4,11 +4,8 @@ import {
   NIcon,
   NButton,
   NSwitch,
-  NTag,
-  NProgress,
   NSlider,
-  NCollapse,
-  NCollapseItem,
+  NInputNumber,
   NPopover,
   useMessage,
 } from 'naive-ui'
@@ -29,14 +26,13 @@ import {
   CloudOutlined,
   ComputerOutlined,
   SportsEsportsOutlined,
-  CachedOutlined,
   ExpandMoreOutlined,
   StorageOutlined,
 } from '@vicons/material'
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
 import { settingsApi } from '@/api/games'
-import type { AppSettings, AiTranslationSettings } from '@/api/types'
+import type { AppSettings, AiTranslationSettings, ToolkitConnectionInfo } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -46,7 +42,6 @@ defineOptions({ name: 'AiTranslationView' })
 
 const collapsed = reactive({
   settings: false,
-  cache: true,
   recent: true,
   errors: true,
   termSettings: false,
@@ -70,18 +65,15 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   localRepeatPenalty: 1.0,
   endpoints: [],
   glossaryExtractionEnabled: false,
-  enablePreTranslationCache: true,
   termAuditEnabled: true,
   naturalTranslationMode: true,
   enableTranslationMemory: true,
   fuzzyMatchThreshold: 85,
-  enableLlmPatternAnalysis: true,
-  enableMultiRoundTranslation: true,
-  enableAutoTermExtraction: true,
-  autoApplyExtractedTerms: false,
 }
 
 const settings = ref<AppSettings | null>(null)
+const connectionInfo = ref<ToolkitConnectionInfo | null>(null)
+let connectionPollTimer: ReturnType<typeof setInterval> | null = null
 
 const aiSettings = computed({
   get: () => settings.value?.aiTranslation ?? { ...DEFAULT_AI_TRANSLATION },
@@ -93,21 +85,43 @@ const aiSettings = computed({
 })
 
 const connectionStatus = computed(() => {
-  if (!aiStore.stats?.lastRequestAt) return 'never'
-  const last = new Date(aiStore.stats.lastRequestAt).getTime()
-  const diff = Date.now() - last
-  if (diff < 5 * 60 * 1000) return 'active'
-  if (diff < 60 * 60 * 1000) return 'idle'
-  return 'stale'
+  if (!connectionInfo.value) return 'never'
+  if (!connectionInfo.value.loopbackSelfTestSucceeded) return 'stale'
+  return connectionInfo.value.pluginConnection.connectedCount > 0 ? 'active' : 'idle'
 })
 
 const connectionLabel = computed(() => {
   switch (connectionStatus.value) {
-    case 'active': return '活跃'
-    case 'idle': return '空闲'
-    case 'stale': return '已断开'
-    case 'never': return '无连接'
+    case 'active': return 'XUnity 已连接'
+    case 'idle': return '等待游戏连接'
+    case 'stale': return '环回自检异常'
+    case 'never': return '正在检测'
   }
+})
+
+const connectionTimeFormatted = computed(() => {
+  const timestamp = connectionInfo.value?.pluginConnection.lastHeartbeatAt
+  if (!timestamp) return connectionStatus.value === 'idle' ? '尚无心跳' : ''
+  return `心跳 ${formatRelativeTime(timestamp)}`
+})
+
+const connectionDiagnostic = computed(() => {
+  const info = connectionInfo.value
+  if (!info) return '正在读取工具箱运行时端点。'
+  if (!info.loopbackSelfTestSucceeded) {
+    return `工具箱自身环回连接失败：${info.loopbackSelfTestError ?? '未知原因'}。请检查安全软件或网络过滤驱动。`
+  }
+  if (info.usedFallback) {
+    return `首选端口 ${info.preferredPort} 不可用，当前已自动回退到 ${info.actualPort}，游戏会通过发现文件自动跟随。`
+  }
+  const heartbeat = info.pluginConnection.lastHeartbeatAt
+  if (heartbeat && Date.now() - new Date(heartbeat).getTime() >= 30_000) {
+    return '工具箱环回自检正常，但游戏心跳已过期。请检查加速器的“绕过局域网/环回地址”、TUN 严格路由及安全软件规则。'
+  }
+  if (info.pluginConnection.connectedCount === 0) {
+    return '工具箱端点工作正常；启动已安装新版端点的游戏后，这里会显示实时心跳。'
+  }
+  return 'XUnity 正通过 127.0.0.1 直连工具箱，系统代理不会参与本机请求。'
 })
 
 const successRate = computed(() => {
@@ -135,7 +149,7 @@ const isActivelyTranslating = computed(() => (aiStore.stats?.translating ?? 0) >
 const tmTotalHits = computed(() => {
   const s = aiStore.stats
   if (!s) return 0
-  return s.translationMemoryHits + s.translationMemoryFuzzyHits + s.translationMemoryPatternHits
+  return s.translationMemoryHits + s.translationMemoryFuzzyHits
 })
 
 const llmCompleted = computed(() => {
@@ -260,34 +274,63 @@ async function loadSettings() {
   enableAutoSave()
 }
 
+async function loadConnectionInfo() {
+  try {
+    connectionInfo.value = await settingsApi.getConnection()
+  } catch {
+    connectionInfo.value = null
+  }
+}
+
+function stopConnectionPolling() {
+  if (connectionPollTimer) {
+    clearInterval(connectionPollTimer)
+    connectionPollTimer = null
+  }
+}
+
+function startConnectionPolling() {
+  stopConnectionPolling()
+  void loadConnectionInfo()
+  connectionPollTimer = setInterval(() => void loadConnectionInfo(), 5000)
+}
+
+async function refreshConnectionAndStats() {
+  await Promise.all([aiStore.fetchStats(), loadConnectionInfo()])
+}
+
 onMounted(async () => {
   await aiStore.connect()
   await Promise.all([
     aiStore.fetchStats(),
-    aiStore.fetchCacheStats(),
     loadSettings(),
+    loadConnectionInfo(),
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
   await nextTick()
   await syncPipelineLayout()
   setupPipelineObserver()
+  startConnectionPolling()
 })
 
 onActivated(async () => {
   await aiStore.connect()
-  await Promise.all([aiStore.fetchStats(), aiStore.fetchCacheStats(), loadSettings()])
+  await Promise.all([aiStore.fetchStats(), loadSettings(), loadConnectionInfo()])
   await nextTick()
   await syncPipelineLayout()
   setupPipelineObserver()
+  startConnectionPolling()
 })
 
 onDeactivated(() => {
   aiStore.disconnect()
+  stopConnectionPolling()
   cleanupPipeline()
 })
 
 onBeforeUnmount(() => {
   aiStore.disconnect()
+  stopConnectionPolling()
   cleanupPipeline()
 })
 
@@ -517,7 +560,6 @@ watch(() => [
   tmTotalHits.value,
   aiStore.stats?.translationMemoryHits ?? 0,
   aiStore.stats?.translationMemoryFuzzyHits ?? 0,
-  aiStore.stats?.translationMemoryPatternHits ?? 0,
   extractionStats.value?.totalExtracted ?? 0,
   extractionStats.value?.totalExtractionCalls ?? 0,
   extractionStats.value?.activeExtractions ?? 0,
@@ -599,9 +641,9 @@ watch(() => [
               <span class="connection-badge" :class="connectionStatus">
                 <span class="connection-dot"></span>
                 {{ connectionLabel }}
-                <span class="connection-time">{{ lastRequestFormatted }}</span>
+                <span v-if="connectionTimeFormatted" class="connection-time">{{ connectionTimeFormatted }}</span>
               </span>
-              <NButton size="small" quaternary @click="aiStore.fetchStats()">
+              <NButton size="small" quaternary @click="refreshConnectionAndStats">
                 刷新
               </NButton>
             </div>
@@ -757,7 +799,6 @@ watch(() => [
                           <div class="tm-chips-inline">
                             <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryHits ?? 0) }}</strong> 精确</span>
                             <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryFuzzyHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryFuzzyHits ?? 0) }}</strong> 模糊</span>
-                            <span class="tm-inline-chip"><strong :data-full-value="String(aiStore.stats?.translationMemoryPatternHits ?? 0)">{{ formatPipelineCount(aiStore.stats?.translationMemoryPatternHits ?? 0) }}</strong> 模式</span>
                           </div>
                         </div>
                       </template>
@@ -858,84 +899,6 @@ watch(() => [
           </div>
         </div>
 
-        <!-- Pre-Translation Cache Stats -->
-        <div v-if="aiStore.cacheStats && aiStore.cacheStats.totalPreTranslated > 0" class="section-card" :class="{ 'is-collapsed': collapsed.cache }" style="animation-delay: 0.06s">
-          <div class="section-header collapsible" @click="collapsed.cache = !collapsed.cache">
-            <h2 class="section-title">
-              <span class="section-icon">
-                <NIcon :size="16"><CachedOutlined /></NIcon>
-              </span>
-              预翻译缓存
-              <NTag size="small" type="warning" style="margin-left: 8px">实验性</NTag>
-            </h2>
-            <NIcon :size="18" class="collapse-chevron" :class="{ expanded: !collapsed.cache }">
-              <ExpandMoreOutlined />
-            </NIcon>
-          </div>
-          <div class="section-body" :class="{ collapsed: collapsed.cache }">
-            <div class="section-body-inner">
-              <div class="metrics-strip compact-metrics">
-                <div class="metric-pill">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><CachedOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.totalPreTranslated }}</span>
-                    <span class="metric-label">总条目</span>
-                  </div>
-                </div>
-                <div class="metric-pill rate-good">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><CheckCircleOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.cacheHits }}</span>
-                    <span class="metric-label">命中</span>
-                  </div>
-                </div>
-                <div class="metric-pill" :class="{ 'rate-bad': aiStore.cacheStats.cacheMisses > 0 }">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><ErrorOutlineOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.cacheMisses }}</span>
-                    <span class="metric-label">未命中</span>
-                  </div>
-                </div>
-                <div class="metric-pill" :class="{ 'rate-good': aiStore.cacheStats.hitRate > 80, 'rate-warn': aiStore.cacheStats.hitRate <= 80 && aiStore.cacheStats.hitRate > 50, 'rate-bad': aiStore.cacheStats.hitRate <= 50 }">
-                  <div class="metric-icon">
-                    <NIcon :size="14"><SpeedOutlined /></NIcon>
-                  </div>
-                  <div class="metric-data">
-                    <span class="metric-value">{{ aiStore.cacheStats.hitRate }}<small>%</small></span>
-                    <span class="metric-label">命中率</span>
-                  </div>
-                </div>
-              </div>
-              <NProgress
-                type="line"
-                :percentage="aiStore.cacheStats.hitRate"
-                :color="aiStore.cacheStats.hitRate > 50 ? 'var(--success)' : 'var(--danger)'"
-                class="cache-progress"
-              />
-              <NCollapse v-if="aiStore.cacheStats.recentMisses.length > 0">
-                <NCollapseItem title="最近未命中详情" name="misses">
-                  <div v-for="(miss, idx) in aiStore.cacheStats.recentMisses" :key="idx" class="cache-miss-item">
-                    <div class="cache-miss-row">
-                      <span class="cache-miss-label">预翻译键:</span>
-                      <code class="cache-miss-code">{{ miss.preTranslatedKey }}</code>
-                    </div>
-                    <div class="cache-miss-row">
-                      <span class="cache-miss-label">运行时文本:</span>
-                      <code class="cache-miss-code">{{ miss.runtimeText }}</code>
-                    </div>
-                  </div>
-                </NCollapseItem>
-              </NCollapse>
-            </div>
-          </div>
-        </div>
-
     <!-- AI Translation Settings (collapsible) -->
     <div v-if="settings" class="section-card" :class="{ 'is-collapsed': collapsed.settings }" style="animation-delay: 0.07s">
       <div class="section-header collapsible" @click="collapsed.settings = !collapsed.settings">
@@ -952,6 +915,62 @@ watch(() => [
 
       <div class="section-body" :class="{ collapsed: collapsed.settings }">
         <div class="section-body-inner">
+          <div class="toolbox-connection-card" :class="connectionStatus">
+            <div class="toolbox-connection-heading">
+              <div>
+                <span class="toolbox-connection-title">工具箱连接</span>
+                <span class="toolbox-connection-subtitle">仅监听 127.0.0.1，XUnity 本机请求强制绕过系统代理</span>
+              </div>
+              <span class="connection-badge" :class="connectionStatus">
+                <span class="connection-dot"></span>
+                {{ connectionLabel }}
+              </span>
+            </div>
+
+            <div class="toolbox-connection-grid">
+              <div class="connection-field editable">
+                <span class="connection-field-label">首选端口</span>
+                <NInputNumber
+                  :value="aiSettings.port"
+                  @update:value="(v: number | null) => { aiSettings = { ...aiSettings, port: v ?? 51821 } }"
+                  :min="1024"
+                  :max="65535"
+                  size="small"
+                />
+                <span class="connection-field-note">下次启动生效</span>
+              </div>
+              <div class="connection-field">
+                <span class="connection-field-label">实际端口</span>
+                <strong>{{ connectionInfo?.actualPort ?? '—' }}</strong>
+                <span v-if="connectionInfo?.usedFallback" class="fallback-chip">已回退</span>
+              </div>
+              <div class="connection-field">
+                <span class="connection-field-label">运行地址</span>
+                <code>{{ connectionInfo?.baseUrl ?? '读取中…' }}</code>
+              </div>
+              <div class="connection-field">
+                <span class="connection-field-label">协议</span>
+                <strong>v{{ connectionInfo?.discoveryProtocolVersion ?? '—' }}</strong>
+                <span> · {{ connectionInfo?.pluginConnection.connectedCount ?? 0 }} 个在线会话</span>
+              </div>
+              <div class="connection-field">
+                <span class="connection-field-label">最后心跳</span>
+                <strong>{{ connectionInfo?.pluginConnection.lastHeartbeatAt ? formatRelativeTime(connectionInfo.pluginConnection.lastHeartbeatAt) : '从未' }}</strong>
+              </div>
+              <div class="connection-field">
+                <span class="connection-field-label">最近翻译</span>
+                <strong>{{ lastRequestFormatted }}</strong>
+              </div>
+            </div>
+
+            <div class="connection-diagnostic" :class="connectionStatus">
+              {{ connectionDiagnostic }}
+            </div>
+            <div v-if="connectionInfo?.restartRequired" class="connection-restart-note">
+              首选端口已修改；当前游戏配置仍继续使用实际地址，重启工具箱后才会应用新首选端口。
+            </div>
+          </div>
+
           <!-- Pipeline Settings Groups -->
           <div class="pipeline-settings" :class="{ 'all-collapsed': allSettingsCollapsed }">
             <!-- Term Settings Group -->
@@ -1123,7 +1142,6 @@ watch(() => [
                   <span v-else-if="item.termAuditResult === 'failed'" class="meta-tag audit-fail">审查失败</span>
                   <span v-if="item.translationSource === 'tmExact'" class="meta-tag tm-exact">TM 精确</span>
                   <span v-else-if="item.translationSource === 'tmFuzzy'" class="meta-tag tm-fuzzy">TM 模糊</span>
-                  <span v-else-if="item.translationSource === 'tmPattern'" class="meta-tag tm-pattern">动态模式</span>
                   <span class="meta-tag">{{ item.tokensUsed }} tok</span>
                   <span class="meta-tag">{{ formatTime(item.responseTimeMs) }}</span>
                   <span class="meta-tag time">{{ formatRelativeTime(item.timestamp) }}</span>
@@ -2143,8 +2161,7 @@ watch(() => [
 }
 
 .meta-tag.tm-exact,
-.meta-tag.tm-fuzzy,
-.meta-tag.tm-pattern {
+.meta-tag.tm-fuzzy {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
   font-weight: 500;
@@ -2206,6 +2223,133 @@ watch(() => [
   color: var(--text-2);
 }
 
+
+/* ===== Toolbox Connection ===== */
+.toolbox-connection-card {
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-subtle) 65%, transparent);
+}
+
+.toolbox-connection-card.active {
+  border-color: var(--accent-border);
+}
+
+.toolbox-connection-card.stale {
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
+}
+
+.toolbox-connection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.toolbox-connection-title,
+.toolbox-connection-subtitle {
+  display: block;
+}
+
+.toolbox-connection-title {
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.toolbox-connection-subtitle {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.toolbox-connection-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.connection-field {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.connection-field.editable {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+}
+
+.connection-field :deep(.n-input-number) {
+  width: 100%;
+}
+
+.connection-field-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.connection-field strong,
+.connection-field code {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.connection-field code {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-field-note {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.fallback-chip {
+  display: inline-flex;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+  font-size: 10px;
+}
+
+.connection-diagnostic,
+.connection-restart-note {
+  margin-top: 10px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.connection-diagnostic.stale {
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+
+.connection-restart-note {
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+  color: var(--warning);
+}
 
 /* ===== Pipeline Settings ===== */
 .pipeline-settings {
@@ -2371,45 +2515,17 @@ watch(() => [
   max-width: 320px;
 }
 
-/* ===== Cache Stats ===== */
-.cache-progress {
-  margin: 12px 0;
-}
-
-.cache-miss-item {
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.cache-miss-item:last-child {
-  border-bottom: none;
-}
-
-.cache-miss-row {
-  display: flex;
-  gap: 8px;
-  font-size: 12px;
-  margin: 3px 0;
-}
-
-.cache-miss-label {
-  color: var(--text-3);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.cache-miss-code {
-  word-break: break-all;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-2);
-  background: var(--bg-subtle);
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
+  .toolbox-connection-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbox-connection-grid {
+    grid-template-columns: 1fr;
+  }
+
   .pipeline-svg {
     display: none;
   }
