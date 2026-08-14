@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { NAlert, NButton, NIcon, NInput, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
 import {
   AttachFileOutlined,
@@ -20,7 +20,12 @@ import type {
   ToolboxAgentToolExecution,
 } from '@/api/types'
 
-const props = defineProps<{ show: boolean }>()
+const props = withDefaults(defineProps<{
+  show: boolean
+  defaultLeft?: number
+}>(), {
+  defaultLeft: 24,
+})
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 interface ChatMessage {
@@ -45,7 +50,29 @@ const needsConfirmation = ref(false)
 const pendingActionDescription = ref<string | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const messageList = ref<HTMLElement | null>(null)
+const agentWindow = ref<HTMLElement | null>(null)
 const sessionId = ref(createSessionId())
+const position = ref<{ x: number; y: number } | null>(null)
+const dragging = ref(false)
+
+let dragPointerId: number | null = null
+let dragOffsetX = 0
+let dragOffsetY = 0
+let previousBodyCursor = ''
+let previousBodyUserSelect = ''
+
+const windowStyle = computed<Record<string, string>>(() => {
+  const style: Record<string, string> = {}
+  if (position.value) {
+    style.left = `${position.value.x}px`
+    style.top = `${position.value.y}px`
+    style.bottom = 'auto'
+  } else {
+    style['--agent-default-left'] = `${props.defaultLeft}px`
+  }
+
+  return style
+})
 
 const gameOptions = computed(() => games.value.map(game => ({
   label: game.name,
@@ -60,10 +87,92 @@ const canSend = computed(() =>
 )
 
 watch(() => props.show, async (show) => {
-  if (!show) return
+  if (!show) {
+    if (dragging.value) endDrag()
+    return
+  }
   minimized.value = false
+  await nextTick()
+  clampCurrentPosition()
   await initialize()
   await scrollToBottom()
+})
+
+function startDrag(event: PointerEvent) {
+  if (dragging.value) return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  const element = agentWindow.value
+  const handle = event.currentTarget as HTMLElement | null
+  if (!element || !handle) return
+
+  event.preventDefault()
+  const rect = element.getBoundingClientRect()
+  position.value = { x: rect.left, y: rect.top }
+  dragPointerId = event.pointerId
+  dragOffsetX = event.clientX - rect.left
+  dragOffsetY = event.clientY - rect.top
+  dragging.value = true
+  previousBodyCursor = document.body.style.cursor
+  previousBodyUserSelect = document.body.style.userSelect
+  document.body.style.cursor = 'grabbing'
+  document.body.style.userSelect = 'none'
+  handle.setPointerCapture(event.pointerId)
+}
+
+function moveDrag(event: PointerEvent) {
+  if (!dragging.value || event.pointerId !== dragPointerId) return
+  position.value = clampPosition(
+    event.clientX - dragOffsetX,
+    event.clientY - dragOffsetY,
+  )
+}
+
+function endDrag(event?: PointerEvent) {
+  if (!dragging.value || dragPointerId === null) return
+  if (event && event.pointerId !== dragPointerId) return
+  const handle = event?.currentTarget as HTMLElement | null
+  if (handle && handle.hasPointerCapture(dragPointerId)) {
+    handle.releasePointerCapture(dragPointerId)
+  }
+  dragging.value = false
+  dragPointerId = null
+  document.body.style.cursor = previousBodyCursor
+  document.body.style.userSelect = previousBodyUserSelect
+}
+
+function clampPosition(x: number, y: number) {
+  const element = agentWindow.value
+  if (!element) return { x, y }
+
+  const margin = window.innerWidth <= 768 ? 10 : 12
+  const maxX = Math.max(margin, window.innerWidth - element.offsetWidth - margin)
+  const maxY = Math.max(margin, window.innerHeight - element.offsetHeight - margin)
+  return {
+    x: Math.min(maxX, Math.max(margin, x)),
+    y: Math.min(maxY, Math.max(margin, y)),
+  }
+}
+
+function clampCurrentPosition() {
+  if (!position.value) return
+  position.value = clampPosition(position.value.x, position.value.y)
+}
+
+async function toggleMinimized() {
+  minimized.value = !minimized.value
+  await nextTick()
+  clampCurrentPosition()
+}
+
+function handleViewportResize() {
+  clampCurrentPosition()
+}
+
+window.addEventListener('resize', handleViewportResize)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleViewportResize)
+  if (dragging.value) endDrag()
 })
 
 async function initialize() {
@@ -224,11 +333,21 @@ function createMessageId() {
   <Transition name="agent-window">
     <section
       v-if="show"
+      ref="agentWindow"
       class="agent-window"
-      :class="{ minimized }"
+      :class="{ minimized, dragging }"
+      :style="windowStyle"
       aria-label="工具箱智能体"
     >
-      <header class="agent-header">
+      <header
+        class="agent-header"
+        title="拖动窗口"
+        @pointerdown="startDrag"
+        @pointermove="moveDrag"
+        @pointerup="endDrag"
+        @pointercancel="endDrag"
+        @lostpointercapture="endDrag"
+      >
         <div class="agent-title">
           <span class="agent-avatar"><NIcon :size="20"><AutoAwesomeOutlined /></NIcon></span>
           <div>
@@ -236,11 +355,11 @@ function createMessageId() {
             <span>{{ status?.endpointName || '云端 AI' }}</span>
           </div>
         </div>
-        <div class="window-actions">
+        <div class="window-actions" @pointerdown.stop>
           <NButton quaternary circle size="small" title="新对话" :disabled="loading" @click="newConversation">
             <template #icon><NIcon><DeleteSweepOutlined /></NIcon></template>
           </NButton>
-          <NButton quaternary circle size="small" title="最小化" @click="minimized = !minimized">
+          <NButton quaternary circle size="small" :title="minimized ? '还原' : '最小化'" @click="toggleMinimized">
             <template #icon><NIcon><RemoveOutlined /></NIcon></template>
           </NButton>
           <NButton quaternary circle size="small" title="关闭" @click="close">
@@ -373,7 +492,7 @@ function createMessageId() {
 <style scoped>
 .agent-window {
   position: fixed;
-  right: 24px;
+  left: var(--agent-default-left, 24px);
   bottom: 20px;
   z-index: 1200;
   display: flex;
@@ -401,7 +520,12 @@ function createMessageId() {
   padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(120deg, var(--accent-soft), transparent 60%);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
+
+.agent-window.dragging .agent-header { cursor: grabbing; }
 
 .agent-title,
 .window-actions,
@@ -548,7 +672,7 @@ function createMessageId() {
 
 @media (max-width: 768px) {
   .agent-window {
-    right: 10px;
+    left: var(--agent-default-left, 10px);
     bottom: 10px;
     width: calc(100vw - 20px);
     height: calc(100vh - 80px);

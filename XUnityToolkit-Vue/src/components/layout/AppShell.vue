@@ -46,12 +46,12 @@ const cachedPages = ['LibraryView', 'AiTranslationView', 'FontGeneratorView', 'L
 const mainNavItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
   { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
-  { label: '工具箱智能体', key: 'toolbox-agent', icon: AutoAwesomeOutlined },
   { label: '字体生成', key: '/font-generator', icon: FontDownloadOutlined },
   { label: '运行日志', key: '/logs', icon: ArticleOutlined },
 ]
 
 const settingsNavItem = { label: '设置', key: '/settings', icon: SettingsOutlined }
+const toolboxAgentNavItem = { label: '工具箱智能体', key: 'toolbox-agent', icon: AutoAwesomeOutlined }
 
 function navigateTo(key: string) {
   if (key === 'toolbox-agent') {
@@ -102,6 +102,13 @@ watch(() => route.path, () => {
 const viewportWidth = ref(window.innerWidth)
 const isMobile = computed(() => viewportWidth.value <= 768)
 const isNarrowDesktop = computed(() => !isMobile.value && viewportWidth.value <= 900)
+const toolboxAgentDefaultLeft = computed(() => {
+  if (isMobile.value) return 10
+  const sidebarWidth = isNarrowDesktop.value
+    ? sidebarStore.COLLAPSED_WIDTH
+    : sidebarStore.effectiveWidth
+  return sidebarWidth + 24
+})
 
 function updateViewport() {
   viewportWidth.value = window.innerWidth
@@ -241,6 +248,22 @@ function onResizeDoubleClick() {
           <span class="nav-label">{{ settingsNavItem.label }}</span>
           <span v-if="showUpdateBadge" class="update-dot" />
         </a>
+
+        <NTooltip v-if="(sidebarStore.collapsed || isNarrowDesktop) && !isMobile" placement="right" :show-arrow="false">
+          <template #trigger>
+            <a class="nav-item toolbox-agent-nav-item" :class="{ active: isActive(toolboxAgentNavItem.key) }" @click="navigateTo(toolboxAgentNavItem.key)">
+              <NIcon :size="20"><component :is="toolboxAgentNavItem.icon" /></NIcon>
+              <span class="nav-label">{{ toolboxAgentNavItem.label }}</span>
+              <span class="agent-beta-badge">测试版</span>
+            </a>
+          </template>
+          工具箱智能体（测试版）
+        </NTooltip>
+        <a v-else class="nav-item toolbox-agent-nav-item" :class="{ active: isActive(toolboxAgentNavItem.key) }" @click="navigateTo(toolboxAgentNavItem.key)">
+          <NIcon :size="20"><component :is="toolboxAgentNavItem.icon" /></NIcon>
+          <span class="nav-label">{{ toolboxAgentNavItem.label }}</span>
+          <span class="agent-beta-badge">测试版</span>
+        </a>
       </div>
 
       <div class="sidebar-footer">
@@ -269,7 +292,7 @@ function onResizeDoubleClick() {
     </main>
   </div>
   <InstallProgressDrawer />
-  <ToolboxAgentWindow v-model:show="toolboxAgentOpen" />
+  <ToolboxAgentWindow v-model:show="toolboxAgentOpen" :default-left="toolboxAgentDefaultLeft" />
 </template>
 
 <style scoped>
@@ -476,6 +499,20 @@ function onResizeDoubleClick() {
 
 .sidebar-bottom-nav .nav-item {
   animation-delay: 0.36s;
+}
+
+.agent-beta-badge {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  letter-spacing: 0.04em;
 }
 
 /* ===== Sidebar Footer ===== */
@@ -742,6 +779,25 @@ function onResizeDoubleClick() {
     padding: 20px 20px;
   }
 
+}
+
+.sidebar.collapsed .agent-beta-badge {
+  position: absolute;
+  top: 3px;
+  right: 1px;
+  display: grid;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  place-items: center;
+  font-size: 0;
+  line-height: 1;
+}
+
+.sidebar.collapsed .agent-beta-badge::after {
+  content: 'β';
+  font-size: 9px;
 }
 
 @media (max-width: 480px) {
