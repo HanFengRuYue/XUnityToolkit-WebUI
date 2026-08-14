@@ -5,11 +5,12 @@ import { NAlert, NButton, NIcon, NSpin, useMessage } from 'naive-ui'
 import {
   AutoFixHighOutlined,
   ArticleOutlined,
+  BuildOutlined,
   MonitorHeartOutlined,
   PlayArrowFilled,
 } from '@vicons/material'
 import { pluginHealthApi } from '@/api/games'
-import type { PluginHealthReport } from '@/api/types'
+import type { PluginAutoRepairResult, PluginHealthReport } from '@/api/types'
 import PluginDiagnosticReport from '@/components/health/PluginDiagnosticReport.vue'
 
 const props = defineProps<{
@@ -17,7 +18,7 @@ const props = defineProps<{
   initialReport?: PluginHealthReport | null
 }>()
 
-type ReportSource = 'passive' | 'analysis' | 'verification' | 'install'
+type ReportSource = 'passive' | 'analysis' | 'repair' | 'verification' | 'install'
 
 const router = useRouter()
 const message = useMessage()
@@ -25,14 +26,17 @@ const report = ref<PluginHealthReport | null>(null)
 const reportSource = ref<ReportSource>('passive')
 const loading = ref(false)
 const analyzing = ref(false)
+const repairing = ref(false)
 const verifying = ref(false)
+const repairResult = ref<PluginAutoRepairResult | null>(null)
 const error = ref<string | null>(null)
 
-const busy = computed(() => loading.value || analyzing.value || verifying.value)
+const busy = computed(() => loading.value || analyzing.value || repairing.value || verifying.value)
 
 const reportSourceLabel = computed(() => {
   switch (reportSource.value) {
     case 'analysis': return 'AI 智能诊断'
+    case 'repair': return 'AI 全自动修复与复检'
     case 'verification': return '本次启动并诊断'
     case 'install': return '安装流程本地验证'
     default: return '本地检查 / 缓存报告'
@@ -86,6 +90,27 @@ async function verifyAndAnalyze() {
     message.error(error.value)
   } finally {
     verifying.value = false
+  }
+}
+
+async function repairAutomatically() {
+  repairing.value = true
+  repairResult.value = null
+  error.value = null
+  try {
+    repairResult.value = await pluginHealthApi.repair(props.gameId)
+    report.value = repairResult.value.after
+    reportSource.value = 'repair'
+    const completed = repairResult.value.actions.filter(action => action.state === 'Completed').length
+    const failed = repairResult.value.actions.filter(action => action.state === 'Failed').length
+    if (failed > 0) message.warning(`自动修复完成：${completed} 项成功，${failed} 项失败`)
+    else if (completed > 0) message.success(`自动修复并复检完成，共修复 ${completed} 项`)
+    else message.info('诊断完成，没有发现可安全自动执行的修复项')
+  } catch (e: unknown) {
+    error.value = errorMessage(e, '插件全自动修复失败')
+    message.error(error.value)
+  } finally {
+    repairing.value = false
   }
 }
 
@@ -147,6 +172,10 @@ watch(() => props.initialReport, (value) => {
           <template #icon><NIcon :size="14"><AutoFixHighOutlined /></NIcon></template>
           {{ analyzing ? '正在诊断...' : 'AI 智能诊断' }}
         </NButton>
+        <NButton type="primary" size="small" :loading="repairing" :disabled="busy && !repairing" @click="repairAutomatically">
+          <template #icon><NIcon :size="14"><BuildOutlined /></NIcon></template>
+          {{ repairing ? '正在自动修复...' : 'AI 全自动修复' }}
+        </NButton>
         <NButton size="small" :loading="verifying" :disabled="busy && !verifying" @click="verifyAndAnalyze">
           <template #icon><NIcon :size="14"><PlayArrowFilled /></NIcon></template>
           {{ verifying ? '正在启动并诊断...' : '启动并智能诊断' }}
@@ -167,9 +196,22 @@ watch(() => props.initialReport, (value) => {
       <NAlert v-if="verifying" type="info" :bordered="false" class="card-alert">
         正在启动游戏获取本次运行日志与连通性证据，完成后会继续执行 AI 智能诊断；游戏随后自动关闭。
       </NAlert>
-      <NAlert v-else-if="analyzing" type="info" :bordered="false" class="card-alert">
-        正在让 AI 先选择关键资料，再根据脱敏证据生成结构化报告。
+      <NAlert v-else-if="repairing" type="warning" :bordered="false" class="card-alert">
+        正在使用云端 AI 诊断、规划受限修复，工具箱会先备份目标文件，执行后再重新诊断。请保持游戏关闭。
       </NAlert>
+      <NAlert v-else-if="analyzing" type="info" :bordered="false" class="card-alert">
+        正在让云端 AI 先选择关键资料，再根据脱敏证据生成结构化报告。本地 AI 不支持此功能。
+      </NAlert>
+
+      <div v-if="repairResult" class="repair-result">
+        <strong>{{ repairResult.summary }}</strong>
+        <div v-if="repairResult.actions.length" class="repair-actions">
+          <div v-for="action in repairResult.actions" :key="action.id" :class="`repair-${action.state.toLowerCase()}`">
+            <span>{{ action.description }}</span>
+            <small>{{ action.message }}</small>
+          </div>
+        </div>
+      </div>
 
       <PluginDiagnosticReport :report="report" compact />
 
@@ -214,6 +256,25 @@ watch(() => props.initialReport, (value) => {
   justify-content: flex-end;
   margin-top: 12px;
 }
+
+.repair-result {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.repair-result > strong { color: var(--text-1); font-size: 12px; }
+.repair-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.repair-actions > div { padding-left: 8px; border-left: 2px solid var(--text-3); }
+.repair-actions span,
+.repair-actions small { display: block; }
+.repair-actions span { color: var(--text-2); font-size: 11px; }
+.repair-actions small { margin-top: 2px; color: var(--text-3); font-size: 10px; line-height: 1.45; }
+.repair-actions .repair-completed { border-left-color: var(--success); }
+.repair-actions .repair-failed { border-left-color: var(--danger); }
+.repair-actions .repair-skipped { border-left-color: var(--warning); }
 
 @media (max-width: 900px) {
   .section-header {

@@ -661,6 +661,9 @@ public sealed partial class PluginDiagnosticArtifactCollector(
     internal static bool IsSafeRegularFile(string gamePath, string fullPath)
         => File.Exists(fullPath) && IsSafePathWithoutReparse(gamePath, fullPath);
 
+    internal static bool IsSafeRegularDirectory(string gamePath, string fullPath)
+        => Directory.Exists(fullPath) && IsSafePathWithoutReparse(gamePath, fullPath);
+
     private static bool IsSafeDirectory(string gamePath, string fullPath)
         => Directory.Exists(fullPath) && IsSafePathWithoutReparse(gamePath, fullPath);
 
@@ -672,7 +675,8 @@ public sealed partial class PluginDiagnosticArtifactCollector(
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var root = rootDirectory + Path.DirectorySeparatorChar;
             var normalized = Path.GetFullPath(fullPath);
-            if (!normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(normalized, rootDirectory, StringComparison.OrdinalIgnoreCase)
+                && !normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                 return false;
 
             var current = normalized;

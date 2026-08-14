@@ -8,11 +8,12 @@ import {
   RefreshOutlined,
   FileDownloadOutlined,
   AutoFixHighOutlined,
+  BuildOutlined,
   TerminalOutlined,
   SearchOutlined,
 } from '@vicons/material'
 import { bepinexLogApi, gamesApi, pluginHealthApi } from '@/api/games'
-import type { Game, PluginHealthReport } from '@/api/types'
+import type { Game, PluginAutoRepairResult, PluginHealthReport } from '@/api/types'
 import PluginDiagnosticReport from '@/components/health/PluginDiagnosticReport.vue'
 
 defineOptions({ name: 'BepInExLogView' })
@@ -30,6 +31,8 @@ const fileSize = ref(0)
 const lastModified = ref('')
 const loading = ref(false)
 const analyzing = ref(false)
+const repairing = ref(false)
+const repairResult = ref<PluginAutoRepairResult | null>(null)
 const healthReport = ref<PluginHealthReport | null>(null)
 const searchQuery = ref('')
 const levelFilter = ref<string>('All')
@@ -167,6 +170,22 @@ async function handleAnalyze() {
   }
 }
 
+async function handleRepair() {
+  repairing.value = true
+  repairResult.value = null
+  try {
+    repairResult.value = await pluginHealthApi.repair(gameId.value)
+    healthReport.value = repairResult.value.after
+    message.success(repairResult.value.summary)
+    await loadLog()
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : '插件全自动修复失败'
+    message.error(msg)
+  } finally {
+    repairing.value = false
+  }
+}
+
 async function loadHealthReport() {
   try {
     healthReport.value = await pluginHealthApi.check(gameId.value)
@@ -240,6 +259,10 @@ onMounted(async () => {
             <template #icon><NIcon><AutoFixHighOutlined /></NIcon></template>
             AI 智能诊断
           </NButton>
+          <NButton size="small" type="warning" @click="handleRepair" :loading="repairing" :disabled="analyzing">
+            <template #icon><NIcon><BuildOutlined /></NIcon></template>
+            AI 全自动修复
+          </NButton>
         </div>
       </div>
 
@@ -292,7 +315,7 @@ onMounted(async () => {
     </div>
 
     <!-- Unified plugin diagnostic report -->
-    <div v-if="analyzing || healthReport" class="section-card" style="animation-delay: 0.15s">
+    <div v-if="analyzing || repairing || healthReport" class="section-card" style="animation-delay: 0.15s">
       <div class="section-header">
         <h2 class="section-title">
           <span class="section-icon">
@@ -303,12 +326,16 @@ onMounted(async () => {
       </div>
 
       <NAlert type="info" :bordered="false" class="analysis-cost-hint">
-        智能诊断会先选择关键日志与配置，再进行第二阶段证据分析，可能产生模型 API 费用。
+        智能诊断与自动修复仅支持云端 AI。自动修复会先备份目标文件，执行受限修复工具，再重新诊断；多阶段调用可能产生模型 API 费用。
       </NAlert>
 
-      <div v-if="analyzing" class="analysis-loading">
+      <NAlert v-if="repairResult" type="success" :bordered="false" class="analysis-cost-hint">
+        {{ repairResult.summary }}
+      </NAlert>
+
+      <div v-if="analyzing || repairing" class="analysis-loading">
         <NSpin size="medium" />
-        <span>正在选择关键资料并生成结构化诊断...</span>
+        <span>{{ repairing ? '正在诊断、备份、自动修复并复检...' : '正在选择关键资料并生成结构化诊断...' }}</span>
       </div>
       <PluginDiagnosticReport v-else-if="healthReport" :report="healthReport" />
     </div>

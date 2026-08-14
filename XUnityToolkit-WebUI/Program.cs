@@ -236,6 +236,13 @@ builder.Services.AddHttpClient("ToolkitLoopback", client =>
     client.Timeout = TimeSpan.FromSeconds(3);
 }).ConfigurePrimaryHttpMessageHandler(ToolkitHttpHandlers.CreateLoopbackHandler);
 
+// The toolbox agent invokes existing local APIs through their normal validation paths.
+// Font generation and installation can take minutes, so this client deliberately has a longer timeout.
+builder.Services.AddHttpClient("ToolboxAgentLoopback", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(10);
+}).ConfigurePrimaryHttpMessageHandler(ToolkitHttpHandlers.CreateLoopbackHandler);
+
 // Services
 builder.Services.AddSingleton<LocalLlmService>();
 builder.Services.AddSingleton<GameImageService>();
@@ -269,7 +276,11 @@ builder.Services.AddSingleton<CharacterSetService>();
 builder.Services.AddSingleton<BepInExLogService>();
 builder.Services.AddSingleton<PluginDiagnosticArtifactCollector>();
 builder.Services.AddSingleton<PluginDiagnosticAgentService>();
+builder.Services.AddSingleton<PluginAutoRepairService>();
 builder.Services.AddSingleton<PluginHealthCheckService>();
+builder.Services.AddSingleton<ToolboxAgentAttachmentStore>();
+builder.Services.AddSingleton<ToolboxAgentToolExecutor>();
+builder.Services.AddSingleton<ToolboxAgentService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<DesktopWindowService>();
 builder.Services.AddSingleton<IDesktopWindowService>(sp =>
@@ -403,6 +414,7 @@ app.MapFontGenerationEndpoints();
 app.MapLocalLlmEndpoints();
 app.MapBepInExLogEndpoints();
 app.MapPluginHealthEndpoints();
+app.MapToolboxAgentEndpoints();
 app.MapUpdateEndpoints();
 app.MapTranslationMemoryEndpoints();
 

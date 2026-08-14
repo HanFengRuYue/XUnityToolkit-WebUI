@@ -15,6 +15,7 @@ public sealed class PluginHealthCheckService(
     XUnityInstallerService xUnityInstaller,
     PluginDiagnosticArtifactCollector artifactCollector,
     PluginDiagnosticAgentService diagnosticAgent,
+    PluginAutoRepairService autoRepairService,
     ILogger<PluginHealthCheckService> logger)
 {
     private const int VerificationTimeoutSeconds = 30;
@@ -56,6 +57,68 @@ public sealed class PluginHealthCheckService(
         try
         {
             return await AnalyzeReservedAsync(game, connectivityVerified, freshRunVerified, ct);
+        }
+        finally
+        {
+            diagnosticAgent.EndDiagnostic(game.Id);
+        }
+    }
+
+    /// <summary>
+    /// Run cloud diagnosis, execute only allowlisted recoverable repairs, then collect a fresh report.
+    /// Local models are deliberately rejected by the diagnostic agent before any file mutation occurs.
+    /// </summary>
+    public async Task<PluginAutoRepairResult> RepairAsync(Game game, CancellationToken ct = default)
+    {
+        if (!diagnosticAgent.TryBeginDiagnostic(game.Id))
+            throw new PluginDiagnosticAlreadyRunningException();
+
+        try
+        {
+            var objectiveBefore = await BuildObjectiveReportAsync(
+                game, connectivityVerified: null, freshRunVerified: false, ct);
+            var snapshotBefore = await artifactCollector.CollectInventoryAsync(game, objectiveBefore.Checks, ct);
+            var before = await diagnosticAgent.AnalyzeReservedAsync(game, objectiveBefore, snapshotBefore, ct);
+
+            if (before.AnalysisState != PluginAnalysisState.Completed || before.Analysis is null)
+            {
+                return new PluginAutoRepairResult(
+                    before,
+                    before,
+                    [],
+                    before.AnalysisMessage ?? "云端 AI 诊断未成功完成，本次没有修改任何文件。",
+                    string.Empty,
+                    DateTime.UtcNow);
+            }
+
+            var plan = await diagnosticAgent.PlanRepairsAsync(game, before, snapshotBefore, ct);
+            var actions = await autoRepairService.ExecuteAsync(game, before, snapshotBefore, plan.Actions, ct);
+            if (actions.Count == 0)
+            {
+                return new PluginAutoRepairResult(
+                    before,
+                    before,
+                    [],
+                    plan.Summary,
+                    plan.EndpointName.Length > 0 ? plan.EndpointName : before.Analysis?.EndpointName ?? string.Empty,
+                    DateTime.UtcNow);
+            }
+
+            var objectiveAfter = await BuildObjectiveReportAsync(
+                game, connectivityVerified: null, freshRunVerified: false, ct);
+            var snapshotAfter = await artifactCollector.CollectInventoryAsync(game, objectiveAfter.Checks, ct);
+            var after = await diagnosticAgent.AnalyzeReservedAsync(game, objectiveAfter, snapshotAfter, ct);
+            var completed = actions.Count(action => action.State == PluginRepairActionState.Completed);
+            var failed = actions.Count(action => action.State == PluginRepairActionState.Failed);
+            var skipped = actions.Count(action => action.State == PluginRepairActionState.Skipped);
+            var summary = $"自动修复已执行并复检：成功 {completed} 项，失败 {failed} 项，跳过 {skipped} 项。";
+            return new PluginAutoRepairResult(
+                before,
+                after,
+                actions,
+                summary,
+                plan.EndpointName.Length > 0 ? plan.EndpointName : after.Analysis?.EndpointName ?? string.Empty,
+                DateTime.UtcNow);
         }
         finally
         {
@@ -566,14 +629,24 @@ public sealed class PluginHealthCheckService(
     private void CheckTranslatorEndpointPackage(List<HealthCheckItem> checks, Game game)
     {
         var status = xUnityInstaller.GetTranslatorEndpointStatus(game);
+        checks.Add(CreateTranslatorEndpointVersionCheck(status));
+    }
+
+    internal static HealthCheckItem CreateTranslatorEndpointVersionCheck(TranslatorEndpointStatus status)
+    {
         var version = string.IsNullOrWhiteSpace(status.Version) ? "未知" : status.Version;
-        checks.Add(status.Origin switch
+        return status.Origin switch
         {
             TranslatorEndpointOrigin.OfficialCurrent => new HealthCheckItem(
                 "translatorEndpointVersion",
                 "AI 翻译端点版本",
                 HealthStatus.Healthy,
                 $"官方 DLL {version}；支持自动发现；本机直连模式已内置。"),
+            TranslatorEndpointOrigin.CompatibleCurrent => new HealthCheckItem(
+                "translatorEndpointVersion",
+                "AI 翻译端点版本",
+                HealthStatus.Healthy,
+                $"同版兼容 DLL {version}；版本和结构与当前端点一致，SHA-256 未列入官方清单；文件已保留并支持自动发现与本机直连。"),
             TranslatorEndpointOrigin.OfficialOutdated => new HealthCheckItem(
                 "translatorEndpointVersion",
                 "AI 翻译端点版本",
@@ -591,7 +664,7 @@ public sealed class PluginHealthCheckService(
                 "AI 翻译端点版本",
                 HealthStatus.Error,
                 "未安装 AI 翻译端点 DLL。")
-        });
+        };
     }
 
     private void CheckToolkitRuntime(List<HealthCheckItem> checks)

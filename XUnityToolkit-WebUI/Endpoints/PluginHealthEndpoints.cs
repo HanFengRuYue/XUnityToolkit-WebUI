@@ -50,6 +50,38 @@ public static class PluginHealthEndpoints
             }
         });
 
+        // POST /repair — cloud-only diagnosis, allowlisted automatic repair, backup and re-diagnosis
+        group.MapPost("/repair", async (string id, GameLibraryService library,
+            PluginHealthCheckService healthService, InstallOrchestrator orchestrator,
+            CancellationToken ct) =>
+        {
+            var game = await library.GetByIdAsync(id, ct);
+            if (game is null)
+                return Results.NotFound(ApiResult.Fail("游戏不存在"));
+            if (game.InstallState == InstallState.NotInstalled)
+                return Results.BadRequest(ApiResult.Fail("游戏未安装 BepInEx 插件"));
+
+            var installStatus = orchestrator.GetStatus(id);
+            if (installStatus.Step is not (InstallStep.Idle or InstallStep.Complete or InstallStep.Failed))
+                return Results.Conflict(ApiResult.Fail("游戏正在安装或卸载中，无法执行自动修复"));
+
+            try
+            {
+                var result = await healthService.RepairAsync(game, ct);
+                if (result.Before.AnalysisState == PluginAnalysisState.Unavailable)
+                    return Results.BadRequest(ApiResult.Fail(result.Summary));
+                return Results.Ok(ApiResult<PluginAutoRepairResult>.Ok(result));
+            }
+            catch (PluginDiagnosticAlreadyRunningException ex)
+            {
+                return Results.Conflict(ApiResult.Fail(ex.Message));
+            }
+            catch (OperationCanceledException)
+            {
+                return Results.Json(ApiResult.Fail("插件自动修复已取消"), statusCode: 499);
+            }
+        });
+
         // POST /verify — launch game briefly, wait for a fresh log and ping, then run the same AI agent
         group.MapPost("/verify", async (string id, GameLibraryService library,
             PluginHealthCheckService healthService, InstallOrchestrator orchestrator,

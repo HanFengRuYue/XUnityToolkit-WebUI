@@ -38,7 +38,7 @@
       Projects="..\TranslatorEndpoint\TranslatorEndpoint.csproj"
       Targets="Build"
       Properties="Configuration=Release"
-      RemoveProperties="RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile" />
+      RemoveProperties="RuntimeIdentifier;RuntimeIdentifiers;SelfContained;PublishSingleFile;InformationalVersion;Version;VersionPrefix;VersionSuffix;AssemblyVersion;FileVersion;PackageVersion;SourceRevisionId;DebugType;DebugSymbols;Edition" />
     <ItemGroup>
       <EmbeddedResource Include="..\TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll" LogicalName="LLMTranslate.dll" />
     </ItemGroup>

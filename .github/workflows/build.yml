@@ -411,6 +411,13 @@ jobs:
                   throw "TranslatorEndpoint build failed: $err"
               }
               Remove-Job $endpointJob -Force
+              $endpointDll = "TranslatorEndpoint/bin/Release/net35/LLMTranslate.dll"
+              if (-not (Test-Path -LiteralPath $endpointDll)) {
+                  throw "TranslatorEndpoint build did not produce $endpointDll"
+              }
+              $endpointHash = (Get-FileHash -LiteralPath $endpointDll -Algorithm SHA256).Hash
+              "TRANSLATOR_ENDPOINT_BUILD_HASH=$endpointHash" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "Stable endpoint SHA-256: $endpointHash"
               Write-Host "TranslatorEndpoint build complete."
               Write-Host "::endgroup::"
           }
@@ -460,6 +467,13 @@ jobs:
 
             & dotnet @publishArgs
             if ($LASTEXITCODE -ne 0) { throw "Publish failed for $($ed.Name)" }
+
+            $endpointDll = "TranslatorEndpoint/bin/Release/net35/LLMTranslate.dll"
+            $endpointHashAfterPublish = (Get-FileHash -LiteralPath $endpointDll -Algorithm SHA256).Hash
+            if (-not $endpointHashAfterPublish.Equals($env:TRANSLATOR_ENDPOINT_BUILD_HASH, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Main publish changed LLMTranslate.dll SHA-256 ($env:TRANSLATOR_ENDPOINT_BUILD_HASH -> $endpointHashAfterPublish). App build properties must not leak into TranslatorEndpoint."
+            }
+            Write-Host "Endpoint SHA-256 remained stable after $($ed.Name) publish."
 
             # Cleanup unnecessary files
             Get-ChildItem $outDir -Include 'web.config','*.pdb','*.staticwebassets.endpoints.json' -Recurse |

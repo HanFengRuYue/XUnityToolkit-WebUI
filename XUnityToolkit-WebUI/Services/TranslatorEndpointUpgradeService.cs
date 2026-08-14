@@ -27,7 +27,7 @@ public sealed class TranslatorEndpointUpgradeService(
                 if (wasOutdated)
                     status = installer.EnsureTranslatorEndpoint(game);
 
-                if (status.Origin == TranslatorEndpointOrigin.OfficialCurrent
+                if ((status.Origin is TranslatorEndpointOrigin.OfficialCurrent or TranslatorEndpointOrigin.CompatibleCurrent)
                     && (refreshCurrentConfigurations || wasOutdated)
                     && File.Exists(configuration.GetConfigPath(game.GamePath)))
                 {

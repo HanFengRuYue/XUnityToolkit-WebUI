@@ -11,6 +11,7 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
     private const long MaxPluginPackageBytes = 50L * 1024 * 1024;
     private const long MaxPluginArchiveEntryBytes = 64L * 1024 * 1024;
     private const long MaxPluginArchiveTotalBytes = 256L * 1024 * 1024;
+    private const string XUnityTranslatorDirectoryPrefix = "XUnity.AutoTranslator/Translators/";
 
     private static readonly HashSet<string> ToolkitManagedPatterns = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -41,9 +42,12 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         foreach (var fullPath in dllFiles)
         {
             var relativePath = Path.GetRelativePath(pluginsDir, fullPath);
+            if (IsXUnityTranslatorEndpoint(relativePath))
+                continue;
+
             var fileName = Path.GetFileName(fullPath);
             var enabled = !fileName.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase);
-            var isToolkitManaged = IsToolkitManaged(fileName);
+            var isToolkitManaged = IsToolkitManaged(relativePath, fileName);
 
             var (guid, name, version) = TryReadPluginMetadata(fullPath);
 
@@ -199,8 +203,9 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         if (!File.Exists(fullPath))
             throw new FileNotFoundException("插件文件不存在");
 
+        var resolvedRelativePath = Path.GetRelativePath(pluginsDir, fullPath);
         var fileName = Path.GetFileName(fullPath);
-        if (IsToolkitManaged(fileName))
+        if (IsToolkitManaged(resolvedRelativePath, fileName))
             throw new InvalidOperationException("无法卸载工具箱管理的插件");
 
         // Check if file is in a subdirectory — if so, try to remove the whole folder
@@ -237,8 +242,9 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         if (!File.Exists(fullPath))
             throw new FileNotFoundException("插件文件不存在");
 
+        var resolvedRelativePath = Path.GetRelativePath(pluginsDir, fullPath);
         var fileName = Path.GetFileName(fullPath);
-        if (IsToolkitManaged(fileName))
+        if (IsToolkitManaged(resolvedRelativePath, fileName))
             throw new InvalidOperationException("无法切换工具箱管理的插件");
 
         string newPath;
@@ -301,8 +307,11 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
         return Task.FromResult<string?>(File.ReadAllText(configPath));
     }
 
-    private static bool IsToolkitManaged(string fileName)
+    private static bool IsToolkitManaged(string relativePath, string fileName)
     {
+        if (IsXUnityTranslatorEndpoint(relativePath))
+            return true;
+
         var nameWithoutExt = fileName;
         if (nameWithoutExt.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
             nameWithoutExt = nameWithoutExt[..^".disabled".Length];
@@ -311,6 +320,14 @@ public sealed class BepInExPluginService(ILogger<BepInExPluginService> logger)
 
         return ToolkitManagedPatterns.Any(p =>
             nameWithoutExt.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsXUnityTranslatorEndpoint(string relativePath)
+    {
+        var normalizedPath = relativePath.Replace('\\', '/');
+        return normalizedPath.StartsWith(
+            XUnityTranslatorDirectoryPrefix,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static (string? Guid, string? Name, string? Version) TryReadPluginMetadata(string dllPath)

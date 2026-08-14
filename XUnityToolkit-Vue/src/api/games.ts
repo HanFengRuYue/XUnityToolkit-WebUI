@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, BepInExPlugin, ToolkitConnectionInfo } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, PluginAutoRepairResult, ToolboxAgentStatus, ToolboxAgentChatRequest, ToolboxAgentChatResponse, ToolboxAgentAttachment, BepInExPlugin, ToolkitConnectionInfo, ApiResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -271,7 +271,24 @@ export const bepinexLogApi = {
 export const pluginHealthApi = {
   check: (id: string) => api.get<PluginHealthReport>(`/api/games/${id}/health-check`),
   analyze: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/analyze`, {}),
+  repair: (id: string) => api.post<PluginAutoRepairResult>(`/api/games/${id}/health-check/repair`, {}),
   verify: (id: string) => api.post<PluginHealthReport>(`/api/games/${id}/health-check/verify`, {}),
+}
+
+export const toolboxAgentApi = {
+  status: () => api.get<ToolboxAgentStatus>('/api/toolbox-agent/status'),
+  chat: (request: ToolboxAgentChatRequest) =>
+    api.post<ToolboxAgentChatResponse>('/api/toolbox-agent/chat', request),
+  upload: async (sessionId: string, files: File[]) => {
+    const form = new FormData()
+    form.append('sessionId', sessionId)
+    for (const file of files) form.append('files', file)
+    const response = await fetch('/api/toolbox-agent/uploads', { method: 'POST', body: form })
+    const result = (await response.json()) as ApiResult<ToolboxAgentAttachment[]>
+    if (!response.ok || !result.success) throw new Error(result.error || '附件上传失败')
+    return result.data ?? []
+  },
+  clear: (sessionId: string) => api.del<void>(`/api/toolbox-agent/sessions/${sessionId}`),
 }
 
 // BepInEx Plugin Management

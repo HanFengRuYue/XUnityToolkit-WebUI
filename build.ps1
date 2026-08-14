@@ -81,6 +81,7 @@ if ([string]::IsNullOrWhiteSpace($ReleaseRoot)) {
 $BundledRoot = Join-Path $ProjectRoot 'bundled'
 
 $EndpointProject = Join-Path $ProjectRoot 'TranslatorEndpoint\TranslatorEndpoint.csproj'
+$EndpointDll = Join-Path $ProjectRoot 'TranslatorEndpoint\bin\Release\net35\LLMTranslate.dll'
 $UpdaterProject = Join-Path $ProjectRoot 'Updater\Updater.csproj'
 $rid = 'win-x64'
 $hasEndpoint = Test-Path $EndpointProject
@@ -387,6 +388,7 @@ try {
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
 # ── Step: Build TranslatorEndpoint (LLMTranslate.dll) ──
+$endpointHashBeforePublish = $null
 if ($hasEndpoint) {
     $currentStep++
     Write-Host ""
@@ -400,6 +402,11 @@ if ($hasEndpoint) {
     if ($hasLibs) {
         & dotnet build $EndpointProject -c Release --nologo -v quiet
         if ($LASTEXITCODE -ne 0) { throw "TranslatorEndpoint build failed" }
+        if (-not (Test-Path -LiteralPath $EndpointDll)) {
+            throw "TranslatorEndpoint build did not produce $EndpointDll"
+        }
+        $endpointHashBeforePublish = (Get-FileHash -LiteralPath $EndpointDll -Algorithm SHA256).Hash
+        Write-Host "  Stable endpoint SHA-256: $endpointHashBeforePublish" -ForegroundColor DarkGray
         Write-Host "  LLMTranslate.dll build complete." -ForegroundColor Green
     } else {
         throw "XUnity reference DLLs not found in TranslatorEndpoint/libs; release build cannot embed LLMTranslate.dll"
@@ -469,6 +476,14 @@ Write-Host "[$currentStep/$stepCount] Publishing $rid ($Edition)..." -Foreground
     -o $OutputDir
 
 if ($LASTEXITCODE -ne 0) { throw "Publishing failed for $rid" }
+
+if ($hasEndpoint -and $endpointHashBeforePublish) {
+    $endpointHashAfterPublish = (Get-FileHash -LiteralPath $EndpointDll -Algorithm SHA256).Hash
+    if (-not $endpointHashAfterPublish.Equals($endpointHashBeforePublish, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Main publish changed LLMTranslate.dll SHA-256 ($endpointHashBeforePublish -> $endpointHashAfterPublish). App build properties must not leak into TranslatorEndpoint."
+    }
+    Write-Host "  Endpoint SHA-256 remained stable after main publish." -ForegroundColor Green
+}
 
 # Clean up unnecessary files
 @('web.config', '*.pdb', '*.staticwebassets.endpoints.json') | ForEach-Object {

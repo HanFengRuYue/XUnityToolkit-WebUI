@@ -158,7 +158,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 桌面宿主：
 
 - 自定义 STA `Main` 在同一进程启动 WinUI 3 消息循环与 Kestrel；`App.xaml` / `MainWindow.xaml` 提供原生窗口、加载/错误遮罩和 WebView2 内容区
-- 主窗口使用系统标题栏，不启用 `ExtendsContentIntoTitleBar`；Windows 负责拖动、缩放、系统菜单与 Snap Layout，最小内容尺寸为 330×400 epx
+- 主窗口启用 `ExtendsContentIntoTitleBar`，并用 32 epx 空白 WinUI 区域隐藏重复的窗口标题与图标；内部 `Title` 与 `app.ico` 仍用于任务栏、Alt+Tab 和辅助功能，Windows 继续负责拖动、缩放、系统菜单、窗口按钮与 Snap Layout，最小内容尺寸为 330×400 epx
 - `IDesktopWindowService` 是窗口激活、隐藏、浏览器回退与幂等退出的统一入口；第二实例、托盘与主机停止不得各自操作 HWND
 - WebView2 用户数据目录为 `cache/webview2`，随 `AppData:Root` 隔离；网页只接收只读宿主描述并发送结构化 `themeChanged` 消息
 - WebView2 缺失、初始化失败、首页探测失败或导航超时时打开默认浏览器，Kestrel 与托盘继续可用
@@ -209,6 +209,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `cache/covers`
 - `cache/icons`
 - `cache/backgrounds`
+- `cache/toolbox-agent-uploads/`
+  工具箱智能体的临时附件，按会话隔离、限制类型/大小并自动过期；设置导出必须排除
 - `models/`
 - `llama/`
 - `llama/launch-cache`
@@ -257,6 +259,10 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
   TMP/TTF 字体扫描与替换
 - `TmpFontGeneratorService`
   SDF 字体生成
+- `PluginDiagnosticAgentService` / `PluginAutoRepairService`
+  云端插件证据诊断、受限修复规划、备份执行与复检；本地 AI 明确不支持
+- `ToolboxAgentService` / `ToolboxAgentToolExecutor` / `ToolboxAgentAttachmentStore`
+  云端工具箱对话智能体、受控工具/API 调用、游戏内文本补丁与临时附件；模型不得获得系统命令或任意主机文件权限
 - `UpdateService`
   更新检查、下载、应用
 - `SystemTrayService`
@@ -278,6 +284,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `AssetEndpoints.cs`
 - `LocalLlmEndpoints.cs`
 - `UpdateEndpoints.cs`
+- `ToolboxAgentEndpoints.cs`
 
 ## 9. 前端模块地图
 
@@ -305,6 +312,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `src/components/settings/AiTranslationCard.vue`
 - `src/components/config/ConfigPanel.vue`
 - `src/components/common/FileExplorerModal.vue`
+- `src/components/agent/ToolboxAgentWindow.vue`
+  左侧入口打开的悬浮对话窗，包含游戏上下文、附件、工具执行记录与高影响操作确认
 
 核心 store：
 
@@ -632,7 +641,8 @@ CI：
 - 字体替换上传端点现在要求显式区分 `kind={ttf|tmp}`；状态端点会返回默认源/自定义源列表与已使用源摘要；替换请求中的 `fonts[]` 需要携带逐字体 `sourceId`
 - `POST /api/games/{id}/font-replacement/scan` 是字体当前资源状态的权威来源；`GET /api/games/{id}/font-replacement/status` 主要基于 `manifest.json` 汇总替换状态，不返回实时重扫后的 `ttfMode` / `fontDataSize`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
-- BepInEx 日志与健康：`GET /api/games/{id}/bepinex-log`、兼容入口 `POST /api/games/{id}/bepinex-log/analyze`，以及 `GET /api/games/{id}/health-check`、`POST /api/games/{id}/health-check/analyze`、`POST /api/games/{id}/health-check/verify`
+- BepInEx 日志与健康：`GET /api/games/{id}/bepinex-log`、兼容入口 `POST /api/games/{id}/bepinex-log/analyze`，以及 `GET /api/games/{id}/health-check`、`POST /api/games/{id}/health-check/analyze`、`POST /api/games/{id}/health-check/repair`、`POST /api/games/{id}/health-check/verify`
+- 工具箱智能体：`GET /api/toolbox-agent/status`、`POST /api/toolbox-agent/chat`、`POST /api/toolbox-agent/uploads`、`DELETE /api/toolbox-agent/sessions/{sessionId}`；聊天与附件会话只保存在当前进程/临时缓存中
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
 - 日志与更新：`GET /api/logs`、`GET /api/logs/history`、`GET /api/logs/download`、`/api/update/*`
 - 所有 `multipart/form-data` 上传端点都必须显式 `.DisableAntiforgery()`
@@ -642,7 +652,7 @@ CI：
 
 ## 20. 同步点与模型补充
 
-- `InstallStep`、`UpdateInfo`、`VersionInfo`、`DataPathInfo`、`BatchAddResult`、`UnityGameInfo`、`FileExplorer`、`FontReplacement`、`FontGeneration`、`PluginHealth`、`BepInExPlugin`、`LocalLlmSettings`、`BuiltInModelInfo`、`LlamaStatus` 等模型，新增字段时都必须同时同步 C# 模型、TS 类型、相关 API、对应前端页面；`PluginHealthReport` 的 `objectiveOverall`、`analysisState`、`analysisMessage`、`freshRunVerified`、`analysis` 与结构化证据模型是一组联动字段
+- `InstallStep`、`UpdateInfo`、`VersionInfo`、`DataPathInfo`、`BatchAddResult`、`UnityGameInfo`、`FileExplorer`、`FontReplacement`、`FontGeneration`、`PluginHealth`、`PluginAutoRepairResult`、`ToolboxAgent*`、`BepInExPlugin`、`LocalLlmSettings`、`BuiltInModelInfo`、`LlamaStatus` 等模型，新增字段时都必须同时同步 C# 模型、TS 类型、相关 API、对应前端页面；`PluginHealthReport` 的 `objectiveOverall`、`analysisState`、`analysisMessage`、`freshRunVerified`、`analysis` 与结构化证据模型是一组联动字段
 - 字体替换链路改动时，要一起核对 `FontReplacementRequest.Fonts[].SourceId`、`ReplacementSource` / `ReplacementSourceSet`、`FontReplacementStatus.AvailableSources` / `UsedSources`、`ReplacedFontEntry.SourceId` / `SourceDisplayName`，并同步 `FontReplacement.cs`、`src/api/types.ts`、`FontReplacementView.vue`、`FontReplacementEndpoints.cs`、`FontReplacementService.cs`
 - 涉及 Legacy `Font` 的 TTF 分析或写回时，还要一起核对 `AnalyzeTtfFont`、`GetByteArrayLength`、`SetByteArrayContents`、写后重读验证日志、`GetStatusAsync` 和前端状态文案；`scan` 与 `status` 的语义不要混用
 - `SettingsView.vue` 的默认 `AppSettings`、`AiTranslationView.vue` 的 `DEFAULT_AI_TRANSLATION`、后端 `AppSettings`/`AiTranslationSettings` 默认值必须保持一致
@@ -660,7 +670,7 @@ CI：
 - `llama.cpp` 版本更新需要同时同步 `build.ps1`、`build.yml`、`LocalLlmService.LlamaVersion`、下载资源命名模式、README/本手册说明
 - 根目录 `app-file-inventory-v1.json` 是应用组件的文件权威清单，覆盖根文件、`runtimes/` 与 WinUI 自包含产生的所有原生资源子目录，并排除 `wwwroot/`、`bundled/`、`data/`、`appsettings*`；CI 的 `app-*.zip` 必须严格按清单打包，更新器必须校验 ZIP、远端 manifest 与清单集合一致
 - 增量删除优先使用已安装版本的 `app-file-inventory-v1.json` 限定范围；旧版没有清单时才回退到根文件、`runtimes/`、`wwwroot/`、`bundled/` 的既有安全规则，不能借新清单删除用户额外文件
-- Release 构建必须成功生成并嵌入 `LLMTranslate.dll`；缺少 `TranslatorEndpoint/libs` 引用 DLL 时，本地构建和 CI 都应失败而不是只警告
+- Release 构建必须成功生成并嵌入 `LLMTranslate.dll`；缺少 `TranslatorEndpoint/libs` 引用 DLL 时，本地构建和 CI 都应失败而不是只警告。端点使用独立固定的语义/信息版本，主程序的时间戳 `InformationalVersion`、edition 与调试属性不得传入端点；本地和 CI 发布都必须校验主程序发布前后端点 SHA-256 不漂移
 
 ## 21. 后端专项补充
 
@@ -680,7 +690,7 @@ CI：
 - `PatchAsync` 中 `null` 表示跳过字段，空字符串表示清空字段，这个语义不能改
 - 默认最优配置会写入 `Language=zh`、`FromLanguage=auto`、`OverrideFont=Microsoft YaHei`、`Endpoint=LLMTranslate` 等值；若调整默认配置，必须同时核对安装链路和文档说明
 - `LLMTranslate.dll` 的日志分为始终输出的 `Log()` 和仅在 `DebugMode` 下输出的 `DebugLog()`，不要把关键初始化和错误信息放进 `DebugLog()`
-- 官方端点识别必须同时使用嵌入资源 SHA-256 与 `translator-endpoint-metadata.json`；已知旧官方版只在游戏未运行时自动升级，未知/自定义 DLL 永不静默覆盖，强制替换必须来自用户显式确认
+- 官方端点识别必须同时使用嵌入资源 SHA-256 与 `translator-endpoint-metadata.json`：哈希完全匹配才可称为当前官方构建，已知旧官方版只在游戏未运行时自动升级；未知哈希若托管 PE 的程序集名、精确当前版本、产品/文件名、入口类型与必要的 XUnity 引用全部匹配，则标记为 `CompatibleCurrent` 并视为功能兼容，但不得伪称哈希已验证或静默覆盖。其他未知/自定义 DLL 同样只允许用户显式确认后替换；元数据检查不得加载或执行用户 DLL
 
 ### 21.3 AI 翻译、术语与缓存
 
@@ -793,8 +803,8 @@ CI：
 
 ## 25. 插件健康状态补充
 
-- 插件健康检查现由两层组成：`PluginHealthCheckService` 只生成文件、配置、环境、日志时间与 ping 等客观事实；`PluginDiagnosticAgentService` 才负责显式触发的两阶段 AI 诊断。不得重新引入基于通用日志正则的预制原因或建议。
-- `GET /api/games/{id}/health-check` 只能刷新本地事实并附加本次工具箱运行期内的缓存报告，严禁调用模型。`POST .../analyze` 先选择关键资料再分析证据；`POST .../verify` 先启动游戏并等待新日志和 ping，再调用同一诊断智能体。
+- 插件健康链路现由三层组成：`PluginHealthCheckService` 生成文件、配置、环境、日志时间与 ping 等客观事实并编排流程；`PluginDiagnosticAgentService` 负责显式触发的两阶段云端 AI 诊断和第三阶段受限修复规划；`PluginAutoRepairService` 才能执行经过后端验证的备份/修复。不得重新引入基于通用日志正则的预制原因或建议。
+- `GET /api/games/{id}/health-check` 只能刷新本地事实并附加本次工具箱运行期内的缓存报告，严禁调用模型。`POST .../analyze` 先选择关键资料再分析证据；`POST .../repair` 继续规划受限工具、备份执行并重新诊断；`POST .../verify` 先启动游戏并等待新日志和 ping，再调用同一诊断智能体。
 - 安装流程的 `VerifyForInstallAsync(...)` 只做本地文件、启动日志与 ping 验证，状态文案必须明确“未调用 AI”；不能因开启自动验证而产生隐藏模型费用。安装进度仍通过现有 SignalR 报告推送。
 - `PluginHealthReport` 同时保留 `overall`、`checks`、日志时间和检查时间，并包含 `objectiveOverall`、`analysisState`、`analysisMessage`、`freshRunVerified` 与结构化 `analysis`。`analysisState` 固定为 `NotRun / Running / Completed / Stale / Unavailable / Failed`。
 - 总体状态规则固定为：本地确定性错误优先；经后端证据校验的 AI `Error` / `Warning` 可下调状态；只有本次启动产生新日志、收到 ping、本地事实正常且 AI 没有有效问题时才允许 `Healthy`。历史日志、AI 未运行/失败/不可用或缓存过期时均不得显示 `Healthy`。
@@ -803,10 +813,14 @@ CI：
 - 用户插件 DLL 只允许通过 `PEReader` / `MetadataReader` 和文件版本资源做静态元数据扫描；不得用 `Assembly.Load*`、反射、依赖注入或任何运行时方式加载/执行插件。标准搜索目录中未发现某个程序集引用只能记为观察事实，不能单独判定依赖缺失。
 - 发给模型的文本必须统一脱敏 API Key、Token、密码、授权头、Cookie、敏感 URL 参数、用户名和绝对路径；不得发送二进制。日志、配置、游戏名和插件元数据始终按不可信数据处理，系统提示词必须明确隔离提示注入。
 - 第一阶段返回的资料 ID 必须由后端对照当前清单过滤；第二阶段的每个问题必须至少包含一条经后端验证的资料 ID 与有效行号。展示摘录只能由后端从已脱敏行生成；无有效证据的问题不得进入报告。结构化 JSON 解析失败只允许一次格式修复调用，仍失败则保留本地事实并标记 `Failed`，不得回退旧正则判断。
-- 诊断端点服从当前 `ActiveMode`：本地模式只用正在运行的本地端点，云端模式选择最高优先级可用云端端点，禁止跨模式静默回退。`AiTranslation.Enabled == false` 只作为实时翻译状态事实，不阻止用户显式诊断。
+- 智能诊断、自动修复与工具箱对话智能体严格要求 `ActiveMode=cloud`，并选择最高优先级可用云端端点；本地模式必须返回“仅支持云端 AI / 不支持运行”，禁止调用 llama-server，也禁止跨模式静默回退。`AiTranslation.Enabled == false` 只作为实时翻译状态事实，不阻止云端模式下的显式诊断。
 - `POST /api/games/{id}/bepinex-log/analyze` 仅为兼容适配器：复用统一结构化报告并由后端生成旧 Markdown 契约，不得保留独立提示词或再次调用模型。
 - `PluginDiagnosticReport.vue` 是健康卡和 BepInEx 日志页的共享报告组件；两处必须展示同一 `analyzedAt`、端点、证据、关键资料、截断与过期状态。模型输出一律作为纯文本渲染，不得使用 `v-html`。
-- 智能诊断是严格只读能力：不自动修复、删除、禁用或重写插件/配置，不持久化诊断历史，也不联网搜索插件资料。
+- 自动修复只能使用 `set_ini_value`、`disable_plugin`、`reinstall_component` 三类后端白名单操作：INI/CFG 目标必须来自已审阅 artifact 且位于 Doorstop/BepInEx 配置范围，第三方插件只能重命名禁用，工具箱组件只能从内置包恢复；未知/自定义 `LLMTranslate.dll` 不得自动覆盖。游戏运行中跳过文件修改。
+- 云端诊断必须以 `Completed` 完成后才能执行任何自动修复；端点不可用、调用失败或结构化结果验证失败时不得继续走确定性写入。每个自动修复覆盖/改名目标前都要在 `backups/<gameId>/agent-repair/` 创建备份；确定性问题与 AI 计划去重后逐项执行，单项失败不能伪装成功，完成后必须重新收集指纹与诊断。静态复检不等于真实游戏运行验收。
+- `ToolboxAgentToolExecutor` 的通用 API 桥只能访问当前 `127.0.0.1` 工具箱，并排除智能体递归、任意主机文件浏览、完整设置/密钥、数据重置、更新应用和二进制下载；工具结果返回模型前必须脱敏。DELETE、卸载、导入、启动进程等高影响调用必须经过悬浮窗二次确认。
+- 游戏文件工具只允许相对路径，拒绝越界与重解析点；读取限安全文本并脱敏，写入限既有 Doorstop/BepInEx 配置、译文和本地化文本，必须用精确单次匹配、备份和原子替换。附件按会话绑定，模型只能看到 ID、名称、类型和大小，不能读取任意宿主路径。
+- `apply_custom_font` 是 TTF/OTF 附件的一体化契约：校验字体头，按游戏 Unity 版本生成 TMP bundle，把生成源与原始 TTF 注册为逐字体来源，扫描并替换所有支持的 TMP/Legacy 字体，最后安装 XUnity fallback；不能退化成只上传或只生成。
 
 <!-- agents-md-maintainer:start -->
 ## Managed project guidance
@@ -820,7 +834,7 @@ This section is generated from repository files. Keep durable, human-written rul
 
 ### Project snapshot
 
-- Primary languages: C# (132 files), Vue (27 files), TypeScript (24 files), PowerShell (2 files)
+- Primary languages: C# (135 files), Vue (27 files), TypeScript (23 files), PowerShell (3 files)
 - Key manifests: `XUnityToolkit-Vue/package-lock.json`, `XUnityToolkit-Vue/package.json`
 
 ### Repository layout

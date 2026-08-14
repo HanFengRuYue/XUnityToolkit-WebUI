@@ -295,9 +295,11 @@ public sealed class ConnectionResilienceTests
             ],
             culture: null)!;
         var start = managerType.GetMethod("Start", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+        var requestImmediateProbe = managerType.GetMethod("RequestImmediateProbe", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
         var currentBaseUrl = managerType.GetProperty("CurrentBaseUrl", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
         var markFailure = managerType.GetMethod("MarkTransportFailure", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
         var timerField = managerType.GetField("_timer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var probeRunningField = managerType.GetField("_probeRunning", BindingFlags.Instance | BindingFlags.NonPublic)!;
 
         TinyProtocolServer? firstServer = null;
         TinyProtocolServer? secondServer = null;
@@ -307,13 +309,24 @@ public sealed class ConnectionResilienceTests
             await WaitUntilAsync(
                 () => messages.Any(message => message.Contains("发现文件无效或已过期", StringComparison.Ordinal)),
                 TimeSpan.FromSeconds(2));
+            await WaitUntilAsync(
+                () => (int)probeRunningField.GetValue(manager)! == 0,
+                TimeSpan.FromSeconds(3));
 
             var firstInstance = Guid.NewGuid().ToString("N");
             firstServer = await TinyProtocolServer.StartAsync(firstInstance);
             await WriteDiscoveryAsync(discoveryFile, firstServer, firstInstance);
-            await WaitUntilAsync(
-                () => string.Equals((string?)currentBaseUrl.GetValue(manager), firstServer.BaseUrl, StringComparison.Ordinal),
-                TimeSpan.FromSeconds(5));
+            requestImmediateProbe.Invoke(manager, null);
+            try
+            {
+                await WaitUntilAsync(
+                    () => string.Equals((string?)currentBaseUrl.GetValue(manager), firstServer.BaseUrl, StringComparison.Ordinal),
+                    TimeSpan.FromSeconds(5));
+            }
+            catch (OperationCanceledException)
+            {
+                Assert.Fail($"Endpoint did not discover late-started server. Current={currentBaseUrl.GetValue(manager)}; Logs={string.Join(" | ", messages)}");
+            }
 
             var firstUrl = firstServer.BaseUrl;
             await firstServer.DisposeAsync();
@@ -363,17 +376,86 @@ public sealed class ConnectionResilienceTests
     }
 
     [Fact]
+    public void SameVersionRebuild_IsCompatibleAndPreservedUntilExplicitReplacement()
+    {
+        using var temp = new TemporaryDirectory();
+        var game = new Game { Name = "Test", GamePath = temp.Path };
+        var installer = new XUnityInstallerService(NullLogger<XUnityInstallerService>.Instance);
+        var official = installer.EnsureTranslatorEndpoint(game);
+        var endpointPath = GetTranslatorEndpointPath(temp.Path);
+        using (var stream = new FileStream(endpointPath, FileMode.Append, FileAccess.Write, FileShare.Read))
+            stream.Write([0x58, 0x55, 0x54, 0x2D, 0x43, 0x4F, 0x4D, 0x50, 0x41, 0x54]);
+        var compatibleBytes = File.ReadAllBytes(endpointPath);
+
+        var compatible = installer.GetTranslatorEndpointStatus(game);
+
+        Assert.Equal(TranslatorEndpointOrigin.CompatibleCurrent, compatible.Origin);
+        Assert.NotEqual(official.Sha256, compatible.Sha256);
+        Assert.True(compatible.AutoDiscoverySupported);
+        Assert.True(compatible.DirectConnectionMode);
+        Assert.False(compatible.UpdatePending);
+        Assert.Contains("同版兼容", compatible.Message);
+
+        var preserved = installer.EnsureTranslatorEndpoint(game);
+
+        Assert.Equal(TranslatorEndpointOrigin.CompatibleCurrent, preserved.Origin);
+        Assert.Equal(compatibleBytes, File.ReadAllBytes(endpointPath));
+
+        var replaced = installer.EnsureTranslatorEndpoint(game, forceReplaceUnknown: true);
+
+        Assert.Equal(TranslatorEndpointOrigin.OfficialCurrent, replaced.Origin);
+        Assert.NotEqual(compatibleBytes, File.ReadAllBytes(endpointPath));
+    }
+
+    [Fact]
+    public void CompatibleIdentity_RequiresExactCurrentVersionAndExpectedEndpointShape()
+    {
+        var installer = new XUnityInstallerService(NullLogger<XUnityInstallerService>.Instance);
+        var valid = new TranslatorEndpointAssemblyIdentity(
+            "LLMTranslate",
+            new Version(2, 0, 0, 0),
+            "2.0.0.0",
+            "LLMTranslate",
+            "LLMTranslate.dll",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "mscorlib",
+                "XUnity.AutoTranslator.Plugin.Core",
+                "XUnity.Common"
+            },
+            HasEndpointType: true);
+
+        Assert.True(installer.IsCompatibleCurrentIdentity(valid));
+        Assert.False(installer.IsCompatibleCurrentIdentity(valid with { AssemblyName = "CustomTranslate" }));
+        Assert.False(installer.IsCompatibleCurrentIdentity(valid with { AssemblyVersion = new Version(2, 1, 0, 0) }));
+        Assert.False(installer.IsCompatibleCurrentIdentity(valid with { FileVersion = "2.0.1.0" }));
+        Assert.False(installer.IsCompatibleCurrentIdentity(valid with { HasEndpointType = false }));
+        Assert.False(installer.IsCompatibleCurrentIdentity(valid with
+        {
+            References = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "mscorlib",
+                "XUnity.Common"
+            }
+        }));
+    }
+
+    [Fact]
+    public void CorruptEndpoint_HasNoManagedIdentity()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = Path.Combine(temp.Path, "LLMTranslate.dll");
+        File.WriteAllText(path, "not a managed assembly");
+
+        Assert.Null(XUnityInstallerService.TryReadEndpointAssemblyIdentity(path));
+    }
+
+    [Fact]
     public void UnknownEndpoint_IsPreservedUntilExplicitReplacement()
     {
         using var temp = new TemporaryDirectory();
         var game = new Game { Name = "Test", GamePath = temp.Path };
-        var endpointPath = Path.Combine(
-            temp.Path,
-            "BepInEx",
-            "plugins",
-            "XUnity.AutoTranslator",
-            "Translators",
-            "LLMTranslate.dll");
+        var endpointPath = GetTranslatorEndpointPath(temp.Path);
         Directory.CreateDirectory(Path.GetDirectoryName(endpointPath)!);
         File.WriteAllText(endpointPath, "custom endpoint");
         var installer = new XUnityInstallerService(NullLogger<XUnityInstallerService>.Instance);
@@ -390,6 +472,14 @@ public sealed class ConnectionResilienceTests
         Assert.True(replaced.DirectConnectionMode);
         Assert.NotEqual("custom endpoint", File.ReadAllText(endpointPath));
     }
+
+    private static string GetTranslatorEndpointPath(string gamePath) => Path.Combine(
+        gamePath,
+        "BepInEx",
+        "plugins",
+        "XUnity.AutoTranslator",
+        "Translators",
+        "LLMTranslate.dll");
 
     private static ToolkitRuntimeEndpointState BindRuntimeEndpoint()
     {

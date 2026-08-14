@@ -80,9 +80,23 @@ const aiEndpointInstalled = computed(() => aiEndpointStatus.value?.installed ?? 
 const aiEndpointStatusLabel = computed(() => {
   switch (aiEndpointStatus.value?.origin) {
     case 'OfficialCurrent': return '官方最新版'
+    case 'CompatibleCurrent': return '同版兼容'
     case 'OfficialOutdated': return aiEndpointStatus.value.updatePending ? '待升级' : '旧官方版'
     case 'UnknownOrCustom': return '自定义版本'
     default: return '未安装'
+  }
+})
+const aiEndpointStatusClass = computed(() => ({
+  installed: aiEndpointStatus.value?.origin === 'OfficialCurrent'
+    || aiEndpointStatus.value?.origin === 'CompatibleCurrent',
+  warning: aiEndpointStatus.value?.origin === 'OfficialOutdated'
+    || aiEndpointStatus.value?.origin === 'UnknownOrCustom',
+}))
+const aiEndpointActionLabel = computed(() => {
+  switch (aiEndpointStatus.value?.origin) {
+    case 'CompatibleCurrent': return '恢复官方构建'
+    case 'UnknownOrCustom': return '替换为官方版'
+    default: return '检查并升级'
   }
 })
 const aiEndpointLoading = ref(false)
@@ -442,6 +456,17 @@ async function performInstallAiEndpoint(forceReplaceUnknown: boolean) {
 }
 
 async function handleReinstallAiEndpoint() {
+  if (aiEndpointStatus.value?.origin === 'CompatibleCurrent') {
+    dialog.warning({
+      title: '恢复官方 AI 翻译端点',
+      content: '当前 DLL 与工具箱的端点版本兼容，但 SHA-256 未列入当前官方清单，无需替换也可正常使用。继续会覆盖该同版构建，是否恢复为本工具箱内嵌的官方构建？',
+      positiveText: '恢复官方构建',
+      negativeText: '保留同版构建',
+      onPositiveClick: () => performInstallAiEndpoint(true),
+    })
+    return
+  }
+
   if (aiEndpointStatus.value?.origin === 'UnknownOrCustom') {
     dialog.warning({
       title: '替换自定义 AI 翻译端点',
@@ -668,16 +693,6 @@ onBeforeUnmount(() => stopWatch())
           </span>
           游戏信息
         </h2>
-        <div class="header-actions">
-          <NButton size="small" @click="handleOpenFolder">
-            <template #icon><NIcon :size="16"><FolderOpenOutlined /></NIcon></template>
-            打开目录
-          </NButton>
-          <NButton size="small" @click="handleLaunch">
-            <template #icon><NIcon :size="16"><PlayArrowFilled /></NIcon></template>
-            运行游戏
-          </NButton>
-        </div>
       </div>
 
       <div class="info-grid">
@@ -745,6 +760,22 @@ onBeforeUnmount(() => stopWatch())
             <span class="info-value muted">非 Unity 游戏</span>
           </div>
         </div>
+      </div>
+
+      <div class="game-info-actions">
+        <NButton class="game-info-folder-button" size="large" @click="handleOpenFolder">
+          <template #icon><NIcon :size="18"><FolderOpenOutlined /></NIcon></template>
+          打开目录
+        </NButton>
+        <NButton
+          class="game-info-launch-button"
+          type="primary"
+          size="large"
+          @click="handleLaunch"
+        >
+          <template #icon><NIcon :size="20"><PlayArrowFilled /></NIcon></template>
+          运行游戏
+        </NButton>
       </div>
     </div>
 
@@ -966,7 +997,7 @@ onBeforeUnmount(() => stopWatch())
           </span>
           AI 翻译引擎
         </h2>
-        <div v-if="aiEndpointStatus !== null" class="ai-status-badge" :class="{ installed: aiEndpointInstalled }">
+        <div v-if="aiEndpointStatus !== null" class="ai-status-badge" :class="aiEndpointStatusClass">
           <span class="ai-status-dot"></span>
           {{ aiEndpointStatusLabel }}
         </div>
@@ -998,7 +1029,7 @@ onBeforeUnmount(() => stopWatch())
               @click="handleReinstallAiEndpoint"
             >
               <template #icon><NIcon :size="16"><RefreshOutlined /></NIcon></template>
-              {{ aiEndpointStatus?.origin === 'UnknownOrCustom' ? '替换为官方版' : '检查并升级' }}
+              {{ aiEndpointActionLabel }}
             </NButton>
             <NButton
               type="error"
@@ -1578,6 +1609,27 @@ onBeforeUnmount(() => stopWatch())
   gap: 12px;
 }
 
+.game-info-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.game-info-folder-button {
+  min-width: 128px;
+  height: 44px;
+}
+
+.game-info-launch-button {
+  min-width: 168px;
+  height: 44px;
+  font-weight: 600;
+}
+
 .info-card {
   display: flex;
   align-items: flex-start;
@@ -2031,6 +2083,12 @@ onBeforeUnmount(() => stopWatch())
   color: #34d399;
 }
 
+.ai-status-badge.warning {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #f59e0b;
+}
+
 .ai-status-dot {
   width: 6px;
   height: 6px;
@@ -2041,6 +2099,11 @@ onBeforeUnmount(() => stopWatch())
 .ai-status-badge.installed .ai-status-dot {
   background: #34d399;
   box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
+}
+
+.ai-status-badge.warning .ai-status-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.45);
 }
 
 .ai-endpoint-content {
@@ -2200,6 +2263,17 @@ onBeforeUnmount(() => stopWatch())
     gap: 10px;
   }
 
+  .game-info-actions {
+    margin-top: 16px;
+    padding-top: 14px;
+  }
+
+  .game-info-folder-button,
+  .game-info-launch-button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .version-card-value {
     font-size: 15px;
   }
@@ -2271,6 +2345,18 @@ onBeforeUnmount(() => stopWatch())
 
   .info-grid {
     grid-template-columns: 1fr;
+  }
+
+  .game-info-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .game-info-folder-button,
+  .game-info-launch-button {
+    flex: 0 0 44px;
+    width: 100%;
   }
 
 }

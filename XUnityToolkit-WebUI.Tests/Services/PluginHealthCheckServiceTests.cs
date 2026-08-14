@@ -8,6 +8,26 @@ namespace XUnityToolkit_WebUI.Tests.Services;
 public sealed class PluginHealthCheckServiceTests
 {
     [Fact]
+    public void EndpointVersionCheck_CompatibleCurrentIsHealthyAndDisclosesUnverifiedHash()
+    {
+        var status = new TranslatorEndpointStatus(
+            true,
+            TranslatorEndpointOrigin.CompatibleCurrent,
+            "2.0.0.0",
+            new string('A', 64),
+            false,
+            true,
+            true,
+            "compatible");
+
+        var item = PluginHealthCheckService.CreateTranslatorEndpointVersionCheck(status);
+
+        Assert.Equal(HealthStatus.Healthy, item.Status);
+        Assert.Contains("同版兼容", item.Detail);
+        Assert.Contains("SHA-256 未列入官方清单", item.Detail);
+    }
+
+    [Fact]
     public void CheckDoorstopProxy_Il2Cpp_AcceptsCoreDobbyDll()
     {
         using var temp = new TemporaryDirectory();
@@ -380,7 +400,7 @@ public sealed class PluginHealthCheckServiceTests
     public void DiagnosticRunGate_AllowsOnlyOneTaskPerGameAndExposesRunningState()
     {
         var agent = new PluginDiagnosticAgentService(
-            null!, null!, null!, null!, NullLogger<PluginDiagnosticAgentService>.Instance);
+            null!, null!, null!, NullLogger<PluginDiagnosticAgentService>.Instance);
         const string gameId = "game";
 
         Assert.True(agent.TryBeginDiagnostic(gameId));

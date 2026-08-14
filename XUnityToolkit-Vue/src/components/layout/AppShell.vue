@@ -2,8 +2,9 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { NIcon, NTooltip } from 'naive-ui'
-import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined, KeyboardDoubleArrowLeftOutlined, KeyboardDoubleArrowRightOutlined } from '@vicons/material'
+import { GamepadFilled, SettingsOutlined, SmartToyOutlined, ArticleOutlined, FontDownloadOutlined, KeyboardDoubleArrowLeftOutlined, KeyboardDoubleArrowRightOutlined, AutoAwesomeOutlined } from '@vicons/material'
 import InstallProgressDrawer from '@/components/progress/InstallProgressDrawer.vue'
+import ToolboxAgentWindow from '@/components/agent/ToolboxAgentWindow.vue'
 import { settingsApi } from '@/api/games'
 import { useUpdateStore } from '@/stores/update'
 import { useSidebarStore } from '@/stores/sidebar'
@@ -11,6 +12,7 @@ import { useSidebarStore } from '@/stores/sidebar'
 const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
+const toolboxAgentOpen = ref(false)
 const appVersion = ref('')
 const updateStore = useUpdateStore()
 const sidebarStore = useSidebarStore()
@@ -44,6 +46,7 @@ const cachedPages = ['LibraryView', 'AiTranslationView', 'FontGeneratorView', 'L
 const mainNavItems = [
   { label: '游戏库', key: '/', icon: GamepadFilled },
   { label: 'AI 翻译', key: '/ai-translation', icon: SmartToyOutlined },
+  { label: '工具箱智能体', key: 'toolbox-agent', icon: AutoAwesomeOutlined },
   { label: '字体生成', key: '/font-generator', icon: FontDownloadOutlined },
   { label: '运行日志', key: '/logs', icon: ArticleOutlined },
 ]
@@ -51,11 +54,17 @@ const mainNavItems = [
 const settingsNavItem = { label: '设置', key: '/settings', icon: SettingsOutlined }
 
 function navigateTo(key: string) {
+  if (key === 'toolbox-agent') {
+    toolboxAgentOpen.value = !toolboxAgentOpen.value
+    sidebarOpen.value = false
+    return
+  }
   router.push(key)
   sidebarOpen.value = false
 }
 
 function isActive(key: string): boolean {
+  if (key === 'toolbox-agent') return toolboxAgentOpen.value
   if (key === '/') return route.path === '/' || route.path.startsWith('/games/')
   return route.path.startsWith(key)
 }
@@ -260,6 +269,7 @@ function onResizeDoubleClick() {
     </main>
   </div>
   <InstallProgressDrawer />
+  <ToolboxAgentWindow v-model:show="toolboxAgentOpen" />
 </template>
 
 <style scoped>
@@ -405,6 +415,7 @@ function onResizeDoubleClick() {
 .nav-item:nth-child(2) { animation-delay: 0.18s; }
 .nav-item:nth-child(3) { animation-delay: 0.24s; }
 .nav-item:nth-child(4) { animation-delay: 0.30s; }
+.nav-item:nth-child(5) { animation-delay: 0.36s; }
 
 .nav-item:hover {
   background: var(--bg-subtle-hover);

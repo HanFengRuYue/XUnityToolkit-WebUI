@@ -279,7 +279,7 @@ export interface TranslationStats {
 
 export interface AiEndpointStatus {
   installed: boolean
-  origin: 'Missing' | 'OfficialCurrent' | 'OfficialOutdated' | 'UnknownOrCustom'
+  origin: 'Missing' | 'OfficialCurrent' | 'CompatibleCurrent' | 'OfficialOutdated' | 'UnknownOrCustom'
   version?: string
   sha256?: string
   updatePending: boolean
@@ -760,6 +760,66 @@ export interface PluginHealthReport {
   gameNeverRun: boolean
   freshRunVerified: boolean
   checkedAt: string
+}
+
+export type PluginRepairActionState = 'Completed' | 'Failed' | 'Skipped'
+
+export interface PluginRepairActionResult {
+  id: string
+  tool: string
+  description: string
+  state: PluginRepairActionState
+  message: string
+  target?: string | null
+}
+
+export interface PluginAutoRepairResult {
+  before: PluginHealthReport
+  after: PluginHealthReport
+  actions: PluginRepairActionResult[]
+  summary: string
+  endpointName: string
+  repairedAt: string
+}
+
+export type AgentToolExecutionState = 'Completed' | 'Failed' | 'Skipped' | 'RequiresConfirmation'
+
+export interface ToolboxAgentStatus {
+  supported: boolean
+  reason?: string | null
+  endpointName?: string | null
+}
+
+export interface ToolboxAgentAttachment {
+  id: string
+  fileName: string
+  kind: string
+  fileSize: number
+}
+
+export interface ToolboxAgentToolExecution {
+  id: string
+  tool: string
+  description: string
+  state: AgentToolExecutionState
+  message: string
+}
+
+export interface ToolboxAgentChatRequest {
+  sessionId: string
+  message: string
+  gameId?: string | null
+  attachmentIds?: string[]
+  confirmPendingAction?: boolean
+}
+
+export interface ToolboxAgentChatResponse {
+  sessionId: string
+  message: string
+  executions: ToolboxAgentToolExecution[]
+  requiresConfirmation: boolean
+  pendingActionDescription?: string | null
+  endpointName: string
 }
 
 // BepInEx Plugin Management

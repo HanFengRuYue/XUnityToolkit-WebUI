@@ -176,6 +176,7 @@ public static class SettingsEndpoints
             var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
             {
                 ["font-generation"] = new(StringComparer.OrdinalIgnoreCase) { "temp", "uploads" },
+                ["cache"] = new(StringComparer.OrdinalIgnoreCase) { "toolbox-agent-uploads" },
             };
 
             var memoryStream = new MemoryStream();

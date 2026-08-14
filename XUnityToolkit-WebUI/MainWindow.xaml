@@ -5,9 +5,20 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="XUnity Toolkit WebUI">
   <Grid x:Name="RootLayout" Background="#0B0B11">
-    <Grid x:Name="BrowserHost" />
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
 
-    <Grid x:Name="StartupOverlay" Background="#0B0B11">
+    <Grid
+        x:Name="NativeTitleBar"
+        Height="32"
+        Background="#0B0B11"
+        Visibility="Collapsed" />
+
+    <Grid x:Name="BrowserHost" Grid.Row="1" />
+
+    <Grid x:Name="StartupOverlay" Grid.Row="1" Background="#0B0B11">
       <StackPanel
           Width="560"
           MaxWidth="560"

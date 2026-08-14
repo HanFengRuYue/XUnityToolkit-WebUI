@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using XUnityToolkit_WebUI.Infrastructure;
@@ -12,6 +14,7 @@ public enum TranslatorEndpointOrigin
 {
     Missing,
     OfficialCurrent,
+    CompatibleCurrent,
     OfficialOutdated,
     UnknownOrCustom
 }
@@ -30,6 +33,14 @@ public sealed class XUnityInstallerService
 {
     private const string EndpointDllResourceName = "LLMTranslate.dll";
     private const string EndpointMetadataResourceName = "translator-endpoint-metadata.json";
+    private const string EndpointAssemblyName = "LLMTranslate";
+    private const string EndpointProductName = "LLMTranslate";
+    private const string EndpointTypeNamespace = "LLMTranslate";
+    private const string EndpointTypeName = "LLMTranslateEndpoint";
+    private static readonly string[] RequiredEndpointReferences =
+    [
+        "XUnity.AutoTranslator.Plugin.Core"
+    ];
 
     private readonly ILogger<XUnityInstallerService> _logger;
     private readonly Lazy<EndpointPackage> _endpointPackage;
@@ -94,6 +105,20 @@ public sealed class XUnityInstallerService
                     : "检测到旧官方端点，可安全自动升级。");
         }
 
+        var identity = TryReadEndpointAssemblyIdentity(destination);
+        if (identity is not null && IsCompatibleCurrentIdentity(identity, package.Metadata))
+        {
+            return new TranslatorEndpointStatus(
+                true,
+                TranslatorEndpointOrigin.CompatibleCurrent,
+                identity.FileVersion ?? package.Metadata.CurrentVersion,
+                hash,
+                false,
+                true,
+                true,
+                $"已识别为当前 {package.Metadata.CurrentVersion} 的同版兼容构建；SHA-256 未列入官方清单，文件已保留，支持自动发现、持续心跳和本机直连。");
+        }
+
         return new TranslatorEndpointStatus(
             true,
             TranslatorEndpointOrigin.UnknownOrCustom,
@@ -118,7 +143,7 @@ public sealed class XUnityInstallerService
 
     /// <summary>
     /// Installs a missing endpoint or upgrades a hash-confirmed old official endpoint.
-    /// Unknown/custom files are preserved unless the caller explicitly confirms replacement.
+    /// Compatible rebuilds and unknown/custom files are preserved unless the caller explicitly confirms replacement.
     /// </summary>
     public TranslatorEndpointStatus EnsureTranslatorEndpoint(Game game, bool forceReplaceUnknown = false)
     {
@@ -126,7 +151,8 @@ public sealed class XUnityInstallerService
         if (current.Origin == TranslatorEndpointOrigin.OfficialCurrent)
             return current;
 
-        if (current.Origin == TranslatorEndpointOrigin.UnknownOrCustom && !forceReplaceUnknown)
+        if ((current.Origin is TranslatorEndpointOrigin.CompatibleCurrent or TranslatorEndpointOrigin.UnknownOrCustom)
+            && !forceReplaceUnknown)
             return current;
 
         if (GameProcessHelper.IsGameRunning(game))
@@ -147,6 +173,7 @@ public sealed class XUnityInstallerService
             {
                 TranslatorEndpointOrigin.Missing => "已安装当前官方 AI 翻译端点。",
                 TranslatorEndpointOrigin.OfficialOutdated => "已将旧官方 AI 翻译端点安全升级到当前版本。",
+                TranslatorEndpointOrigin.CompatibleCurrent => "已按用户确认将同版兼容端点替换为当前官方构建。",
                 _ => "已按用户确认将未知或自定义端点替换为当前官方版本。"
             }
         };
@@ -247,6 +274,77 @@ public sealed class XUnityInstallerService
         }
     }
 
+    internal static TranslatorEndpointAssemblyIdentity? TryReadEndpointAssemblyIdentity(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var peReader = new PEReader(stream, PEStreamOptions.PrefetchMetadata);
+            if (!peReader.HasMetadata)
+                return null;
+
+            var metadata = peReader.GetMetadataReader();
+            if (!metadata.IsAssembly)
+                return null;
+
+            var definition = metadata.GetAssemblyDefinition();
+            var references = metadata.AssemblyReferences
+                .Select(handle => metadata.GetString(metadata.GetAssemblyReference(handle).Name))
+                .Where(reference => !string.IsNullOrWhiteSpace(reference))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var hasEndpointType = metadata.TypeDefinitions.Any(handle =>
+            {
+                var type = metadata.GetTypeDefinition(handle);
+                return metadata.GetString(type.Name).Equals(EndpointTypeName, StringComparison.Ordinal)
+                       && metadata.GetString(type.Namespace).Equals(EndpointTypeNamespace, StringComparison.Ordinal);
+            });
+            var versionInfo = FileVersionInfo.GetVersionInfo(path);
+
+            return new TranslatorEndpointAssemblyIdentity(
+                metadata.GetString(definition.Name),
+                definition.Version,
+                versionInfo.FileVersion,
+                versionInfo.ProductName,
+                versionInfo.OriginalFilename,
+                references,
+                hasEndpointType);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal bool IsCompatibleCurrentIdentity(TranslatorEndpointAssemblyIdentity identity) =>
+        IsCompatibleCurrentIdentity(identity, _endpointPackage.Value.Metadata);
+
+    private static bool IsCompatibleCurrentIdentity(
+        TranslatorEndpointAssemblyIdentity identity,
+        EndpointMetadata metadata)
+    {
+        if (metadata.ProtocolVersion != ToolkitRuntimeEndpointState.ProtocolVersion
+            || !Version.TryParse(metadata.CurrentVersion, out var currentVersion)
+            || !Version.TryParse(identity.FileVersion, out var fileVersion))
+        {
+            return false;
+        }
+
+        return identity.AssemblyName.Equals(EndpointAssemblyName, StringComparison.Ordinal)
+               && NormalizeVersion(identity.AssemblyVersion) == NormalizeVersion(currentVersion)
+               && NormalizeVersion(fileVersion) == NormalizeVersion(currentVersion)
+               && string.Equals(identity.ProductName, EndpointProductName, StringComparison.Ordinal)
+               && string.Equals(identity.OriginalFilename, EndpointDllResourceName, StringComparison.OrdinalIgnoreCase)
+               && identity.HasEndpointType
+               && RequiredEndpointReferences.All(identity.References.Contains);
+    }
+
+    private static Version NormalizeVersion(Version version) => new(
+        version.Major,
+        version.Minor,
+        Math.Max(0, version.Build),
+        Math.Max(0, version.Revision));
+
     public string ResolveBundledZip(UnityGameInfo info, BundledAssetPaths bundled)
     {
         var isIL2CPP = info.Backend == UnityBackend.IL2CPP;
@@ -335,3 +433,12 @@ public sealed class XUnityInstallerService
         public string Sha256 { get; init; } = string.Empty;
     }
 }
+
+internal sealed record TranslatorEndpointAssemblyIdentity(
+    string AssemblyName,
+    Version AssemblyVersion,
+    string? FileVersion,
+    string? ProductName,
+    string? OriginalFilename,
+    IReadOnlySet<string> References,
+    bool HasEndpointType);

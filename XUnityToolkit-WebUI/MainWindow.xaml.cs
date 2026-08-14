@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using Windows.Graphics;
 using WinRT.Interop;
@@ -59,6 +60,7 @@ public sealed partial class MainWindow : Window
             MinimumHeightEpx);
 
         ConfigureNativeWindow();
+        ApplyNativeTheme(dark: true);
         AppWindow.Closing += OnAppWindowClosing;
         Closed += OnWindowClosed;
     }
@@ -197,6 +199,13 @@ public sealed partial class MainWindow : Window
         if (File.Exists(iconPath))
             AppWindow.SetIcon(iconPath);
 
+        if (AppWindowTitleBar.IsCustomizationSupported())
+        {
+            NativeTitleBar.Visibility = Visibility.Visible;
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(NativeTitleBar);
+        }
+
         var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
         if (displayArea is null)
         {
@@ -316,6 +325,11 @@ public sealed partial class MainWindow : Window
     private void ApplyNativeTheme(bool dark)
     {
         RootLayout.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        var titleBarBackground = dark
+            ? WinUIColor.FromArgb(255, 11, 11, 17)
+            : WinUIColor.FromArgb(255, 248, 248, 250);
+        NativeTitleBar.Background = new SolidColorBrush(titleBarBackground);
+
         if (!AppWindowTitleBar.IsCustomizationSupported())
             return;
 
@@ -323,32 +337,32 @@ public sealed partial class MainWindow : Window
         if (dark)
         {
             titleBar.ForegroundColor = WinUIColor.FromArgb(255, 224, 224, 232);
-            titleBar.BackgroundColor = WinUIColor.FromArgb(255, 11, 11, 17);
+            titleBar.BackgroundColor = titleBarBackground;
             titleBar.ButtonForegroundColor = WinUIColor.FromArgb(255, 224, 224, 232);
-            titleBar.ButtonBackgroundColor = WinUIColor.FromArgb(255, 11, 11, 17);
+            titleBar.ButtonBackgroundColor = titleBarBackground;
             titleBar.ButtonHoverForegroundColor = WinUIColor.FromArgb(255, 255, 255, 255);
             titleBar.ButtonHoverBackgroundColor = WinUIColor.FromArgb(255, 35, 35, 45);
             titleBar.ButtonPressedForegroundColor = WinUIColor.FromArgb(255, 255, 255, 255);
             titleBar.ButtonPressedBackgroundColor = WinUIColor.FromArgb(255, 48, 48, 60);
             titleBar.InactiveForegroundColor = WinUIColor.FromArgb(255, 144, 144, 158);
-            titleBar.InactiveBackgroundColor = WinUIColor.FromArgb(255, 11, 11, 17);
+            titleBar.InactiveBackgroundColor = titleBarBackground;
             titleBar.ButtonInactiveForegroundColor = WinUIColor.FromArgb(255, 144, 144, 158);
-            titleBar.ButtonInactiveBackgroundColor = WinUIColor.FromArgb(255, 11, 11, 17);
+            titleBar.ButtonInactiveBackgroundColor = titleBarBackground;
         }
         else
         {
             titleBar.ForegroundColor = WinUIColor.FromArgb(255, 31, 31, 38);
-            titleBar.BackgroundColor = WinUIColor.FromArgb(255, 248, 248, 250);
+            titleBar.BackgroundColor = titleBarBackground;
             titleBar.ButtonForegroundColor = WinUIColor.FromArgb(255, 31, 31, 38);
-            titleBar.ButtonBackgroundColor = WinUIColor.FromArgb(255, 248, 248, 250);
+            titleBar.ButtonBackgroundColor = titleBarBackground;
             titleBar.ButtonHoverForegroundColor = WinUIColor.FromArgb(255, 0, 0, 0);
             titleBar.ButtonHoverBackgroundColor = WinUIColor.FromArgb(255, 230, 230, 235);
             titleBar.ButtonPressedForegroundColor = WinUIColor.FromArgb(255, 0, 0, 0);
             titleBar.ButtonPressedBackgroundColor = WinUIColor.FromArgb(255, 216, 216, 224);
             titleBar.InactiveForegroundColor = WinUIColor.FromArgb(255, 112, 112, 124);
-            titleBar.InactiveBackgroundColor = WinUIColor.FromArgb(255, 248, 248, 250);
+            titleBar.InactiveBackgroundColor = titleBarBackground;
             titleBar.ButtonInactiveForegroundColor = WinUIColor.FromArgb(255, 112, 112, 124);
-            titleBar.ButtonInactiveBackgroundColor = WinUIColor.FromArgb(255, 248, 248, 250);
+            titleBar.ButtonInactiveBackgroundColor = titleBarBackground;
         }
     }
 
