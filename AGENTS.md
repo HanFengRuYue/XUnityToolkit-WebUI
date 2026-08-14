@@ -437,6 +437,14 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `GET /font-replacement/status` 当前主要返回备份、来源和外部还原状态；其中 `ReplacedFonts` 来自 `manifest.json` 摘要，不是实时重扫结果。需要当前 `ttfMode` / `fontDataSize` 时，以 `POST /font-replacement/scan` 为准
 - 替换前会建立备份，恢复依赖备份清单和哈希
 
+运行时 TMP 字体：
+
+- `RuntimeFontLoader/` 分别生成 BepInEx 5 Mono `net35` 与 BepInEx 6 IL2CPP `net6.0` 插件；插件 ID 固定为 `com.xunitytoolkit.runtimefontloader`，构建引用由 `prepare-references.ps1` 从固定 BepInEx 随包 ZIP 提取。
+- `RuntimeTmpFontService` 是 `GET/POST/DELETE /api/games/{id}/tmp-font` 的权威实现。新安装默认以 `ttf-default`、`fallback` 模式部署思源黑体 TTF；`override` 模式通过 `XUnityToolkit.RuntimeFont` 哨兵适配 XUnity 5.6.1。
+- 配置、清单、运行状态分别位于 `BepInEx/config/com.xunitytoolkit.runtimefontloader.cfg`、`.manifest.json`、`.status.json`；配置修改后在新状态时间戳出现前必须显示等待重启验证。
+- 运行时插件只接受 `BepInEx/Font` 内的 TTF/OTF，拒绝路径越界、重解析点、错误魔数和 SHA-256 不匹配。自定义字体不得使用内置思源黑体兼容资产静默回退。
+- 内置字体目录由 `BundledFontCatalog` 统一描述：运行时使用思源黑体 2.005R `SourceHanSansCN-VF.ttf`，Legacy `Font` 资源替换使用 `SourceHanSansCN-Regular.otf`；来源清单与 OFL 许可证必须随包。
+
 字体生成：
 
 - `TmpFontGeneratorService`
@@ -452,6 +460,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 作用：
 
 - 下载 bundled 资源
+- 从固定 BepInEx 5.4.23.5、BepInEx 6 BE 785 与 XUnity 5.6.1 包提取引用并构建 Mono/IL2CPP 两个 RuntimeFontLoader
 - 提取 XUnity 依赖 DLL 到 `TranslatorEndpoint/libs`
 - 构建前端
 - 构建 `LLMTranslate.dll`
@@ -828,7 +837,8 @@ CI：
 - `external` 作用域只允许普通绝对路径读取，目录枚举、每个文件和每个分块必须逐次确认，确认文案需显示用途、真实路径和会发送的原始内容；任何外部写入必须拒绝。二进制只允许被动哈希、签名、PE/程序集/ZIP 元数据和有界十六进制块，不得加载用户程序集。
 - `run_script` 可以执行任意 PowerShell / CMD 文本，但每个脚本必须单独显示用途、宿主、超时、完整脚本和“后端无法证明只读”的风险后确认，仅以当前用户权限、无提权运行。只读/诊断限制由系统提示词约束，不得增加伪安全的 AST 白名单；提示词必须禁止用脚本修改系统或绕过可信根，并要求外部环境修复最终由用户自行执行。
 - `reset_toolbox_data` 必须是终止回合的专用确认工具。`ToolboxDataResetService` 从程序目录复制 `Updater.exe` 到系统临时目录，等待主进程退出后删除完整 `AppData:Root` 并重启；不得删除游戏目录，不创建备份，也不得在安排重置后再次调用模型或持久化新会话数据。
-- `apply_custom_font` 是 TTF/OTF 附件的一体化契约：校验字体头，按游戏 Unity 版本生成 TMP bundle，把生成源与原始 TTF 注册为逐字体来源，扫描并替换所有支持的 TMP/Legacy 字体，最后安装 XUnity fallback；不能退化成只上传或只生成。
+- `apply_custom_font` 只负责校验并登记 TTF/OTF 附件，再调用 `RuntimeTmpFontService` 配置运行时 TMP 字体；不得自动生成 TMP bundle 或改写游戏资源。自定义字体运行时失败时必须明确报告，并由用户显式选择字体生成流程。
+- `configure_tmp_runtime_font` 与 `apply_custom_font` 都是高影响操作，必须由悬浮窗二次确认；未知外部 XUnity TMP 字体键必须先返回冲突，只有 `replaceExistingConfig=true` 才能接管。
 
 <!-- agents-md-maintainer:start -->
 ## Managed project guidance

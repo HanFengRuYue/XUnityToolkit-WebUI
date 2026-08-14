@@ -127,7 +127,7 @@ public sealed class LlmTranslationService(
     private long _tmMisses;
 
     // ── Per-endpoint runtime stats ──
-    private readonly ConcurrentDictionary<string, EndpointStats> _endpointStats = new();
+    private readonly ConcurrentDictionary<string, EndpointRuntimeStatsTracker> _endpointStats = new();
 
     // ── Recent translations circular buffer ──
     private readonly ConcurrentQueue<RecentTranslation> _recentTranslations = new();
@@ -206,6 +206,14 @@ public sealed class LlmTranslationService(
             TranslationMemoryFuzzyHits = (int)Interlocked.Read(ref _tmFuzzyHits),
             TranslationMemoryMisses = (int)Interlocked.Read(ref _tmMisses),
             MaxConcurrency = _currentMaxConcurrency,
+            EndpointStats = _endpointStats.Values
+                .Select(stats => stats.GetSnapshot())
+                .Where(stats => stats.InFlight > 0 || stats.LastUsedAt is not null)
+                .OrderByDescending(stats => stats.InFlight > 0)
+                .ThenByDescending(stats => stats.Priority)
+                .ThenBy(stats => stats.EndpointName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(stats => stats.EndpointId, StringComparer.Ordinal)
+                .ToArray(),
         };
     }
 
@@ -1218,19 +1226,29 @@ public sealed class LlmTranslationService(
                 try
                 {
                     chosenEndpoint = SelectEndpoint(endpoints);
-                    var sw = Stopwatch.StartNew();
+                    var stats = GetEndpointStats(chosenEndpoint);
+                    stats.BeginRequest(chosenEndpoint);
+                    _ = BroadcastStats(force: true);
 
-                    var (result, tokens) = await CallProviderAsync(
-                        chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
-                        fallbackTexts ?? texts,
-                        overrideSystemPrompt);
-                    sw.Stop();
-
-                    var elapsedMs = sw.Elapsed.TotalMilliseconds;
-
-                    // Update per-endpoint stats
-                    var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-                    stats.RecordSuccess(elapsedMs);
+                    IList<TranslationCandidate> result;
+                    long tokens;
+                    double elapsedMs;
+                    try
+                    {
+                        var sw = Stopwatch.StartNew();
+                        (result, tokens) = await CallProviderAsync(
+                            chosenEndpoint, ai, texts, from, to, glossary, gameDescription, memoryContext, dntHint, ct,
+                            fallbackTexts ?? texts,
+                            overrideSystemPrompt);
+                        sw.Stop();
+                        elapsedMs = sw.Elapsed.TotalMilliseconds;
+                        stats.RecordSuccess(elapsedMs);
+                    }
+                    finally
+                    {
+                        stats.EndRequest();
+                        _ = BroadcastStats(force: true);
+                    }
 
                     // Update global stats
                     Interlocked.Add(ref _totalTokensUsed, tokens);
@@ -1260,8 +1278,9 @@ public sealed class LlmTranslationService(
                 {
                     if (chosenEndpoint is not null)
                     {
-                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
+                        var stats = GetEndpointStats(chosenEndpoint);
                         stats.RecordError();
+                        _ = BroadcastStats(force: true);
                     }
                     var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt) * 2);
                     logger.LogWarning(ex, "提供商 {Name} 翻译失败 (尝试 {Attempt}/{Max}), {Delay}s 后重试",
@@ -1272,8 +1291,9 @@ public sealed class LlmTranslationService(
                 {
                     if (chosenEndpoint is not null)
                     {
-                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
+                        var stats = GetEndpointStats(chosenEndpoint);
                         stats.RecordError();
+                        _ = BroadcastStats(force: true);
                         logger.LogWarning(ex, "提供商 {Name} 翻译失败", chosenEndpoint.Name);
                     }
                     throw;
@@ -1338,9 +1358,12 @@ public sealed class LlmTranslationService(
 
         const int maxRetries = 2;
         var chosenEndpoint = SelectEndpoint(endpoints);
+        var endpointStats = GetEndpointStats(chosenEndpoint);
         var baseUrl = chosenEndpoint.Provider == LlmProvider.Custom
             ? chosenEndpoint.ApiBaseUrl : GetDefaultBaseUrl(chosenEndpoint);
 
+        endpointStats.BeginRequest(chosenEndpoint);
+        _ = BroadcastStats(force: true);
         try
         {
             // Build system prompt once for the entire batch
@@ -1375,8 +1398,7 @@ public sealed class LlmTranslationService(
                         translatedText = parsed[0];
 
                         // Update stats
-                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-                        stats.RecordSuccess(elapsedMs);
+                        endpointStats.RecordSuccess(elapsedMs);
                         Interlocked.Add(ref _totalTokensUsed, tokens);
                         Interlocked.Add(ref _totalResponseTimeMs, (long)elapsedMs);
                         Interlocked.Increment(ref _totalRequests);
@@ -1392,8 +1414,8 @@ public sealed class LlmTranslationService(
                     }
                     catch (Exception ex) when (attempt < maxRetries && IsTransientError(ex))
                     {
-                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-                        stats.RecordError();
+                        endpointStats.RecordError();
+                        _ = BroadcastStats(force: true);
                         var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt) * 2);
                         logger.LogWarning(ex, "本地模型翻译失败 (尝试 {Attempt}/{Max}), {Delay}s 后重试",
                             attempt + 1, maxRetries + 1, delay.TotalSeconds);
@@ -1401,8 +1423,8 @@ public sealed class LlmTranslationService(
                     }
                     catch (Exception ex)
                     {
-                        var stats = _endpointStats.GetOrAdd(chosenEndpoint.Id, _ => new EndpointStats());
-                        stats.RecordError();
+                        endpointStats.RecordError();
+                        _ = BroadcastStats(force: true);
                         logger.LogWarning(ex, "本地模型翻译第 {Index} 条文本失败，回退到原文", i);
                         break; // Fall through to use original text
                     }
@@ -1417,6 +1439,7 @@ public sealed class LlmTranslationService(
         }
         finally
         {
+            endpointStats.EndRequest();
             if (semaphoreAcquired)
             {
                 Interlocked.Decrement(ref _translating);
@@ -1437,7 +1460,7 @@ public sealed class LlmTranslationService(
 
         foreach (var ep in endpoints)
         {
-            var stats = _endpointStats.GetOrAdd(ep.Id, _ => new EndpointStats());
+            var stats = GetEndpointStats(ep);
             var score = CalculateScore(ep.Priority, stats);
             if (score > bestScore)
             {
@@ -1449,10 +1472,10 @@ public sealed class LlmTranslationService(
         return best ?? endpoints[0];
     }
 
-    private static double CalculateScore(int priority, EndpointStats stats)
+    private static double CalculateScore(int priority, EndpointRuntimeStatsTracker stats)
     {
         var errorRate = stats.TotalCalls > 0 ? (double)stats.ErrorCount / stats.TotalCalls : 0;
-        var avgMs = stats.AverageResponseTimeMs;
+        var avgMs = stats.SuccessfulCalls > 0 ? stats.AverageResponseTimeMs : 500;
 
         // Priority weight + speed bonus - error penalty
         return priority * 10.0
@@ -2338,6 +2361,9 @@ public sealed class LlmTranslationService(
         };
     }
 
+    private EndpointRuntimeStatsTracker GetEndpointStats(ApiEndpointConfig endpoint) =>
+        _endpointStats.GetOrAdd(endpoint.Id, _ => new EndpointRuntimeStatsTracker(endpoint));
+
     private async Task<IList<string>> FetchOpenAiModelsAsync(LlmProvider provider, string apiBaseUrl, string apiKey, CancellationToken ct)
     {
         var baseUrl = string.IsNullOrWhiteSpace(apiBaseUrl)
@@ -2417,35 +2443,4 @@ public sealed class LlmTranslationService(
             .ToList()!;
     }
 
-    // ── Per-endpoint stats tracker ──
-
-    private sealed class EndpointStats
-    {
-        private long _totalCalls;
-        private long _errorCount;
-        private long _totalMs;
-
-        public long TotalCalls => Interlocked.Read(ref _totalCalls);
-        public long ErrorCount => Interlocked.Read(ref _errorCount);
-        public double AverageResponseTimeMs
-        {
-            get
-            {
-                var total = Interlocked.Read(ref _totalCalls) - Interlocked.Read(ref _errorCount);
-                return total > 0 ? (double)Interlocked.Read(ref _totalMs) / total : 500;
-            }
-        }
-
-        public void RecordSuccess(double ms)
-        {
-            Interlocked.Increment(ref _totalCalls);
-            Interlocked.Add(ref _totalMs, (long)ms);
-        }
-
-        public void RecordError()
-        {
-            Interlocked.Increment(ref _totalCalls);
-            Interlocked.Increment(ref _errorCount);
-        }
-    }
 }

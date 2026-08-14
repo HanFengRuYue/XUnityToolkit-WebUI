@@ -12,7 +12,7 @@ public sealed class InstallOrchestrator(
     UnityDetectionService detection,
     BepInExInstallerService bepInExInstaller,
     XUnityInstallerService xUnityInstaller,
-    TmpFontService tmpFontService,
+    RuntimeTmpFontService runtimeTmpFontService,
     ConfigurationService configService,
     PluginHealthCheckService healthCheckService,
     BundledAssetPaths bundledPaths,
@@ -184,7 +184,7 @@ public sealed class InstallOrchestrator(
 
         // Step 4: Install TMP font (skip if game doesn't use TextMeshPro)
         await UpdateStatus(status, InstallStep.InstallingTmpFont, 66, "正在安装 TMP 字体...");
-        string? tmpFontConfigValue = null;
+        var runtimeTmpFontInstalled = false;
         if (!options.AutoInstallTmpFont)
         {
             logger.LogInformation("用户已关闭自动安装 TMP 字体");
@@ -199,11 +199,16 @@ public sealed class InstallOrchestrator(
         {
             try
             {
-                tmpFontConfigValue = tmpFontService.InstallFont(game.GamePath, gameInfo);
-                if (tmpFontConfigValue != null)
-                    await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体已安装");
-                else
-                    await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "TMP 字体不可用（跳过）");
+                await runtimeTmpFontService.InstallAsync(game, new TmpFontInstallRequest
+                {
+                    ApplicationMode = options.TmpFontApplicationMode,
+                }, ct);
+                runtimeTmpFontInstalled = true;
+                await UpdateStatus(status, InstallStep.InstallingTmpFont, 68, "运行时 TMP 字体已安装");
+            }
+            catch (RuntimeFontConfigurationConflictException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -295,15 +300,9 @@ public sealed class InstallOrchestrator(
             await UpdateStatus(status, InstallStep.ApplyingConfig, 86, "正在应用最佳默认配置...");
             await configService.ApplyOptimalDefaultsAsync(game.GamePath, ct);
 
-            // Patch TMP font config value (must happen after defaults, since defaults no longer set it)
-            if (tmpFontConfigValue != null)
-            {
-                await configService.PatchSectionAsync(game.GamePath, "Behaviour",
-                    new Dictionary<string, string>
-                    {
-                        ["FallbackFontTextMeshPro"] = tmpFontConfigValue
-                    }, ct);
-            }
+            // Re-apply the managed runtime font sentinel after defaults are written.
+            if (runtimeTmpFontInstalled)
+                await runtimeTmpFontService.ConfigureInstalledFontAsync(game.GamePath, ct);
 
             if (config != null)
             {

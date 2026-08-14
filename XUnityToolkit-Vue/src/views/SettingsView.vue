@@ -113,6 +113,7 @@ const settings = ref<AppSettings>({
   receivePreReleaseUpdates: false,
   installOptions: {
     autoInstallTmpFont: true,
+    tmpFontApplicationMode: 'fallback',
     autoDeployAiEndpoint: true,
     autoGenerateConfig: true,
     autoApplyOptimalConfig: true,

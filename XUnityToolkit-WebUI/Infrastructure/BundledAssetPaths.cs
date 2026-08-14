@@ -6,14 +6,29 @@ namespace XUnityToolkit_WebUI.Infrastructure;
 /// </summary>
 public sealed class BundledAssetPaths
 {
-    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "bundled");
+    private readonly string _root;
+
+    public BundledAssetPaths() : this(Path.Combine(AppContext.BaseDirectory, "bundled"))
+    {
+    }
+
+    internal BundledAssetPaths(string root)
+    {
+        _root = Path.GetFullPath(root);
+    }
 
     public string BepInEx5Directory => Path.Combine(_root, "bepinex5");
     public string BepInEx6Directory => Path.Combine(_root, "bepinex6");
     public string XUnityDirectory => Path.Combine(_root, "xunity");
+    public string RuntimeFontLoaderDirectory => Path.Combine(_root, "runtime-font-loader");
     public string LlamaDirectory => Path.Combine(_root, "llama");
     public string FontsDirectory => Path.Combine(_root, "fonts");
     public string ScriptTagPresetsFile => Path.Combine(_root, "script-tag-presets.json");
+
+    public string GetRuntimeFontLoaderPlugin(bool isIl2Cpp) => Path.Combine(
+        RuntimeFontLoaderDirectory,
+        isIl2Cpp ? "il2cpp" : "mono",
+        isIl2Cpp ? "XUnityToolkit.RuntimeFontLoader.IL2CPP.dll" : "XUnityToolkit.RuntimeFontLoader.dll");
 
     public string? FindBepInEx5Zip(string archPattern)
     {

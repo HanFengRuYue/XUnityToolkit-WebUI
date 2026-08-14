@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text;
 using System.Text.Json;
 using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
@@ -117,6 +118,67 @@ public sealed class ToolboxAgentSafetyTests
         try
         {
             Assert.True(PluginDiagnosticArtifactCollector.IsSafeRegularDirectory(root, root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void MissingGameDirectory_ReturnsNearestSafeDirectoryInsteadOfThrowing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"xunity-agent-missing-{Guid.NewGuid():N}");
+        var bepinex = Path.Combine(root, "BepInEx");
+        Directory.CreateDirectory(bepinex);
+        File.WriteAllText(Path.Combine(bepinex, "LogOutput.log"), "active log");
+        try
+        {
+            var game = new Game { Name = "Test", GamePath = root };
+            var requested = Path.Combine(bepinex, "logs");
+
+            var result = ToolboxAgentToolExecutor.CreateMissingGameDirectoryResult(
+                game, "BepInEx/logs", requested);
+
+            Assert.False(result.Success);
+            Assert.Equal("列出游戏文件", result.Description);
+            Assert.Contains("BepInEx/logs", result.ModelContent);
+            Assert.Contains("BepInEx", result.ModelContent);
+            Assert.Contains("BepInEx/LogOutput.log", result.ModelContent);
+            Assert.DoesNotContain(root, result.ModelContent, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SharedTextSnapshot_ReadsLogWhileAnotherProcessKeepsWriting()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"xunity-agent-shared-log-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var logPath = Path.Combine(root, "LogOutput.log");
+        await File.WriteAllTextAsync(logPath, "line one\n");
+        try
+        {
+            await using (var writer = new FileStream(
+                             logPath,
+                             FileMode.Open,
+                             FileAccess.ReadWrite,
+                             FileShare.Read,
+                             4096,
+                             useAsync: true))
+            {
+                writer.Seek(0, SeekOrigin.End);
+                await writer.WriteAsync(Encoding.UTF8.GetBytes("line two\n"));
+                await writer.FlushAsync();
+
+                var content = await ToolboxAgentToolExecutor.ReadSharedTextSnapshotAsync(
+                    logPath, 512 * 1024, default);
+
+                Assert.Equal("line one\nline two\n", content);
+            }
         }
         finally
         {

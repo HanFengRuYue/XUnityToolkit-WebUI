@@ -301,6 +301,7 @@ const mutatingTools = new Set([
   'auto_repair_plugins',
   'patch_game_file',
   'apply_custom_font',
+  'configure_tmp_runtime_font',
   'update_toolbox_setting',
   'use_attachment',
   'manage_files',

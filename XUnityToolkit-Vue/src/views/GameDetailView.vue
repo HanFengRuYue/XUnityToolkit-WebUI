@@ -7,6 +7,7 @@ import {
   NIcon,
   NInput,
   NDropdown,
+  NSelect,
   NSwitch,
   useMessage,
   useDialog,
@@ -108,6 +109,7 @@ const packageExporting = ref(false)
 const packageImporting = ref(false)
 const installOptions = ref<InstallOptions>({
   autoInstallTmpFont: true,
+  tmpFontApplicationMode: 'fallback',
   autoDeployAiEndpoint: true,
   autoGenerateConfig: true,
   autoApplyOptimalConfig: true,
@@ -888,10 +890,25 @@ onBeforeUnmount(() => stopWatch())
             <div class="install-options-body-inner">
               <div class="install-option-row">
                 <div class="install-option-info">
-                  <span class="install-option-name">安装 TMP 字体</span>
-                  <span class="install-option-desc">自动安装匹配游戏 Unity 版本的中文 TMP 字体</span>
+                  <span class="install-option-name">安装 TMP 字体（运行时 TTF 优先）</span>
+                  <span class="install-option-desc">默认直接加载思源黑体 TTF；不支持时回退到匹配 Unity 版本的兼容资产</span>
                 </div>
                 <NSwitch v-model:value="installOptions.autoInstallTmpFont" size="small" />
+              </div>
+              <div v-if="installOptions.autoInstallTmpFont" class="install-option-row">
+                <div class="install-option-info">
+                  <span class="install-option-name">TMP 字体应用方式</span>
+                  <span class="install-option-desc">全局回退保留原游戏字体；全部替换会统一 TMP 文本字体</span>
+                </div>
+                <NSelect
+                  v-model:value="installOptions.tmpFontApplicationMode"
+                  size="small"
+                  style="width: 210px"
+                  :options="[
+                    { label: '全局回退', value: 'fallback' },
+                    { label: '全部 TMP 文本替换', value: 'override' },
+                  ]"
+                />
               </div>
               <div class="install-option-row">
                 <div class="install-option-info">

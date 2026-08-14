@@ -29,7 +29,22 @@ public sealed record TranslationStats(
     public int TranslationMemoryMisses { get; init; }
     /// <summary>Current max concurrency (API request slots).</summary>
     public int MaxConcurrency { get; init; }
+    /// <summary>Per-endpoint in-memory runtime telemetry. Never contains credentials or request content.</summary>
+    public IList<EndpointRuntimeStats> EndpointStats { get; init; } = [];
 }
+
+public sealed record EndpointRuntimeStats(
+    string EndpointId,
+    string EndpointName,
+    LlmProvider Provider,
+    string ModelName,
+    int Priority,
+    int InFlight,
+    long SuccessfulCalls,
+    long ErrorCount,
+    double AverageResponseTimeMs,
+    DateTime? LastUsedAt
+);
 
 public sealed record RecentTranslation(
     string Original,

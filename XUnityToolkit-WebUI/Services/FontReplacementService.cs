@@ -13,7 +13,7 @@ namespace XUnityToolkit_WebUI.Services;
 
 public sealed class FontReplacementService(
     TmpFontService tmpFontService,
-    BundledAssetPaths bundledPaths,
+    BundledFontCatalog bundledFontCatalog,
     AppDataPaths appDataPaths,
     ILogger<FontReplacementService> logger)
 {
@@ -602,7 +602,7 @@ public sealed class FontReplacementService(
     }
 
     private string GetBundledTtfPath() =>
-        Path.Combine(bundledPaths.FontsDirectory, "SourceHanSansCN-Regular.ttf");
+        bundledFontCatalog.AssetReplacementFontPath;
 
     private static bool IsTtfFile(string path) =>
         Path.GetExtension(path).ToLowerInvariant() is ".ttf" or ".otf";
@@ -737,11 +737,15 @@ public sealed class FontReplacementService(
             {
                 Id = DefaultTtfSourceId,
                 Kind = SourceKindTtf,
-                DisplayName = Path.GetFileName(bundledTtfPath),
+                DisplayName = BundledFontCatalog.DisplayName,
                 FileName = Path.GetFileName(bundledTtfPath),
                 Origin = SourceOriginDefault,
                 IsDefault = true,
-                FileSize = new FileInfo(bundledTtfPath).Length
+                FileSize = new FileInfo(bundledTtfPath).Length,
+                Version = BundledFontCatalog.Version,
+                License = BundledFontCatalog.LicenseName,
+                LicenseUrl = BundledFontCatalog.LicenseUrl,
+                Sha256 = BundledFontCatalog.AssetReplacementSha256,
             });
         }
 
@@ -988,14 +992,14 @@ public sealed class FontReplacementService(
                 }
             }
 
-            // Priority 2: bundled SourceHanSansCN-Regular.ttf
+            // Priority 2: bundled Source Han Sans static OTF for Legacy Font assets
             if (ttfSourceBytes is null)
             {
-                var bundledTtf = Path.Combine(bundledPaths.FontsDirectory, "SourceHanSansCN-Regular.ttf");
+                var bundledTtf = bundledFontCatalog.AssetReplacementFontPath;
                 if (File.Exists(bundledTtf))
                 {
                     ttfSourceBytes = File.ReadAllBytes(bundledTtf);
-                    ttfSourceName = "SourceHanSansCN-Regular.ttf";
+                    ttfSourceName = BundledFontCatalog.AssetReplacementFileName;
                 }
             }
         }

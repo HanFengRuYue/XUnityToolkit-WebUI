@@ -32,7 +32,7 @@ import {
 import { useAiTranslationStore } from '@/stores/aiTranslation'
 import { useGamesStore } from '@/stores/games'
 import { settingsApi } from '@/api/games'
-import type { AppSettings, AiTranslationSettings, ToolkitConnectionInfo } from '@/api/types'
+import type { AppSettings, AiTranslationSettings, EndpointRuntimeStats, ToolkitConnectionInfo } from '@/api/types'
 import AiTranslationCard from '@/components/settings/AiTranslationCard.vue'
 import LocalAiPanel from '@/components/settings/LocalAiPanel.vue'
 import { useAutoSave } from '@/composables/useAutoSave'
@@ -236,8 +236,6 @@ async function handleToggle(enabled: boolean) {
   }
 }
 
-const isPipelineOverflowing = ref(false)
-
 function trimCompactDecimal(value: number): string {
   return value.toFixed(1).replace(/\.0$/, '')
 }
@@ -257,7 +255,40 @@ function formatCompactChineseCount(value: number): string {
 
 function formatPipelineCount(value: number | null | undefined): string {
   const resolved = value ?? 0
-  return isPipelineOverflowing.value ? formatCompactChineseCount(resolved) : String(resolved)
+  return formatCompactChineseCount(resolved)
+}
+
+const endpointRuntimeStats = computed(() => aiStore.stats?.endpointStats ?? [])
+
+const activeEndpointStats = computed(() => endpointRuntimeStats.value
+  .filter(endpoint => endpoint.inFlight > 0)
+  .sort((a, b) => b.priority - a.priority
+    || a.endpointName.localeCompare(b.endpointName, 'zh-CN')
+    || a.endpointId.localeCompare(b.endpointId)))
+
+const displayedEndpointStats = computed<EndpointRuntimeStats[]>(() => {
+  if (activeEndpointStats.value.length > 0) return activeEndpointStats.value
+  const mostRecent = endpointRuntimeStats.value
+    .filter(endpoint => !!endpoint.lastUsedAt)
+    .sort((a, b) => Date.parse(b.lastUsedAt ?? '') - Date.parse(a.lastUsedAt ?? ''))[0]
+  return mostRecent ? [mostRecent] : []
+})
+
+const showingRecentEndpoint = computed(() => activeEndpointStats.value.length === 0 && displayedEndpointStats.value.length > 0)
+
+function formatEndpointSuccessRate(endpoint: EndpointRuntimeStats): string {
+  const total = endpoint.successfulCalls + endpoint.errorCount
+  if (total === 0) return '—'
+  return `${((endpoint.successfulCalls / total) * 100).toFixed(1)}%`
+}
+
+function formatEndpointLatency(endpoint: EndpointRuntimeStats): string {
+  if (endpoint.successfulCalls === 0) return '—'
+  return formatTime(endpoint.averageResponseTimeMs)
+}
+
+function endpointSubtitle(endpoint: EndpointRuntimeStats): string {
+  return endpoint.modelName ? `${endpoint.provider} · ${endpoint.modelName}` : endpoint.provider
 }
 
 async function loadSettings() {
@@ -309,8 +340,8 @@ onMounted(async () => {
     gamesStore.games.length === 0 ? gamesStore.fetchGames() : Promise.resolve(),
   ])
   await nextTick()
-  await syncPipelineLayout()
   setupPipelineObserver()
+  await syncPipelineLayout()
   startConnectionPolling()
 })
 
@@ -318,8 +349,8 @@ onActivated(async () => {
   await aiStore.connect()
   await Promise.all([aiStore.fetchStats(), loadSettings(), loadConnectionInfo()])
   await nextTick()
-  await syncPipelineLayout()
   setupPipelineObserver()
+  await syncPipelineLayout()
   startConnectionPolling()
 })
 
@@ -339,11 +370,14 @@ onBeforeUnmount(() => {
 const pipelineRef = ref<HTMLElement | null>(null)
 const rootNodeRef = ref<HTMLElement | null>(null)
 const queueNodeRef = ref<HTMLElement | null>(null)
-const translatingNodeRef = ref<HTMLElement | null>(null)
 const doneNodeRef = ref<HTMLElement | null>(null)
 const extractionNodeRef = ref<HTMLElement | null>(null)
 const tmChipsRef = ref<HTMLElement | null>(null)
 const tmDoneRef = ref<HTMLElement | null>(null)
+const providerEmptyNodeRef = ref<HTMLElement | null>(null)
+const endpointNodeRefs = new Map<string, HTMLElement>()
+const pipelineViewport = reactive({ width: 1, height: 1 })
+const pipelineViewBox = computed(() => `0 0 ${pipelineViewport.width} ${pipelineViewport.height}`)
 
 interface PipelineConnection {
   id: string
@@ -381,67 +415,38 @@ function particleParams(volume: number) {
 }
 
 function isDesktopPipelineLayout() {
-  return typeof window !== 'undefined' && window.innerWidth > 768
+  return typeof window !== 'undefined'
+    && window.innerWidth > 980
+    && (pipelineRef.value?.clientWidth ?? 0) > 760
 }
 
-function restoreMeasuredPipelineTexts(root: HTMLElement) {
-  root.querySelectorAll<HTMLElement>('[data-full-value]').forEach((el) => {
-    el.textContent = el.dataset.fullValue ?? ''
-  })
+function setEndpointNodeRef(endpointId: string, element: unknown) {
+  const previous = endpointNodeRefs.get(endpointId)
+  if (previous && previous !== element) {
+    pipelineResizeObserver?.unobserve(previous)
+  }
 
-  root.querySelectorAll<HTMLElement>('[data-full-current]').forEach((el) => {
-    const current = el.dataset.fullCurrent ?? ''
-    const max = el.dataset.fullMax ?? ''
-
-    let leadingTextNode = Array.from(el.childNodes).find((node) => node.nodeType === Node.TEXT_NODE) ?? null
-    if (!leadingTextNode) {
-      leadingTextNode = document.createTextNode('')
-      el.insertBefore(leadingTextNode, el.firstChild)
-    }
-
-    leadingTextNode.textContent = current
-
-    const small = el.querySelector('small')
-    if (small) {
-      small.textContent = max ? `/${max}` : ''
-    }
-  })
-}
-
-function measurePipelineOverflow() {
-  if (!pipelineRef.value || !isDesktopPipelineLayout()) return false
-
-  const source = pipelineRef.value.querySelector<HTMLElement>('.pipeline-hbox')
-  if (!source) return false
-
-  const wrapper = document.createElement('div')
-  Object.assign(wrapper.style, {
-    position: 'absolute',
-    left: '-100000px',
-    top: '0',
-    width: `${pipelineRef.value.clientWidth}px`,
-    visibility: 'hidden',
-    pointerEvents: 'none',
-    overflow: 'hidden',
-  })
-
-  const clone = source.cloneNode(true) as HTMLElement
-  restoreMeasuredPipelineTexts(clone)
-  wrapper.appendChild(clone)
-  document.body.appendChild(wrapper)
-
-  const overflowing = clone.scrollWidth > wrapper.clientWidth + 1
-  wrapper.remove()
-
-  return overflowing
+  if (element instanceof HTMLElement) {
+    endpointNodeRefs.set(endpointId, element)
+    pipelineResizeObserver?.observe(element)
+  } else {
+    endpointNodeRefs.delete(endpointId)
+  }
 }
 
 function computeConnections() {
   if (!pipelineRef.value) return
   const container = pipelineRef.value.getBoundingClientRect()
+  pipelineViewport.width = Math.max(1, container.width)
+  pipelineViewport.height = Math.max(1, container.height)
+
+  if (!isDesktopPipelineLayout()) {
+    connections.value = []
+    return
+  }
+
   const root = getRelPos(rootNodeRef.value, container)
   const queue = getRelPos(queueNodeRef.value, container)
-  const translating = getRelPos(translatingNodeRef.value, container)
   const done = getRelPos(doneNodeRef.value, container)
   const extraction = getRelPos(extractionNodeRef.value, container)
   const tmChips = getRelPos(tmChipsRef.value, container)
@@ -464,20 +469,40 @@ function computeConnections() {
     result.push({ id: 'root-queue', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
   }
 
-  // queue → translating
-  if (queue && translating) {
-    const pathD = rightAngleH(queue.right, queue.cy, translating.left, translating.cy)
-    const vol = s?.translating ?? 0
-    const pp = particleParams(vol)
-    result.push({ id: 'queue-translating', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
-  }
+  const providerNodes = displayedEndpointStats.value.length > 0
+    ? displayedEndpointStats.value.map(endpoint => ({
+        endpoint,
+        position: getRelPos(endpointNodeRefs.get(endpoint.endpointId) ?? null, container),
+      }))
+    : [{ endpoint: null, position: getRelPos(providerEmptyNodeRef.value, container) }]
 
-  // translating → done
-  if (translating && done) {
-    const pathD = rightAngleH(translating.right, translating.cy, done.left, done.cy)
-    const vol = s?.translating ?? 0
-    const pp = particleParams(vol)
-    result.push({ id: 'translating-done', pathD, active: vol > 0, particleCount: pp.count, duration: pp.duration, isTm: false })
+  for (const providerNode of providerNodes) {
+    if (!providerNode.position) continue
+    const endpointId = providerNode.endpoint?.endpointId ?? 'waiting'
+    const volume = providerNode.endpoint?.inFlight ?? 0
+    const pp = particleParams(volume)
+
+    if (queue) {
+      result.push({
+        id: `queue-provider-${endpointId}`,
+        pathD: rightAngleH(queue.right, queue.cy, providerNode.position.left, providerNode.position.cy),
+        active: volume > 0,
+        particleCount: pp.count,
+        duration: pp.duration,
+        isTm: false,
+      })
+    }
+
+    if (done) {
+      result.push({
+        id: `provider-done-${endpointId}`,
+        pathD: rightAngleH(providerNode.position.right, providerNode.position.cy, done.left, done.cy),
+        active: volume > 0,
+        particleCount: pp.count,
+        duration: pp.duration,
+        isTm: false,
+      })
+    }
   }
 
   // done → extraction (horizontal inline)
@@ -507,16 +532,24 @@ function computeConnections() {
     result.push({ id: 'tm-chips-done', pathD, active: tmActive, particleCount: pp.count, duration: pp.duration, isTm: true })
   }
 
+  if (tmDone && done) {
+    const vol = Math.min(20, tmTotalHits.value)
+    const pp = particleParams(vol)
+    result.push({
+      id: 'tm-done-complete',
+      pathD: rightAngleH(tmDone.right, tmDone.cy, done.left, done.cy),
+      active: tmActive,
+      particleCount: pp.count,
+      duration: pp.duration,
+      isTm: true,
+    })
+  }
+
   connections.value = result
 }
 
 async function syncPipelineLayout() {
-  const nextOverflowState = measurePipelineOverflow()
-  if (nextOverflowState !== isPipelineOverflowing.value) {
-    isPipelineOverflowing.value = nextOverflowState
-    await nextTick()
-  }
-
+  await nextTick()
   computeConnections()
 }
 
@@ -533,17 +566,45 @@ function schedulePipelineLayout() {
 
 let pipelineResizeObserver: ResizeObserver | null = null
 
+function refreshPipelineObserverTargets() {
+  if (!pipelineResizeObserver) return
+  pipelineResizeObserver.disconnect()
+  const nodes = [
+    pipelineRef.value,
+    rootNodeRef.value,
+    queueNodeRef.value,
+    doneNodeRef.value,
+    extractionNodeRef.value,
+    tmChipsRef.value,
+    tmDoneRef.value,
+    providerEmptyNodeRef.value,
+    ...endpointNodeRefs.values(),
+  ]
+  for (const node of nodes) {
+    if (node) pipelineResizeObserver.observe(node)
+  }
+}
+
+function handlePipelineEnvironmentChange() {
+  schedulePipelineLayout()
+}
+
 function setupPipelineObserver() {
-  if (!pipelineRef.value || pipelineResizeObserver) return
-  pipelineResizeObserver = new ResizeObserver(() => {
-    schedulePipelineLayout()
-  })
-  pipelineResizeObserver.observe(pipelineRef.value)
+  if (!pipelineRef.value) return
+  if (!pipelineResizeObserver) {
+    pipelineResizeObserver = new ResizeObserver(schedulePipelineLayout)
+  }
+  refreshPipelineObserverTargets()
+  window.addEventListener('resize', handlePipelineEnvironmentChange)
+  document.fonts?.addEventListener('loadingdone', handlePipelineEnvironmentChange)
+  void document.fonts?.ready.then(handlePipelineEnvironmentChange)
 }
 
 function cleanupPipeline() {
   pipelineResizeObserver?.disconnect()
   pipelineResizeObserver = null
+  window.removeEventListener('resize', handlePipelineEnvironmentChange)
+  document.fonts?.removeEventListener('loadingdone', handlePipelineEnvironmentChange)
   if (pipelineLayoutFrame !== null) {
     cancelAnimationFrame(pipelineLayoutFrame)
     pipelineLayoutFrame = null
@@ -565,8 +626,22 @@ watch(() => [
   extractionStats.value?.totalExtractionCalls ?? 0,
   extractionStats.value?.activeExtractions ?? 0,
   extractionStats.value?.totalErrors ?? 0,
+  endpointRuntimeStats.value.map(endpoint => [
+    endpoint.endpointId,
+    endpoint.endpointName,
+    endpoint.modelName,
+    endpoint.priority,
+    endpoint.inFlight,
+    endpoint.successfulCalls,
+    endpoint.errorCount,
+    endpoint.averageResponseTimeMs,
+    endpoint.lastUsedAt ?? '',
+  ].join(':')).join('|'),
 ], () => {
-  nextTick(schedulePipelineLayout)
+  void nextTick(() => {
+    refreshPipelineObserverTargets()
+    schedulePipelineLayout()
+  })
 })
 </script>
 
@@ -660,7 +735,14 @@ watch(() => [
           <!-- Pipeline Flow -->
           <div class="pipeline-flow" ref="pipelineRef">
             <!-- SVG Connection Overlay -->
-            <svg class="pipeline-svg">
+            <svg
+              class="pipeline-svg"
+              :viewBox="pipelineViewBox"
+              :width="pipelineViewport.width"
+              :height="pipelineViewport.height"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
               <defs>
                 <filter id="particle-glow" x="-50%" y="-50%" width="200%" height="200%">
                   <feGaussianBlur stdDeviation="3" result="blur" />
@@ -672,6 +754,7 @@ watch(() => [
               </defs>
               <path v-for="conn in connections" :key="conn.id"
                     :d="conn.pathD"
+                    :data-connection-id="conn.id"
                     class="connection-path"
                     :class="{ active: conn.active, 'tm-path': conn.isTm }" />
               <template v-for="conn in connections" :key="'particles-' + conn.id">
@@ -708,84 +791,8 @@ watch(() => [
                 </NPopover>
               </div>
 
-              <!-- Fork Branches -->
+              <!-- Split Rails -->
               <div class="pipeline-branches">
-                <!-- LLM Branch -->
-                <div class="pipeline-branch llm-branch">
-                  <div class="branch-header">
-                    <NIcon :size="13"><SmartToyOutlined /></NIcon>
-                    <span>LLM 翻译</span>
-                  </div>
-                  <div class="branch-nodes branch-nodes-llm" :class="{ 'has-extraction': showExtraction }">
-                    <div class="llm-node-slot queue-slot">
-                      <NPopover trigger="hover" placement="top">
-                        <template #trigger>
-                          <div ref="queueNodeRef" class="pipeline-node stage-node queue-node" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
-                            <div class="node-icon"><NIcon :size="14"><HourglassEmptyOutlined /></NIcon></div>
-                            <div class="node-data">
-                              <span class="node-value" :data-full-value="String(aiStore.stats?.queued ?? 0)">{{ formatPipelineCount(aiStore.stats?.queued ?? 0) }}</span>
-                              <span class="node-label">排队</span>
-                            </div>
-                          </div>
-                        </template>
-                        <div class="pipeline-tooltip">等待 LLM 处理的翻译请求队列</div>
-                      </NPopover>
-                    </div>
-
-                    <div class="llm-node-slot translating-slot">
-                      <NPopover trigger="hover" placement="top">
-                        <template #trigger>
-                          <div ref="translatingNodeRef" class="pipeline-node stage-node translating-node" :class="{ 'is-active': isActivelyTranslating }">
-                            <div class="node-icon translating-icon"><NIcon :size="14"><SyncOutlined /></NIcon></div>
-                            <div class="node-data">
-                              <span
-                                class="node-value"
-                                :data-full-current="String(aiStore.stats?.translating ?? 0)"
-                                :data-full-max="aiStore.stats?.maxConcurrency ? String(aiStore.stats.maxConcurrency) : ''"
-                              >
-                                {{ formatPipelineCount(aiStore.stats?.translating ?? 0) }}<small v-if="aiStore.stats?.maxConcurrency">/{{ formatPipelineCount(aiStore.stats.maxConcurrency) }}</small>
-                              </span>
-                              <span class="node-label">翻译中</span>
-                            </div>
-                          </div>
-                        </template>
-                        <div class="pipeline-tooltip">正在由大语言模型处理的翻译请求</div>
-                      </NPopover>
-                    </div>
-
-                    <div class="llm-node-slot done-slot">
-                      <NPopover trigger="hover" placement="top">
-                        <template #trigger>
-                          <div ref="doneNodeRef" class="pipeline-node stage-node done-node">
-                            <div class="node-icon done-icon"><NIcon :size="14"><TranslateOutlined /></NIcon></div>
-                            <div class="node-data">
-                              <span class="node-value" :data-full-value="String(llmCompleted)">{{ formatPipelineCount(llmCompleted) }}</span>
-                              <span class="node-label">已完成</span>
-                            </div>
-                          </div>
-                        </template>
-                        <div class="pipeline-tooltip">LLM 成功翻译的文本数（不含翻译记忆命中）</div>
-                      </NPopover>
-                    </div>
-
-                    <!-- Term Extraction (inline after 已完成) -->
-                    <div v-if="showExtraction" class="llm-node-slot extraction-slot">
-                      <NPopover trigger="hover" placement="top">
-                        <template #trigger>
-                          <div ref="extractionNodeRef" class="pipeline-node stage-node extraction-node">
-                            <div class="node-icon extraction-icon"><NIcon :size="14"><AutoFixHighOutlined /></NIcon></div>
-                            <div class="node-data">
-                              <span class="node-value" :data-full-value="String(extractionStats!.totalExtracted)">{{ formatPipelineCount(extractionStats!.totalExtracted) }}</span>
-                              <span class="node-label">术语提取</span>
-                            </div>
-                          </div>
-                        </template>
-                        <div class="pipeline-tooltip">翻译完成后自动提取专有名词、角色名等术语，用于后续翻译</div>
-                      </NPopover>
-                    </div>
-                  </div>
-                </div>
-
                 <!-- TM Branch -->
                 <div v-if="hasTmActivity" class="pipeline-branch tm-branch">
                   <div class="branch-header tm-header">
@@ -818,6 +825,123 @@ watch(() => [
                       </template>
                       <div class="pipeline-tooltip">翻译记忆总命中数 — 无需调用 LLM 直接复用已有翻译</div>
                     </NPopover>
+                  </div>
+                </div>
+
+                <!-- Provider Branch -->
+                <div class="pipeline-branch llm-branch">
+                  <div class="branch-header provider-header">
+                    <div class="branch-heading">
+                      <NIcon :size="13"><SmartToyOutlined /></NIcon>
+                      <span>AI 提供商</span>
+                    </div>
+                    <span v-if="activeEndpointStats.length > 0" class="branch-runtime active">
+                      {{ activeEndpointStats.length }} 个端点正在调用
+                    </span>
+                    <span v-else-if="showingRecentEndpoint" class="branch-runtime">最近使用</span>
+                    <span v-else class="branch-runtime">等待调度</span>
+                  </div>
+                  <div class="branch-nodes branch-nodes-llm" :class="{ 'has-extraction': showExtraction }">
+                    <div class="llm-node-slot queue-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="queueNodeRef" class="pipeline-node stage-node queue-node" :class="{ dimmed: (aiStore.stats?.queued ?? 0) === 0 }">
+                            <div class="node-icon"><NIcon :size="14"><HourglassEmptyOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value">{{ formatPipelineCount(aiStore.stats?.queued ?? 0) }}</span>
+                              <span class="node-label">排队</span>
+                            </div>
+                          </div>
+                        </template>
+                        <div class="pipeline-tooltip">等待可用并发槽位的翻译请求</div>
+                      </NPopover>
+                    </div>
+
+                    <div class="provider-pool">
+                      <template v-if="displayedEndpointStats.length > 0">
+                        <NPopover
+                          v-for="endpoint in displayedEndpointStats"
+                          :key="endpoint.endpointId"
+                          trigger="hover"
+                          placement="top"
+                        >
+                          <template #trigger>
+                            <div
+                              :ref="(element) => setEndpointNodeRef(endpoint.endpointId, element)"
+                              :data-endpoint-id="endpoint.endpointId"
+                              class="pipeline-node endpoint-node"
+                              :class="{
+                                'is-active': endpoint.inFlight > 0,
+                                'is-recent': showingRecentEndpoint,
+                              }"
+                            >
+                              <div class="endpoint-title-row">
+                                <span class="endpoint-icon" :class="{ local: endpoint.provider === 'Custom' }">
+                                  <NIcon :size="15">
+                                    <ComputerOutlined v-if="endpoint.provider === 'Custom'" />
+                                    <CloudOutlined v-else />
+                                  </NIcon>
+                                </span>
+                                <span class="endpoint-name" :title="endpoint.endpointName">{{ endpoint.endpointName }}</span>
+                                <span class="endpoint-state" :class="{ active: endpoint.inFlight > 0 }">
+                                  <span class="endpoint-state-dot"></span>
+                                  {{ endpoint.inFlight > 0 ? '处理中' : '最近使用' }}
+                                </span>
+                              </div>
+                              <div class="endpoint-subtitle" :title="endpointSubtitle(endpoint)">{{ endpointSubtitle(endpoint) }}</div>
+                              <div class="endpoint-metrics">
+                                <span><strong>{{ endpoint.inFlight }}</strong> 并发</span>
+                                <span><strong>{{ formatEndpointLatency(endpoint) }}</strong> 延迟</span>
+                                <span><strong>{{ formatEndpointSuccessRate(endpoint) }}</strong> 成功</span>
+                              </div>
+                            </div>
+                          </template>
+                          <div class="pipeline-tooltip endpoint-tooltip">
+                            <strong>{{ endpoint.endpointName }}</strong>
+                            <span>{{ endpointSubtitle(endpoint) }}</span>
+                            <span>成功调用 {{ endpoint.successfulCalls }} 次，失败 {{ endpoint.errorCount }} 次</span>
+                            <span v-if="endpoint.lastUsedAt">最近使用：{{ formatRelativeTime(endpoint.lastUsedAt) }}</span>
+                          </div>
+                        </NPopover>
+                      </template>
+                      <div v-else ref="providerEmptyNodeRef" class="pipeline-node endpoint-node endpoint-empty-node">
+                        <span class="endpoint-icon"><NIcon :size="15"><SyncOutlined /></NIcon></span>
+                        <div class="endpoint-empty-copy">
+                          <strong>等待提供商调度</strong>
+                          <span>请求开始后将在这里显示实际端点</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="llm-node-slot done-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="doneNodeRef" class="pipeline-node stage-node done-node">
+                            <div class="node-icon done-icon"><NIcon :size="14"><TranslateOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value">{{ formatPipelineCount(llmCompleted) }}</span>
+                              <span class="node-label">已完成</span>
+                            </div>
+                          </div>
+                        </template>
+                        <div class="pipeline-tooltip">LLM 成功翻译的文本数（不含翻译记忆命中）</div>
+                      </NPopover>
+                    </div>
+
+                    <div v-if="showExtraction" class="llm-node-slot extraction-slot">
+                      <NPopover trigger="hover" placement="top">
+                        <template #trigger>
+                          <div ref="extractionNodeRef" class="pipeline-node stage-node extraction-node">
+                            <div class="node-icon extraction-icon"><NIcon :size="14"><AutoFixHighOutlined /></NIcon></div>
+                            <div class="node-data">
+                              <span class="node-value">{{ formatPipelineCount(extractionStats!.totalExtracted) }}</span>
+                              <span class="node-label">术语提取</span>
+                            </div>
+                          </div>
+                        </template>
+                        <div class="pipeline-tooltip">翻译完成后自动提取专有名词、角色名等术语，用于后续翻译</div>
+                      </NPopover>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1487,11 +1611,10 @@ watch(() => [
 .pipeline-flow {
   position: relative;
   margin-bottom: 16px;
-  padding: 4px 0;
+  padding: 6px 0;
   overflow: visible;
 }
 
-/* SVG Connection Overlay */
 .pipeline-svg {
   position: absolute;
   inset: 0;
@@ -1504,9 +1627,10 @@ watch(() => [
 
 .connection-path {
   fill: none;
-  stroke: color-mix(in srgb, var(--accent) 15%, var(--border));
-  stroke-width: 2;
+  stroke: color-mix(in srgb, var(--accent) 18%, var(--border));
+  stroke-width: 1.75;
   stroke-linecap: round;
+  stroke-linejoin: round;
   transition: stroke 0.4s ease;
 }
 
@@ -1522,7 +1646,6 @@ watch(() => [
   stroke: color-mix(in srgb, var(--accent) 25%, var(--border));
 }
 
-/* Animated particles */
 .flow-particle {
   fill: var(--accent);
   opacity: 0;
@@ -1551,21 +1674,20 @@ watch(() => [
   }
 }
 
-/* Horizontal Pipeline Layout */
 .pipeline-hbox {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
+  display: grid;
+  grid-template-columns: minmax(138px, 168px) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(22px, 2.4vw, 34px);
   width: 100%;
   position: relative;
   z-index: 2;
 }
 
-/* Root Node */
 .pipeline-root {
-  flex-shrink: 0;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .pipeline-node {
@@ -1591,9 +1713,9 @@ watch(() => [
 .root-node {
   border-left: 3px solid var(--accent);
   padding: 12px 16px;
-  flex: 0 0 auto;
-  min-inline-size: 152px;
-  max-inline-size: 176px;
+  width: 100%;
+  min-inline-size: 138px;
+  max-inline-size: 168px;
   background: color-mix(in srgb, var(--accent) 3%, var(--bg-subtle));
 }
 
@@ -1654,21 +1776,22 @@ watch(() => [
   letter-spacing: 0.05em;
 }
 
-/* Fork Branches (right side, stacked vertically) */
 .pipeline-branches {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-left: 28px;
+  gap: 12px;
   min-width: 0;
 }
 
 .pipeline-branch {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  padding: 9px 11px 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: calc(var(--radius-md) + 2px);
+  background: color-mix(in srgb, var(--bg-subtle) 62%, transparent);
 }
 
 .branch-header {
@@ -1680,71 +1803,98 @@ watch(() => [
   color: var(--accent);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  margin-bottom: 0;
-  padding-top: 2px;
+  min-height: 20px;
 }
 
 .tm-header {
   color: color-mix(in srgb, var(--accent) 65%, var(--text-2));
 }
 
-.branch-nodes {
+.provider-header {
+  justify-content: space-between;
+}
+
+.branch-heading {
   display: flex;
-  align-items: flex-start;
-  gap: clamp(18px, 2.4vw, 34px);
+  align-items: center;
+  gap: 5px;
+}
+
+.branch-runtime {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.branch-runtime.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.branch-nodes {
   width: 100%;
   min-width: 0;
 }
 
 .branch-nodes-llm {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
-  justify-content: normal;
-  gap: clamp(12px, 1.6vw, 24px);
+  grid-template-columns: minmax(108px, 0.65fr) minmax(190px, 1.8fr) minmax(108px, 0.65fr);
+  grid-template-areas: 'queue providers done';
+  align-items: center;
+  gap: clamp(12px, 1.4vw, 22px);
 }
 
 .branch-nodes-llm.has-extraction {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(104px, 0.62fr) minmax(180px, 1.55fr) minmax(104px, 0.62fr) minmax(104px, 0.62fr);
+  grid-template-areas: 'queue providers done extraction';
 }
 
 .llm-node-slot {
   min-width: 0;
   display: flex;
-  align-items: flex-start;
-}
-
-.queue-slot {
-  justify-content: flex-start;
-}
-
-.translating-slot,
-.done-slot {
+  align-items: center;
   justify-content: center;
 }
 
-.branch-nodes-llm:not(.has-extraction) .done-slot,
+.queue-slot {
+  grid-area: queue;
+}
+
+.done-slot {
+  grid-area: done;
+}
+
 .extraction-slot {
-  justify-content: flex-end;
+  grid-area: extraction;
 }
 
 .branch-nodes-tm {
+  display: grid;
+  grid-template-columns: minmax(210px, 340px) minmax(126px, 168px);
   justify-content: space-between;
   align-items: center;
+  gap: 18px;
 }
 
 .stage-node {
-  min-inline-size: 136px;
-  max-inline-size: 160px;
-}
-
-.translating-node {
-  min-inline-size: 152px;
-  max-inline-size: 176px;
+  width: 100%;
+  min-inline-size: 104px;
+  max-inline-size: 148px;
 }
 
 .tm-node {
-  min-inline-size: 252px;
+  width: 100%;
+  min-inline-size: 210px;
   max-inline-size: 340px;
 }
 
@@ -1765,7 +1915,8 @@ watch(() => [
   50% { box-shadow: inset 0 0 36px color-mix(in srgb, var(--accent) 8%, transparent); }
 }
 
-.pipeline-node.is-active .translating-icon :deep(.n-icon) {
+.pipeline-node.is-active .endpoint-icon :deep(.n-icon),
+.endpoint-empty-node .endpoint-icon :deep(.n-icon) {
   animation: spin-icon 2s linear infinite;
 }
 
@@ -1791,8 +1942,9 @@ watch(() => [
 .tm-done-node {
   background: color-mix(in srgb, var(--accent) 4%, var(--bg-subtle));
   border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
-  min-inline-size: 160px;
-  max-inline-size: 188px;
+  width: 100%;
+  min-inline-size: 126px;
+  max-inline-size: 168px;
 }
 
 /* TM node with inline chips */
@@ -1825,10 +1977,9 @@ watch(() => [
   font-variant-numeric: tabular-nums;
 }
 
-/* Extraction Node (inline in LLM flow) */
 .extraction-node {
-  min-inline-size: 136px;
-  max-inline-size: 160px;
+  min-inline-size: 104px;
+  max-inline-size: 148px;
   border-color: color-mix(in srgb, var(--accent) 15%, var(--border));
   background: color-mix(in srgb, var(--accent) 2%, var(--bg-subtle));
 }
@@ -1838,12 +1989,181 @@ watch(() => [
   color: var(--accent);
 }
 
-/* Tooltip */
+.provider-pool {
+  grid-area: providers;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: stretch;
+  justify-content: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 13%, var(--border));
+  border-radius: calc(var(--radius-md) + 1px);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 48%),
+    color-mix(in srgb, var(--bg-elevated) 54%, transparent);
+}
+
+.endpoint-node {
+  width: 100%;
+  max-width: 268px;
+  min-height: 96px;
+  justify-self: center;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 11px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-subtle) 88%, var(--bg-elevated));
+}
+
+.endpoint-node.is-active {
+  border-color: color-mix(in srgb, var(--accent) 54%, var(--border));
+  box-shadow:
+    inset 0 0 26px color-mix(in srgb, var(--accent) 7%, transparent),
+    0 0 18px color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.endpoint-node.is-recent {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+}
+
+.endpoint-title-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.endpoint-icon {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  flex: 0 0 auto;
+}
+
+.endpoint-icon.local {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+.endpoint-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.endpoint-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.endpoint-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.endpoint-state.active {
+  color: var(--accent);
+}
+
+.endpoint-state.active .endpoint-state-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.endpoint-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.endpoint-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.endpoint-metrics span {
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.endpoint-metrics strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.endpoint-empty-node {
+  min-height: 80px;
+  max-width: 320px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.72;
+}
+
+.endpoint-empty-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.endpoint-empty-copy strong {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.endpoint-empty-copy span {
+  color: var(--text-3);
+  font-size: 9px;
+}
+
 .pipeline-tooltip {
   max-width: 260px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-2);
+}
+
+.endpoint-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.endpoint-tooltip strong {
+  color: var(--text-1);
 }
 
 /* ===== Error Bar ===== */
@@ -2517,6 +2837,40 @@ watch(() => [
 }
 
 /* ===== Responsive ===== */
+@media (max-width: 980px) {
+  .pipeline-svg {
+    display: none;
+  }
+
+  .pipeline-hbox {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .root-node {
+    max-inline-size: none;
+  }
+
+  .branch-nodes-llm,
+  .branch-nodes-llm.has-extraction {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'queue done'
+      'providers providers'
+      'extraction extraction';
+  }
+
+  .provider-pool {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .stage-node,
+  .extraction-node {
+    max-inline-size: none;
+  }
+}
+
 @media (max-width: 768px) {
   .toolbox-connection-heading {
     align-items: stretch;
@@ -2532,42 +2886,59 @@ watch(() => [
   }
 
   .pipeline-hbox {
-    flex-direction: column;
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  .pipeline-branches {
-    padding-left: 0;
+  .pipeline-branch {
+    padding: 8px;
   }
 
-  .branch-nodes {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    gap: 6px;
+  .provider-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 
-  .branch-nodes-llm {
-    display: flex;
-    grid-template-columns: none;
+  .branch-nodes-llm,
+  .branch-nodes-llm.has-extraction {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'queue'
+      'providers'
+      'done'
+      'extraction';
+    gap: 8px;
   }
 
   .llm-node-slot,
   .queue-slot,
-  .translating-slot,
   .done-slot,
   .extraction-slot {
-    justify-content: flex-start;
+    justify-content: stretch;
   }
 
   .pipeline-node,
   .root-node,
   .stage-node,
-  .translating-node,
   .tm-node,
   .tm-done-node,
-  .extraction-node {
+  .extraction-node,
+  .endpoint-node {
+    width: 100%;
     min-inline-size: 0;
     max-inline-size: 100%;
+  }
+
+  .branch-nodes-tm {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .provider-pool {
+    grid-template-columns: 1fr;
+    padding: 7px;
   }
 
   .tm-chips-inline {

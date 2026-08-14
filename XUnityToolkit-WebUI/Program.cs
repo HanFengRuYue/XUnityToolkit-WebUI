@@ -254,6 +254,8 @@ builder.Services.AddSingleton<BepInExInstallerService>();
 builder.Services.AddSingleton<XUnityInstallerService>();
 builder.Services.AddSingleton<TranslatorEndpointUpgradeService>();
 builder.Services.AddSingleton<TmpFontService>();
+builder.Services.AddSingleton<BundledFontCatalog>();
+builder.Services.AddSingleton<RuntimeTmpFontService>();
 builder.Services.AddSingleton<ConfigurationService>();
 builder.Services.AddSingleton<ToolkitRuntimeDiscoveryService>();
 builder.Services.AddSingleton<PluginConnectionRegistry>();

@@ -95,6 +95,7 @@ export interface InstallationStatus {
 
 export interface InstallOptions {
   autoInstallTmpFont: boolean
+  tmpFontApplicationMode: 'fallback' | 'override'
   autoDeployAiEndpoint: boolean
   autoGenerateConfig: boolean
   autoApplyOptimalConfig: boolean
@@ -254,6 +255,19 @@ export interface TranslationError {
   gameId?: string
 }
 
+export interface EndpointRuntimeStats {
+  endpointId: string
+  endpointName: string
+  provider: LlmProvider
+  modelName: string
+  priority: number
+  inFlight: number
+  successfulCalls: number
+  errorCount: number
+  averageResponseTimeMs: number
+  lastUsedAt?: string | null
+}
+
 export interface TranslationStats {
   totalTranslated: number
   translating: number
@@ -276,6 +290,7 @@ export interface TranslationStats {
   translationMemoryFuzzyHits: number
   translationMemoryMisses: number
   maxConcurrency: number
+  endpointStats: EndpointRuntimeStats[]
 }
 
 export interface AiEndpointStatus {
@@ -311,6 +326,26 @@ export interface ToolkitConnectionInfo {
 
 export interface TmpFontStatus {
   installed: boolean
+  enabled: boolean
+  availableSources: ReplacementSource[]
+  sourceId: string
+  sourceDisplayName: string
+  applicationMode: 'fallback' | 'override'
+  activeLoader: 'pending' | 'direct-ttf' | 'legacy-bundle' | 'none' | string
+  directTtfSupported: boolean
+  legacyFallbackUsed: boolean
+  overrideAdapterAvailable: boolean
+  requiresRestart: boolean
+  lastRuntimeCheckUtc?: string | null
+  message: string
+  error?: string | null
+}
+
+export interface TmpFontInstallRequest {
+  sourceId?: string
+  applicationMode?: 'fallback' | 'override'
+  enabled?: boolean
+  replaceExistingConfig?: boolean
 }
 
 // ── Font Replacement ──
@@ -355,6 +390,10 @@ export interface ReplacementSource {
   isDefault: boolean
   fileSize: number
   uploadedAt?: string | null
+  version?: string | null
+  license?: string | null
+  licenseUrl?: string | null
+  sha256?: string | null
 }
 
 export interface ReplacementSourceSet {

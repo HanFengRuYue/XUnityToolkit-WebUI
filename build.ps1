@@ -1,9 +1,10 @@
 # build.ps1 - XUnityToolkit-WebUI 本地构建脚本（便携版）
-# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-Edition full|no-llama|lite] [-ReleaseRoot <Release 子目录>]
+# 用法: .\build.ps1 [-SkipDownload] [-SkipSmoke] [-NonInteractive] [-Edition full|no-llama|lite] [-ReleaseRoot <Release 子目录>]
 
 param(
     [switch]$SkipDownload,
     [switch]$SkipSmoke,
+    [switch]$NonInteractive,
     [ValidateSet('full', 'no-llama', 'lite')]
     [string]$Edition = 'full',
     [string]$ReleaseRoot
@@ -13,6 +14,9 @@ $ErrorActionPreference = 'Stop'
 
 function Wait-Exit {
     param([int]$ExitCode = 0)
+    if ($NonInteractive) {
+        exit $ExitCode
+    }
     Write-Host ""
     try {
         Write-Host "Press 0 to exit..." -ForegroundColor DarkGray
@@ -96,7 +100,7 @@ $BepInEx5Repo = "BepInEx"
 $XUnityOwner = "bbepis"
 $XUnityRepo = "XUnity.AutoTranslator"
 
-$stepCount = 3 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 }) + $(if (-not $SkipSmoke) { 1 } else { 0 })
+$stepCount = 4 + $(if ($hasEndpoint) { 1 } else { 0 }) + $(if ($hasUpdater) { 1 } else { 0 }) + $(if (-not $SkipDownload) { 1 } else { 0 }) + $(if (-not $SkipSmoke) { 1 } else { 0 })
 
 Write-Host ""
 Write-Host "=== XUnityToolkit-WebUI Build ===" -ForegroundColor Cyan
@@ -175,43 +179,22 @@ if (-not $SkipDownload) {
         }
     }
 
-    # ── BepInEx 5 (Mono) from GitHub Releases ──
-    Write-Host "  Fetching BepInEx 5 latest stable release..." -ForegroundColor DarkGray
-    $bepinex5Releases = Invoke-WithRetry -Operation "Fetch BepInEx 5 releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/$BepInEx5Owner/$BepInEx5Repo/releases?per_page=20" -Headers $GitHubHeaders -TimeoutSec 30
-    }.GetNewClosure()
-    $bepinex5Release = $bepinex5Releases | Where-Object { -not $_.prerelease -and $_.tag_name -like 'v5*' } | Select-Object -First 1
-    if (-not $bepinex5Release) { throw "BepInEx 5 stable release not found" }
-    Write-Host "  BepInEx 5: $($bepinex5Release.tag_name)" -ForegroundColor DarkGray
-
+    # ── BepInEx 5 (Mono), pinned for reproducible plugin references ──
+    $bepInEx5Version = '5.4.23.5'
+    Write-Host "  BepInEx 5: v$bepInEx5Version (pinned)" -ForegroundColor DarkGray
     $expectedBepInEx5 = @()
     foreach ($arch in @('x64', 'x86')) {
-        $asset = $bepinex5Release.assets | Where-Object { $_.name -like "BepInEx_win_${arch}_*" } | Select-Object -First 1
-        if ($asset) {
-            Download-IfMissing -Url $asset.browser_download_url -DestDir (Join-Path $BundledRoot 'bepinex5')
-            $expectedBepInEx5 += $asset.name
-        } else {
-            Write-Host "  [skip] BepInEx 5 $arch asset not found" -ForegroundColor DarkYellow
-        }
+        $fileName = "BepInEx_win_${arch}_$bepInEx5Version.zip"
+        $url = "https://github.com/BepInEx/BepInEx/releases/download/v$bepInEx5Version/$fileName"
+        Download-IfMissing -Url $url -DestDir (Join-Path $BundledRoot 'bepinex5') -FileName $fileName
+        $expectedBepInEx5 += $fileName
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'bepinex5') -ExpectedFiles $expectedBepInEx5
 
-    # ── BepInEx 6 BE (IL2CPP) from builds.bepinex.dev ──
-    Write-Host "  Fetching BepInEx 6 BE latest build..." -ForegroundColor DarkGray
-    $buildsPage = Invoke-WithRetry -Operation "Fetch BepInEx 6 BE page" -ScriptBlock {
-        Invoke-WebRequest -Uri "https://builds.bepinex.dev/projects/bepinex_be" -UseBasicParsing -TimeoutSec 60
-    }
-    $buildsHtml = $buildsPage.Content
-
-    # Parse latest build number and commit from IL2CPP x64 link
-    if ($buildsHtml -match 'href="[^"]*?/(\d+)/BepInEx-Unity\.IL2CPP-win-x64-6\.0\.0-be\.\d+%2B([a-f0-9]+)\.zip"') {
-        $be6BuildNo = $Matches[1]
-        $be6Commit = $Matches[2]
-        Write-Host "  BepInEx 6 BE: build $be6BuildNo ($be6Commit)" -ForegroundColor DarkGray
-    } else {
-        throw "Failed to parse BepInEx 6 BE build info from builds.bepinex.dev (page size: $($buildsHtml.Length) chars)"
-    }
-
+    # ── BepInEx 6 BE (IL2CPP), pinned for reproducible plugin references ──
+    $be6BuildNo = '785'
+    $be6Commit = '6abdba4'
+    Write-Host "  BepInEx 6 BE: build $be6BuildNo ($be6Commit, pinned)" -ForegroundColor DarkGray
     $expectedBepInEx6 = @()
     foreach ($arch in @('x64', 'x86')) {
         $be6Url = "https://builds.bepinex.dev/projects/bepinex_be/$be6BuildNo/BepInEx-Unity.IL2CPP-win-$arch-6.0.0-be.$be6BuildNo%2B$be6Commit.zip"
@@ -221,21 +204,15 @@ if (-not $SkipDownload) {
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'bepinex6') -ExpectedFiles $expectedBepInEx6
 
-    # ── XUnity.AutoTranslator from GitHub Releases ──
-    Write-Host "  Fetching XUnity.AutoTranslator latest release..." -ForegroundColor DarkGray
-    $xunityReleases = Invoke-WithRetry -Operation "Fetch XUnity releases" -ScriptBlock {
-        Invoke-RestMethod -Uri "https://api.github.com/repos/$XUnityOwner/$XUnityRepo/releases?per_page=10" -Headers $GitHubHeaders -TimeoutSec 30
-    }.GetNewClosure()
-    $xunityRelease = $xunityReleases | Select-Object -First 1
-    if (-not $xunityRelease) { throw "XUnity.AutoTranslator release not found" }
-    Write-Host "  XUnity: $($xunityRelease.tag_name)" -ForegroundColor DarkGray
-
+    # ── XUnity.AutoTranslator 5.6.1 (the override adapter target) ──
+    $xunityVersion = '5.6.1'
+    Write-Host "  XUnity: v$xunityVersion (pinned)" -ForegroundColor DarkGray
     $expectedXUnity = @()
-    foreach ($asset in $xunityRelease.assets) {
-        if ($asset.name -like 'XUnity.AutoTranslator-BepInEx*') {
-            Download-IfMissing -Url $asset.browser_download_url -DestDir (Join-Path $BundledRoot 'xunity')
-            $expectedXUnity += $asset.name
-        }
+    foreach ($variant in @('BepInEx', 'BepInEx-IL2CPP')) {
+        $fileName = "XUnity.AutoTranslator-$variant-$xunityVersion.zip"
+        $url = "https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v$xunityVersion/$fileName"
+        Download-IfMissing -Url $url -DestDir (Join-Path $BundledRoot 'xunity') -FileName $fileName
+        $expectedXUnity += $fileName
     }
     Remove-OldVersions -Dir (Join-Path $BundledRoot 'xunity') -ExpectedFiles $expectedXUnity
 
@@ -387,6 +364,23 @@ try {
 }
 Write-Host "  Frontend build complete." -ForegroundColor Green
 
+# ── Step: Build RuntimeFontLoader ──
+$currentStep++
+Write-Host ""
+Write-Host "[$currentStep/$stepCount] Building RuntimeFontLoader (Mono + IL2CPP)..." -ForegroundColor Yellow
+& (Join-Path $ProjectRoot 'RuntimeFontLoader\prepare-references.ps1') -ProjectRoot $ProjectRoot
+& dotnet build (Join-Path $ProjectRoot 'RuntimeFontLoader\Mono\RuntimeFontLoader.Mono.csproj') -c Release --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw "RuntimeFontLoader Mono build failed" }
+& dotnet build (Join-Path $ProjectRoot 'RuntimeFontLoader\Il2Cpp\RuntimeFontLoader.Il2Cpp.csproj') -c Release --nologo -v quiet
+if ($LASTEXITCODE -ne 0) { throw "RuntimeFontLoader IL2CPP build failed" }
+$runtimeFontDest = Join-Path $BundledRoot 'runtime-font-loader'
+$runtimeFontMonoDest = Join-Path $runtimeFontDest 'mono'
+$runtimeFontIl2CppDest = Join-Path $runtimeFontDest 'il2cpp'
+New-Item -ItemType Directory -Path $runtimeFontMonoDest,$runtimeFontIl2CppDest -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'RuntimeFontLoader\Mono\bin\Release\net35\XUnityToolkit.RuntimeFontLoader.dll') -Destination $runtimeFontMonoDest -Force
+Copy-Item -LiteralPath (Join-Path $ProjectRoot 'RuntimeFontLoader\Il2Cpp\bin\Release\net6.0\XUnityToolkit.RuntimeFontLoader.IL2CPP.dll') -Destination $runtimeFontIl2CppDest -Force
+Write-Host "  RuntimeFontLoader builds complete." -ForegroundColor Green
+
 # ── Step: Build TranslatorEndpoint (LLMTranslate.dll) ──
 $endpointHashBeforePublish = $null
 if ($hasEndpoint) {
@@ -518,6 +512,44 @@ if (Test-Path $bundledSrc) {
     }
     Write-Host "  Copied bundled assets." -ForegroundColor DarkGray
 }
+
+# Fail the release if any runtime-font, license, WinUI, or core payload is missing.
+$requiredReleaseFiles = @(
+    'XUnityToolkit-WebUI.exe',
+    'XUnityToolkit-WebUI.dll',
+    'wwwroot\index.html',
+    'App.xbf',
+    'MainWindow.xbf',
+    'XUnityToolkit-WebUI.pri',
+    'bundled\runtime-font-loader\mono\XUnityToolkit.RuntimeFontLoader.dll',
+    'bundled\runtime-font-loader\il2cpp\XUnityToolkit.RuntimeFontLoader.IL2CPP.dll',
+    'bundled\fonts\SourceHanSansCN-VF.ttf',
+    'bundled\fonts\SourceHanSansCN-Regular.otf',
+    'bundled\fonts\font-catalog.json',
+    'bundled\fonts\licenses\SourceHanSans-OFL-1.1.txt',
+    'bundled\bepinex5\BepInEx_win_x64_5.4.23.5.zip',
+    'bundled\bepinex6\BepInEx-Unity.IL2CPP-win-x64-6.0.0-be.785+6abdba4.zip',
+    'bundled\xunity\XUnity.AutoTranslator-BepInEx-5.6.1.zip',
+    'bundled\xunity\XUnity.AutoTranslator-BepInEx-IL2CPP-5.6.1.zip'
+)
+if ($hasUpdater) { $requiredReleaseFiles += 'Updater.exe' }
+foreach ($relativeFile in $requiredReleaseFiles) {
+    $requiredPath = Join-Path $OutputDir $relativeFile
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf) -or (Get-Item -LiteralPath $requiredPath).Length -eq 0) {
+        throw "Release payload is missing or empty: $relativeFile"
+    }
+}
+$requiredFontHashes = @{
+    'bundled\fonts\SourceHanSansCN-VF.ttf' = '25A01E41B5CC99893EB35A6CD2CC7611841DC19EB03CBAF7F0C1DE8210F2BA0B'
+    'bundled\fonts\SourceHanSansCN-Regular.otf' = 'E2BC8A2E7F37474B774FFF8DB758681ECE40BB6947A90D571BCE9DD60671A8E4'
+}
+foreach ($relativeFile in $requiredFontHashes.Keys) {
+    $actualHash = (Get-FileHash -LiteralPath (Join-Path $OutputDir $relativeFile) -Algorithm SHA256).Hash
+    if (-not $actualHash.Equals($requiredFontHashes[$relativeFile], [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Release font SHA-256 mismatch: $relativeFile ($actualHash)"
+    }
+}
+Write-Host "  Runtime font, font license, and WinUI release payload verified." -ForegroundColor Green
 
 # Record every application-component file, including WinUI self-contained native resources.
 & (Join-Path $ProjectRoot 'New-AppFileInventory.ps1') -ReleaseDir $OutputDir

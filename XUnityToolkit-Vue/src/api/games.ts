@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, PluginAutoRepairResult, ToolboxAgentStatus, ToolboxAgentChatRequest, ToolboxAgentChatResponse, ToolboxAgentAttachment, ToolboxAgentConversationSummary, ToolboxAgentConversation, BepInExPlugin, ToolkitConnectionInfo, ApiResult } from './types'
+import type { Game, UnityGameInfo, XUnityConfig, InstallationStatus, InstallOptions, AppSettings, VersionInfo, DataPathInfo, AddGameResponse, BatchAddResult, ModFrameworkType, TranslationStats, AiEndpointStatus, TmpFontStatus, TmpFontInstallRequest, TermEntry, LlmProvider, ApiEndpointConfig, EndpointTestResult, SteamGridDbSearchResult, SteamGridDbImage, CoverInfo, SteamStoreSearchResult, WebImageResult, GlossaryExtractionStats, LogEntry, TranslationEditorData, TranslationEntry, LocalLlmStatus, LocalLlmSettings, GpuInfo, BuiltInModelInfo, LocalModelEntry, LlamaStatus, LocalLlmTestResult, LocalLlmDownloadProgress, BepInExLogResponse, BepInExLogAnalysis, ScriptTagConfig, ScriptTagPreset, PluginHealthReport, PluginAutoRepairResult, ToolboxAgentStatus, ToolboxAgentChatRequest, ToolboxAgentChatResponse, ToolboxAgentAttachment, ToolboxAgentConversationSummary, ToolboxAgentConversation, BepInExPlugin, ToolkitConnectionInfo, ApiResult } from './types'
 
 export const gamesApi = {
   list: () => api.get<Game[]>('/api/games'),
@@ -55,7 +55,8 @@ export const gamesApi = {
   uninstallAiEndpoint: (id: string) => api.del<AiEndpointStatus>(`/api/games/${id}/ai-endpoint`),
 
   getTmpFontStatus: (id: string) => api.get<TmpFontStatus>(`/api/games/${id}/tmp-font`),
-  installTmpFont: (id: string) => api.post<TmpFontStatus>(`/api/games/${id}/tmp-font`, {}),
+  installTmpFont: (id: string, request: TmpFontInstallRequest = {}) =>
+    api.post<TmpFontStatus>(`/api/games/${id}/tmp-font`, request),
   uninstallTmpFont: (id: string) => api.del<TmpFontStatus>(`/api/games/${id}/tmp-font`),
 
   // Unified term management

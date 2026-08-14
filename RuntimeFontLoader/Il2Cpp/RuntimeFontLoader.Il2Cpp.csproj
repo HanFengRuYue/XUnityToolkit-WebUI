@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>XUnityToolkit.RuntimeFontLoader.IL2CPP</AssemblyName>
+    <RootNamespace>XUnityToolkit.RuntimeFontLoader</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <Optimize>true</Optimize>
+    <Deterministic>true</Deterministic>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\RuntimeFontBootstrap.cs" Link="RuntimeFontBootstrap.cs" />
+    <Compile Include="..\Shared\RuntimeFontFileValidator.cs" Link="RuntimeFontFileValidator.cs" />
+    <Reference Include="BepInEx.Core"><HintPath>..\libs\il2cpp\BepInEx.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.Common"><HintPath>..\libs\il2cpp\BepInEx.Unity.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP"><HintPath>..\libs\il2cpp\BepInEx.Unity.IL2CPP.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>..\libs\il2cpp\0Harmony.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

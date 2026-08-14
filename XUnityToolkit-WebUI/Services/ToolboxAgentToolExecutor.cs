@@ -23,8 +23,7 @@ public sealed partial class ToolboxAgentToolExecutor(
     ToolboxAgentHostAccessService hostAccessService,
     ToolboxDataResetService dataResetService,
     FontReplacementService fontReplacementService,
-    TmpFontGeneratorService fontGenerator,
-    ConfigurationService configurationService,
+    RuntimeTmpFontService runtimeTmpFontService,
     BepInExPluginService pluginService,
     InstallOrchestrator installOrchestrator,
     AppSettingsService settingsService,
@@ -46,11 +45,6 @@ public sealed partial class ToolboxAgentToolExecutor(
         ".txt", ".ini", ".cfg", ".json", ".xml", ".yaml", ".yml"
     };
 
-    private static readonly HashSet<string> SupportedCharsets = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "GB2312", "GBK", "CJK_Common", "CJK_Full", "Japanese"
-    };
-
     internal static readonly string ToolCatalog = """
         可用工具：
         1. describe_capabilities {}：取得全部可调用 API 类别、路径和常用请求体提示；不确定接口时先调用。
@@ -61,15 +55,16 @@ public sealed partial class ToolboxAgentToolExecutor(
         6. list_game_files {"gameId":"...","relativeDirectory":"BepInEx/config"}：列出游戏目录内文件。
         7. read_game_file {"gameId":"...","relativePath":"BepInEx/config/example.cfg"}：读取允许的文本文件；返回内容会脱敏。
         8. patch_game_file {"gameId":"...","relativePath":"...","searchText":"精确旧文本","replacementText":"新文本"}：精确替换一处文本，先备份再原子写入。
-        9. apply_custom_font {"gameId":"...","attachmentId":"...","characterSets":["GB2312"]}：将上传的 TTF/OTF 生成 TMP 字体，替换可支持的 TMP/Legacy 字体并配置 XUnity fallback。
-        10. update_toolbox_setting {"path":"aiTranslation.maxConcurrency","value":6}：补丁式更新安全设置，不读取或覆盖 API Key；支持的路径通过 describe_capabilities 查询。
-        11. use_attachment {"gameId":"...","attachmentId":"...","purpose":"install_plugin|plugin_package_import|icon|cover|background|settings_import|font_generation_upload|font_replacement_ttf|font_replacement_tmp|charset|translation_charset"}：把上传文件交给对应工具箱功能。
-        12. list_path {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","purpose":"读取用途"}：列出目录；game/toolbox 属于可信根，external 每次都需要用户确认。
-        13. read_file {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","mode":"auto|text|hex|metadata","startLine":1,"maxLines":200,"offset":0,"length":4096,"purpose":"读取用途"}：读取任意文件原文、有限十六进制块或被动元数据；不会加载用户程序集。external 每次都需要用户确认。
-        14. manage_files {"purpose":"修改用途","operations":[{"kind":"create_directory|write_text|copy|move|delete|copy_attachment","scope":"game|toolbox","gameId":"...","path":"相对路径","content":"...","source":{"scope":"game|toolbox","gameId":"...","path":"..."},"attachmentId":"...","overwrite":false,"recursive":false}]}：在已添加游戏目录或完整工具箱数据目录中批量修改文件。整个批次只确认一次，不自动备份。
-        15. run_script {"shell":"powershell|cmd","script":"完整脚本","purpose":"具体诊断用途","timeoutSeconds":30}：以当前用户运行诊断脚本。每个脚本都必须单独确认并展示全文；提示词只允许读取和诊断，但后端无法从技术上保证脚本只读。
-        16. reset_toolbox_data {"purpose":"为什么要清空"}：删除完整工具箱数据目录并重启工具箱；不会删除游戏目录。必须单独确认，并且必须作为本轮最后且唯一的终止操作。
-        17. call_toolbox_api {"method":"GET|POST|PUT|DELETE","path":"/api/...","body":{}}：调用其余 JSON 工具箱接口。可覆盖游戏管理、检测/安装、配置、术语、脚本标签、译文编辑、翻译记忆、字体、插件、日志、更新、本地模型等现有功能；文件上传优先使用 use_attachment/apply_custom_font。
+        9. apply_custom_font {"gameId":"...","attachmentId":"...","applicationMode":"fallback|override","replaceExistingConfig":false}：登记上传的 TTF/OTF 并配置运行时 TTF→TMP；不会生成资产或修改游戏资源。自定义字体不支持直接加载时会明确失败，可另行使用字体生成接口生成兼容 TMP 资产。
+        10. configure_tmp_runtime_font {"gameId":"...","sourceId":"ttf-default","applicationMode":"fallback|override","enabled":true,"replaceExistingConfig":false}：配置已登记的运行时 TMP 字体来源与应用模式。
+        11. update_toolbox_setting {"path":"aiTranslation.maxConcurrency","value":6}：补丁式更新安全设置，不读取或覆盖 API Key；支持的路径通过 describe_capabilities 查询。
+        12. use_attachment {"gameId":"...","attachmentId":"...","purpose":"install_plugin|plugin_package_import|icon|cover|background|settings_import|font_generation_upload|font_replacement_ttf|font_replacement_tmp|charset|translation_charset"}：把上传文件交给对应工具箱功能。
+        13. list_path {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","purpose":"读取用途"}：列出目录；game/toolbox 属于可信根，external 每次都需要用户确认。
+        14. read_file {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","mode":"auto|text|hex|metadata","startLine":1,"maxLines":200,"offset":0,"length":4096,"purpose":"读取用途"}：读取任意文件原文、有限十六进制块或被动元数据；不会加载用户程序集。external 每次都需要用户确认。
+        15. manage_files {"purpose":"修改用途","operations":[{"kind":"create_directory|write_text|copy|move|delete|copy_attachment","scope":"game|toolbox","gameId":"...","path":"相对路径","content":"...","source":{"scope":"game|toolbox","gameId":"...","path":"..."},"attachmentId":"...","overwrite":false,"recursive":false}]}：在已添加游戏目录或完整工具箱数据目录中批量修改文件。整个批次只确认一次，不自动备份。
+        16. run_script {"shell":"powershell|cmd","script":"完整脚本","purpose":"具体诊断用途","timeoutSeconds":30}：以当前用户运行诊断脚本。每个脚本都必须单独确认并展示全文；提示词只允许读取和诊断，但后端无法从技术上保证脚本只读。
+        17. reset_toolbox_data {"purpose":"为什么要清空"}：删除完整工具箱数据目录并重启工具箱；不会删除游戏目录。必须单独确认，并且必须作为本轮最后且唯一的终止操作。
+        18. call_toolbox_api {"method":"GET|POST|PUT|DELETE","path":"/api/...","body":{}}：调用其余 JSON 工具箱接口。可覆盖游戏管理、检测/安装、配置、术语、脚本标签、译文编辑、翻译记忆、字体、插件、日志、更新、本地模型等现有功能；文件上传优先使用 use_attachment/apply_custom_font。
 
         call_toolbox_api 禁止访问智能体自身、任意主机文件浏览、完整设置密钥、数据重置、更新应用和二进制下载。DELETE、卸载、导入、启动游戏等高影响操作会先要求用户确认。
         """;
@@ -77,7 +72,7 @@ public sealed partial class ToolboxAgentToolExecutor(
     private const string CapabilityCatalog = """
         游戏：GET /api/games；GET/PUT/DELETE /api/games/{id}；POST /api/games/{id}/detect、/launch、/open-folder；POST /api/games/add-with-detection {folderPath,exePath?}；POST /api/games/batch-add {parentFolderPath}。
         安装：GET /api/games/{id}/status；POST /api/games/{id}/install {installBepInEx,installXUnity,autoInstallTmpFont,autoDeployAiEndpoint,applyOptimalConfig}；DELETE /api/games/{id}/install；POST /api/games/{id}/cancel。
-        XUnity 配置：GET/PUT /api/games/{id}/config；GET/PUT /api/games/{id}/config/raw，PUT raw 请求体必须是 {"content":"完整 INI 文本"}；GET/POST/DELETE /api/games/{id}/ai-endpoint；GET/POST/DELETE /api/games/{id}/tmp-font。
+        XUnity 配置：GET/PUT /api/games/{id}/config；GET/PUT /api/games/{id}/config/raw，PUT raw 请求体必须是 {"content":"完整 INI 文本"}；GET/POST/DELETE /api/games/{id}/ai-endpoint；GET/POST/DELETE /api/games/{id}/tmp-font，POST 字体请求为 {"sourceId":"ttf-default","applicationMode":"fallback|override","enabled":true,"replaceExistingConfig":false}。
         术语与描述：GET/PUT /api/games/{id}/terms，PUT 请求体必须直接是术语数组，例如 [{"type":"translate","original":"Captain","translation":"船长","category":"character","isRegex":false,"caseSensitive":true,"exactMatch":true}]，不要再包 entries；POST /api/games/{id}/terms/import-from-game {"sourceGameId":"..."}；GET/PUT /api/games/{id}/description，PUT 请求体是 {"description":"..."}；兼容 glossary/do-not-translate；GET/PUT /api/games/{id}/script-tags，PUT 请求体是 {"presetVersion":1,"rules":[{"pattern":"^NPC:(.+)$","action":"Extract","description":"提取 NPC 文本","isBuiltin":false}]}，action 只能是 Extract 或 Exclude；GET /api/script-tag-presets。
         译文：GET/PUT /api/games/{id}/translation-editor，PUT 请求体是 {"entries":[{"original":"Hello","translation":"你好"}]}；POST .../translation-editor/import 请求体是 {"content":"Hello=你好"}；GET .../translation-editor/export；GET .../translation-memory/stats；DELETE .../translation-memory。
         插件：GET /api/games/{id}/plugins；POST .../plugins/toggle {relativePath}；DELETE .../plugins?relativePath=；GET .../plugins/config?configFile=；POST .../plugin-package/import {zipPath}；插件附件请用 use_attachment。
@@ -89,7 +84,7 @@ public sealed partial class ToolboxAgentToolExecutor(
         本地模型管理：GET /api/local-llm/status、/gpus、/settings、/catalog、/downloads、/llama-status、/models；PUT /settings；POST /gpus/refresh、/test、/start、/stop、/llama-download、/llama-download/cancel、/download、/download/pause、/download/cancel、/models/add；DELETE /models/{id}。智能体自身仍只由云端 AI 驱动，但可以按用户要求管理本地模型。
         更新：GET /api/update/check、/status；POST /api/update/download、/cancel、/dismiss。为防止对话连接中途销毁进程，/api/update/apply 只能由用户在更新页面点击。
         设置：GET /api/settings/connection、/version；设置导入附件用 use_attachment。完整设置（含密钥）、全量重置和任意主机文件浏览不会暴露给云端智能体。
-        安全设置补丁：update_toolbox_setting 支持 theme、modelDownloadSource、hfMirrorUrl、libraryViewMode、librarySortBy、accentColor、libraryCardSize、libraryGap、libraryShowLabels、receivePreReleaseUpdates、pageZoom；installOptions.autoInstallTmpFont/autoDeployAiEndpoint/autoGenerateConfig/autoApplyOptimalConfig/autoVerifyHealth；aiTranslation.enabled/activeMode/maxConcurrency/port/systemPrompt/temperature/contextSize/localContextSize/localMinP/localRepeatPenalty/termAuditEnabled/naturalTranslationMode/enableTranslationMemory/fuzzyMatchThreshold/glossaryExtractionEnabled；以及 aiTranslation.endpoints.{id}.name/modelName/apiFormat/reasoningEffort/priority/enabled。API Key、SteamGridDB Key 与端点 URL 必须由用户在设置页填写，绝不交给模型。
+        安全设置补丁：update_toolbox_setting 支持 theme、modelDownloadSource、hfMirrorUrl、libraryViewMode、librarySortBy、accentColor、libraryCardSize、libraryGap、libraryShowLabels、receivePreReleaseUpdates、pageZoom；installOptions.autoInstallTmpFont/tmpFontApplicationMode/autoDeployAiEndpoint/autoGenerateConfig/autoApplyOptimalConfig/autoVerifyHealth；aiTranslation.enabled/activeMode/maxConcurrency/port/systemPrompt/temperature/contextSize/localContextSize/localMinP/localRepeatPenalty/termAuditEnabled/naturalTranslationMode/enableTranslationMemory/fuzzyMatchThreshold/glossaryExtractionEnabled；以及 aiTranslation.endpoints.{id}.name/modelName/apiFormat/reasoningEffort/priority/enabled。API Key、SteamGridDB Key 与端点 URL 必须由用户在设置页填写，绝不交给模型。
         """;
 
     internal async Task<ToolboxAgentToolResult> ExecuteAsync(
@@ -111,7 +106,8 @@ public sealed partial class ToolboxAgentToolExecutor(
             "list_game_files" => await ListGameFilesAsync(call.Arguments, selectedGameId, ct),
             "read_game_file" => await ReadGameFileAsync(call.Arguments, selectedGameId, ct),
             "patch_game_file" => await PatchGameFileAsync(call.Arguments, selectedGameId, ct),
-            "apply_custom_font" => await ApplyCustomFontAsync(sessionId, call.Arguments, selectedGameId, ct),
+            "apply_custom_font" => await ApplyCustomFontAsync(sessionId, call.Arguments, selectedGameId, confirmed, ct),
+            "configure_tmp_runtime_font" => await ConfigureTmpRuntimeFontAsync(call.Arguments, selectedGameId, confirmed, ct),
             "update_toolbox_setting" => await UpdateToolboxSettingAsync(call.Arguments, ct),
             "use_attachment" => await UseAttachmentAsync(sessionId, call.Arguments, selectedGameId, confirmed, ct),
             "list_path" => await hostAccessService.ListPathAsync(call.Arguments, selectedGameId, confirmed, ct),
@@ -306,9 +302,9 @@ public sealed partial class ToolboxAgentToolExecutor(
     {
         var game = await GetGameAsync(arguments, selectedGameId, ct);
         var relativeDirectory = GetOptionalString(arguments, "relativeDirectory") ?? string.Empty;
-        var directory = ResolveGamePath(game, relativeDirectory, requireExisting: true);
+        var directory = ResolveGamePath(game, relativeDirectory, requireExisting: false);
         if (!Directory.Exists(directory))
-            throw new DirectoryNotFoundException("指定的游戏内目录不存在。");
+            return CreateMissingGameDirectoryResult(game, relativeDirectory, directory);
         if (!PluginDiagnosticArtifactCollector.IsSafeRegularDirectory(game.GamePath, directory))
             throw new InvalidOperationException("目录包含重解析点或不在游戏目录内。");
 
@@ -342,7 +338,21 @@ public sealed partial class ToolboxAgentToolExecutor(
         if (info.Length > MaxReadableTextBytes)
             throw new InvalidOperationException("文件超过 512 KB，请缩小范围后再处理。");
 
-        var content = await File.ReadAllTextAsync(fullPath, ct);
+        string content;
+        try
+        {
+            content = await ReadSharedTextSnapshotAsync(fullPath, MaxReadableTextBytes, ct);
+        }
+        catch (IOException ex)
+        {
+            logger.LogDebug(ex, "工具箱智能体无法共享读取游戏文件 {GameId} {RelativePath}",
+                game.Id, relativePath);
+            return Failure("读取游戏文件", new
+            {
+                relativePath,
+                error = "文件当前不允许并发读取或正在轮换，请稍后重试。"
+            }, $"无法读取 {relativePath}：文件当前不允许并发读取或正在轮换，请稍后重试。");
+        }
         if (!PluginDiagnosticArtifactCollector.IsProbablyText(content))
             throw new InvalidDataException("该文件不是可安全读取的文本。");
         content = PluginDiagnosticArtifactCollector.SanitizeContent(content, game.GamePath);
@@ -382,115 +392,78 @@ public sealed partial class ToolboxAgentToolExecutor(
     }
 
     private async Task<ToolboxAgentToolResult> ApplyCustomFontAsync(
-        string sessionId, JsonElement arguments, string? selectedGameId, CancellationToken ct)
+        string sessionId,
+        JsonElement arguments,
+        string? selectedGameId,
+        bool confirmed,
+        CancellationToken ct)
     {
         var game = await GetGameAsync(arguments, selectedGameId, ct);
         if (game.DetectedInfo is null)
-            throw new InvalidOperationException("尚未检测到游戏的 Unity 版本，无法生成匹配字体。");
+            throw new InvalidOperationException("尚未检测到游戏的 Unity 版本，无法选择运行时插件。");
         if (game.InstallState != InstallState.FullyInstalled)
             throw new InvalidOperationException("请先完整安装 BepInEx 与 XUnity.AutoTranslator。");
         if (GameProcessHelper.IsGameRunning(game))
-            throw new InvalidOperationException("游戏正在运行。请退出游戏后再自动生成并应用字体。");
-
-        var configPath = Path.Combine(game.GamePath, "BepInEx", "config", "AutoTranslatorConfig.ini");
-        if (!File.Exists(configPath))
-            throw new InvalidOperationException("AutoTranslatorConfig.ini 不存在，无法自动应用字体。请先修复插件安装。");
+            throw new InvalidOperationException("游戏正在运行。请退出游戏后再配置运行时字体。");
 
         var attachmentId = GetRequiredString(arguments, "attachmentId");
         var attachment = attachmentStore.GetRequired(sessionId, attachmentId);
-        if (Path.GetExtension(attachment.FullPath) is not (".ttf" or ".otf"))
+        if (Path.GetExtension(attachment.FullPath).ToLowerInvariant() is not (".ttf" or ".otf"))
             throw new InvalidDataException("apply_custom_font 只接受 TTF/OTF 附件。");
+        if (!confirmed)
+            return Confirmation(
+                "应用自定义运行时 TMP 字体",
+                $"将把 {attachment.FileName} 复制到工具箱字体来源，并写入游戏的运行时字体插件与 XUnity 配置。是否确认继续？");
+
         await ValidateFontMagicAsync(attachment.FullPath, ct);
-
-        var characterSets = GetStringArray(arguments, "characterSets")
-            .Where(SupportedCharsets.Contains)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (characterSets.Count == 0)
-            characterSets.Add("GB2312");
-
-        var generationInputPath = CreateFontGenerationInputCopy(
-            attachment.FullPath,
-            appDataPaths.FontGenerationUploadsDirectory);
-        FontGenerationResult generation;
-        try
-        {
-            generation = await fontGenerator.GenerateAsync(new FontGenerationRequest(
-                generationInputPath,
-                game.DetectedInfo.UnityVersion,
-                CharacterSet: new CharacterSetConfig
-                {
-                    BuiltinSets = characterSets,
-                    TranslationGameId = game.Id
-                }));
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(generationInputPath))
-                    File.Delete(generationInputPath);
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "清理智能体字体生成输入副本失败: {Path}", generationInputPath);
-            }
-        }
-        if (!generation.Success || string.IsNullOrWhiteSpace(generation.OutputPath))
-            throw new InvalidOperationException(generation.Error ?? "TMP 字体生成失败。");
 
         var customTtfPath = fontReplacementService.GetUniqueCustomSourcePath(game.Id, "TTF", attachment.FileName);
         File.Copy(attachment.FullPath, customTtfPath, overwrite: false);
-        var customTmpPath = fontReplacementService.GetUniqueCustomSourcePath(
-            game.Id, "TMP", Path.GetFileName(generation.OutputPath));
-        File.Copy(generation.OutputPath, customTmpPath, overwrite: false);
-        var ttfSourceId = $"ttf__{Path.GetFileName(customTtfPath)}";
-        var tmpSourceId = $"tmp__{Path.GetFileName(customTmpPath)}";
-
-        var scannedFonts = await fontReplacementService.ScanFontsAsync(game.GamePath, game.DetectedInfo, ct);
-        var targets = scannedFonts
-            .Where(font => font.ReplacementSupported)
-            .Select(font => new FontReplacementTarget
-            {
-                PathId = font.PathId,
-                AssetFile = font.AssetFile,
-                SourceId = string.Equals(font.FontType, "TTF", StringComparison.OrdinalIgnoreCase)
-                    ? ttfSourceId
-                    : tmpSourceId
-            })
-            .ToArray();
-
-        FontReplacementResult replacement = new() { SuccessCount = 0, FailedFonts = [] };
-        if (targets.Length > 0)
+        var sourceId = $"ttf__{Path.GetFileName(customTtfPath)}";
+        var request = new TmpFontInstallRequest
         {
-            replacement = await fontReplacementService.ReplaceFontsAsync(
-                game.GamePath, game.Id, game.DetectedInfo, targets, progress: null, ct);
-        }
+            SourceId = sourceId,
+            ApplicationMode = GetOptionalString(arguments, "applicationMode") ?? "fallback",
+            Enabled = GetOptionalBoolean(arguments, "enabled", true),
+            ReplaceExistingConfig = GetOptionalBoolean(arguments, "replaceExistingConfig", false),
+        };
 
-        BackupFile(game, configPath);
-
-        var installedName = Path.GetFileNameWithoutExtension(generation.OutputPath);
-        var installedPath = Path.Combine(game.GamePath, "BepInEx", "Font", installedName);
-        if (File.Exists(installedPath))
-            BackupFile(game, installedPath);
-        var configValue = TmpFontService.InstallCustomFont(game.GamePath, generation.OutputPath, installedName);
-        await configurationService.PatchSectionAsync(game.GamePath, "Behaviour",
-            new Dictionary<string, string> { ["FallbackFontTextMeshPro"] = configValue }, ct);
-
-        var userMessage = $"已用「{attachment.FileName}」生成并应用 TMP 字体（{generation.GlyphCount} 个字形），" +
-                          $"资源内字体替换成功 {replacement.SuccessCount}/{targets.Length} 项" +
-                          (replacement.FailedFonts.Count > 0 ? $"，失败 {replacement.FailedFonts.Count} 项" : "") + "。";
-        return Success("生成并应用自定义字体", new
+        var status = await runtimeTmpFontService.InstallAsync(game, request, ct);
+        return Success("应用自定义运行时 TMP 字体", new
         {
-            generation.FontName,
-            generation.GlyphCount,
-            characterSets,
-            scanned = scannedFonts.Count,
-            requestedReplacements = targets.Length,
-            replacement.SuccessCount,
-            failed = replacement.FailedFonts.Select(item => new { item.AssetFile, item.PathId, item.Error }),
-            fallbackConfigured = true
-        }, userMessage);
+            sourceId,
+            status.ApplicationMode,
+            status.RequiresRestart,
+            status.ActiveLoader,
+        }, $"已登记并配置「{attachment.FileName}」为运行时 TMP 字体；请重启游戏完成字形验证。不会自动生成资产或替换游戏资源。");
+    }
+
+    private async Task<ToolboxAgentToolResult> ConfigureTmpRuntimeFontAsync(
+        JsonElement arguments,
+        string? selectedGameId,
+        bool confirmed,
+        CancellationToken ct)
+    {
+        var game = await GetGameAsync(arguments, selectedGameId, ct);
+        if (game.DetectedInfo is null)
+            throw new InvalidOperationException("尚未检测到游戏的 Unity 版本，无法选择运行时插件。");
+        if (game.InstallState != InstallState.FullyInstalled)
+            throw new InvalidOperationException("请先完整安装 BepInEx 与 XUnity.AutoTranslator。");
+        if (GameProcessHelper.IsGameRunning(game))
+            throw new InvalidOperationException("游戏正在运行。请退出游戏后再配置运行时字体。");
+        if (!confirmed)
+            return Confirmation("配置运行时 TMP 字体", "该操作会写入游戏插件、字体和 XUnity 配置。是否确认继续？");
+
+        var request = new TmpFontInstallRequest
+        {
+            SourceId = GetOptionalString(arguments, "sourceId") ?? BundledFontCatalog.DefaultSourceId,
+            ApplicationMode = GetOptionalString(arguments, "applicationMode") ?? "fallback",
+            Enabled = GetOptionalBoolean(arguments, "enabled", true),
+            ReplaceExistingConfig = GetOptionalBoolean(arguments, "replaceExistingConfig", false),
+        };
+        var status = await runtimeTmpFontService.InstallAsync(game, request, ct);
+        return Success("配置运行时 TMP 字体", status,
+            $"已配置「{status.SourceDisplayName}」为{(status.ApplicationMode == "override" ? "全局替换" : "全局回退")}字体；请重启游戏验证。");
     }
 
     internal static string CreateFontGenerationInputCopy(string sourcePath, string uploadDirectory)
@@ -563,6 +536,12 @@ public sealed partial class ToolboxAgentToolExecutor(
                 return;
             }
             case "installoptions.autoinstalltmpfont": settings.InstallOptions.AutoInstallTmpFont = RequiredSettingBool(value); return;
+            case "installoptions.tmpfontapplicationmode":
+                var tmpFontMode = RequiredSettingString(value, 16).ToLowerInvariant();
+                if (tmpFontMode is not ("fallback" or "override"))
+                    throw new InvalidDataException("TMP 字体应用模式必须是 fallback 或 override。");
+                settings.InstallOptions.TmpFontApplicationMode = tmpFontMode;
+                return;
             case "installoptions.autodeployaiendpoint": settings.InstallOptions.AutoDeployAiEndpoint = RequiredSettingBool(value); return;
             case "installoptions.autogenerateconfig": settings.InstallOptions.AutoGenerateConfig = RequiredSettingBool(value); return;
             case "installoptions.autoapplyoptimalconfig": settings.InstallOptions.AutoApplyOptimalConfig = RequiredSettingBool(value); return;
@@ -751,6 +730,105 @@ public sealed partial class ToolboxAgentToolExecutor(
         return path;
     }
 
+    internal static ToolboxAgentToolResult CreateMissingGameDirectoryResult(
+        Game game,
+        string relativeDirectory,
+        string requestedPath)
+    {
+        var root = Path.GetFullPath(game.GamePath)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var current = Path.GetDirectoryName(requestedPath);
+        while (current is not null
+               && IsPathInsideRoot(root, current)
+               && !Directory.Exists(current))
+        {
+            current = Path.GetDirectoryName(current);
+        }
+
+        string? closestDirectory = null;
+        var availableEntries = new List<string>();
+        if (current is not null
+            && IsPathInsideRoot(root, current)
+            && Directory.Exists(current)
+            && PluginDiagnosticArtifactCollector.IsSafeRegularDirectory(root, current))
+        {
+            closestDirectory = string.Equals(root, current, StringComparison.OrdinalIgnoreCase)
+                ? "."
+                : Path.GetRelativePath(root, current).Replace('\\', '/');
+            try
+            {
+                availableEntries.AddRange(Directory
+                    .EnumerateFileSystemEntries(current, "*", SearchOption.TopDirectoryOnly)
+                    .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+                    .Take(20)
+                    .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')));
+            }
+            catch (IOException)
+            {
+                // The directory may be changing while a game starts or stops. The missing-path
+                // result remains useful even when suggestions cannot be enumerated.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Do not turn an expected missing path into an executor exception.
+            }
+        }
+
+        var requestedDirectory = string.IsNullOrWhiteSpace(relativeDirectory)
+            ? "."
+            : relativeDirectory.Replace('\\', '/');
+        return Failure("列出游戏文件", new
+        {
+            requestedDirectory,
+            error = "指定的游戏内目录不存在。",
+            closestExistingDirectory = closestDirectory,
+            availableEntries
+        }, $"游戏内目录 {requestedDirectory} 不存在；已向智能体返回最近的现有目录和可用条目。 ");
+    }
+
+    internal static async Task<string> ReadSharedTextSnapshotAsync(
+        string path,
+        int maxBytes,
+        CancellationToken ct)
+    {
+        if (maxBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxBytes));
+
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            16 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var snapshotLength = stream.Length;
+        if (snapshotLength > maxBytes)
+            throw new InvalidOperationException($"文件超过 {maxBytes} 字节，请缩小范围后再处理。");
+
+        var buffer = new byte[(int)snapshotLength];
+        var totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            var read = await stream.ReadAsync(buffer.AsMemory(totalRead), ct);
+            if (read == 0)
+                break;
+            totalRead += read;
+        }
+
+        ct.ThrowIfCancellationRequested();
+        using var memory = new MemoryStream(buffer, 0, totalRead, writable: false);
+        using var reader = new StreamReader(memory, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
+
+    private static bool IsPathInsideRoot(string root, string path)
+    {
+        var fullPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(root, fullPath, StringComparison.OrdinalIgnoreCase)
+               || fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void EnsureWritableGameTextPath(Game game, string fullPath)
     {
         if (!File.Exists(fullPath)
@@ -824,6 +902,10 @@ public sealed partial class ToolboxAgentToolExecutor(
         new(true, description, Trim(JsonSerializer.Serialize(payload, FileHelper.DataJsonOptions),
             MaxModelToolOutputCharacters), userMessage);
 
+    private static ToolboxAgentToolResult Failure(string description, object payload, string userMessage) =>
+        new(false, description, Trim(JsonSerializer.Serialize(payload, FileHelper.DataJsonOptions),
+            MaxModelToolOutputCharacters), userMessage);
+
     private static ToolboxAgentToolResult Confirmation(string description, string message) =>
         new(false, description, message, message, RequiresConfirmation: true);
 
@@ -838,6 +920,16 @@ public sealed partial class ToolboxAgentToolExecutor(
             || value.ValueKind != JsonValueKind.String)
             return null;
         return string.IsNullOrWhiteSpace(value.GetString()) ? null : value.GetString()!.Trim();
+    }
+
+    private static bool GetOptionalBoolean(JsonElement element, string propertyName, bool defaultValue)
+    {
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(propertyName, out var value))
+            return defaultValue;
+        if (value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            return value.GetBoolean();
+        throw new InvalidDataException($"工具参数 {propertyName} 必须是布尔值。");
     }
 
     private static IEnumerable<string> GetStringArray(JsonElement element, string propertyName)

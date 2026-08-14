@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "families": [
+    {
+      "id": "ttf-default",
+      "family": "Source Han Sans CN",
+      "displayName": "思源黑体 CN 2.005R",
+      "version": "2.005R",
+      "license": "SIL Open Font License 1.1",
+      "licenseFile": "licenses/SourceHanSans-OFL-1.1.txt",
+      "sourceRelease": "https://github.com/adobe-fonts/source-han-sans/releases/tag/2.005R",
+      "files": [
+        {
+          "purpose": "runtime-tmp",
+          "fileName": "SourceHanSansCN-VF.ttf",
+          "originalPath": "Variable/TTF/Subset/SourceHanSansCN-VF.ttf",
+          "size": 17749860,
+          "sha256": "25A01E41B5CC99893EB35A6CD2CC7611841DC19EB03CBAF7F0C1DE8210F2BA0B"
+        },
+        {
+          "purpose": "legacy-font-replacement",
+          "fileName": "SourceHanSansCN-Regular.otf",
+          "originalPath": "SubsetOTF/CN/SourceHanSansCN-Regular.otf",
+          "size": 8429224,
+          "sha256": "E2BC8A2E7F37474B774FFF8DB758681ECE40BB6947A90D571BCE9DD60671A8E4"
+        }
+      ]
+    }
+  ]
+}
