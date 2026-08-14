@@ -170,7 +170,7 @@ public static class SettingsEndpoints
                 "models", "llama", "generated-fonts", "logs",
                 "update-staging", "update-backup", "update-temp",
                 "backups", "font-backups", "custom-fonts",
-                "translation-memory", "runtime",
+                "translation-memory", "runtime", "toolbox-agent",
             };
             // font-generation/temp and font-generation/uploads are excluded separately
             var excludedSubDirs = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
@@ -343,7 +343,8 @@ public static class SettingsEndpoints
             var firstSegment = entry.FullName
                 .Split('/', '\\', StringSplitOptions.RemoveEmptyEntries)
                 .FirstOrDefault();
-            if (string.Equals(firstSegment, "runtime", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(firstSegment, "runtime", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(firstSegment, "toolbox-agent", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var destinationPath = PathSecurity.PrepareZipExtractionPath(

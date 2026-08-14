@@ -788,6 +788,15 @@ export interface ToolboxAgentStatus {
   supported: boolean
   reason?: string | null
   endpointName?: string | null
+  endpoints: ToolboxAgentEndpointOption[]
+}
+
+export interface ToolboxAgentEndpointOption {
+  id: string
+  name: string
+  provider: LlmProvider
+  modelName: string
+  isAutomaticDefault: boolean
 }
 
 export interface ToolboxAgentAttachment {
@@ -811,6 +820,7 @@ export interface ToolboxAgentChatRequest {
   gameId?: string | null
   attachmentIds?: string[]
   confirmPendingAction?: boolean
+  endpointId?: string | null
 }
 
 export interface ToolboxAgentChatResponse {
@@ -819,7 +829,33 @@ export interface ToolboxAgentChatResponse {
   executions: ToolboxAgentToolExecution[]
   requiresConfirmation: boolean
   pendingActionDescription?: string | null
+  endpointId: string
   endpointName: string
+}
+
+export interface ToolboxAgentConversationMessage {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  attachments: ToolboxAgentAttachment[]
+  executions: ToolboxAgentToolExecution[]
+  createdAt: string
+}
+
+export interface ToolboxAgentConversationSummary {
+  sessionId: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  endpointId?: string | null
+  endpointName?: string | null
+  gameId?: string | null
+  messageCount: number
+}
+
+export interface ToolboxAgentConversation {
+  summary: ToolboxAgentConversationSummary
+  messages: ToolboxAgentConversationMessage[]
 }
 
 // BepInEx Plugin Management

@@ -279,6 +279,7 @@ builder.Services.AddSingleton<PluginDiagnosticAgentService>();
 builder.Services.AddSingleton<PluginAutoRepairService>();
 builder.Services.AddSingleton<PluginHealthCheckService>();
 builder.Services.AddSingleton<ToolboxAgentAttachmentStore>();
+builder.Services.AddSingleton<ToolboxAgentConversationStore>();
 builder.Services.AddSingleton<ToolboxAgentToolExecutor>();
 builder.Services.AddSingleton<ToolboxAgentService>();
 builder.Services.AddSingleton<UpdateService>();

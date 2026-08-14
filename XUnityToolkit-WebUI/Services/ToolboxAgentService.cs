@@ -12,11 +12,13 @@ public sealed class ToolboxAgentService(
     LlmTranslationService translationService,
     ToolboxAgentToolExecutor toolExecutor,
     ToolboxAgentAttachmentStore attachmentStore,
+    ToolboxAgentConversationStore conversationStore,
     ILogger<ToolboxAgentService> logger)
 {
     private const int MaxTurns = 40;
     private const int MaxToolRounds = 8;
     private const int MaxTotalToolCalls = 16;
+    private const int MaxTitleLength = 40;
 
     private static readonly TimeSpan SessionRetention = TimeSpan.FromHours(6);
     private static readonly JsonSerializerOptions JsonOptions = new(FileHelper.DataJsonOptions)
@@ -35,7 +37,7 @@ public sealed class ToolboxAgentService(
         5. 插件问题需要自动解决时使用 auto_repair_plugins；不要用任意文件补丁绕过其云端诊断、备份、受限工具和复检链路。
         6. 删除、卸载、导入、启动进程等操作若工具返回需要确认，必须停止并把确认原因清楚告诉用户；不得伪造确认。
         7. 工具失败时根据返回事实调整方案；不要声称未执行的操作已经完成。最多进行必要的少量工具调用，避免循环。
-        8. 该智能体仅支持云端 AI。本提示只会在服务端已确认云端模式后发送。
+        8. 该智能体仅支持云端 AI。本提示只会发送到用户在智能体窗口选择的云端端点。
         9. 回复使用简洁中文，明确说明实际执行结果、失败项和仍需用户处理的事项。
 
         每一轮只能返回一个 JSON 对象，不要返回 Markdown 代码块或额外文字：
@@ -56,10 +58,39 @@ public sealed class ToolboxAgentService(
 
     public async Task<ToolboxAgentStatus> GetStatusAsync(CancellationToken ct = default)
     {
-        var endpoint = await ResolveCloudEndpointAsync(ct);
-        return endpoint.Endpoint is null
-            ? new ToolboxAgentStatus(false, endpoint.Error, null)
-            : new ToolboxAgentStatus(true, null, endpoint.Endpoint.Name);
+        var settings = await settingsService.GetAsync(ct);
+        var endpoints = GetAvailableCloudEndpoints(settings.AiTranslation);
+        var automatic = EndpointSelector.SelectBestEndpoint(endpoints);
+        var options = endpoints
+            .OrderByDescending(endpoint => endpoint.Priority)
+            .ThenBy(endpoint => endpoint.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(endpoint => new ToolboxAgentEndpointOption(
+                endpoint.Id,
+                endpoint.Name,
+                endpoint.Provider,
+                endpoint.ModelName,
+                string.Equals(endpoint.Id, automatic?.Id, StringComparison.Ordinal)))
+            .ToList();
+
+        return automatic is null
+            ? new ToolboxAgentStatus(
+                false,
+                "当前没有已启用且配置有效的云端 AI 端点，工具箱智能体无法运行。",
+                null,
+                options)
+            : new ToolboxAgentStatus(true, null, automatic.Name, options);
+    }
+
+    public Task<List<ToolboxAgentConversationSummary>> ListSessionsAsync(CancellationToken ct = default) =>
+        conversationStore.ListAsync(ct);
+
+    public async Task<ToolboxAgentConversation?> GetSessionAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        ToolboxAgentAttachmentStore.ValidateSessionId(sessionId);
+        var document = await conversationStore.LoadAsync(sessionId, ct);
+        return document?.ToPublic();
     }
 
     public async Task<ToolboxAgentChatResponse> ChatAsync(
@@ -72,6 +103,12 @@ public sealed class ToolboxAgentService(
         if (request.Message.Length > 8_000)
             throw new InvalidDataException("单条消息不能超过 8,000 个字符。");
 
+        var preferredEndpointId = string.IsNullOrWhiteSpace(request.EndpointId)
+            ? null
+            : request.EndpointId.Trim();
+        if (preferredEndpointId is { Length: > 100 })
+            throw new InvalidDataException("无效的云端端点 ID。");
+
         var attachments = attachmentStore.GetMany(request.SessionId, request.AttachmentIds);
         if (string.IsNullOrWhiteSpace(request.Message) && attachments.Count == 0 && !request.ConfirmPendingAction)
             throw new InvalidDataException("请输入消息或上传附件。");
@@ -79,18 +116,25 @@ public sealed class ToolboxAgentService(
         CleanupExpiredSessions();
         var session = _sessions.GetOrAdd(request.SessionId, _ => new AgentSession());
         await session.Gate.WaitAsync(ct);
+        var visibleTurnStarted = false;
         try
         {
+            await InitializeSessionAsync(request.SessionId, session, ct);
             session.LastActivityUtc = DateTime.UtcNow;
-            var endpointResult = await ResolveCloudEndpointAsync(ct);
+
+            var endpointResult = await ResolveCloudEndpointAsync(preferredEndpointId, ct);
             if (endpointResult.Endpoint is null)
                 throw new ToolboxAgentUnavailableException(endpointResult.Error ?? "工具箱智能体当前不可用。");
+
+            session.EndpointId = preferredEndpointId;
+            session.EndpointName = endpointResult.Endpoint.Name;
+            session.GameId = request.GameId;
 
             var executions = new List<ToolboxAgentToolExecution>();
             if (request.ConfirmPendingAction)
             {
                 if (session.Pending is null)
-                    throw new InvalidOperationException("当前没有等待确认的智能体操作。");
+                    throw new InvalidOperationException("当前没有等待确认的智能体操作；重启后请重新下达该指令。");
 
                 var pending = session.Pending;
                 session.Pending = null;
@@ -102,13 +146,17 @@ public sealed class ToolboxAgentService(
                     session,
                     executions,
                     ct);
-                session.Messages.Add(new AgentMessage("user", "用户已在界面中明确确认上一项高影响操作。"));
+                session.ContextMessages.Add(new ToolboxAgentContextMessage(
+                    "user",
+                    "用户已在界面中明确确认上一项高影响操作。"));
             }
             else
             {
                 if (session.Pending is not null)
                 {
-                    session.Messages.Add(new AgentMessage("tool", "上一项等待确认的操作未获确认，已取消。"));
+                    session.ContextMessages.Add(new ToolboxAgentContextMessage(
+                        "tool",
+                        "上一项等待确认的操作未获确认，已取消。"));
                     session.Pending = null;
                 }
 
@@ -120,17 +168,31 @@ public sealed class ToolboxAgentService(
                 var gameContext = string.IsNullOrWhiteSpace(request.GameId)
                     ? "\n当前界面未选择游戏。"
                     : $"\n当前界面选择的 gameId={request.GameId}。";
-                session.Messages.Add(new AgentMessage(
+                session.ContextMessages.Add(new ToolboxAgentContextMessage(
                     "user",
                     request.Message.Trim() + gameContext + attachmentContext));
+
+                var visibleText = string.IsNullOrWhiteSpace(request.Message)
+                    ? "请处理我上传的附件。"
+                    : request.Message.Trim();
+                session.Messages.Add(new ToolboxAgentConversationMessage(
+                    CreateMessageId(),
+                    "user",
+                    visibleText,
+                    attachments.ToList(),
+                    [],
+                    DateTime.UtcNow));
+                if (session.Title == "新对话")
+                    session.Title = CreateTitle(visibleText, attachments);
+                visibleTurnStarted = true;
             }
 
-            TrimHistory(session.Messages);
+            TrimHistory(session.ContextMessages);
             var totalCalls = 0;
             for (var round = 0; round < MaxToolRounds; round++)
             {
                 ct.ThrowIfCancellationRequested();
-                var turn = await CallAgentAsync(endpointResult.Endpoint, session.Messages, ct);
+                var turn = await CallAgentAsync(endpointResult.Endpoint, session.ContextMessages, ct);
                 var assistantMessage = Trim(turn.Message, 4_000)
                                        ?? (turn.ToolCalls is { Count: > 0 } ? "正在执行所需操作。" : "操作已完成。");
                 var calls = (turn.ToolCalls ?? [])
@@ -138,17 +200,19 @@ public sealed class ToolboxAgentService(
                     .Take(4)
                     .ToList();
 
-                session.Messages.Add(new AgentMessage("assistant", assistantMessage));
+                session.ContextMessages.Add(new ToolboxAgentContextMessage("assistant", assistantMessage));
                 if (calls.Count == 0)
                 {
-                    TrimHistory(session.Messages);
-                    return new ToolboxAgentChatResponse(
+                    TrimHistory(session.ContextMessages);
+                    return await CompleteTurnAsync(
                         request.SessionId,
+                        session,
+                        endpointResult.Endpoint,
                         assistantMessage,
                         executions,
                         false,
                         null,
-                        endpointResult.Endpoint.Name);
+                        ct);
                 }
 
                 foreach (var call in calls)
@@ -157,9 +221,16 @@ public sealed class ToolboxAgentService(
                     if (totalCalls > MaxTotalToolCalls)
                     {
                         const string limitMessage = "已达到本轮工具调用上限。我已停止继续操作，请检查上方执行结果后再继续。";
-                        session.Messages.Add(new AgentMessage("assistant", limitMessage));
-                        return new ToolboxAgentChatResponse(
-                            request.SessionId, limitMessage, executions, false, null, endpointResult.Endpoint.Name);
+                        session.ContextMessages.Add(new ToolboxAgentContextMessage("assistant", limitMessage));
+                        return await CompleteTurnAsync(
+                            request.SessionId,
+                            session,
+                            endpointResult.Endpoint,
+                            limitMessage,
+                            executions,
+                            false,
+                            null,
+                            ct);
                     }
 
                     var result = await ExecuteToolAsync(
@@ -176,23 +247,44 @@ public sealed class ToolboxAgentService(
                         var confirmationMessage = string.IsNullOrWhiteSpace(assistantMessage)
                             ? result.UserMessage
                             : $"{assistantMessage}\n\n{result.UserMessage}";
-                        return new ToolboxAgentChatResponse(
+                        return await CompleteTurnAsync(
                             request.SessionId,
+                            session,
+                            endpointResult.Endpoint,
                             confirmationMessage,
                             executions,
                             true,
                             result.Description,
-                            endpointResult.Endpoint.Name);
+                            ct);
                     }
                 }
 
-                TrimHistory(session.Messages);
+                TrimHistory(session.ContextMessages);
             }
 
             const string exhausted = "已达到本轮自动操作上限。我已停止继续调用工具，请根据现有结果继续下达指令。";
-            session.Messages.Add(new AgentMessage("assistant", exhausted));
-            return new ToolboxAgentChatResponse(
-                request.SessionId, exhausted, executions, false, null, endpointResult.Endpoint.Name);
+            session.ContextMessages.Add(new ToolboxAgentContextMessage("assistant", exhausted));
+            return await CompleteTurnAsync(
+                request.SessionId,
+                session,
+                endpointResult.Endpoint,
+                exhausted,
+                executions,
+                false,
+                null,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            if (visibleTurnStarted)
+                await RecordFailureAsync(request.SessionId, session, "智能体操作已取消。", CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            if (visibleTurnStarted)
+                await RecordFailureAsync(request.SessionId, session, SafeErrorMessage(ex), CancellationToken.None);
+            throw;
         }
         finally
         {
@@ -200,11 +292,156 @@ public sealed class ToolboxAgentService(
         }
     }
 
-    public void ClearSession(string sessionId)
+    public async Task DeleteSessionAsync(string sessionId, CancellationToken ct = default)
     {
         ToolboxAgentAttachmentStore.ValidateSessionId(sessionId);
-        _sessions.TryRemove(sessionId, out _);
+        if (_sessions.TryGetValue(sessionId, out var session))
+        {
+            await session.Gate.WaitAsync(ct);
+            try
+            {
+                _sessions.TryRemove(sessionId, out _);
+                await conversationStore.DeleteAsync(sessionId, ct);
+                attachmentStore.ClearSession(sessionId);
+            }
+            finally
+            {
+                session.Gate.Release();
+            }
+            return;
+        }
+
+        await conversationStore.DeleteAsync(sessionId, ct);
         attachmentStore.ClearSession(sessionId);
+    }
+
+    public async Task ClearSessionsAsync(CancellationToken ct = default)
+    {
+        foreach (var pair in _sessions.ToArray())
+        {
+            await pair.Value.Gate.WaitAsync(ct);
+            try
+            {
+                _sessions.TryRemove(pair.Key, out _);
+                attachmentStore.ClearSession(pair.Key);
+            }
+            finally
+            {
+                pair.Value.Gate.Release();
+            }
+        }
+
+        await conversationStore.ClearAsync(ct);
+    }
+
+    private async Task<ToolboxAgentChatResponse> CompleteTurnAsync(
+        string sessionId,
+        AgentSession session,
+        ApiEndpointConfig endpoint,
+        string message,
+        List<ToolboxAgentToolExecution> executions,
+        bool requiresConfirmation,
+        string? pendingActionDescription,
+        CancellationToken ct)
+    {
+        session.Messages.Add(new ToolboxAgentConversationMessage(
+            CreateMessageId(),
+            "assistant",
+            message,
+            [],
+            executions.ToList(),
+            DateTime.UtcNow));
+        await PersistSessionAsync(sessionId, session, ct);
+        return new ToolboxAgentChatResponse(
+            sessionId,
+            message,
+            executions,
+            requiresConfirmation,
+            pendingActionDescription,
+            endpoint.Id,
+            endpoint.Name);
+    }
+
+    private async Task RecordFailureAsync(
+        string sessionId,
+        AgentSession session,
+        string message,
+        CancellationToken ct)
+    {
+        session.ContextMessages.Add(new ToolboxAgentContextMessage("assistant", message));
+        session.Messages.Add(new ToolboxAgentConversationMessage(
+            CreateMessageId(),
+            "assistant",
+            message,
+            [],
+            [],
+            DateTime.UtcNow));
+        await PersistSessionAsync(sessionId, session, ct);
+    }
+
+    private async Task InitializeSessionAsync(
+        string sessionId,
+        AgentSession session,
+        CancellationToken ct)
+    {
+        if (session.Initialized)
+            return;
+
+        var document = await conversationStore.LoadAsync(sessionId, ct);
+        if (document is not null)
+        {
+            session.Title = document.Title;
+            session.CreatedAt = document.CreatedAt;
+            session.EndpointId = document.EndpointId;
+            session.EndpointName = document.EndpointName;
+            session.GameId = document.GameId;
+            session.Messages.AddRange(document.Messages);
+            session.ContextMessages.AddRange(document.ContextMessages);
+            TrimHistory(session.ContextMessages);
+        }
+
+        session.Initialized = true;
+    }
+
+    private async Task PersistSessionAsync(
+        string sessionId,
+        AgentSession session,
+        CancellationToken ct)
+    {
+        session.UpdatedAt = DateTime.UtcNow;
+        session.Messages.RemoveRange(
+            0,
+            Math.Max(0, session.Messages.Count - ToolboxAgentConversationStore.MaxVisibleMessages));
+        var document = new ToolboxAgentConversationDocument
+        {
+            SessionId = sessionId,
+            Title = session.Title,
+            CreatedAt = session.CreatedAt,
+            UpdatedAt = session.UpdatedAt,
+            EndpointId = session.EndpointId,
+            EndpointName = session.EndpointName,
+            GameId = session.GameId,
+            Messages = session.Messages.ToList(),
+            ContextMessages = session.ContextMessages.ToList()
+        };
+
+        try
+        {
+            var evicted = await conversationStore.SaveAsync(document, ct);
+            foreach (var evictedSessionId in evicted)
+            {
+                _sessions.TryRemove(evictedSessionId, out _);
+                attachmentStore.ClearSession(evictedSessionId);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "保存工具箱智能体历史失败: {SessionId}", sessionId);
+        }
     }
 
     private async Task<ToolboxAgentToolResult> ExecuteToolAsync(
@@ -253,7 +490,7 @@ public sealed class ToolboxAgentService(
             result.UserMessage));
         if (!result.RequiresConfirmation)
         {
-            session.Messages.Add(new AgentMessage(
+            session.ContextMessages.Add(new ToolboxAgentContextMessage(
                 "tool",
                 JsonSerializer.Serialize(new
                 {
@@ -269,7 +506,7 @@ public sealed class ToolboxAgentService(
 
     private async Task<ToolboxAgentTurn> CallAgentAsync(
         ApiEndpointConfig endpoint,
-        List<AgentMessage> messages,
+        List<ToolboxAgentContextMessage> messages,
         CancellationToken ct)
     {
         var payload = JsonSerializer.Serialize(new
@@ -291,35 +528,53 @@ public sealed class ToolboxAgentService(
         throw new InvalidDataException("云端 AI 返回的智能体指令不是可验证的 JSON。");
     }
 
-    private async Task<(ApiEndpointConfig? Endpoint, string? Error)> ResolveCloudEndpointAsync(CancellationToken ct)
+    private async Task<(ApiEndpointConfig? Endpoint, string? Error)> ResolveCloudEndpointAsync(
+        string? preferredEndpointId,
+        CancellationToken ct)
     {
         var settings = await settingsService.GetAsync(ct);
-        var ai = settings.AiTranslation;
-        if (string.Equals(ai.ActiveMode, "local", StringComparison.OrdinalIgnoreCase))
+        var selected = SelectCloudEndpoint(settings.AiTranslation, preferredEndpointId);
+        if (!string.IsNullOrWhiteSpace(preferredEndpointId))
         {
-            return (null, "工具箱智能体仅支持云端 AI；当前处于本地 AI 模式，不支持运行。请切换到云端模式并配置可用端点。");
+            return selected is null
+                ? (null, "所选云端 AI 端点已禁用、被删除或配置无效，请重新选择。")
+                : (selected, null);
         }
 
-        var endpoint = PluginDiagnosticAgentService.SelectCloudDiagnosticEndpoint(ai);
-        return endpoint is null
-            ? (null, "当前没有已启用且配置完整的云端 AI 端点，工具箱智能体无法运行。")
-            : (endpoint, null);
+        return selected is null
+            ? (null, "当前没有已启用且配置有效的云端 AI 端点，工具箱智能体无法运行。")
+            : (selected, null);
     }
+
+    internal static ApiEndpointConfig? SelectCloudEndpoint(
+        AiTranslationSettings ai,
+        string? preferredEndpointId)
+    {
+        var endpoints = GetAvailableCloudEndpoints(ai);
+        return string.IsNullOrWhiteSpace(preferredEndpointId)
+            ? EndpointSelector.SelectBestEndpoint(endpoints)
+            : endpoints.FirstOrDefault(endpoint =>
+                string.Equals(endpoint.Id, preferredEndpointId, StringComparison.Ordinal));
+    }
+
+    internal static List<ApiEndpointConfig> GetAvailableCloudEndpoints(AiTranslationSettings ai) =>
+        ai.Endpoints
+            .Where(endpoint => endpoint.Enabled
+                               && !string.IsNullOrWhiteSpace(endpoint.ApiKey)
+                               && !string.Equals(endpoint.ApiKey, "local", StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
     private void CleanupExpiredSessions()
     {
         var cutoff = DateTime.UtcNow - SessionRetention;
         foreach (var pair in _sessions.Where(pair => pair.Value.LastActivityUtc < cutoff).ToList())
         {
-            if (_sessions.TryRemove(pair.Key, out var removed))
-            {
-                _ = removed;
+            if (_sessions.TryRemove(pair.Key, out _))
                 attachmentStore.ClearSession(pair.Key);
-            }
         }
     }
 
-    private static void TrimHistory(List<AgentMessage> messages)
+    private static void TrimHistory(List<ToolboxAgentContextMessage> messages)
     {
         while (messages.Count > MaxTurns)
             messages.RemoveAt(0);
@@ -332,6 +587,30 @@ public sealed class ToolboxAgentService(
         }
     }
 
+    private static string CreateTitle(
+        string visibleText,
+        IReadOnlyList<ToolboxAgentAttachment> attachments)
+    {
+        var source = visibleText == "请处理我上传的附件。" && attachments.Count > 0
+            ? $"附件任务：{attachments[0].FileName}"
+            : visibleText;
+        var title = string.Join(' ', source
+            .Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (string.IsNullOrWhiteSpace(title))
+            return "新对话";
+        return title.Length <= MaxTitleLength ? title : title[..(MaxTitleLength - 1)] + "…";
+    }
+
+    private static string SafeErrorMessage(Exception ex) => ex switch
+    {
+        ToolboxAgentUnavailableException or InvalidDataException or InvalidOperationException or FileNotFoundException =>
+            ex.Message,
+        HttpRequestException => "无法连接所选云端 AI 端点，请检查端点配置和网络连接。",
+        _ => "智能体执行失败，请查看工具箱日志。"
+    };
+
+    private static string CreateMessageId() => Guid.NewGuid().ToString("N");
+
     private static string? Trim(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -343,12 +622,19 @@ public sealed class ToolboxAgentService(
     private sealed class AgentSession
     {
         public SemaphoreSlim Gate { get; } = new(1, 1);
-        public List<AgentMessage> Messages { get; } = [];
+        public List<ToolboxAgentContextMessage> ContextMessages { get; } = [];
+        public List<ToolboxAgentConversationMessage> Messages { get; } = [];
         public PendingAgentTool? Pending { get; set; }
+        public string Title { get; set; } = "新对话";
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         public DateTime LastActivityUtc { get; set; } = DateTime.UtcNow;
+        public string? EndpointId { get; set; }
+        public string? EndpointName { get; set; }
+        public string? GameId { get; set; }
+        public bool Initialized { get; set; }
     }
 
-    private sealed record AgentMessage(string Role, string Content);
     private sealed record PendingAgentTool(
         ToolboxAgentToolCall Call,
         string? SelectedGameId,

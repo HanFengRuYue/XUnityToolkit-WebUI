@@ -20,7 +20,16 @@ public enum PluginRepairActionState
 public record ToolboxAgentStatus(
     bool Supported,
     string? Reason,
-    string? EndpointName
+    string? EndpointName,
+    List<ToolboxAgentEndpointOption> Endpoints
+);
+
+public record ToolboxAgentEndpointOption(
+    string Id,
+    string Name,
+    LlmProvider Provider,
+    string ModelName,
+    bool IsAutomaticDefault
 );
 
 public record ToolboxAgentAttachment(
@@ -35,7 +44,8 @@ public record ToolboxAgentChatRequest(
     string Message,
     string? GameId = null,
     List<string>? AttachmentIds = null,
-    bool ConfirmPendingAction = false
+    bool ConfirmPendingAction = false,
+    string? EndpointId = null
 );
 
 public record ToolboxAgentToolExecution(
@@ -52,8 +62,62 @@ public record ToolboxAgentChatResponse(
     List<ToolboxAgentToolExecution> Executions,
     bool RequiresConfirmation,
     string? PendingActionDescription,
+    string EndpointId,
     string EndpointName
 );
+
+public record ToolboxAgentConversationMessage(
+    string Id,
+    string Role,
+    string Text,
+    List<ToolboxAgentAttachment> Attachments,
+    List<ToolboxAgentToolExecution> Executions,
+    DateTime CreatedAt
+);
+
+public record ToolboxAgentConversationSummary(
+    string SessionId,
+    string Title,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    string? EndpointId,
+    string? EndpointName,
+    string? GameId,
+    int MessageCount
+);
+
+public record ToolboxAgentConversation(
+    ToolboxAgentConversationSummary Summary,
+    List<ToolboxAgentConversationMessage> Messages
+);
+
+internal sealed record ToolboxAgentContextMessage(string Role, string Content);
+
+internal sealed class ToolboxAgentConversationDocument
+{
+    public int Version { get; set; } = 1;
+    public string SessionId { get; set; } = "";
+    public string Title { get; set; } = "新对话";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public string? EndpointId { get; set; }
+    public string? EndpointName { get; set; }
+    public string? GameId { get; set; }
+    public List<ToolboxAgentConversationMessage> Messages { get; set; } = [];
+    public List<ToolboxAgentContextMessage> ContextMessages { get; set; } = [];
+
+    public ToolboxAgentConversationSummary ToSummary() => new(
+        SessionId,
+        Title,
+        CreatedAt,
+        UpdatedAt,
+        EndpointId,
+        EndpointName,
+        GameId,
+        Messages.Count);
+
+    public ToolboxAgentConversation ToPublic() => new(ToSummary(), Messages);
+}
 
 public record PluginRepairActionResult(
     string Id,

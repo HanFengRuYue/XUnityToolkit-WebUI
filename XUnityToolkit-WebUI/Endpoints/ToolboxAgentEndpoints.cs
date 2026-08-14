@@ -12,6 +12,28 @@ public static class ToolboxAgentEndpoints
         group.MapGet("/status", async (ToolboxAgentService service, CancellationToken ct) =>
             Results.Ok(ApiResult<ToolboxAgentStatus>.Ok(await service.GetStatusAsync(ct))));
 
+        group.MapGet("/sessions", async (ToolboxAgentService service, CancellationToken ct) =>
+            Results.Ok(ApiResult<List<ToolboxAgentConversationSummary>>.Ok(
+                await service.ListSessionsAsync(ct))));
+
+        group.MapGet("/sessions/{sessionId}", async (
+            string sessionId,
+            ToolboxAgentService service,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var conversation = await service.GetSessionAsync(sessionId, ct);
+                return conversation is null
+                    ? Results.NotFound(ApiResult.Fail("未找到该历史对话。"))
+                    : Results.Ok(ApiResult<ToolboxAgentConversation>.Ok(conversation));
+            }
+            catch (InvalidDataException ex)
+            {
+                return Results.BadRequest(ApiResult.Fail(ex.Message));
+            }
+        });
+
         group.MapPost("/chat", async (
             ToolboxAgentChatRequest request,
             ToolboxAgentService service,
@@ -42,6 +64,12 @@ public static class ToolboxAgentEndpoints
             catch (OperationCanceledException)
             {
                 return Results.Json(ApiResult.Fail("智能体操作已取消。"), statusCode: 499);
+            }
+            catch (HttpRequestException)
+            {
+                return Results.Json(
+                    ApiResult.Fail("无法连接所选云端 AI 端点，请检查端点配置和网络连接。"),
+                    statusCode: StatusCodes.Status502BadGateway);
             }
         });
 
@@ -75,19 +103,28 @@ public static class ToolboxAgentEndpoints
             }
         }).DisableAntiforgery();
 
-        group.MapDelete("/sessions/{sessionId}", (
+        group.MapDelete("/sessions/{sessionId}", async (
             string sessionId,
-            ToolboxAgentService service) =>
+            ToolboxAgentService service,
+            CancellationToken ct) =>
         {
             try
             {
-                service.ClearSession(sessionId);
+                await service.DeleteSessionAsync(sessionId, ct);
                 return Results.Ok(ApiResult.Ok());
             }
             catch (InvalidDataException ex)
             {
                 return Results.BadRequest(ApiResult.Fail(ex.Message));
             }
+        });
+
+        group.MapDelete("/sessions", async (
+            ToolboxAgentService service,
+            CancellationToken ct) =>
+        {
+            await service.ClearSessionsAsync(ct);
+            return Results.Ok(ApiResult.Ok());
         });
     }
 }

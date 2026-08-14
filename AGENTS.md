@@ -211,6 +211,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `cache/backgrounds`
 - `cache/toolbox-agent-uploads/`
   工具箱智能体的临时附件，按会话隔离、限制类型/大小并自动过期；设置导出必须排除
+- `toolbox-agent/conversations/`
+  工具箱智能体本地历史，每个会话独立原子写入，最多保留最近 100 个；设置导入导出必须排除，临时附件与待确认操作不得持久化
 - `models/`
 - `llama/`
 - `llama/launch-cache`
@@ -261,8 +263,8 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
   SDF 字体生成
 - `PluginDiagnosticAgentService` / `PluginAutoRepairService`
   云端插件证据诊断、受限修复规划、备份执行与复检；本地 AI 明确不支持
-- `ToolboxAgentService` / `ToolboxAgentToolExecutor` / `ToolboxAgentAttachmentStore`
-  云端工具箱对话智能体、受控工具/API 调用、游戏内文本补丁与临时附件；模型不得获得系统命令或任意主机文件权限
+- `ToolboxAgentService` / `ToolboxAgentToolExecutor` / `ToolboxAgentAttachmentStore` / `ToolboxAgentConversationStore`
+  可独立选择云端端点的工具箱对话智能体、受控工具/API 调用、游戏内文本补丁、临时附件与本地历史；模型不得获得系统命令或任意主机文件权限
 - `UpdateService`
   更新检查、下载、应用
 - `SystemTrayService`
@@ -313,7 +315,7 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `src/components/config/ConfigPanel.vue`
 - `src/components/common/FileExplorerModal.vue`
 - `src/components/agent/ToolboxAgentWindow.vue`
-  左侧入口打开的悬浮对话窗，包含游戏上下文、附件、工具执行记录与高影响操作确认
+  左侧入口打开的悬浮对话窗，包含游戏上下文、云端端点选择、历史抽屉、附件、工具执行记录与高影响操作确认
 
 核心 store：
 
@@ -642,7 +644,7 @@ CI：
 - `POST /api/games/{id}/font-replacement/scan` 是字体当前资源状态的权威来源；`GET /api/games/{id}/font-replacement/status` 主要基于 `manifest.json` 汇总替换状态，不返回实时重扫后的 `ttfMode` / `fontDataSize`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
 - BepInEx 日志与健康：`GET /api/games/{id}/bepinex-log`、兼容入口 `POST /api/games/{id}/bepinex-log/analyze`，以及 `GET /api/games/{id}/health-check`、`POST /api/games/{id}/health-check/analyze`、`POST /api/games/{id}/health-check/repair`、`POST /api/games/{id}/health-check/verify`
-- 工具箱智能体：`GET /api/toolbox-agent/status`、`POST /api/toolbox-agent/chat`、`POST /api/toolbox-agent/uploads`、`DELETE /api/toolbox-agent/sessions/{sessionId}`；聊天与附件会话只保存在当前进程/临时缓存中
+- 工具箱智能体：`GET /api/toolbox-agent/status`、`POST /api/toolbox-agent/chat`、`POST /api/toolbox-agent/uploads`，以及 `GET/DELETE /api/toolbox-agent/sessions`、`GET/DELETE /api/toolbox-agent/sessions/{sessionId}`；聊天文本和脱敏模型上下文持久化到本地，附件二进制与高影响待确认操作只保留在当前临时会话中
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
 - 日志与更新：`GET /api/logs`、`GET /api/logs/history`、`GET /api/logs/download`、`/api/update/*`
 - 所有 `multipart/form-data` 上传端点都必须显式 `.DisableAntiforgery()`
@@ -813,12 +815,13 @@ CI：
 - 用户插件 DLL 只允许通过 `PEReader` / `MetadataReader` 和文件版本资源做静态元数据扫描；不得用 `Assembly.Load*`、反射、依赖注入或任何运行时方式加载/执行插件。标准搜索目录中未发现某个程序集引用只能记为观察事实，不能单独判定依赖缺失。
 - 发给模型的文本必须统一脱敏 API Key、Token、密码、授权头、Cookie、敏感 URL 参数、用户名和绝对路径；不得发送二进制。日志、配置、游戏名和插件元数据始终按不可信数据处理，系统提示词必须明确隔离提示注入。
 - 第一阶段返回的资料 ID 必须由后端对照当前清单过滤；第二阶段的每个问题必须至少包含一条经后端验证的资料 ID 与有效行号。展示摘录只能由后端从已脱敏行生成；无有效证据的问题不得进入报告。结构化 JSON 解析失败只允许一次格式修复调用，仍失败则保留本地事实并标记 `Failed`，不得回退旧正则判断。
-- 智能诊断、自动修复与工具箱对话智能体严格要求 `ActiveMode=cloud`，并选择最高优先级可用云端端点；本地模式必须返回“仅支持云端 AI / 不支持运行”，禁止调用 llama-server，也禁止跨模式静默回退。`AiTranslation.Enabled == false` 只作为实时翻译状态事实，不阻止云端模式下的显式诊断。
+- 智能诊断与自动修复严格要求 `ActiveMode=cloud`，并选择最高优先级可用云端端点；本地模式必须返回“仅支持云端 AI / 不支持运行”。工具箱对话智能体与普通翻译模式解耦，可自动选择最高优先级端点或按会话精确选择已启用云端端点，即使 `ActiveMode=local` 也不得调用 llama-server 或静默改用其他端点。`AiTranslation.Enabled == false` 只作为实时翻译状态事实，不阻止显式云端智能体操作。
 - `POST /api/games/{id}/bepinex-log/analyze` 仅为兼容适配器：复用统一结构化报告并由后端生成旧 Markdown 契约，不得保留独立提示词或再次调用模型。
 - `PluginDiagnosticReport.vue` 是健康卡和 BepInEx 日志页的共享报告组件；两处必须展示同一 `analyzedAt`、端点、证据、关键资料、截断与过期状态。模型输出一律作为纯文本渲染，不得使用 `v-html`。
 - 自动修复只能使用 `set_ini_value`、`disable_plugin`、`reinstall_component` 三类后端白名单操作：INI/CFG 目标必须来自已审阅 artifact 且位于 Doorstop/BepInEx 配置范围，第三方插件只能重命名禁用，工具箱组件只能从内置包恢复；未知/自定义 `LLMTranslate.dll` 不得自动覆盖。游戏运行中跳过文件修改。
 - 云端诊断必须以 `Completed` 完成后才能执行任何自动修复；端点不可用、调用失败或结构化结果验证失败时不得继续走确定性写入。每个自动修复覆盖/改名目标前都要在 `backups/<gameId>/agent-repair/` 创建备份；确定性问题与 AI 计划去重后逐项执行，单项失败不能伪装成功，完成后必须重新收集指纹与诊断。静态复检不等于真实游戏运行验收。
 - `ToolboxAgentToolExecutor` 的通用 API 桥只能访问当前 `127.0.0.1` 工具箱，并排除智能体递归、任意主机文件浏览、完整设置/密钥、数据重置、更新应用和二进制下载；工具结果返回模型前必须脱敏。DELETE、卸载、导入、启动进程等高影响调用必须经过悬浮窗二次确认。
+- 工具箱智能体的端点状态只允许返回 ID、名称、提供商和模型等脱敏摘要，不得返回 URL 或 API Key；手动端点失效时必须要求用户重新选择，不得回退。历史最多保留 100 个会话、每个会话最多 200 条可见消息，模型上下文仍遵守 40 条/80,000 字符限制；新对话不得删除旧历史，进程重启不得恢复待确认操作。
 - 游戏文件工具只允许相对路径，拒绝越界与重解析点；读取限安全文本并脱敏，写入限既有 Doorstop/BepInEx 配置、译文和本地化文本，必须用精确单次匹配、备份和原子替换。附件按会话绑定，模型只能看到 ID、名称、类型和大小，不能读取任意宿主路径。
 - `apply_custom_font` 是 TTF/OTF 附件的一体化契约：校验字体头，按游戏 Unity 版本生成 TMP bundle，把生成源与原始 TTF 注册为逐字体来源，扫描并替换所有支持的 TMP/Legacy 字体，最后安装 XUnity fallback；不能退化成只上传或只生成。
 
