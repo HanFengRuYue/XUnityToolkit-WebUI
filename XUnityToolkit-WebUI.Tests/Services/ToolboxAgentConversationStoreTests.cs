@@ -92,6 +92,7 @@ public sealed class ToolboxAgentConversationStoreTests
     {
         var settings = new AiTranslationSettings
         {
+            Enabled = false,
             ActiveMode = "local",
             Endpoints =
             [
@@ -102,15 +103,20 @@ public sealed class ToolboxAgentConversationStoreTests
             ]
         };
 
-        var automatic = ToolboxAgentService.SelectCloudEndpoint(settings, null);
-        var manual = ToolboxAgentService.SelectCloudEndpoint(settings, "low");
-        var missing = ToolboxAgentService.SelectCloudEndpoint(settings, "disabled");
+        var automatic = ToolboxAgentEndpointResolver.Resolve(settings);
+        settings.AgentEndpointId = "low";
+        var manual = ToolboxAgentEndpointResolver.Resolve(settings);
+        settings.AgentEndpointId = "disabled";
+        var missing = ToolboxAgentEndpointResolver.Resolve(settings);
 
-        Assert.Equal("high", automatic?.Id);
-        Assert.Equal("low", manual?.Id);
-        Assert.Null(missing);
+        Assert.Equal("high", automatic.Endpoint?.Id);
+        Assert.True(automatic.IsAutomatic);
+        Assert.Equal("low", manual.Endpoint?.Id);
+        Assert.False(manual.IsAutomatic);
+        Assert.Null(missing.Endpoint);
+        Assert.NotNull(missing.Error);
         Assert.DoesNotContain(
-            ToolboxAgentService.GetAvailableCloudEndpoints(settings),
+            ToolboxAgentEndpointResolver.GetAvailableCloudEndpoints(settings),
             endpoint => endpoint.Id is "local" or "disabled");
     }
 

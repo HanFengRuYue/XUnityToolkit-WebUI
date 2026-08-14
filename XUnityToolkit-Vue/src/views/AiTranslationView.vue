@@ -64,6 +64,7 @@ const DEFAULT_AI_TRANSLATION: AiTranslationSettings = {
   localMinP: 0.05,
   localRepeatPenalty: 1.0,
   endpoints: [],
+  agentEndpointId: null,
   glossaryExtractionEnabled: false,
   termAuditEnabled: true,
   naturalTranslationMode: true,

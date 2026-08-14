@@ -12,12 +12,16 @@ internal sealed record ToolboxAgentToolResult(
     string Description,
     string ModelContent,
     string UserMessage,
-    bool RequiresConfirmation = false);
+    bool RequiresConfirmation = false,
+    bool TerminatesTurn = false,
+    bool ReloadRequired = false);
 
 public sealed partial class ToolboxAgentToolExecutor(
     GameLibraryService gameLibrary,
     PluginHealthCheckService healthService,
     ToolboxAgentAttachmentStore attachmentStore,
+    ToolboxAgentHostAccessService hostAccessService,
+    ToolboxDataResetService dataResetService,
     FontReplacementService fontReplacementService,
     TmpFontGeneratorService fontGenerator,
     ConfigurationService configurationService,
@@ -60,7 +64,12 @@ public sealed partial class ToolboxAgentToolExecutor(
         9. apply_custom_font {"gameId":"...","attachmentId":"...","characterSets":["GB2312"]}：将上传的 TTF/OTF 生成 TMP 字体，替换可支持的 TMP/Legacy 字体并配置 XUnity fallback。
         10. update_toolbox_setting {"path":"aiTranslation.maxConcurrency","value":6}：补丁式更新安全设置，不读取或覆盖 API Key；支持的路径通过 describe_capabilities 查询。
         11. use_attachment {"gameId":"...","attachmentId":"...","purpose":"install_plugin|plugin_package_import|icon|cover|background|settings_import|font_generation_upload|font_replacement_ttf|font_replacement_tmp|charset|translation_charset"}：把上传文件交给对应工具箱功能。
-        12. call_toolbox_api {"method":"GET|POST|PUT|DELETE","path":"/api/...","body":{}}：调用其余 JSON 工具箱接口。可覆盖游戏管理、检测/安装、配置、术语、脚本标签、译文编辑、翻译记忆、字体、插件、日志、更新、本地模型等现有功能；文件上传优先使用 use_attachment/apply_custom_font。
+        12. list_path {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","purpose":"读取用途"}：列出目录；game/toolbox 属于可信根，external 每次都需要用户确认。
+        13. read_file {"scope":"game|toolbox|external","gameId":"可信游戏范围可选","path":"相对路径或外部绝对路径","mode":"auto|text|hex|metadata","startLine":1,"maxLines":200,"offset":0,"length":4096,"purpose":"读取用途"}：读取任意文件原文、有限十六进制块或被动元数据；不会加载用户程序集。external 每次都需要用户确认。
+        14. manage_files {"purpose":"修改用途","operations":[{"kind":"create_directory|write_text|copy|move|delete|copy_attachment","scope":"game|toolbox","gameId":"...","path":"相对路径","content":"...","source":{"scope":"game|toolbox","gameId":"...","path":"..."},"attachmentId":"...","overwrite":false,"recursive":false}]}：在已添加游戏目录或完整工具箱数据目录中批量修改文件。整个批次只确认一次，不自动备份。
+        15. run_script {"shell":"powershell|cmd","script":"完整脚本","purpose":"具体诊断用途","timeoutSeconds":30}：以当前用户运行诊断脚本。每个脚本都必须单独确认并展示全文；提示词只允许读取和诊断，但后端无法从技术上保证脚本只读。
+        16. reset_toolbox_data {"purpose":"为什么要清空"}：删除完整工具箱数据目录并重启工具箱；不会删除游戏目录。必须单独确认，并且必须作为本轮最后且唯一的终止操作。
+        17. call_toolbox_api {"method":"GET|POST|PUT|DELETE","path":"/api/...","body":{}}：调用其余 JSON 工具箱接口。可覆盖游戏管理、检测/安装、配置、术语、脚本标签、译文编辑、翻译记忆、字体、插件、日志、更新、本地模型等现有功能；文件上传优先使用 use_attachment/apply_custom_font。
 
         call_toolbox_api 禁止访问智能体自身、任意主机文件浏览、完整设置密钥、数据重置、更新应用和二进制下载。DELETE、卸载、导入、启动游戏等高影响操作会先要求用户确认。
         """;
@@ -105,6 +114,11 @@ public sealed partial class ToolboxAgentToolExecutor(
             "apply_custom_font" => await ApplyCustomFontAsync(sessionId, call.Arguments, selectedGameId, ct),
             "update_toolbox_setting" => await UpdateToolboxSettingAsync(call.Arguments, ct),
             "use_attachment" => await UseAttachmentAsync(sessionId, call.Arguments, selectedGameId, confirmed, ct),
+            "list_path" => await hostAccessService.ListPathAsync(call.Arguments, selectedGameId, confirmed, ct),
+            "read_file" => await hostAccessService.ReadFileAsync(call.Arguments, selectedGameId, confirmed, ct),
+            "manage_files" => await hostAccessService.ManageFilesAsync(sessionId, call.Arguments, selectedGameId, confirmed, ct),
+            "run_script" => await hostAccessService.RunScriptAsync(call.Arguments, confirmed, ct),
+            "reset_toolbox_data" => await ResetToolboxDataAsync(call.Arguments, confirmed, ct),
             "call_toolbox_api" => await CallToolboxApiAsync(call.Arguments, confirmed, ct),
             _ => new ToolboxAgentToolResult(false, name, "未知工具。", $"智能体请求了未知工具 {name}。")
         };
@@ -220,6 +234,29 @@ public sealed partial class ToolboxAgentToolExecutor(
             architecture = game.DetectedInfo?.Architecture.ToString()
         });
         return Success("列出游戏", payload, $"已读取 {games.Count} 个游戏。 ");
+    }
+
+    private async Task<ToolboxAgentToolResult> ResetToolboxDataAsync(
+        JsonElement arguments,
+        bool confirmed,
+        CancellationToken ct)
+    {
+        var purpose = GetRequiredString(arguments, "purpose");
+        if (!confirmed)
+        {
+            return Confirmation(
+                "清空全部工具箱数据并重启",
+                $"用途：{purpose}\n\n将永久删除完整工具箱数据目录：\n{appDataPaths.Root}\n\n这包括设置、API Key、游戏库记录、模型、缓存、日志、备份、附件和智能体会话；不会删除已添加游戏的目录。该操作不创建备份，工具箱随后会退出并自动重启。是否继续？");
+        }
+
+        await dataResetService.ScheduleAsync(ct);
+        return new ToolboxAgentToolResult(
+            true,
+            "清空全部工具箱数据并重启",
+            "数据清空助手已启动；当前进程退出后将删除完整工具箱数据目录并重启。",
+            "已安排清空全部工具箱数据。工具箱即将退出，完成删除后会自动重启。",
+            TerminatesTurn: true,
+            ReloadRequired: true);
     }
 
     private async Task<ToolboxAgentToolResult> InspectGameAsync(

@@ -41,7 +41,7 @@ public sealed class PluginHealthCheckService(
     {
         var report = await BuildObjectiveReportAsync(game, connectivityVerified, freshRunVerified, ct);
         var snapshot = await artifactCollector.CollectInventoryAsync(game, report.Checks, ct);
-        return diagnosticAgent.AttachCached(game.Id, snapshot.Fingerprint, report);
+        return WithRepairAvailability(game, diagnosticAgent.AttachCached(game.Id, snapshot.Fingerprint, report));
     }
 
     /// <summary>Run the two-stage AI agent against current files and historical log data.</summary>
@@ -78,9 +78,13 @@ public sealed class PluginHealthCheckService(
             var objectiveBefore = await BuildObjectiveReportAsync(
                 game, connectivityVerified: null, freshRunVerified: false, ct);
             var snapshotBefore = await artifactCollector.CollectInventoryAsync(game, objectiveBefore.Checks, ct);
-            var before = await diagnosticAgent.AnalyzeReservedAsync(game, objectiveBefore, snapshotBefore, ct);
+            var before = WithRepairAvailability(
+                game,
+                await diagnosticAgent.AnalyzeReservedAsync(game, objectiveBefore, snapshotBefore, ct));
 
-            if (before.AnalysisState != PluginAnalysisState.Completed || before.Analysis is null)
+            var hasDeterministicRepair = autoRepairService.HasDeterministicRepair(game, before);
+            if ((before.AnalysisState != PluginAnalysisState.Completed || before.Analysis is null)
+                && !hasDeterministicRepair)
             {
                 return new PluginAutoRepairResult(
                     before,
@@ -91,7 +95,10 @@ public sealed class PluginHealthCheckService(
                     DateTime.UtcNow);
             }
 
-            var plan = await diagnosticAgent.PlanRepairsAsync(game, before, snapshotBefore, ct);
+            var plan = before.AnalysisState == PluginAnalysisState.Completed && before.Analysis is not null
+                ? await diagnosticAgent.PlanRepairsAsync(game, before, snapshotBefore, ct)
+                : (Summary: "已根据本地确定性检查执行工具箱内置修复。",
+                    Actions: new List<PluginRepairPlanAction>(), EndpointName: string.Empty);
             var actions = await autoRepairService.ExecuteAsync(game, before, snapshotBefore, plan.Actions, ct);
             if (actions.Count == 0)
             {
@@ -107,7 +114,11 @@ public sealed class PluginHealthCheckService(
             var objectiveAfter = await BuildObjectiveReportAsync(
                 game, connectivityVerified: null, freshRunVerified: false, ct);
             var snapshotAfter = await artifactCollector.CollectInventoryAsync(game, objectiveAfter.Checks, ct);
-            var after = await diagnosticAgent.AnalyzeReservedAsync(game, objectiveAfter, snapshotAfter, ct);
+            var after = before.AnalysisState == PluginAnalysisState.Completed
+                ? WithRepairAvailability(
+                    game,
+                    await diagnosticAgent.AnalyzeReservedAsync(game, objectiveAfter, snapshotAfter, ct))
+                : WithRepairAvailability(game, objectiveAfter);
             var completed = actions.Count(action => action.State == PluginRepairActionState.Completed);
             var failed = actions.Count(action => action.State == PluginRepairActionState.Failed);
             var skipped = actions.Count(action => action.State == PluginRepairActionState.Skipped);
@@ -246,7 +257,9 @@ public sealed class PluginHealthCheckService(
     {
         var report = await BuildObjectiveReportAsync(game, connectivityVerified, freshRunVerified, ct);
         var snapshot = await artifactCollector.CollectInventoryAsync(game, report.Checks, ct);
-        return await diagnosticAgent.AnalyzeReservedAsync(game, report, snapshot, ct);
+        return WithRepairAvailability(
+            game,
+            await diagnosticAgent.AnalyzeReservedAsync(game, report, snapshot, ct));
     }
 
     private async Task<PluginHealthReport> BuildObjectiveReportAsync(
@@ -317,8 +330,11 @@ public sealed class PluginHealthCheckService(
             gameNeverRun,
             freshRunVerified,
             DateTime.UtcNow);
-        return PluginDiagnosticAgentService.RecalculateOverall(report);
+        return WithRepairAvailability(game, PluginDiagnosticAgentService.RecalculateOverall(report));
     }
+
+    private PluginHealthReport WithRepairAvailability(Game game, PluginHealthReport report) =>
+        autoRepairService.AttachRepairAvailability(game, report);
 
     private void CheckToolboxAiState(List<HealthCheckItem> checks, AiTranslationSettings ai)
     {

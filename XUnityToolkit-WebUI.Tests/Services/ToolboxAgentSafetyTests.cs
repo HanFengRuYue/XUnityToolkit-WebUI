@@ -1,3 +1,7 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
+using XUnityToolkit_WebUI.Infrastructure;
 using XUnityToolkit_WebUI.Models;
 using XUnityToolkit_WebUI.Services;
 using Xunit;
@@ -6,6 +10,105 @@ namespace XUnityToolkit_WebUI.Tests.Services;
 
 public sealed class ToolboxAgentSafetyTests
 {
+    [Fact]
+    public void DataReset_RejectsBroadProfileAndTempRootsButAllowsDedicatedChild()
+    {
+        var userProfile = Path.GetFullPath(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var tempRoot = Path.GetFullPath(Path.GetTempPath())
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var dedicated = Path.Combine(tempRoot, $"xunity-reset-{Guid.NewGuid():N}");
+
+        Assert.True(ToolboxDataResetService.IsProtectedResetRoot(userProfile));
+        Assert.True(ToolboxDataResetService.IsProtectedResetRoot(tempRoot));
+        Assert.False(ToolboxDataResetService.IsProtectedResetRoot(dedicated));
+    }
+
+    [Fact]
+    public async Task HostAccess_TrustedReadIsDirectButExternalReadAndScriptsRequireConfirmation()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"xunity-agent-host-{Guid.NewGuid():N}");
+        var externalRoot = Path.Combine(Path.GetTempPath(), $"xunity-agent-external-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(externalRoot);
+        await File.WriteAllTextAsync(Path.Combine(root, "raw.secret"), "token=raw-value");
+        var externalFile = Path.Combine(externalRoot, "environment.log");
+        await File.WriteAllTextAsync(externalFile, "external evidence");
+
+        try
+        {
+            var service = CreateHostAccessService(root);
+            using var trustedJson = JsonDocument.Parse("""
+                {"scope":"toolbox","path":"raw.secret","mode":"text","purpose":"读取测试"}
+                """);
+            using var externalJson = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                scope = "external",
+                path = externalFile,
+                mode = "text",
+                purpose = "检查外部环境日志"
+            }));
+            using var scriptJson = JsonDocument.Parse("""
+                {"shell":"powershell","script":"Get-Process | Select-Object -First 1","purpose":"检查进程读取能力"}
+                """);
+            using var traversalJson = JsonDocument.Parse("""
+                {"scope":"toolbox","path":"../escape.txt","mode":"text","purpose":"越界测试"}
+                """);
+
+            var trusted = await service.ReadFileAsync(trustedJson.RootElement, null, false, default);
+            var external = await service.ReadFileAsync(externalJson.RootElement, null, false, default);
+            var script = await service.RunScriptAsync(scriptJson.RootElement, false, default);
+
+            Assert.True(trusted.Success);
+            Assert.Contains("token=raw-value", trusted.ModelContent);
+            Assert.False(trusted.RequiresConfirmation);
+            Assert.True(external.RequiresConfirmation);
+            Assert.Contains(externalFile, external.UserMessage);
+            Assert.True(script.RequiresConfirmation);
+            Assert.Contains("Get-Process | Select-Object -First 1", script.UserMessage);
+            Assert.Contains("后端不能证明", script.UserMessage);
+            await Assert.ThrowsAnyAsync<Exception>(() =>
+                service.ReadFileAsync(traversalJson.RootElement, null, false, default));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+            Directory.Delete(externalRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task HostAccess_FileBatchWaitsForOneConfirmationAndThenWritesTrustedRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"xunity-agent-batch-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var service = CreateHostAccessService(root);
+            using var json = JsonDocument.Parse("""
+                {
+                  "purpose":"建立诊断记录",
+                  "operations":[
+                    {"kind":"create_directory","scope":"toolbox","path":"agent-test"},
+                    {"kind":"write_text","scope":"toolbox","path":"agent-test/result.any","content":"done"}
+                  ]
+                }
+                """);
+
+            var pending = await service.ManageFilesAsync("session", json.RootElement, null, false, default);
+            Assert.True(pending.RequiresConfirmation);
+            Assert.False(File.Exists(Path.Combine(root, "agent-test", "result.any")));
+
+            var completed = await service.ManageFilesAsync("session", json.RootElement, null, true, default);
+            Assert.True(completed.Success);
+            Assert.Equal("done", await File.ReadAllTextAsync(Path.Combine(root, "agent-test", "result.any")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void GamePathGate_AllowsTheRegisteredGameRoot()
     {
@@ -181,5 +284,19 @@ public sealed class ToolboxAgentSafetyTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static ToolboxAgentHostAccessService CreateHostAccessService(string root)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AppData:Root"] = root })
+            .Build();
+        var paths = new AppDataPaths(configuration);
+        paths.EnsureDirectoriesExist();
+        return new ToolboxAgentHostAccessService(
+            new GameLibraryService(paths, NullLogger<GameLibraryService>.Instance),
+            paths,
+            new ToolboxAgentAttachmentStore(paths, NullLogger<ToolboxAgentAttachmentStore>.Instance),
+            NullLogger<ToolboxAgentHostAccessService>.Instance);
     }
 }

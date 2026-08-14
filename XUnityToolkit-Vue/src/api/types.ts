@@ -196,6 +196,7 @@ export interface AiTranslationSettings {
   localMinP: number
   localRepeatPenalty: number
   endpoints: ApiEndpointConfig[]
+  agentEndpointId?: string | null
   glossaryExtractionEnabled: boolean
   termAuditEnabled: boolean
   naturalTranslationMode: boolean
@@ -760,6 +761,8 @@ export interface PluginHealthReport {
   gameNeverRun: boolean
   freshRunVerified: boolean
   checkedAt: string
+  repairAvailable: boolean
+  repairAvailabilityReason?: string | null
 }
 
 export type PluginRepairActionState = 'Completed' | 'Failed' | 'Skipped'
@@ -787,16 +790,11 @@ export type AgentToolExecutionState = 'Completed' | 'Failed' | 'Skipped' | 'Requ
 export interface ToolboxAgentStatus {
   supported: boolean
   reason?: string | null
+  endpointId?: string | null
   endpointName?: string | null
-  endpoints: ToolboxAgentEndpointOption[]
-}
-
-export interface ToolboxAgentEndpointOption {
-  id: string
-  name: string
-  provider: LlmProvider
-  modelName: string
-  isAutomaticDefault: boolean
+  provider?: LlmProvider | null
+  modelName?: string | null
+  isAutomatic: boolean
 }
 
 export interface ToolboxAgentAttachment {
@@ -820,7 +818,6 @@ export interface ToolboxAgentChatRequest {
   gameId?: string | null
   attachmentIds?: string[]
   confirmPendingAction?: boolean
-  endpointId?: string | null
 }
 
 export interface ToolboxAgentChatResponse {
@@ -831,6 +828,7 @@ export interface ToolboxAgentChatResponse {
   pendingActionDescription?: string | null
   endpointId: string
   endpointName: string
+  reloadRequired: boolean
 }
 
 export interface ToolboxAgentConversationMessage {

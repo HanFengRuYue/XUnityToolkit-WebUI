@@ -262,9 +262,11 @@ dotnet build TranslatorEndpoint/TranslatorEndpoint.csproj -c Release
 - `TmpFontGeneratorService`
   SDF 字体生成
 - `PluginDiagnosticAgentService` / `PluginAutoRepairService`
-  云端插件证据诊断、受限修复规划、备份执行与复检；本地 AI 明确不支持
-- `ToolboxAgentService` / `ToolboxAgentToolExecutor` / `ToolboxAgentAttachmentStore` / `ToolboxAgentConversationStore`
-  可独立选择云端端点的工具箱对话智能体、受控工具/API 调用、游戏内文本补丁、临时附件与本地历史；模型不得获得系统命令或任意主机文件权限
+  工具箱智能体的插件证据诊断、受限修复规划、备份执行与复检专项链路；与通用对话共用全局智能体端点，本地 AI 明确不支持
+- `ToolboxAgentService` / `ToolboxAgentEndpointResolver` / `ToolboxAgentToolExecutor` / `ToolboxAgentHostAccessService`
+  统一工具箱智能体、全局云端端点解析、受控工具/API、可信根文件管理、外部只读访问与逐次确认的诊断脚本
+- `ToolboxAgentAttachmentStore` / `ToolboxAgentConversationStore` / `ToolboxDataResetService`
+  临时附件、本地历史，以及退出后通过 Updater 完整清空数据目录并重启
 - `UpdateService`
   更新检查、下载、应用
 - `SystemTrayService`
@@ -644,7 +646,7 @@ CI：
 - `POST /api/games/{id}/font-replacement/scan` 是字体当前资源状态的权威来源；`GET /api/games/{id}/font-replacement/status` 主要基于 `manifest.json` 汇总替换状态，不返回实时重扫后的 `ttfMode` / `fontDataSize`
 - 字体生成：上传、生成、状态、取消、下载、历史、删除、安装 TMP 字体、字符集预览/上传、报告查询均由 `/api/font-generation/*` 提供
 - BepInEx 日志与健康：`GET /api/games/{id}/bepinex-log`、兼容入口 `POST /api/games/{id}/bepinex-log/analyze`，以及 `GET /api/games/{id}/health-check`、`POST /api/games/{id}/health-check/analyze`、`POST /api/games/{id}/health-check/repair`、`POST /api/games/{id}/health-check/verify`
-- 工具箱智能体：`GET /api/toolbox-agent/status`、`POST /api/toolbox-agent/chat`、`POST /api/toolbox-agent/uploads`，以及 `GET/DELETE /api/toolbox-agent/sessions`、`GET/DELETE /api/toolbox-agent/sessions/{sessionId}`；聊天文本和脱敏模型上下文持久化到本地，附件二进制与高影响待确认操作只保留在当前临时会话中
+- 工具箱智能体：`GET /api/toolbox-agent/status`、`POST /api/toolbox-agent/chat`、`POST /api/toolbox-agent/uploads`，以及 `GET/DELETE /api/toolbox-agent/sessions`、`GET/DELETE /api/toolbox-agent/sessions/{sessionId}`；聊天文本和模型上下文持久化到本地，附件二进制与高影响待确认操作只保留在当前临时会话中
 - 插件管理与插件包：`/api/games/{id}/plugins`、`/api/games/{id}/plugin-package/export`、`/api/games/{id}/plugin-package/import`
 - 日志与更新：`GET /api/logs`、`GET /api/logs/history`、`GET /api/logs/download`、`/api/update/*`
 - 所有 `multipart/form-data` 上传端点都必须显式 `.DisableAntiforgery()`
@@ -735,7 +737,7 @@ CI：
 - 外部 URL 的 SSRF 校验不能只看原始主机名；若输入是域名，还必须检查 DNS 解析后的 IP 是否落到回环、链路本地或私网网段
 - 任何允许重定向的外链下载都必须对每一跳目标重复做同样的 SSRF 校验；首跳安全不代表后续跳转安全
 - 用户提供或本地选择的 ZIP 导入（设置导入、插件 ZIP、汉化包导入等）必须同时限制压缩包原始大小、单文件解压大小与总解压大小，并统一走 `PathSecurity.PrepareZipExtractionPath(...)` / `ExtractZipEntryAsync(...)`
-- `POST /api/settings/reset`、`POST /api/settings/import` 会引发跨服务缓存失效，相关服务新增缓存后必须并入这两条路径
+- `POST /api/settings/import` 会引发跨服务缓存失效，相关服务新增缓存后必须并入导入后的统一刷新链路；`POST /api/settings/reset` 改由 `ToolboxDataResetService` 安排主进程退出后删除完整 `AppData:Root` 并重启，不得在运行中重新创建会话、日志或 WebView2 缓存
 - JSON 数据文件统一走 `FileHelper.WriteJsonAtomicAsync`；非 JSON 关键文件也应采用 `.tmp + move` 的原子落盘模式
 
 ## 22. 前端专项补充
@@ -808,21 +810,24 @@ CI：
 - 插件健康链路现由三层组成：`PluginHealthCheckService` 生成文件、配置、环境、日志时间与 ping 等客观事实并编排流程；`PluginDiagnosticAgentService` 负责显式触发的两阶段云端 AI 诊断和第三阶段受限修复规划；`PluginAutoRepairService` 才能执行经过后端验证的备份/修复。不得重新引入基于通用日志正则的预制原因或建议。
 - `GET /api/games/{id}/health-check` 只能刷新本地事实并附加本次工具箱运行期内的缓存报告，严禁调用模型。`POST .../analyze` 先选择关键资料再分析证据；`POST .../repair` 继续规划受限工具、备份执行并重新诊断；`POST .../verify` 先启动游戏并等待新日志和 ping，再调用同一诊断智能体。
 - 安装流程的 `VerifyForInstallAsync(...)` 只做本地文件、启动日志与 ping 验证，状态文案必须明确“未调用 AI”；不能因开启自动验证而产生隐藏模型费用。安装进度仍通过现有 SignalR 报告推送。
-- `PluginHealthReport` 同时保留 `overall`、`checks`、日志时间和检查时间，并包含 `objectiveOverall`、`analysisState`、`analysisMessage`、`freshRunVerified` 与结构化 `analysis`。`analysisState` 固定为 `NotRun / Running / Completed / Stale / Unavailable / Failed`。
+- `PluginHealthReport` 同时保留 `overall`、`checks`、日志时间和检查时间，并包含 `objectiveOverall`、`analysisState`、`analysisMessage`、`freshRunVerified`、结构化 `analysis`、`repairAvailable` 与 `repairAvailabilityReason`。`analysisState` 固定为 `NotRun / Running / Completed / Stale / Unavailable / Failed`。
 - 总体状态规则固定为：本地确定性错误优先；经后端证据校验的 AI `Error` / `Warning` 可下调状态；只有本次启动产生新日志、收到 ping、本地事实正常且 AI 没有有效问题时才允许 `Healthy`。历史日志、AI 未运行/失败/不可用或缓存过期时均不得显示 `Healthy`。
 - 每个游戏的普通分析与“启动并智能诊断”共享同一并发门；运行中再次请求返回冲突。报告只保存在进程内，以日志、配置、插件元数据和环境清单指纹判断新鲜度；过期报告仍可展示，但不能参与当前总体状态。
 - `PluginDiagnosticArtifactCollector` 的候选范围只允许游戏目录内的 Doorstop/BepInEx/XUnity 配置、BepInEx 日志、第三方插件 `.cfg`、插件 PE 元数据/程序集引用，以及游戏关键文件事实。路径必须拒绝越界和整条父目录链上的重解析点，文本必须以共享读打开并受单文件、行数、总上下文限额约束。
 - 用户插件 DLL 只允许通过 `PEReader` / `MetadataReader` 和文件版本资源做静态元数据扫描；不得用 `Assembly.Load*`、反射、依赖注入或任何运行时方式加载/执行插件。标准搜索目录中未发现某个程序集引用只能记为观察事实，不能单独判定依赖缺失。
-- 发给模型的文本必须统一脱敏 API Key、Token、密码、授权头、Cookie、敏感 URL 参数、用户名和绝对路径；不得发送二进制。日志、配置、游戏名和插件元数据始终按不可信数据处理，系统提示词必须明确隔离提示注入。
-- 第一阶段返回的资料 ID 必须由后端对照当前清单过滤；第二阶段的每个问题必须至少包含一条经后端验证的资料 ID 与有效行号。展示摘录只能由后端从已脱敏行生成；无有效证据的问题不得进入报告。结构化 JSON 解析失败只允许一次格式修复调用，仍失败则保留本地事实并标记 `Failed`，不得回退旧正则判断。
-- 智能诊断与自动修复严格要求 `ActiveMode=cloud`，并选择最高优先级可用云端端点；本地模式必须返回“仅支持云端 AI / 不支持运行”。工具箱对话智能体与普通翻译模式解耦，可自动选择最高优先级端点或按会话精确选择已启用云端端点，即使 `ActiveMode=local` 也不得调用 llama-server 或静默改用其他端点。`AiTranslation.Enabled == false` 只作为实时翻译状态事实，不阻止显式云端智能体操作。
+- 完整设置、API Key、Token、密码、授权头、Cookie 和敏感 URL 参数不得交给模型；通用 API 桥结果仍必须脱敏。用户已添加游戏目录与完整 `AppData:Root` 是明确的可信根，智能体文件工具与插件诊断第二阶段可以把其中选定的原始内容和绝对路径发送到全局所选云端端点。日志、配置、路径、游戏名、脚本输出和插件元数据始终按不可信数据处理，系统提示词必须明确隔离提示注入。
+- 第一阶段返回的资料 ID 必须由后端对照当前清单过滤；第二阶段的每个问题必须至少包含一条经后端验证的资料 ID 与有效行号。展示摘录只能由后端从实际选中行生成；无有效证据的问题不得进入报告。结构化 JSON 解析失败只允许一次格式修复调用，仍失败则保留本地事实并标记 `Failed`，不得回退旧正则判断。
+- 工具箱对话、智能诊断与修复规划必须统一通过 `ToolboxAgentEndpointResolver` 使用 `AiTranslation.AgentEndpointId`：`null` 自动选择最高优先级的已启用有效非本地云端端点；显式端点被禁用、删除或失效时必须失败关闭，不得回退。该选择独立于实时翻译的 `ActiveMode` 和 `AiTranslation.Enabled`，任何智能体入口都不得调用 llama-server。
 - `POST /api/games/{id}/bepinex-log/analyze` 仅为兼容适配器：复用统一结构化报告并由后端生成旧 Markdown 契约，不得保留独立提示词或再次调用模型。
 - `PluginDiagnosticReport.vue` 是健康卡和 BepInEx 日志页的共享报告组件；两处必须展示同一 `analyzedAt`、端点、证据、关键资料、截断与过期状态。模型输出一律作为纯文本渲染，不得使用 `v-html`。
 - 自动修复只能使用 `set_ini_value`、`disable_plugin`、`reinstall_component` 三类后端白名单操作：INI/CFG 目标必须来自已审阅 artifact 且位于 Doorstop/BepInEx 配置范围，第三方插件只能重命名禁用，工具箱组件只能从内置包恢复；未知/自定义 `LLMTranslate.dll` 不得自动覆盖。游戏运行中跳过文件修改。
-- 云端诊断必须以 `Completed` 完成后才能执行任何自动修复；端点不可用、调用失败或结构化结果验证失败时不得继续走确定性写入。每个自动修复覆盖/改名目标前都要在 `backups/<gameId>/agent-repair/` 创建备份；确定性问题与 AI 计划去重后逐项执行，单项失败不能伪装成功，完成后必须重新收集指纹与诊断。静态复检不等于真实游戏运行验收。
-- `ToolboxAgentToolExecutor` 的通用 API 桥只能访问当前 `127.0.0.1` 工具箱，并排除智能体递归、任意主机文件浏览、完整设置/密钥、数据重置、更新应用和二进制下载；工具结果返回模型前必须脱敏。DELETE、卸载、导入、启动进程等高影响调用必须经过悬浮窗二次确认。
-- 工具箱智能体的端点状态只允许返回 ID、名称、提供商和模型等脱敏摘要，不得返回 URL 或 API Key；手动端点失效时必须要求用户重新选择，不得回退。历史最多保留 100 个会话、每个会话最多 200 条可见消息，模型上下文仍遵守 40 条/80,000 字符限制；新对话不得删除旧历史，进程重启不得恢复待确认操作。
-- 游戏文件工具只允许相对路径，拒绝越界与重解析点；读取限安全文本并脱敏，写入限既有 Doorstop/BepInEx 配置、译文和本地化文本，必须用精确单次匹配、备份和原子替换。附件按会话绑定，模型只能看到 ID、名称、类型和大小，不能读取任意宿主路径。
+- 自动修复按钮只在 `repairAvailable=true` 时显示：本地确定性修复计划非空，或新鲜 `Completed` AI 报告含中/高置信度、至少一条有效证据的 `Warning/Error`。确定性组件问题即使 AI 调用失败也可继续走专用修复；AI 计划仍必须先通过结构化验证。每个专用自动修复覆盖/改名目标前都要在 `backups/<gameId>/agent-repair/` 创建备份，完成后必须重新收集事实；静态复检不等于真实游戏运行验收。
+- `ToolboxAgentToolExecutor` 的通用 API 桥只能访问当前 `127.0.0.1` 工具箱，并排除智能体递归、主机文件浏览、完整设置/密钥、设置重置、更新应用和二进制下载；这些能力只能走各自的专用工具。DELETE、卸载、导入、启动进程等高影响调用必须经过悬浮窗二次确认。
+- 工具箱智能体的端点状态只允许返回 ID、名称、提供商和模型等摘要，不得返回 URL 或 API Key；端点选择只存在于设置页，悬浮窗与请求不得再决定端点。历史最多保留 100 个会话、每个会话最多 200 条可见消息，模型上下文仍遵守 40 条/80,000 字符限制；新对话不得删除旧历史，进程重启不得恢复待确认操作。
+- `ToolboxAgentHostAccessService` 的 `game` / `toolbox` 作用域只接受相对路径并拒绝越界、备用数据流与重解析点逃逸；它们可原文读取任意文件，并在一个 `manage_files` 批次确认后创建、覆盖、复制、移动、重命名或删除任意扩展名文件，通用操作不自动备份。不得修改或删除可信根本身。
+- `external` 作用域只允许普通绝对路径读取，目录枚举、每个文件和每个分块必须逐次确认，确认文案需显示用途、真实路径和会发送的原始内容；任何外部写入必须拒绝。二进制只允许被动哈希、签名、PE/程序集/ZIP 元数据和有界十六进制块，不得加载用户程序集。
+- `run_script` 可以执行任意 PowerShell / CMD 文本，但每个脚本必须单独显示用途、宿主、超时、完整脚本和“后端无法证明只读”的风险后确认，仅以当前用户权限、无提权运行。只读/诊断限制由系统提示词约束，不得增加伪安全的 AST 白名单；提示词必须禁止用脚本修改系统或绕过可信根，并要求外部环境修复最终由用户自行执行。
+- `reset_toolbox_data` 必须是终止回合的专用确认工具。`ToolboxDataResetService` 从程序目录复制 `Updater.exe` 到系统临时目录，等待主进程退出后删除完整 `AppData:Root` 并重启；不得删除游戏目录，不创建备份，也不得在安排重置后再次调用模型或持久化新会话数据。
 - `apply_custom_font` 是 TTF/OTF 附件的一体化契约：校验字体头，按游戏 Unity 版本生成 TMP bundle，把生成源与原始 TTF 注册为逐字体来源，扫描并替换所有支持的 TMP/Legacy 字体，最后安装 XUnity fallback；不能退化成只上传或只生成。
 
 <!-- agents-md-maintainer:start -->
@@ -837,7 +842,7 @@ This section is generated from repository files. Keep durable, human-written rul
 
 ### Project snapshot
 
-- Primary languages: C# (145 files), Vue (28 files), TypeScript (23 files), PowerShell (3 files)
+- Primary languages: C# (148 files), Vue (28 files), TypeScript (23 files), PowerShell (3 files)
 - Key manifests: `XUnityToolkit-Vue/package-lock.json`, `XUnityToolkit-Vue/package.json`
 
 ### Repository layout

@@ -11,6 +11,7 @@ import {
   NCollapse,
   NCollapseItem,
   NSlider,
+  NAlert,
   useMessage,
 } from 'naive-ui'
 import {
@@ -45,6 +46,7 @@ const emit = defineEmits<{
 const message = useMessage()
 const testing = ref(false)
 const fetchingModels = ref<Record<string, boolean>>({})
+const AUTOMATIC_AGENT_ENDPOINT = '__automatic__'
 
 function update(patch: Partial<AiTranslationSettings>) {
   emit('update:modelValue', { ...props.modelValue, ...patch })
@@ -88,6 +90,30 @@ const providerOptions: { label: string; value: LlmProvider }[] = [
   { label: 'Kimi (Moonshot)', value: 'Kimi' },
   { label: '自定义 (OpenAI 兼容)', value: 'Custom' },
 ]
+
+const agentEndpointOptions = computed(() => {
+  const options: Array<{ label: string; value: string; disabled?: boolean }> = [{
+    label: '自动（按优先级选择可用云端提供商）',
+    value: AUTOMATIC_AGENT_ENDPOINT,
+  }]
+  for (const endpoint of props.modelValue.endpoints) {
+    if (!endpoint.enabled || !endpoint.apiKey || endpoint.apiKey.toLowerCase() === 'local') continue
+    const provider = providerOptions.find(item => item.value === endpoint.provider)?.label ?? endpoint.provider
+    const model = endpoint.modelName ? ` · ${endpoint.modelName}` : ''
+    options.push({ label: `${provider} · ${endpoint.name || endpoint.id}${model}`, value: endpoint.id })
+  }
+  const selected = props.modelValue.agentEndpointId
+  if (selected && !options.some(option => option.value === selected)) {
+    options.push({ label: `原端点 ${selected}（当前不可用）`, value: selected, disabled: true })
+  }
+  return options
+})
+
+const agentEndpointValue = computed(() => props.modelValue.agentEndpointId || AUTOMATIC_AGENT_ENDPOINT)
+
+function updateAgentEndpoint(value: string) {
+  update({ agentEndpointId: value === AUTOMATIC_AGENT_ENDPOINT ? null : value })
+}
 
 const apiFormatOptions: { label: string; value: LlmApiFormat }[] = [
   { label: 'Responses API（推荐）', value: 'Responses' },
@@ -609,6 +635,22 @@ const priorityMarks = computed(() => {
           </div>
         </NCollapseItem>
       </NCollapse>
+
+      <div class="agent-endpoint-setting">
+        <div class="form-row">
+          <label class="form-label">工具箱智能体使用的提供商</label>
+          <NSelect
+            :value="agentEndpointValue"
+            :options="agentEndpointOptions"
+            @update:value="updateAgentEndpoint"
+            placeholder="选择工具箱智能体提供商"
+          />
+          <span class="form-hint">统一用于工具箱对话、插件智能诊断和修复规划；指定端点失效时不会自动回退。</span>
+        </div>
+        <NAlert type="warning" :bordered="false">
+          工具箱智能体可把已添加游戏目录和工具箱数据目录中的原始文件内容、绝对路径和工具输出发送给所选云端提供商。读取其他电脑路径或运行脚本前会逐次请求确认。
+        </NAlert>
+      </div>
     </div>
 
     <div class="section-footer">
@@ -777,6 +819,17 @@ const priorityMarks = computed(() => {
   flex-direction: column;
   gap: 16px;
   padding: 4px 0;
+}
+
+.agent-endpoint-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .model-row {

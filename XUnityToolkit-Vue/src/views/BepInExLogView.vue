@@ -257,9 +257,9 @@ onMounted(async () => {
           </NButton>
           <NButton size="small" type="primary" @click="handleAnalyze" :loading="analyzing">
             <template #icon><NIcon><AutoFixHighOutlined /></NIcon></template>
-            AI 智能诊断
+            工具箱智能诊断
           </NButton>
-          <NButton size="small" type="warning" @click="handleRepair" :loading="repairing" :disabled="analyzing">
+          <NButton v-if="healthReport?.repairAvailable" size="small" type="warning" @click="handleRepair" :loading="repairing" :disabled="analyzing">
             <template #icon><NIcon><BuildOutlined /></NIcon></template>
             AI 全自动修复
           </NButton>
@@ -321,12 +321,12 @@ onMounted(async () => {
           <span class="section-icon">
             <NIcon :size="16"><AutoFixHighOutlined /></NIcon>
           </span>
-          插件智能诊断
+          工具箱智能体诊断
         </h2>
       </div>
 
       <NAlert type="info" :bordered="false" class="analysis-cost-hint">
-        智能诊断与自动修复仅支持云端 AI。自动修复会先备份目标文件，执行受限修复工具，再重新诊断；多阶段调用可能产生模型 API 费用。
+        智能诊断使用设置页统一选择的智能体提供商。自动修复只会在检测到可修复问题时显示，并会先备份目标文件、执行受限修复工具，再重新诊断；多阶段调用可能产生模型 API 费用。
       </NAlert>
 
       <NAlert v-if="repairResult" type="success" :bordered="false" class="analysis-cost-hint">

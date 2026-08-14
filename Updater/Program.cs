@@ -12,6 +12,8 @@ string? stagingDir = null;
 string? deleteListPath = null;
 string? exeName = null;
 string? dataDir = null;
+string? exePathArg = null;
+bool resetData = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -23,8 +25,13 @@ for (int i = 0; i < args.Length; i++)
         case "--delete-list": deleteListPath = args[++i]; break;
         case "--exe-name":    exeName = args[++i]; break;
         case "--data-dir":    dataDir = args[++i]; break;
+        case "--exe-path":    exePathArg = args[++i]; break;
+        case "--reset-data":  resetData = true; break;
     }
 }
+
+if (resetData)
+    return RunDataReset(pidArg, dataDir, exePathArg);
 
 if (appDir is null || stagingDir is null || exeName is null)
 {
@@ -275,6 +282,169 @@ Log("Update complete. Exiting with code 0.");
 return 0;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+static int RunDataReset(string? pidArg, string? dataDir, string? exePathArg)
+{
+    var logPath = Path.Combine(Path.GetTempPath(), $"XUnityToolkit-reset-{Guid.NewGuid():N}.log");
+    using var log = new StreamWriter(logPath, append: false) { AutoFlush = true };
+    void Write(string message)
+    {
+        var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {message}";
+        log.WriteLine(line);
+        Console.WriteLine(line);
+    }
+
+    if (string.IsNullOrWhiteSpace(dataDir) || string.IsNullOrWhiteSpace(exePathArg))
+    {
+        Write("Error: --reset-data requires --data-dir and --exe-path.");
+        return 10;
+    }
+
+    var normalizedDataDir = Path.GetFullPath(dataDir)
+        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    var normalizedExePath = Path.GetFullPath(exePathArg);
+    if (!File.Exists(normalizedExePath))
+    {
+        Write($"Error: application executable does not exist: {normalizedExePath}");
+        return 12;
+    }
+    var root = Path.GetPathRoot(normalizedDataDir)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    if (string.IsNullOrWhiteSpace(root)
+        || string.Equals(normalizedDataDir, root, StringComparison.OrdinalIgnoreCase)
+        || IsProtectedResetRoot(normalizedDataDir))
+    {
+        Write($"Error: refusing to reset filesystem root: {normalizedDataDir}");
+        return 11;
+    }
+
+    var dataPrefix = normalizedDataDir + Path.DirectorySeparatorChar;
+    if (normalizedExePath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+    {
+        Write("Error: refusing to delete a data directory that contains the application executable.");
+        return 16;
+    }
+
+    if (pidArg is not null && int.TryParse(pidArg, out var pid))
+    {
+        Write($"Waiting for process PID={pid} to exit (timeout 120s)...");
+        var deadline = DateTime.UtcNow.AddSeconds(120);
+        var exited = false;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var process = Process.GetProcessById(pid);
+                if (process.HasExited)
+                {
+                    exited = true;
+                    break;
+                }
+            }
+            catch (ArgumentException)
+            {
+                exited = true;
+                break;
+            }
+            Thread.Sleep(200);
+        }
+        if (!exited)
+        {
+            Write("Error: main process did not exit; data was not deleted.");
+            return 13;
+        }
+    }
+
+    Write($"Deleting complete toolbox data directory: {normalizedDataDir}");
+    Exception? deleteError = null;
+    for (var attempt = 1; attempt <= 120; attempt++)
+    {
+        try
+        {
+            if (Directory.Exists(normalizedDataDir))
+            {
+                ClearReadOnlyAttributes(normalizedDataDir);
+                Directory.Delete(normalizedDataDir, recursive: true);
+            }
+            deleteError = null;
+            break;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            deleteError = ex;
+            Write($"Delete attempt {attempt} failed: {ex.Message}");
+            Thread.Sleep(250);
+        }
+    }
+
+    if (deleteError is not null)
+    {
+        Write($"Error: data reset was incomplete: {deleteError.Message}");
+        return 14;
+    }
+
+    Write($"Launching: {normalizedExePath}");
+    try
+    {
+        Process.Start(new ProcessStartInfo(normalizedExePath)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = Path.GetDirectoryName(normalizedExePath)!
+        });
+    }
+    catch (Exception ex)
+    {
+        Write($"Error: data was deleted but the application could not restart: {ex.Message}");
+        return 15;
+    }
+
+    Write("Toolbox data reset complete.");
+    return 0;
+}
+
+static void ClearReadOnlyAttributes(string directory)
+{
+    var directoryAttributes = File.GetAttributes(directory);
+    if (directoryAttributes.HasFlag(FileAttributes.ReadOnly))
+        File.SetAttributes(directory, directoryAttributes & ~FileAttributes.ReadOnly);
+
+    foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+    {
+        var attributes = File.GetAttributes(file);
+        if (attributes.HasFlag(FileAttributes.ReadOnly))
+            File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+    }
+
+    foreach (var child in Directory.EnumerateDirectories(directory, "*", SearchOption.TopDirectoryOnly))
+    {
+        var attributes = File.GetAttributes(child);
+        if (attributes.HasFlag(FileAttributes.ReadOnly))
+            File.SetAttributes(child, attributes & ~FileAttributes.ReadOnly);
+        if (!attributes.HasFlag(FileAttributes.ReparsePoint))
+            ClearReadOnlyAttributes(child);
+    }
+}
+
+static bool IsProtectedResetRoot(string candidate)
+{
+    var prefix = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                 + Path.DirectorySeparatorChar;
+    var protectedPaths = new[]
+    {
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        Path.GetTempPath()
+    };
+    return protectedPaths
+        .Where(static path => !string.IsNullOrWhiteSpace(path))
+        .Select(static path => Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+        .Any(path => string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase)
+                     || path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+}
 
 static void Rollback(
     string appDir,

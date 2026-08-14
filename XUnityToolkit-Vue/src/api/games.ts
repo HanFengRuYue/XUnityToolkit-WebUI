@@ -175,7 +175,7 @@ export const settingsApi = {
   save: (settings: AppSettings) => api.put<AppSettings>('/api/settings', settings),
   getVersion: () => api.get<VersionInfo>('/api/settings/version'),
   getConnection: () => api.get<ToolkitConnectionInfo>('/api/settings/connection'),
-  reset: () => api.post<{ partial: boolean; errors?: string[] }>('/api/settings/reset'),
+  reset: () => api.post<{ scheduled: boolean; restartRequired: boolean; message: string }>('/api/settings/reset'),
   getDataPath: () => api.get<DataPathInfo>('/api/settings/data-path'),
   openDataFolder: () => api.post('/api/settings/open-data-folder'),
   async exportData(): Promise<void> {

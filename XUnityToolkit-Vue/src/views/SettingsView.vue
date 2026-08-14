@@ -95,6 +95,7 @@ const settings = ref<AppSettings>({
     localMinP: 0.05,
     localRepeatPenalty: 1.0,
     endpoints: [],
+    agentEndpointId: null,
     glossaryExtractionEnabled: false,
     termAuditEnabled: true,
     naturalTranslationMode: true,
@@ -256,21 +257,16 @@ const resetLoading = ref(false)
 
 function handleReset() {
   dialog.warning({
-    title: '重置所有配置',
-    content: '此操作将删除所有设置、游戏库、下载缓存和备份数据，且无法恢复。确定要继续吗？',
-    positiveText: '确认重置',
+    title: '清空全部工具箱数据',
+    content: '此操作将永久删除设置、API Key、游戏库记录、模型、缓存、日志、备份和智能体会话，不会删除游戏目录。工具箱随后会自动重启，且无法恢复。确定要继续吗？',
+    positiveText: '确认清空并重启',
     negativeText: '取消',
     onPositiveClick: async () => {
       resetLoading.value = true
       try {
         const result = await settingsApi.reset()
-        if (result.partial) {
-          message.warning('部分数据清除失败，请关闭占用的程序后重试')
-        } else {
-          message.success('已重置所有配置')
-        }
         localStorage.clear()
-        setTimeout(() => window.location.reload(), 500)
+        message.warning(result.message || '工具箱即将退出；清空全部数据后会自动重启')
       } catch {
         message.error('重置失败')
       } finally {
