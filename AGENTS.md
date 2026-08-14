@@ -837,7 +837,7 @@ This section is generated from repository files. Keep durable, human-written rul
 
 ### Project snapshot
 
-- Primary languages: C# (135 files), Vue (27 files), TypeScript (23 files), PowerShell (3 files)
+- Primary languages: C# (145 files), Vue (28 files), TypeScript (23 files), PowerShell (3 files)
 - Key manifests: `XUnityToolkit-Vue/package-lock.json`, `XUnityToolkit-Vue/package.json`
 
 ### Repository layout
