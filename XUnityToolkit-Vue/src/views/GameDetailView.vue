@@ -1265,27 +1265,32 @@ onBeforeUnmount(() => stopWatch())
   height: 100%;
   object-fit: cover;
   object-position: center 25%;
-  filter: brightness(0.65) saturate(1.1);
+  /* Keep the source image/animated WebP luminance intact. */
   will-change: transform;
 }
 
 .hero-gradient-overlay {
   position: absolute;
-  inset: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 58%;
   background:
     linear-gradient(
       to bottom,
       transparent 0%,
-      transparent 30%,
-      color-mix(in srgb, var(--bg-root) 50%, transparent) 65%,
+      color-mix(in srgb, var(--bg-root) 42%, transparent) 52%,
       var(--bg-root) 100%
     );
 }
 
 .hero-vignette {
   position: absolute;
-  inset: 0;
-  box-shadow: inset 0 0 100px 30px color-mix(in srgb, var(--bg-root) 35%, transparent);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 58%;
+  box-shadow: inset 0 -48px 90px -36px color-mix(in srgb, var(--bg-root) 45%, transparent);
 }
 
 /* Ensure all content floats above the hero */
